@@ -1,0 +1,17 @@
+[Unit]
+Description=Durable CommuLingo editorial stage
+Wants=network-online.target leninbot-llm-proxy.service
+After=network-online.target leninbot-llm-proxy.service
+
+[Service]
+Type=oneshot
+User=grass
+WorkingDirectory=/home/grass/leninbot
+EnvironmentFile=/home/grass/leninbot/.env
+Environment=PYTHONUNBUFFERED=1
+LoadCredentialEncrypted=db_password:/etc/credstore.encrypted/db_password.cred
+LoadCredentialEncrypted=tavily_api_key:/etc/credstore.encrypted/tavily_api_key.cred
+ExecStart=/home/grass/leninbot/venv/bin/python /home/grass/leninbot/scripts/commulingo_pipeline.py tick
+TimeoutStartSec=650
+StandardOutput=journal
+StandardError=journal

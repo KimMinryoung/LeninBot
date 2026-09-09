@@ -61,6 +61,13 @@ The existing runner and write-boundary checks still enforce each stage.
 
 ## CommuLingo Research Continuity
 
+The replacement `commulingo_pipeline/` runtime persists discovery, research, draft,
+validation, independent review and submission as PostgreSQL stages. It uses short
+stage-specific curator prompts and the existing independent reviewer; no delegated
+worker or new public agent is registered. Migration and staged rollout, including
+the shared daily budget and term editorial service, are specified in
+`commulingo_pipeline.md`. Legacy timers remain the default until that rollout.
+
 `scripts/commulingo_research_memory.py` owns a local SQLite evidence store at
 ignored `data/commulingo_research.sqlite3`. People stages, gap workers, event
 stages and term stages reuse research across attempts and process restarts.

@@ -1,0 +1,9 @@
+{
+  "phase": "canary",
+  "daily_cap_usd": 3.39,
+  "review_fraction": 0.3,
+  "stage_budget_usd": 0.2,
+  "canary_per_group_per_day": 1,
+  "legacy_shared_budget": true,
+  "term_editorial_service": true
+}

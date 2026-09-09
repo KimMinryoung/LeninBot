@@ -6,8 +6,9 @@ import subprocess
 
 def call_person_service(request: dict):
     container = os.environ.get("COMMULINGO_FRONTEND_CONTAINER", "leninbot-frontend")
+    script = 'commulingo-term-service.js' if request.get('target')=='term' else 'commulingo-person-service.js'
     completed = subprocess.run(
-        ["docker", "exec", "-i", container, "node", "/app/scripts/commulingo-person-service.js"],
+        ["docker", "exec", "-i", container, "node", f"/app/scripts/{script}"],
         input=json.dumps(request, ensure_ascii=False), text=True,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=45, check=False,
     )

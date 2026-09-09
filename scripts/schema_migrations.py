@@ -140,7 +140,15 @@ def _audit_sink_role() -> None:
     print(ensure_audit_role())
 
 
+def _commulingo_pipeline() -> None:
+    from db import get_conn
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("SET LOCAL lock_timeout = '5s'")
+        cur.execute((ROOT / 'commulingo_pipeline/schema.sql').read_text())
+
+
 MIGRATIONS: list[tuple[str, Callable[[], None]]] = [
+    ("commulingo-pipeline", _commulingo_pipeline),
     ("telegram-core", _telegram_core),
     ("telegram-summaries", _telegram_summaries),
     ("roleplay-tables", _roleplay_tables),

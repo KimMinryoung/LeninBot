@@ -79,9 +79,11 @@ def cmd_review(sid: int, approve: bool, note: str) -> int:
     from runtime_tools.commulingo_person_service import call_person_service
     with get_conn() as conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
         candidate = _fetch(cur, sid)
-    if candidate and candidate["target_type"] in {"person", "person_section"}:
+    if candidate and (candidate["target_type"] in {"person", "person_section"}
+                      or (candidate["target_type"]=='term' and 'evidence' in (candidate.get('patch_json') or {}))):
         try:
             result = call_person_service({"command": "review", "suggestionId": sid,
+                **({'target':'term'} if candidate['target_type']=='term' else {}),
                 "approve": approve, "note": note, "changedBy": f"agent-suggestion:{sid}"})
         except ValueError as exc:
             print(f"cannot review: {exc}")

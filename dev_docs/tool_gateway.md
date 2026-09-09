@@ -106,3 +106,10 @@ venv/bin/python scripts/smoke_url_security.py
 venv/bin/python scripts/smoke_mcp_gateway.py
 venv/bin/python -m py_compile tool_gateway/*.py runtime_tools/allowlists.py agents/base.py llm/claude_loop.py llm/openai_tool_loop.py services/web_chat.py services/a2a_handler.py mcp_gateway/tools.py
 ```
+# CommuLingo pipeline artifact tool
+
+`commulingo_pipeline_result`는 새 단계 실행기가 로컬로 주입하는 state 도구다.
+전역 registry나 일반 agent allow-list에는 추가하지 않는다. 소유자 권한의
+commulingo_curator만 실행할 수 있으며 현재 단계의 JSON schema를 dispatcher가 검증한다.
+handler는 조사/발견/초안 artifact를 반환하며 사전 저장 권한은 제공하지 않는다.
+실제 저장은 실행기가 고정된 대상·revision·검토 판단으로 private frontend RPC를 호출한다.

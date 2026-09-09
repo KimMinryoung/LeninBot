@@ -36,6 +36,7 @@
 | `vector_corpus_reingestion.md` | 코퍼스 manifest·metadata·chunking·재등록과 감사 절차 |
 | `mission_state_machine.md` | Telegram mission context lifecycle |
 | `commulingo_editorial.md` | 인물 공통 저장·출처·검토·보강 상태와 배포 계약 |
+| `commulingo_pipeline.md` | 영속 인물·용어 작업 대기열, 단계별 복구·검토·예산 및 전환 |
 | `autonomous_project.md` | hourly autonomous project loop |
 | `skill_import_design.md` | 외부 skill import/conversion 설계 |
 | `x402_design.md` | Base USDC x402 payment demo/runtime |

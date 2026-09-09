@@ -26,6 +26,9 @@ DECISION={'decision':'approve','reason':'원본 기록의 생년과 직책을 �
 
 class PolicyTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
+        reservation = patch('commulingo_pipeline.config.legacy_reserve',return_value=None)
+        reservation.start()
+        self.addCleanup(reservation.stop)
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         ledger = patch('scripts.commulingo_research_memory.STORE_PATH', Path(directory.name) / 'review.sqlite3')
@@ -124,7 +127,7 @@ class PolicyTests(unittest.IsolatedAsyncioTestCase):
             await cmd_commulingo_review(message,ctx);rpc.assert_not_called()
     async def test_owner_review_uses_common_service_with_identity(self):
         message=SimpleNamespace(from_user=SimpleNamespace(id=1),chat=SimpleNamespace(type='private'),text='/commulingo_review approve 5 원문과 생년을 대조함',answer=AsyncMock())
-        with patch('telegram.commulingo_review.queue.detail',return_value={'status':'pending'}),patch('telegram.commulingo_review.queue.synchronize'),patch('telegram.commulingo_review.call_person_service',return_value={'status':'approved'}) as rpc:
+        with patch('telegram.commulingo_review.queue.detail',return_value={'status':'pending','target_type':'person'}),patch('telegram.commulingo_review.queue.synchronize'),patch('telegram.commulingo_review.call_person_service',return_value={'status':'approved'}) as rpc:
             await cmd_commulingo_review(message,{'is_allowed':lambda uid:uid==1})
             self.assertEqual(rpc.call_args.args[0]['changedBy'],'telegram-owner:1')
             self.assertTrue(rpc.call_args.args[0]['approve'])

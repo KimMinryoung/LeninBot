@@ -18,6 +18,10 @@ from tool_gateway.results import ToolRejection
 
 class EfficiencyTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
+        # Unit tests exercise the local run ledger, independently of deployed flags.
+        reservation = patch('commulingo_pipeline.config.legacy_reserve',return_value=None)
+        reservation.start()
+        self.addCleanup(reservation.stop)
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         self.path = Path(self.directory.name) / 'research.sqlite3'

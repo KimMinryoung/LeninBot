@@ -1302,6 +1302,7 @@ async def _call_curator_stage(
                 budget_usd=cost, budget_tracker=tracker, agent_name=spec.name,
                 finalization_tools=finalization_tools, terminal_tools=terminal_tools,
                 **binding.reasoning), timeout=seconds)
+            tracker['pipeline_call_complete'] = True
         except Exception as exc:
             last_error = exc
         finally:
@@ -1418,7 +1419,7 @@ async def run_once(*, mode: str, candidate_id: str, config: dict) -> dict:
                 tracker["rounds_used"] = create_tracker["rounds_used"]
                 state["new_cooldown_remaining"] = 0
             except Exception as exc:
-                if getattr(exc, "summary", {}).get("writes") or getattr(exc, "summary", {}).get("status") == "error":
+                if getattr(exc, "summary", {}).get("writes") or getattr(exc, "summary", {}).get("status") in {"error","budget_deferred"}:
                     raise
                 if job_budget:
                     job_budget.remaining()
@@ -1492,7 +1493,9 @@ async def run_once(*, mode: str, candidate_id: str, config: dict) -> dict:
                     terminal_tools=enrich_terminals,
                     no_edit_box=no_edit_box,
                 )
-            except Exception:
+            except Exception as exc:
+                if getattr(exc,'summary',{}).get('status')=='budget_deferred':
+                    raise
                 # All attempts are spent and nothing was written. Record the
                 # cooldown before the unit dies on the traceback — otherwise the
                 # run leaves no trace at all and the next hour picks this same
@@ -1643,6 +1646,8 @@ def main() -> int:
                 print(json.dumps({"status": summary["status"], "run_id": summary["run_id"],
                     "cost_usd": summary["cost_usd"], "rounds": summary["rounds_used"],
                     "error": str(exc)[:500]}, ensure_ascii=False, indent=2))
+                if summary['status']=='budget_deferred':
+                    break
                 failures += 1
                 continue
             if runs == 1:

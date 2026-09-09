@@ -52,6 +52,7 @@ class RunBudget:
         self.rounds = 0
         self.attempts = 0
         self.extra = {}
+        self.reservation = None
         with sqlite3.connect(path) as db:
             db.execute("CREATE TABLE IF NOT EXISTS runs (run_id TEXT PRIMARY KEY, ts REAL, stage TEXT, target TEXT, status TEXT, summary TEXT)")
         self.record("running")
@@ -62,9 +63,22 @@ class RunBudget:
         cost = self.policy.budget_usd - self.cost if self.policy.budget_usd > 0 else 0
         if seconds <= 0 or rounds <= 0 or (self.policy.budget_usd > 0 and cost <= 0):
             raise RunFailure("job budget, round or time limit exhausted", self.record("exhausted"))
+        if not self.reservation:
+            from commulingo_pipeline.config import legacy_reserve
+            from commulingo_pipeline.store import BudgetUnavailable
+            try:
+                self.reservation = legacy_reserve(cost or 0.35, 'review' if self.stage=='review' else self.stage)
+            except BudgetUnavailable as exc:
+                raise RunFailure(str(exc),self.record('budget_deferred')) from exc
         return seconds, rounds, cost
 
     def account(self, tracker):
+        if self.reservation:
+            store, token = self.reservation
+            # A failed call with unknown usage retains its conservative reservation.
+            if tracker.get('pipeline_call_complete'):
+                store.settle(token,tracker['total_cost'])
+            self.reservation = None
         self.cost += float(tracker.get("total_cost") or 0)
         self.rounds += int(tracker.get("rounds_used") or 0)
         self.attempts += 1

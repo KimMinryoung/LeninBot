@@ -1,0 +1,10 @@
+[Unit]
+Description=Resume one CommuLingo editorial stage every five minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitInactiveSec=5min
+Unit=leninbot-commulingo-pipeline.service
+
+[Install]
+WantedBy=timers.target

@@ -403,6 +403,39 @@ def bio_length_drift() -> tuple[list[str], list[str]]:
     return lines, alerts
 
 
+def pipeline_health(since):
+    """Queue and budget state via the digest's existing read-only psql path."""
+    match = re.fullmatch(r"-(\d+)h", since.strip())
+    boundary = (f"now()-interval '{int(match[1])} hours'" if match else
+                "date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'" if since=='today'
+                else "now()-interval '24 hours'")
+    sql = f"""SELECT json_build_object(
+        'applied',(SELECT count(DISTINCT job_id) FROM commulingo_pipeline_artifacts
+            WHERE stage='submit' AND value->>'status'='approved' AND created_at>{boundary}),
+        'escalated',(SELECT count(*) FROM commulingo_pipeline_jobs WHERE status='escalated'),
+        'retrying',(SELECT count(*) FROM commulingo_pipeline_jobs
+            WHERE status='deferred' AND attempts>0 AND last_error NOT IN ('draft-only execution','daily budget unavailable')),
+        'running',(SELECT count(*) FROM commulingo_pipeline_jobs WHERE status='running'),
+        'expired_leases',(SELECT count(*) FROM commulingo_pipeline_jobs
+            WHERE status='running' AND lease_until<now()-interval '10 minutes'),
+        'pipeline_cost',(SELECT coalesce(sum(actual),0) FROM commulingo_pipeline_budget
+            WHERE job_id IS NOT NULL AND created_at>{boundary}),
+        'today_actual',(SELECT coalesce(sum(actual),0) FROM commulingo_pipeline_budget
+            WHERE day=(now() AT TIME ZONE 'UTC')::date),
+        'today_reserved',(SELECT coalesce(sum(reserved),0) FROM commulingo_pipeline_budget
+            WHERE actual IS NULL AND day=(now() AT TIME ZONE 'UTC')::date))"""
+    result = subprocess.run(['docker','exec','leninbot-pg','psql','-X','-U','postgres',
+        '-d','leninbot','-t','-A','-c',sql],capture_output=True,text=True,timeout=30,check=True)
+    value = json.loads(result.stdout)
+    lines = [f"pipeline applied {value['applied']}  running {value['running']}  retrying {value['retrying']}  escalated {value['escalated']}  ${value['pipeline_cost']:.4f}",
+             f"shared budget (UTC today): spent ${value['today_actual']:.4f}, reserved ${value['today_reserved']:.4f}"]
+    alerts = ([f"pipeline: {value['expired_leases']} leases expired over ten minutes ago"]
+              if value['expired_leases'] else [])
+    if value['retrying']:
+        alerts.append(f"pipeline: {value['retrying']} failed stages awaiting retry")
+    return lines, alerts, float(value['pipeline_cost'])
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--since", default="-24h", help="journalctl --since value")
@@ -411,6 +444,8 @@ def main() -> int:
     args = parser.parse_args()
 
     lines, alerts, total_cost = [], [], 0.0
+    config = json.loads((ROOT/'config/commulingo_pipeline.json').read_text())
+    pipeline_active = config['phase'] in {'canary','live'} and config['legacy_shared_budget']
     waste_lines = []
     for lane, unit in LANES.items():
         drain = lane in DRAIN_LANES
@@ -426,7 +461,9 @@ def main() -> int:
             + (f"  completed {stats['completed']}" if stats.get("completed") else "")
             + (f"  ({stats['total']} runs)" if drain else "")
         )
-        alerts.extend(drain_problems(lane, stats) if drain else problems(lane, stats))
+        # Retain historical costs, but a retired writer's silence is expected.
+        if not (pipeline_active and lane in {'gap','enrich','new','terms'} and not stats['total']):
+            alerts.extend(drain_problems(lane, stats) if drain else problems(lane, stats))
         if stats["applied"] and stats["rounds"]:
             rounds = sorted(stats["rounds"])
             median = rounds[len(rounds) // 2] if rounds else 0
@@ -452,6 +489,14 @@ def main() -> int:
     if metrics:
         lines.extend(["runner metrics (since rollout):", *metrics])
 
+    if pipeline_active:
+        try:
+            pipeline_lines, pipeline_alerts, pipeline_cost = pipeline_health(args.since)
+            lines.extend(pipeline_lines)
+            alerts.extend(pipeline_alerts)
+            total_cost += pipeline_cost
+        except (subprocess.SubprocessError,ValueError) as exc:
+            alerts.append(f"pipeline metrics unavailable: {type(exc).__name__}")
     header = f"[commulingo-lanes] since {args.since} — total ${total_cost:.2f}"
     print(header)
     print("\n".join(lines))

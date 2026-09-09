@@ -1,5 +1,8 @@
 # CommuLingo 인물 편집 서비스
 
+새 영속 실행기와 용어 저장·검토 확장은 [파이프라인 문서](commulingo_pipeline.md)를 따른다.
+기존 timer의 동작은 전환 전까지 아래와 같으며 새 설정은 기본적으로 draft/비활성 상태다.
+
 인물/상세 절 저장의 소유자는 frontend `data/commulingo/person-editorial-service.js`다.
 Python `runtime_tools/commulingo_people.py`의 등록·수정·절 저장과
 `scripts/commulingo_suggestions.py`의 인물 제안 승인은

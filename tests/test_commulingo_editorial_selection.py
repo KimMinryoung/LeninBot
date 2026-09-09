@@ -3,6 +3,7 @@ import ast
 import os
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(os.environ.get('COMMULINGO_TEST_SOURCE', '/home/grass/leninbot'))
 source = ROOT / 'scripts/commulingo_people_maintainer.py'
@@ -14,6 +15,11 @@ namespace = {'db_query': lambda sql, params: queries.append((sql, params)) or []
 exec(compile(ast.Module(body=selected, type_ignores=[]), str(source), 'exec'), namespace)
 
 class EditorialSelection(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        reservation = patch('commulingo_pipeline.config.legacy_reserve',return_value=None)
+        reservation.start()
+        self.addCleanup(reservation.stop)
+
     def test_selection_query_and_step_contract(self):
         namespace['select_sparse_person'](30, exclude_ids=['excluded-person'])
         sql, params = queries[-1]

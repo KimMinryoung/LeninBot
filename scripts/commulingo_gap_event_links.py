@@ -144,6 +144,9 @@ async def describe(rows: list[dict], model: str) -> list[dict]:
         f"why the event asked for this card: {row['reason']}"
         for i, row in enumerate(rows)
     )
+    from commulingo_pipeline.config import legacy_reserve
+    from llm.claude_loop import _calculate_cost
+    reservation = legacy_reserve(0.20,'links')
     response = await _deepseek_anthropic_client.messages.create(
         model=model,
         max_tokens=12000,
@@ -155,6 +158,9 @@ async def describe(rows: list[dict], model: str) -> list[dict]:
         thinking={"type": "disabled"},
         messages=[{"role": "user", "content": PROMPT.format(kinds=", ".join(_HISTORY_RELATION_KINDS)) + items}],
     )
+    if reservation:
+        store, token = reservation
+        store.settle(token,_calculate_cost(response.usage,model))
     raw = "".join(block.text for block in response.content if getattr(block, "type", "") == "text")
     start, end = raw.find("["), raw.rfind("]")
     if start == -1 or end == -1:
@@ -228,6 +234,10 @@ async def main() -> int:
         try:
             entries = await describe(batch, model)
         except Exception as exc:
+            from commulingo_pipeline.store import BudgetUnavailable
+            if isinstance(exc,BudgetUnavailable):
+                logger.info('Daily CommuLingo budget deferred; remaining links stay queued')
+                break
             logger.warning("batch %d failed, left alone: %s", start // BATCH, exc)
             skipped += len(batch)
             continue

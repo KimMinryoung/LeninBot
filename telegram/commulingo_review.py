@@ -28,7 +28,7 @@ async def cmd_commulingo_review(message, ctx):
         if not row:
             await message.answer('인물/상세 절 제안을 찾지 못했습니다.',parse_mode=None);return
         if action=='show':
-            current=await asyncio.to_thread(call_person_service,{'command':'read','id':row['target_id']})
+            current=await asyncio.to_thread(call_person_service,{'command':'read','id':row['target_id'],**({'target':'term'} if row['target_type']=='term' else {})})
             job=row.get('review_job') or {}
             reason=job.get('last_error') or (job.get('decision') or {}).get('reason') or row.get('review_note') or '검토 전'
             fields=row.get('patch_json') or {}
@@ -57,7 +57,7 @@ async def cmd_commulingo_review(message, ctx):
             return
         if len(parts)<4 or len(parts[3].strip())<5:
             await message.answer('근거를 확인한 승인/반려 사유를 5자 이상 적어 주세요.\n'+HELP,parse_mode=None);return
-        result=await asyncio.to_thread(call_person_service,{'command':'review','suggestionId':sid,'approve':action=='approve',
+        result=await asyncio.to_thread(call_person_service,{'command':'review','suggestionId':sid,'approve':action=='approve',**({'target':'term'} if row['target_type']=='term' else {}),
             'note':parts[3].strip(),'changedBy':f'telegram-owner:{message.from_user.id}'})
         await asyncio.to_thread(queue.synchronize)
         await message.answer(f"#{sid} {'승인하여 반영했습니다.' if result['status']=='approved' else '반려했습니다.'}",parse_mode=None)

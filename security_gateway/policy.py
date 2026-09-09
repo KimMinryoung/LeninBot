@@ -88,6 +88,7 @@ TOOL_RISK_CLASS: dict[str, str] = {
     # cap only throttled legitimate bulk curation (2026-07-11 incident: 11
     # section writes bounced mid-task).
     "commulingo_review_decision": "state",  # runner-local decision, applied by the review worker
+    "commulingo_pipeline_result": "state",  # runner-local artifact; no dictionary write
     "commulingo_person_create": "write",
     "commulingo_person_update": "write",
     "commulingo_section_save": "write",
@@ -170,6 +171,7 @@ OWNER_REQUIRED_RISK_CLASSES = frozenset({"pay", "send", "execute", "admin"})
 # The curator lanes run as the owner (interface 'agent', is_owner true), so the
 # same owner test covers them without naming the agent.
 OWNER_REQUIRED_TOOLS = frozenset({
+    "commulingo_pipeline_result",
     "commulingo_review_decision",
     "commulingo_person_create",
     "commulingo_person_update",
@@ -201,6 +203,7 @@ COMMULINGO_WRITE_CALLERS = frozenset({
 TOOL_CALLER_ALLOWLIST: dict[str, frozenset[str]] = {
     **{tool: COMMULINGO_WRITE_CALLERS for tool in OWNER_REQUIRED_TOOLS},
     "commulingo_review_decision": frozenset({"commulingo_reviewer"}),
+    "commulingo_pipeline_result": frozenset({"commulingo_curator"}),
 }
 
 # ── Rate limits (NEW — shadow by default) ─────────────────────────────

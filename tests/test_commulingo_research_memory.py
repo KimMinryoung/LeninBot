@@ -12,6 +12,9 @@ from tool_gateway.results import ToolFailure, ToolRejection
 
 class ResearchMemoryTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
+        reservation = patch('commulingo_pipeline.config.legacy_reserve',return_value=None)
+        reservation.start()
+        self.addCleanup(reservation.stop)
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.path = Path(self.tmp.name) / "memory.sqlite3"

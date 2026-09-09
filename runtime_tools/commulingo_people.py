@@ -324,7 +324,7 @@ _HISTORY_EVENT_SECTION_PATCH_KEYS = frozenset({"heading", "body", "after"})
 _TERM_PATCH_KEYS = frozenset({
     "id", "sortOrder", "term", "original", "period", "startYear", "endYear",
     "category", "definition", "body", "aliases", "people", "events", "sources",
-    "parentId",
+    "parentId", "expectedRevision", "evidence",
 })
 _LOCALIZED_TERM_KEYS = ("term", "definition", "body", "period")
 
@@ -1046,6 +1046,9 @@ def _list_terms(q: str = "") -> list[dict]:
 
 
 def _get_term(term_id: str) -> dict | None:
+    from commulingo_pipeline.config import load
+    if load()['term_editorial_service']:
+        return call_person_service({'command':'read','target':'term','id':term_id})
     with get_conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             return _term_snapshot(cur, term_id)
@@ -2899,6 +2902,22 @@ def _public_page(target_type: str, target_id: str) -> str:
 
 def _run_edit(target_type: str, action: str, target_id: str, patch: dict,
               sources: list[str], confidence: float | None) -> str:
+    if target_type=='term':
+        from commulingo_pipeline.config import load
+        if load()['term_editorial_service']:
+            prose = {k:v for k,v in patch.items() if k not in {'evidence','sources'}}
+            problems = [p for p in (_em_dash_problem(prose),_script_leak_problem(prose),
+                "Error: use 조선민주주의인민공화국 or 조선" if _contains_north_korea(prose) else None) if p]
+            if problems:
+                return '; '.join(problems)
+            try:
+                result = call_person_service({'command':'submit','target':'term','action':action,
+                    'id':target_id,'fields':patch,'sources':sources,'changedBy':_SUGGESTED_BY})
+            except ValueError as exc:
+                return f'Error: {exc}'
+            return f"OK — {result['status']}: {action} term '{target_id}'. Logged as edit #{result['suggestionId']}. Pending review; no content changed."
+        if 'expectedRevision' in patch or 'evidence' in patch:
+            return 'Error: term editorial service must be deployed and enabled for versioned evidence writes'
     if target_type in {"person", "person_section"}:
         fields = {k: v for k, v in patch.items() if k not in {"office_rows", "sections", "revision"}}
         if "origin" in fields:
@@ -3655,7 +3674,7 @@ async def _exec_commulingo_write(
         )
         # Expand references after prose normalization so citation bytes are
         # copied exactly, including any intentional literal escape sequences.
-        if target_type in {"person", "person_section"} and "evidence" in patch:
+        if target_type in {"person", "person_section", "term"} and "evidence" in patch:
             from runtime_tools.commulingo_evidence import resolve_evidence_sources
             try:
                 patch = {**patch, "evidence": resolve_evidence_sources(patch["evidence"], sources)}
@@ -3723,7 +3742,7 @@ _PERSON_NARROW_KEYS = (
 )
 _TERM_NARROW_KEYS = (
     "sortOrder", "term", "original", "period", "startYear", "endYear",
-    "category", "definition", "body", "aliases", "people", "events", "parentId",
+    "category", "definition", "body", "aliases", "people", "events", "parentId", "evidence", "expectedRevision",
 )
 # Create fills the card's source list from the top-level citations. An update
 # is usually partial, so it must leave the stored list alone unless the caller
