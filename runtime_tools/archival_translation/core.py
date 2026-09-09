@@ -600,7 +600,8 @@ def slice_documents(spec: dict) -> list[dict]:
         # 재번역하게 된다. 후보 추천은 scripts/suggest_tm_examples.py가 하고,
         # 채택은 사람이 스펙을 고쳐서 한다(의도된 캐시 무효화).
         examples = entry.get("tmExamples") or spec.get("tmExamples")
-        chosen = [{**b, "register": entry.get("register"), "tmExamples": examples}
+        chosen = [{**b, "register": entry.get("register"), "tmExamples": examples,
+                   "preserveBibliography": bool(entry.get("preserveBibliography"))}
                   for b in chosen]
         context_chars = int(spec.get("sourceContextChars", 0))
         if not 0 <= context_chars <= 2000:
@@ -882,7 +883,7 @@ def validate(chunk: list[tuple[int, dict]], got: dict[int, list[str]],
         # 있다. script(로마자 한 글자)가 아니라 stray_word(번역할 낱말)가 있을
         # 때만 그대로 반환을 실패로 본다.
         translatable = lang.stray_word.search(source) if lang.latin else src_cyr
-        if translatable and joined.strip() == source.strip():
+        if translatable and joined.strip() == source.strip() and not block.get("preserveBibliography"):
             problems.append(f"[[{idx}]] 원문을 그대로 반환함: {source[:40]}…")
             continue
 
@@ -890,7 +891,7 @@ def validate(chunk: list[tuple[int, dict]], got: dict[int, list[str]],
         # Korean and should not: only demand Hangul where the source had
         # Cyrillic prose to render.
         has_prose = bool(translatable) if lang.latin else src_cyr >= 4
-        if has_prose and not HANGUL_RE.search(joined):
+        if has_prose and not HANGUL_RE.search(joined) and not block.get("preserveBibliography"):
             problems.append(f"[[{idx}]] 한국어가 없음: {joined[:40]}…")
 
         # 제3의 문자(벵골·조지아·아랍…)는 어떤 저본에서도 번역문에 나올 이유가
@@ -916,7 +917,7 @@ def validate(chunk: list[tuple[int, dict]], got: dict[int, list[str]],
                       if len(w) >= lang.stray_min)
         else:
             cyr = len(lang.script.findall(outside))
-        if cyr / max(len(outside.strip()), 1) > 0.15:
+        if cyr / max(len(outside.strip()), 1) > 0.15 and not block.get("preserveBibliography"):
             problems.append(
                 f"[[{idx}]] {lang.label}가 그대로 남음 ({cyr}자): {outside.strip()[:40]}…")
 
@@ -1047,6 +1048,8 @@ def _chunk_key(prompt: str, opts: Options,
         lang.system_prompt.encode("utf-8")).hexdigest()[:16]
     fingerprint = (f"{profile.provider}\0{profile.model}\0"
                    f"{profile.extra.get('thinking')}\0{system_hash}")
+    if profile.extra.get("thinking_level"):
+        fingerprint += f"\0thinking_level={profile.extra['thinking_level']}"
     if positional:
         # 마커의 블록 번호를 청크 안 순번으로 바꿔 키를 만든다. 앞쪽 블록 하나를
         # 빼거나 문서를 끼워 넣어 번호가 밀려도 내용이 같은 청크는 캐시에 맞는다

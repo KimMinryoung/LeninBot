@@ -283,6 +283,8 @@ def _generate_gemini(p: CallSiteProfile, prompt: str, system: str | None) -> tup
         max_output_tokens=p.max_tokens,
         system_instruction=system or None,
         response_mime_type="application/json" if p.json_mode else None,
+        **({"thinking_config": {"thinking_level": p.extra["thinking_level"]}}
+           if p.extra.get("thinking_level") else {}),
     )
     started = time.monotonic()
     response = client.models.generate_content(

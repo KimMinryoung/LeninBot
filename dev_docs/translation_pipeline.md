@@ -46,6 +46,8 @@
 | `db_content_translation` | deepseek / deepseek-v4-flash | 12,000 | 180초 | disabled, JSON mode |
 | `archival_term_extraction` | deepseek / deepseek-v4-flash | 8,000 | 180초 | disabled, JSON mode |
 
+Gemini 호출은 registry의 선택 필드 `thinking_level`을 SDK `thinking_config.thinking_level`로 전달한다. 미지정이면 기존 동적 추론을 유지한다. Gemini 3.1 Pro는 추론을 끌 수 없으며 `low`로 낮출 수 있다. 이 값도 사료 청크 캐시 키에 반영하며 미지정인 기존 캐시 키는 유지한다.
+
 사료 CLI·API·`Options`에는 model/max_tokens 옵션이 없다. 모델 비교는 `--compare`로 명시적으로 수행하고, 채택할 설정은 registry에 반영한다. 현재 모델 선택은 유지한 상태이며, 공통화·검증 개선을 이유로 자동 교체하지 않는다.
 
 ### 사료 CLI·API
@@ -246,3 +248,7 @@ SELECT count(*) FROM research_documents
 - **`--plan` 견적**: Gemini는 registry에 thinking 키가 없어도 동적 추론이 켜져 있으므로 추론 on으로 치고, 호출당 입력 오버헤드(`_CALL_OVERHEAD_TOKENS`=1,600)와 Gemini 추론 토큰(`_GEMINI_REASONING_TOKENS_PER_CALL`=4,000)을 더한다. 2026-09-07 4묶음 실측(입력 오버헤드 1,460~1,900, 추론 2,700~5,500/호출)에서 뽑은 상수다. 옛 견적 $0.32 → 새 견적 $2.01, 실제 $2.37(낭비 호출 포함).
 - **감사 라벨**: `Options.label`(기본 스펙 id) → `generate_translation(label=)` → `call_registry.generate_detailed(label=)` → `llm_audit_log.label`. 애드혹 실행은 게이트웨이가 ` [adhoc]`을 덧붙이므로 `label LIKE '<spec id>%'`로 문서별 비용을 뽑는다.
 - **청크 캐시 키의 블록 번호 독립**: `_chunk_key`가 마커의 블록 번호를 청크 안 순번으로 바꿔 해시한다. 앞 블록을 빼거나 문서를 끼워 넣어 번호가 밀려도 내용이 같은 청크는 캐시에 맞고, `_cached_blocks`가 원문 해시 순서 일치를 확인한 뒤 새 번호로 옮겨 다시 기록한다. 구키 레코드는 `_legacy_chunk_key` 폴백으로 찾아 새 키로 이관한다(같은 날 71개 캐시 전부 한 번 훑어 이관; 2026-08-31 모델 교체 이전 레코드는 어차피 키가 안 맞아 `--reassemble`의 해시 대조에만 쓰인다). 테스트 `RenumberedCache`. 검증: 오버로드 저본 맨 앞에 블록 하나를 끼운 사본으로 pending 4→1.
+
+### 원어 서지 보존
+
+서지와 설명이 섞인 주석 문서에 `preserveBibliography: true`를 명시하면 원문 반환·한국어 유무·라틴어 잔존 비율 검사를 면제한다. 문서의 `register`에도 서지를 원어로 유지하고 설명만 번역하라는 정책을 명시하여 프롬프트와 캐시 키에 반영한다. 마커·태그·누락·길이·응답 절단 검사는 유지된다. 순수 서지 목록은 모델에 보내지 않고 원문으로 조립하는 것이 비용과 정확성 면에서 낫다. 설명성 주석의 미번역 여부는 표본 교열해야 한다.
