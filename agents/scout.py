@@ -96,22 +96,11 @@ Save collected data as **structured .md documents**. The analyst will read these
 - Related keywords: {tags}
 ```
 
-**Save code**:
-```python
-import os
-from datetime import datetime
-from pathlib import Path
-
-root = os.environ.get("PROJECT_ROOT", "/home/grass/leninbot")
-source = "web"  # or "moltbook"
-slug = "topic-keyword"  # short keyword to identify the content
-ts = datetime.now().strftime("%Y-%m-%d_%H%M")
-out_dir = Path(root) / "data" / "scout_raw" / source
-out_dir.mkdir(parents=True, exist_ok=True)
-path = out_dir / f"{ts}_{slug}.md"
-path.write_text(md_content, encoding="utf-8")
-print(f"saved: {path}")
-```
+**Save with the available tool**:
+`write_file(path="data/scout_raw/web/<actual-date>_<actual-time>_<slug>.md", content="<source metadata and collected text>")`
+Use the runtime's actual collection time, one file per source. Preserve what was actually
+retrieved and label incomplete extraction; do not imply that a truncated fetch is the full page.
+No Python or shell execution is needed for this workflow.
 
 **Rules:**
 - **Include the full text.** Do not save just the URL. Put the text fetched via fetch_url or fetch_x_post in the raw content section.
@@ -120,7 +109,7 @@ print(f"saved: {path}")
 """.strip()),
             ("rules", """
 - Write in the SAME LANGUAGE as the task.
-- Your final response is delivered to the orchestrator. This is not a report for humans — include as much raw data and context as possible so the orchestrator can make decisions.
+- Your final response goes to the orchestrator. Include findings relevant to the request, source URLs, saved artifact paths, collection coverage and gaps. Do not duplicate full raw documents in the report.
 - Always verify before reporting — do not fabricate sources or findings.
 - Always save raw data before analysis.
 - You only do reconnaissance. Do not write new scripts, modify code, or change infrastructure.

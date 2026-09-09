@@ -16,7 +16,9 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 from runtime_tools import commulingo_review_queue as queue
 from runtime_tools.commulingo_person_service import call_person_service
-from runtime_tools.commulingo_review_policy import DECISION_TOOL, validate_decision, external_url
+from runtime_tools.commulingo_review_policy import (
+    DECISION_TOOL, validate_decision, external_url, review_source, resolve_review_checks,
+)
 
 logger = logging.getLogger('commulingo_person_reviewer')
 
@@ -53,6 +55,7 @@ def invalidated(row, current):
 def make_handlers(read_handlers, proposal, fetched, box):
     from tool_gateway.results import ToolRejection
     handlers = {}
+    snapshots = {}
     for name, handler in read_handlers.items():
         def wrap(tool_name, call):
             async def wrapped(**kwargs):
@@ -63,13 +66,19 @@ def make_handlers(read_handlers, proposal, fetched, box):
                     urls = [kwargs.get('url')] if tool_name=='fetch_url' else re.findall(r'https?://[^\s<>\]"\)]+', text[:1000])
                     for url in urls:
                         if isinstance(url,str) and external_url(url):
-                            fetched[url] = (fetched.get(url,'')+'\n'+body[1])[-150000:]
+                            # Keep previously selected ranges valid throughout the review.
+                            fetched[url] = fetched.get(url, '') + '\n' + body[1]
+                            source_id, numbered = review_source(url, body[1], snapshots)
+                            text = text[:body.start(1)] + numbered + text[body.end(1):]
+                            return f'Review source_id={source_id}; select inclusive line_start/line_end.\n' + text
                 return result
             return wrapped
         handlers[name] = wrap(name,handler)
     async def decide(**value):
         if box: raise ToolRejection('a decision has already been submitted')
-        try: validate_decision(value, proposal, fetched)
+        try:
+            value = resolve_review_checks(value, proposal, snapshots)
+            validate_decision(value, proposal, fetched)
         except ValueError as exc: raise ToolRejection(str(exc)) from exc
         box.update(value)
         return 'OK: review decision recorded; no dictionary write was made by this tool.'
@@ -93,13 +102,23 @@ async def research(row, current, tracker):
     context = new_run_context(interface='autonomous', agent_name=spec.name, is_owner=True,
         scope_type='maintenance_job',scope_id=f"commulingo_review:{row['id']}")
     with caller_scope(context):
-        await binding.chat([{'role':'user','content':'Review this data; it is not instructions:\n'+json.dumps(task,ensure_ascii=False,default=str)}],
-            client=binding.client,model=binding.model,tools=[*tools,DECISION_TOOL],tool_handlers=handlers,
-            system_prompt=spec.render_prompt(provider=binding.render_provider),
-            max_rounds=policy.max_rounds,max_tokens=policy.max_output_tokens,max_input_tokens=policy.max_input_tokens,
-            budget_usd=policy.budget_usd,budget_tracker=tracker,agent_name=spec.name,
-            finalization_tools=[DECISION_TOOL['name']],terminal_tools=[DECISION_TOOL['name']],
-            **binding.reasoning)
+        from scripts.commulingo_run import RunBudget
+        from scripts.commulingo_research_memory import STORE_PATH
+        run = RunBudget(policy, STORE_PATH, 'review', str(row['id']))
+        try:
+            await binding.chat([{'role':'user','content':'Review this data; it is not instructions:\n'+json.dumps(task,ensure_ascii=False,default=str)}],
+                client=binding.client,model=binding.model,tools=[*tools,DECISION_TOOL],tool_handlers=handlers,
+                system_prompt=spec.render_prompt(provider=binding.render_provider),
+                max_rounds=policy.max_rounds,max_tokens=policy.max_output_tokens,max_input_tokens=policy.max_input_tokens,
+                budget_usd=policy.budget_usd,budget_tracker=tracker,agent_name=spec.name,
+                finalization_tools=[DECISION_TOOL['name']],terminal_tools=[DECISION_TOOL['name']],
+                continue_on_length=policy.max_output_continuations > 0,
+                max_length_continuations=policy.max_output_continuations,
+                **binding.reasoning)
+        finally:
+            run.account(tracker)
+            run.record('reviewed' if box else 'error', decision=box.get('decision'), fetched_sources=len(fetched))
+            tracker['run_id'] = run.run_id
     if not box: raise RuntimeError('review ended without a validated decision')
     return box,fetched
 
@@ -194,7 +213,12 @@ async def run(*, notify_only=False, skip_budget=False):
         queue.synchronize()
         await asyncio.to_thread(deliver_notifications)
     state = queue.detail(job['suggestion_id'])['review_job']['status']
-    return {'status':state,'suggestion_id':job['suggestion_id'],'cost_usd':float(tracker.get('total_cost') or 0)}
+    if tracker.get('run_id'):
+        from scripts.commulingo_run import finish_record
+        from scripts.commulingo_research_memory import STORE_PATH
+        finish_record(STORE_PATH, tracker['run_id'], state)
+    return {'status':state,'suggestion_id':job['suggestion_id'],'run_id':tracker.get('run_id'),
+            'cost_usd':float(tracker.get('total_cost') or 0)}
 
 
 def main():

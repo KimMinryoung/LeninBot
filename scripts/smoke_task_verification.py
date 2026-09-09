@@ -132,7 +132,7 @@ async def main():
     CAPTURED_SQL.clear()
     v = await tasks._run_verification(
         None, make_task(999901, "analyst"), GOOD_REPORT,
-        chat_with_tools_fn=make_stub_chat("VERDICT: PASS\nReason: report is substantiated."),
+        chat_with_tools_fn=make_stub_chat("VERDICT: PASS\nReason: report is substantiated.\nExecution: appropriate\nGoal: complete\nRetry: no"),
         get_model_fn=stub_model,
     )
     print(f"  result: {v}")
@@ -147,7 +147,7 @@ async def main():
     CAPTURED_SQL.clear()
     v = await tasks._run_verification(
         None, make_task(999902, "analyst"), GOOD_REPORT,
-        chat_with_tools_fn=make_stub_chat("VERDICT: FAIL\nReason: claimed file was never modified."),
+        chat_with_tools_fn=make_stub_chat("VERDICT: FAIL\nReason: claimed file was never modified.\nExecution: error\nGoal: partial\nRetry: yes"),
         get_model_fn=stub_model,
     )
     print(f"  result: {v}")
@@ -184,7 +184,7 @@ async def main():
     print(f"  result: {v}")
     check("visualizer (no policy) -> passed by default", v["status"] == "passed")
 
-    # 3f. verifier LLM exception degrades to auto-check result, not a crash
+    # 3f. verifier LLM exception records unverified outcome, not a crash or PASS
     async def broken_chat(messages, **kwargs):
         raise RuntimeError("provider down")
 
@@ -197,7 +197,7 @@ async def main():
     print(f"  result: {v}")
     check(
         "LLM error degrades gracefully",
-        v["status"] == "passed" and "llm_verification: error" in v["details"],
+        v["status"] == "failed" and v["goal"] == "unverified" and "llm_verification: error" in v["details"],
     )
 
     print()

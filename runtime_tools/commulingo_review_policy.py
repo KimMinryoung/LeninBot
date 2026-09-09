@@ -1,6 +1,7 @@
 """Pure decision validation. Only source text fetched in this review counts."""
 import re
 import json
+import hashlib
 from urllib.parse import urlsplit
 
 DECISION_TOOL = {"name": "commulingo_review_decision", "description": "Submit one independently researched review decision; does not directly write dictionary content.",
@@ -15,13 +16,63 @@ DECISION_TOOL = {"name": "commulingo_review_decision", "description": "Submit on
                     "source": {"type": "string", "description": "URL whose text you actually retrieved during this review."},
                     "quote": {"type": "string", "description": "Exact contiguous quotation from the retrieved body, at least 20 characters. No ellipsis or paraphrase."},
                     "finding": {"type": "string", "description": "Your Korean explanation of what this quote verifies."},
+                    "citation_id": {"type": "string", "pattern": "^S[1-9][0-9]*$", "description": "S1 is suggestion.source_refs[0], S2 is source_refs[1]."},
+                    "source_id": {"type": "string", "description": "Exact review source ID returned by fetch_url/wiki_get."},
+                    "line_start": {"type": "integer", "minimum": 1},
+                    "line_end": {"type": "integer", "minimum": 1},
                 },
-                "required": ["citation", "source", "quote", "finding"]}},
+                "required": ["finding"],
+                "allOf": [
+                    {"oneOf": [{"required": ["citation"], "not": {"required": ["citation_id"]}}, {"required": ["citation_id"], "not": {"required": ["citation"]}}]},
+                    {"oneOf": [{"required": ["source", "quote"], "not": {"required": ["source_id"]}}, {"required": ["source_id", "line_start", "line_end"], "not": {"anyOf": [{"required": ["source"]}, {"required": ["quote"]}]}}]},
+                ]}},
         }, "required": ["decision", "reason", "resolved_risks", "checks"]}}
 
 
 def normalize(text):
     return re.sub(r"\s+", " ", text).strip()
+
+
+def review_source(url, body, snapshots):
+    """Immutable source pages scoped to this review, never the author's cache."""
+    source_id = "R" + hashlib.sha256((url + "\n" + body).encode()).hexdigest()[:16]
+    # Some extractors emit an entire page on one line. Display bounded chunks
+    # while preserving every original character for exact quote reconstruction.
+    lines = [line[i:i+240] for line in body.splitlines(keepends=True)
+             for i in range(0, len(line), 240)]
+    snapshots[source_id] = {"url": url, "lines": lines}
+    numbered = "\n".join(f"{i}: {line.rstrip()}" for i, line in enumerate(snapshots[source_id]["lines"], 1))
+    return source_id, numbered
+
+
+def resolve_review_checks(value, proposal, snapshots):
+    """Expand explicit IDs/ranges into the legacy, persistable decision contract."""
+    from copy import deepcopy
+    value = deepcopy(value)
+    for check in value.get("checks", []):
+        if not isinstance(check, dict):
+            raise ValueError("each check must be an object")
+        if "citation_id" in check:
+            identifier = check.pop("citation_id")
+            match = re.fullmatch(r"S([1-9][0-9]*)", str(identifier))
+            refs = proposal.get("source_refs") or []
+            index = int(match[1]) - 1 if match else -1
+            if "citation" in check or not 0 <= index < len(refs):
+                raise ValueError("citation_id must select an original source_refs entry; do not also supply citation")
+            check["citation"] = refs[index]
+        if "source_id" in check:
+            snapshot = snapshots.get(check.pop("source_id"))
+            start, end = check.pop("line_start", None), check.pop("line_end", None)
+            if (not snapshot or type(start) is not int or type(end) is not int
+                    or not 1 <= start <= end <= len(snapshot["lines"])):
+                raise ValueError("select an existing review source_id and valid inclusive line_start/line_end")
+            if "source" in check or "quote" in check:
+                raise ValueError("use a source range or literal source/quote, not both")
+            check["source"] = snapshot["url"]
+            check["quote"] = "".join(snapshot["lines"][start-1:end])
+            if len(check["quote"]) > 6000:
+                raise ValueError("select a narrower source range (at most 6000 characters)")
+    return value
 
 
 def external_url(url):

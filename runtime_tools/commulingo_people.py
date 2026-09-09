@@ -3653,6 +3653,14 @@ async def _exec_commulingo_write(
         patch, sources, confidence, repairs = normalize_commulingo_write(
             target_type, target_id, patch, sources, confidence
         )
+        # Expand references after prose normalization so citation bytes are
+        # copied exactly, including any intentional literal escape sequences.
+        if target_type in {"person", "person_section"} and "evidence" in patch:
+            from runtime_tools.commulingo_evidence import resolve_evidence_sources
+            try:
+                patch = {**patch, "evidence": resolve_evidence_sources(patch["evidence"], sources)}
+            except ValueError as exc:
+                return _commulingo_error("invalid_source_id", str(exc))
         result = await asyncio.to_thread(
             _run_edit, target_type, action, target_id, patch, sources, confidence
         )
@@ -3674,9 +3682,11 @@ _EVIDENCE_SCHEMA = {
     "items": {"type": "object", "additionalProperties": False,
         "properties": {**{key: {"type": "string"} for key in
             ("field", "claim", "source", "locator", "excerpt")},
+            "source_id": {"type": "string", "pattern": "^S[1-9][0-9]*$", "description": "S1 selects citations[0], S2 selects citations[1]. Prefer this over copying source text."},
             "stance": {"type": "string", "enum": ["supports", "disputes"]}},
-        "required": ["field", "claim", "source", "locator"]},
-    "description": "For EVERY supplied factual field (bio, moment, years, citizenship, nationalOrigin; body for sections), use a separate item with that exact field name. source must exactly equal one FULL citations string including its description, not merely its URL. locator names the cited page/section. Do not attach old evidence for omitted non-factual fields such as career. Use stance=disputes for conflicting evidence; it stages review.",
+        "required": ["field", "claim", "locator"],
+        "anyOf": [{"required": ["source_id"]}, {"required": ["source"]}]},
+    "description": "Prefer source_id: S1=citations[0], S2=citations[1]. Each supplied factual field needs its own claim and locator. Alternative source must equal the full citation string. Use stance=disputes for conflicting evidence.",
 }
 _PAIR_SCHEMA = {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "string"}}
 _COLLECTION_SCHEMAS = {

@@ -307,7 +307,27 @@ def select_sparse_person(
               "non_soviet": enrich_non_soviet_revolutionaries,
               "stale": bool(prefer_stale), "stale_days": stale_days}
     rows = db_query("""
-      WITH candidates AS (
+      WITH topic_edits AS MATERIALIZED (
+        SELECT q.target_id AS person_id, t.topic, MAX(q.created_at) AS edited_at
+        FROM commulingo_agent_suggestions q
+        CROSS JOIN (VALUES ('basics', ARRAY['years','career','role','epithet']),
+          ('bio', ARRAY['bio']), ('nationality', ARRAY['citizenship','nationalOrigin','origin']),
+          ('moment', ARRAY['moment']), ('sections', ARRAY['body'])) AS t(topic, fields)
+        WHERE q.status='approved' AND q.target_type IN ('person','person_section')
+          AND q.created_at > NOW() - GREATEST(%(recent)s,%(incomplete)s)*INTERVAL '1 day'
+          AND ((q.target_type='person_section' AND t.topic='sections')
+            OR (q.target_type='person' AND t.topic<>'sections' AND
+              (q.patch_json ?| t.fields OR EXISTS (
+                SELECT 1 FROM jsonb_array_elements(COALESCE(q.patch_json->'evidence','[]'::jsonb)) ev
+                WHERE ev->>'field'=ANY(t.fields)))))
+        GROUP BY q.target_id, t.topic
+        UNION ALL
+        SELECT q.patch_json->>'personId', 'events', MAX(q.created_at)
+        FROM commulingo_agent_suggestions q WHERE q.status='approved'
+          AND q.target_type='history_event_person'
+          AND q.created_at > NOW() - %(recent)s*INTERVAL '1 day'
+        GROUP BY q.patch_json->>'personId'
+      ), candidates AS MATERIALIZED (
         SELECT p.*, p.group_id AS group_id_copy,
           LENGTH(p.bio_ko) AS bio_chars, (p.epithet_ko<>'')::int AS has_epithet,
           (p.moment_ko<>'')::int AS has_moment,
@@ -317,6 +337,16 @@ def select_sparse_person(
           (SELECT COUNT(*) FROM commulingo_history_event_people e WHERE e.person_id=p.id)::int AS event_count,
           (SELECT COUNT(*) FROM commulingo_office_rows o WHERE o.person_id=p.id)::int AS office_count,
           (SELECT COUNT(*) FROM commulingo_person_evidence e WHERE e.person_id=p.id)::int AS evidence_count,
+          ARRAY(SELECT f.field FROM (VALUES
+            ('bio', p.bio_ko<>'', 'bio'), ('years', p.years_label<>'', 'basics'),
+            ('citizenship', p.citizenship_code<>'', 'nationality'),
+            ('nationalOrigin', p.origin_code<>'', 'nationality'),
+            ('moment', p.moment_ko<>'', 'moment')) AS f(field,present,topic)
+            WHERE f.present AND NOT EXISTS(SELECT 1 FROM commulingo_person_evidence e
+              WHERE e.person_id=p.id AND e.section_slug='' AND (e.field=f.field
+                OR (f.field='nationalOrigin' AND e.field='origin')))
+            AND NOT EXISTS(SELECT 1 FROM commulingo_person_enrichment e WHERE e.person_id=p.id
+              AND e.topic=f.topic AND e.review_after>NOW() AND e.status<>'open')) AS missing_evidence_fields,
           COALESCE((SELECT jsonb_object_agg(e.topic,e.status) FROM commulingo_person_enrichment e
                     WHERE e.person_id=p.id AND e.review_after>NOW() AND e.status<>'open'), '{}'::jsonb) AS editorial_states,
           (SELECT MAX(r.created_at) FROM commulingo_people_revisions r
@@ -327,10 +357,10 @@ def select_sparse_person(
               WHERE r.person_id=p.id AND r.category_id='non-soviet-revolutionary'))
           AND NOT EXISTS(SELECT 1 FROM commulingo_agent_suggestions q WHERE q.target_id=p.id
               AND q.target_type IN ('person','person_section') AND q.status='pending')
-      ), ranked AS (
+      ), ranked AS MATERIALIZED (
         SELECT *, CASE
           WHEN (bio_chars=0 OR has_epithet=0 OR career_count=0 OR has_role=0) AND NOT(editorial_states ? 'basics') THEN 1
-          WHEN evidence_count=0 AND NOT(editorial_states ? 'bio') THEN 7
+          WHEN cardinality(missing_evidence_fields)>0 THEN 7
           WHEN ((bio_ko<>'' AND bio_en='') OR (moment_ko<>'' AND moment_en='') OR (epithet_ko<>'' AND epithet_en='')) AND NOT(editorial_states ? 'bio') THEN 8
           WHEN (citizenship_code='' OR origin_code='') AND NOT(editorial_states ? 'nationality') THEN 2
           WHEN has_moment=0 AND NOT(editorial_states ? 'moment') THEN 4
@@ -338,8 +368,16 @@ def select_sparse_person(
           WHEN section_count<12 AND NOT(editorial_states ? 'sections') THEN 6
           ELSE 0 END AS editorial_step
         FROM candidates
-      ) SELECT * FROM ranked WHERE editorial_step<>0
-        AND (%(forced)s<>'' OR COALESCE(last_edit,'-infinity') < NOW() -
+      ), scheduled AS MATERIALIZED (
+        SELECT *, CASE editorial_step WHEN 1 THEN 'basics' WHEN 2 THEN 'nationality'
+          WHEN 4 THEN 'moment' WHEN 5 THEN 'events' WHEN 6 THEN 'sections'
+          WHEN 7 THEN CASE missing_evidence_fields[1] WHEN 'years' THEN 'basics'
+            WHEN 'citizenship' THEN 'nationality' WHEN 'nationalOrigin' THEN 'nationality'
+            WHEN 'moment' THEN 'moment' ELSE 'bio' END ELSE 'bio' END AS topic
+        FROM ranked
+      ) SELECT c.* FROM scheduled c LEFT JOIN topic_edits t ON t.person_id=c.id AND t.topic=c.topic
+        WHERE editorial_step<>0
+        AND (%(forced)s<>'' OR COALESCE(t.edited_at, '-infinity') < NOW() -
           (CASE WHEN editorial_step IN (1,2,4,7,8) THEN %(incomplete)s ELSE %(recent)s END)*INTERVAL '1 day')
       ORDER BY CASE editorial_step WHEN 1 THEN 0 WHEN 7 THEN 1 WHEN 8 THEN 2 WHEN 2 THEN 3 WHEN 4 THEN 4 ELSE 5 END,
         CASE WHEN %(stale)s AND COALESCE(last_edit,created_at)<NOW()-%(stale_days)s*INTERVAL '1 day' THEN 0 ELSE 1 END,
@@ -547,7 +585,7 @@ row in this run.
     # are already listed above.
     step = enrich_step(candidate)
     step_text = {
-        7: "EVIDENCE: research the least-supported important claim, correct it if necessary or add field-level evidence only. Include claim, source and page/section locator; do not lengthen the bio just to add a citation.",
+        7: "EVIDENCE: research the least-supported important claim in these missing-evidence fields: " + ", ".join(candidate.get("missing_evidence_fields") or ["bio"]) + ". Correct it if necessary or add field-level evidence only. Use source_id S1 for citations[0], claim and locator; do not lengthen text just to add a citation. Stay within the commissioned topic.",
         8: "BILINGUAL GAP: preserve the existing language and supply the missing translation with the same substantiated claims and evidence.",
         1: _STEP_BASIC,
         2: _STEP_NATIONALITY_TEMPLATE.format(NATIONALITY_CODES=NATIONALITY_CODES),
@@ -565,9 +603,9 @@ row in this run.
     # checklist order; 4, 5 and 6 sat below it.
     bio_gate = _BIO_GATE_TEMPLATE.format(bio_step=bio_step) if step in (4, 5, 6) else ""
     reads_line = (
-        "Call get_person and get_sections first"
+        "Use the supplied person snapshot; call get_sections for full section text only when needed"
         if step == 6
-        else "Call get_person first"
+        else "Use the current person snapshot supplied below (get_person only if absent)"
     )
 
     return f"""MODE: ENRICH EXISTING PERSON
@@ -595,8 +633,8 @@ already holds. Default to building on the existing content — keep accurate, in
 prose, and fold them into any rewrite rather than regenerating a field from scratch. You MAY
 remove or replace existing material, but only on a judged reason (factually wrong, contradicted
 by sources, duplicated elsewhere on the card, or clearly violating the style rules) — never as
-an accidental side effect of a rewrite. If the existing content already satisfies a step, that
-step does not apply; move to the next one.
+an accidental side effect of a rewrite. If the existing content already satisfies the commissioned step, record complete/not_applicable
+with commulingo_no_edit; another topic is a separate job.
 Korean Soviet-history prose uses `그루지야`, not `조지아`; modern citizenship labels may still
 use `조지아`. Korea before the two states of 1948 is `조선` (`대한제국` for 1897–1910), its
 people `조선인`, its language `조선어`; `한국` names the southern republic founded in 1948 and
@@ -774,6 +812,8 @@ def pending_person_gap_count() -> int:
         """SELECT COUNT(*)::int AS n
              FROM commulingo_curation_gaps
             WHERE kind = 'person'
+              AND NOT (COALESCE(resolution,'') LIKE 'retry:%%' AND updated_at>NOW()-INTERVAL '6 hours')
+              AND NOT (COALESCE(resolution,'') LIKE 'sources_unavailable:%%' AND updated_at>NOW()-INTERVAL '90 days')
               AND (status = 'pending'
                    OR (status = 'claimed' AND claimed_at < NOW() - INTERVAL '40 minutes'))"""
     )
@@ -1213,101 +1253,75 @@ async def _call_curator_stage(
     policy, stage: str, expect_edit: bool, before_count: int,
     finalization_tools: list[str], terminal_tools: list[str],
     candidate_box: dict | None = None, no_edit_box: dict | None = None,
-    research_key: str | None = None,
+    research_key: str | None = None, baseline: dict | None = None, run_budget=None,
 ) -> tuple[str, dict, dict | None]:
+    import asyncio
+    from scripts.commulingo_run import RunBudget, RunFailure
+    from tool_gateway.results import ToolFailure
     binding = resolve_agent_tool_loop(spec, policy)
     memory = ResearchMemory(research_key or f"{spec.name}:{stage}:{task}")
-    staged_result: dict = {}
-    def capture_pending(handler):
+    memory.baseline = baseline
+    run = run_budget or RunBudget(policy, memory.path, stage, research_key or stage)
+    run.stage, run.target = stage, research_key or stage
+    outcomes = []
+    terminal_recorded = False
+
+    def capture(handler, name):
         async def captured(**kwargs):
+            nonlocal terminal_recorded
+            if terminal_recorded:
+                raise ToolRejection("the commissioned terminal action already succeeded; stop this run")
             result = await handler(**kwargs)
-            if isinstance(result, str) and result.startswith("OK — pending:"):
-                staged_result["text"] = result
+            if not isinstance(result, ToolFailure) and not str(result).startswith("Error:"):
+                terminal_recorded = name in terminal_tools
+                if name in NARROW_WRITE_TOOLS:
+                    outcomes.append({"tool": name, "result": str(result),
+                        "target": kwargs.get("person_id") or kwargs.get("event_id") or kwargs.get("term_id")})
+                    run.record("submitted", writes=outcomes, metrics=memory.metrics)
             return result
         return captured
-    handlers = {name: capture_pending(handler) if name in NARROW_WRITE_TOOLS else handler
+
+    handlers = {name: capture(handler, name) if name in NARROW_WRITE_TOOLS or name in terminal_tools else handler
                 for name, handler in handlers.items()}
-    attempts = 1 + max(0, int(policy.max_output_continuations))
-    total_cost = 0.0
-    total_rounds = 0
-    last_result = ""
-    last_error: Exception | None = None
-    for attempt in range(1, attempts + 1):
-        tracker: dict = {}
-        if candidate_box is not None:
-            candidate_box["search_count"] = 0
-        if no_edit_box is not None:
-            no_edit_box.pop("reason", None)
-        prior_detail = str(last_error or "")[:800]
-        retry_note = "" if attempt == 1 else (
-            "\n\nRETRY: The prior attempt produced no usable terminal edit/candidate. "
-            "Do not emit DSML markup or commentary-only output. Complete the required "
-            "terminal action now using canonical tool arguments."
-            + (f" Prior failure: {prior_detail}" if prior_detail else "")
-            # Each attempt is a fresh conversation, so without this the second
-            # attempt only learns the last rejection and can re-propose the one
-            # before it. Carry every duplicate found so far.
-            + rejected_candidate_note((candidate_box or {}).get("rejected"))
-        )
+    # A fresh attempt is distinct from output continuation and shares the job envelope.
+    last_result, last_error = "", None
+    for attempt in range(2):
+        tracker = {}
+        seconds, rounds, cost = run.remaining()
+        continuations = min(policy.max_output_continuations, max(0, rounds - 1))
         try:
-            last_result = await memory.chat(binding.chat,
-                [{"role": "user", "content": task + retry_note}],
-                client=binding.client,
-                model=binding.model,
-                tools=tools,
-                tool_handlers=handlers,
-                system_prompt=(
-                    spec.render_prompt(provider=binding.render_provider)
-                    + ("\n\nDISCOVERY-STAGE EXCEPTION: do not edit; finish only with commulingo_candidate_select." if not expect_edit else "")
-                ),
-                max_rounds=policy.max_rounds,
-                max_tokens=policy.max_output_tokens,
-                max_input_tokens=policy.max_input_tokens,
-                recover_input_via_tools=True,
-                continue_on_length=policy.max_output_continuations > 0,
-                max_length_continuations=policy.max_output_continuations,
-                budget_usd=policy.budget_usd,
-                budget_tracker=tracker,
-                agent_name=spec.name,
-                finalization_tools=finalization_tools,
-                terminal_tools=terminal_tools,
-                **binding.reasoning,
-            )
-            total_cost += float(tracker.get("total_cost") or 0.0)
-            total_rounds += int(tracker.get("rounds_used") or 0)
-            after = completed_run_count()
-            if expect_edit:
-                if after == before_count + 1:
-                    return last_result, {"total_cost": total_cost, "rounds_used": total_rounds}, None
-                if after != before_count:
-                    raise RuntimeError(
-                        f"unexpected edit count change during {stage}: {before_count} -> {after}"
-                    )
-                if staged_result:
-                    return staged_result["text"], {"total_cost": total_cost, "rounds_used": total_rounds}, None
-                if no_edit_box is not None and no_edit_box.get("reason"):
-                    # The curator judged the commissioned step needs no write and
-                    # said so through the typed terminal — a completed run, not a
-                    # failure.
-                    return last_result, {"total_cost": total_cost, "rounds_used": total_rounds}, None
-                raise RuntimeError(f"{stage} produced no edit: {last_result[:500]}")
-            candidate = (candidate_box or {}).get("candidate")
-            if not candidate:
-                rejection = (candidate_box or {}).get("last_error")
-                detail = f": {rejection}" if rejection else ""
-                raise RuntimeError(f"{stage} produced no typed candidate selection{detail}")
-            return last_result, {"total_cost": total_cost, "rounds_used": total_rounds}, candidate
+            last_result = await asyncio.wait_for(memory.chat(binding.chat,
+                [{"role": "user", "content": task + ("\nRepair the saved draft using the existing evidence; finish with the commissioned tool." if attempt else "")}],
+                client=binding.client, model=binding.model, tools=tools, tool_handlers=handlers,
+                system_prompt=spec.render_prompt(provider=binding.render_provider)
+                    + ("\nDISCOVERY: finish only with commulingo_candidate_select." if not expect_edit else ""),
+                max_rounds=max(1, rounds - continuations), max_tokens=policy.max_output_tokens,
+                max_input_tokens=policy.max_input_tokens, recover_input_via_tools=True,
+                continue_on_length=continuations > 0,
+                max_length_continuations=continuations,
+                budget_usd=cost, budget_tracker=tracker, agent_name=spec.name,
+                finalization_tools=finalization_tools, terminal_tools=terminal_tools,
+                **binding.reasoning), timeout=seconds)
         except Exception as exc:
             last_error = exc
-            logger.warning(
-                "%s attempt %d/%d failed without an applied edit: %s",
-                stage, attempt, attempts, exc,
-            )
-            if completed_run_count() != before_count:
-                raise
-    raise RuntimeError(
-        f"{stage} failed after {attempts} attempts: {last_error}; result={last_result[:500]}"
-    )
+        finally:
+            run.account(tracker)
+            run.record("running", metrics=memory.metrics, writes=outcomes)
+        writes = [item for item in outcomes if item["tool"] in terminal_tools]
+        if writes:
+            status = "pending_review" if writes[-1]["result"].startswith("OK — pending:") else "applied"
+            return writes[-1]["result"], run.record(status, metrics=memory.metrics, writes=outcomes), None
+        if no_edit_box and no_edit_box.get("reason"):
+            status = no_edit_box.get("status", "complete")
+            return last_result, run.record(status, metrics=memory.metrics, writes=outcomes), None
+        if not expect_edit and (candidate_box or {}).get("candidate"):
+            return last_result, run.record("selected", metrics=memory.metrics), candidate_box["candidate"]
+        # A handler exception after a side effect must never replay the task.
+        if outcomes or last_error is not None:
+            break
+    summary = run.record("error" if last_error else "exhausted", metrics=memory.metrics, writes=outcomes,
+                         error=str(last_error or "no terminal result")[:500])
+    raise RunFailure(f"{stage} ended without its terminal result: {last_error or last_result[:500]}", summary)
 
 
 async def run_once(*, mode: str, candidate_id: str, config: dict) -> dict:
@@ -1359,12 +1373,17 @@ async def run_once(*, mode: str, candidate_id: str, config: dict) -> dict:
     discovery = None
     fallback_error = None
     tracker = {"total_cost": 0.0, "rounds_used": 0}
+    write_outcomes = []
+    from scripts.commulingo_run import RunBudget
+    from scripts.commulingo_research_memory import STORE_PATH
+    job_budget = None
     with caller_scope(ctx):
         if chosen_mode == "new":
             # Seeded from disk and merged back below whether or not the stage
             # succeeds, so a duplicate proved in this run is not re-proposed in
             # the next one. The box is built outside the try for that reason.
             candidate_box: dict = {"rejected": list(state.get("rejected_candidates") or [])}
+            job_budget = RunBudget(policy, STORE_PATH, "new-person", "discovery")
             try:
                 discovery_tools = [*read_tools, COMMULINGO_CANDIDATE_SELECT_TOOL]
                 discovery_handlers = {
@@ -1377,28 +1396,32 @@ async def run_once(*, mode: str, candidate_id: str, config: dict) -> dict:
                         roster_groups_for_focus(config),
                     ), spec=spec,
                     tools=discovery_tools, handlers=discovery_handlers, policy=policy,
-                    stage="new-person discovery", expect_edit=False, before_count=before,
+                    stage="new-person discovery", expect_edit=False, before_count=before, run_budget=job_budget,
                     finalization_tools=["commulingo_candidate_select"],
                     terminal_tools=["commulingo_candidate_select"], candidate_box=candidate_box,
                 )
                 discovery = {"candidate": candidate, "result": discovery_result}
-                tracker["total_cost"] += discovery_tracker["total_cost"]
-                tracker["rounds_used"] += discovery_tracker["rounds_used"]
+                tracker["total_cost"] = discovery_tracker["total_cost"]
+                tracker["rounds_used"] = discovery_tracker["rounds_used"]
                 create_tools, create_handlers = stage_tools(frozenset({"commulingo_person_create"}))
                 result, create_tracker, _ = await _call_curator_stage(
                     task=build_new_person_task(candidate), spec=spec,
                     tools=create_tools, handlers=create_handlers, policy=policy,
-                    stage="new-person creation", expect_edit=True, before_count=before,
+                    stage="new-person creation", expect_edit=True, before_count=before, run_budget=job_budget,
                     research_key=f"commulingo_person:{candidate['id']}:create",
                     finalization_tools=["commulingo_person_create"],
                     terminal_tools=["commulingo_person_create"],
                 )
-                tracker["total_cost"] += create_tracker["total_cost"]
-                tracker["rounds_used"] += create_tracker["rounds_used"]
+                write_outcomes = create_tracker.get("writes", [])
+                tracker["run_id"] = create_tracker["run_id"]
+                tracker["total_cost"] = create_tracker["total_cost"]
+                tracker["rounds_used"] = create_tracker["rounds_used"]
                 state["new_cooldown_remaining"] = 0
             except Exception as exc:
-                if completed_run_count() != before:
+                if getattr(exc, "summary", {}).get("writes") or getattr(exc, "summary", {}).get("status") == "error":
                     raise
+                if job_budget:
+                    job_budget.remaining()
                 fallback_error = str(exc)
                 logger.error("new-person path failed; falling back to enrich: %s", exc)
                 state["new_cooldown_remaining"] = int(config["new_person_cooldown_runs"])
@@ -1437,7 +1460,7 @@ async def run_once(*, mode: str, candidate_id: str, config: dict) -> dict:
                     "fallback_error": fallback_error,
                 }
             task = build_task("enrich", candidate) + (
-                "\nRead get_person for expectedRevision. Every factual write needs evidence entries: "
+                "\nUse the supplied snapshot for expectedRevision. Every factual write needs evidence entries: "
                 "field, claim, source exactly matching a citation, and locator (page or section). "
                 "Mark disputes explicitly. A pending review is a successful terminal; do not retry it. "
                 "Use no_edit complete/not_applicable/sources_unavailable only after research. "
@@ -1447,7 +1470,11 @@ async def run_once(*, mode: str, candidate_id: str, config: dict) -> dict:
             no_edit_box: dict = {}
             from runtime_tools.commulingo_person_service import call_person_service
             baseline = call_person_service({"command": "read", "id": candidate["id"]})
-            topic = {1: "basics", 2: "nationality", 4: "moment", 5: "events", 6: "sections", 7: "bio", 8: "bio"}.get(enrich_step(candidate), "bio")
+            baseline["id"] = candidate["id"]
+            from provenance.runtime import _wrap_external
+            task += "\nCURRENT SNAPSHOT (already read by runner; no repeat get_person needed):\n" + _wrap_external(json.dumps(baseline, ensure_ascii=False, default=str), "commulingo_current_person")
+            topic = candidate.get("topic") or {1: "basics", 2: "nationality", 4: "moment", 5: "events", 6: "sections", 7: "bio", 8: "bio"}.get(enrich_step(candidate), "bio")
+            task += f"\nCommissioned topic: {topic}. Complete only this topic."
             enrich_tools = [*enrich_tools, COMMULINGO_NO_EDIT_TOOL]
             enrich_handlers = {
                 **enrich_handlers,
@@ -1458,8 +1485,9 @@ async def run_once(*, mode: str, candidate_id: str, config: dict) -> dict:
                 result, enrich_tracker, _ = await _call_curator_stage(
                     task=task, spec=spec,
                     tools=enrich_tools, handlers=enrich_handlers,
-                    policy=policy, stage=chosen_mode, expect_edit=True, before_count=before,
-                    research_key=f"commulingo_person:{candidate['id']}:enrich",
+                    policy=policy, stage=chosen_mode, expect_edit=True, before_count=before, run_budget=job_budget,
+                    research_key=f"commulingo_person:{candidate['id']}:{topic}:{baseline['revision']}",
+                    baseline=baseline,
                     finalization_tools=enrich_terminals,
                     terminal_tools=enrich_terminals,
                     no_edit_box=no_edit_box,
@@ -1479,8 +1507,10 @@ async def run_once(*, mode: str, candidate_id: str, config: dict) -> dict:
                     logger.warning("%s is on enrich-failure cooldown for %d run(s)",
                                    candidate["id"], cooldown)
                 raise
-            tracker["total_cost"] += enrich_tracker["total_cost"]
-            tracker["rounds_used"] += enrich_tracker["rounds_used"]
+            write_outcomes = enrich_tracker.get("writes", [])
+            tracker["run_id"] = enrich_tracker["run_id"]
+            tracker["total_cost"] = enrich_tracker["total_cost"]
+            tracker["rounds_used"] = enrich_tracker["rounds_used"]
             if chosen_mode == "enrich" and state.get("new_cooldown_remaining", 0) > 0:
                 state["new_cooldown_remaining"] -= 1
             no_edit_reason = no_edit_box.get("reason")
@@ -1489,20 +1519,10 @@ async def run_once(*, mode: str, candidate_id: str, config: dict) -> dict:
                     "status": no_edit_box.get("status", "sources_unavailable"), "reason": no_edit_reason,
                     "sources": no_edit_box.get("sources", []), "expectedRevision": baseline["revision"],
                     "changedBy": "commulingo-maintainer"})
-                # A judged "nothing to write" completes the run without an edit, so
-                # the DB recency cooldown never fires — step over this card for the
-                # same window a failed one gets, or the next hour re-picks it.
-                cooldown = int(config["enrich_failure_cooldown_runs"])
-                if cooldown > 0:
-                    state["failed_candidates"] = (
-                        [e for e in state["failed_candidates"] if e["id"] != candidate["id"]]
-                        + [{"id": candidate["id"], "runs_left": cooldown}]
-                    )[-FAILED_MEMORY:]
-                    logger.info("%s declared complete for its step; stepping over it for %d run(s)",
-                                candidate["id"], cooldown)
                 save_state(state)
                 return {
-                    "status": "no_edit",
+                    "status": no_edit_box.get("status", "sources_unavailable"),
+                    "run_id": tracker.get("run_id"),
                     "mode": chosen_mode,
                     "candidate": candidate.get("id"),
                     "model": report_model,
@@ -1517,23 +1537,18 @@ async def run_once(*, mode: str, candidate_id: str, config: dict) -> dict:
 
     if str(result).startswith("OK — pending:"):
         save_state(state)
-        return {"status": "pending_review", "mode": chosen_mode,
+        return {"status": "pending_review", "run_id": tracker.get("run_id"), "mode": chosen_mode,
                 "candidate": candidate and candidate.get("id"), "model": report_model,
                 "cost_usd": round(float(tracker.get("total_cost") or 0), 4),
                 "rounds": int(tracker.get("rounds_used") or 0), "result": result}
-    after = completed_run_count()
-    # Every completed stage lands exactly one write (the burst-bug guard).
-    max_edits = 1
-    if not (before + 1 <= after <= before + max_edits):
-        raise RuntimeError(
-            f"expected 1..{max_edits} applied edits, count changed {before} -> {after}; result={result[:500]}"
-        )
+    from scripts.commulingo_run import submitted_edit
     save_state(state)
-    edit = latest_maintainer_edit()
+    edit = submitted_edit(write_outcomes, db_query_one)
     if not edit or edit.get("status") != "approved":
         raise RuntimeError("applied edit was not recorded as approved")
     return {
         "status": "applied",
+        "run_id": tracker.get("run_id"),
         "mode": chosen_mode,
         "candidate": candidate and candidate.get("id"),
         "model": report_model,
@@ -1619,10 +1634,17 @@ def main() -> int:
                 break
         try:
             result = asyncio.run(run_once(mode=args.mode, candidate_id=args.candidate, config=config))
-        except Exception:
+        except Exception as exc:
             # Logged as a traceback (the lane digest counts those), then on to
             # the next run: the failed card is on cooldown, the next pick differs.
             # A single-run invocation keeps its old contract and raises.
+            if getattr(exc, "summary", None):
+                summary = exc.summary
+                print(json.dumps({"status": summary["status"], "run_id": summary["run_id"],
+                    "cost_usd": summary["cost_usd"], "rounds": summary["rounds_used"],
+                    "error": str(exc)[:500]}, ensure_ascii=False, indent=2))
+                failures += 1
+                continue
             if runs == 1:
                 raise
             failures += 1

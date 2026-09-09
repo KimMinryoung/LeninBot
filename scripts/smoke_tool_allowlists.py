@@ -136,7 +136,9 @@ def _assert_global_registry() -> tuple[set[str], set[str]]:
         name for name in tool_names
         if name.startswith("commulingo_") and name != "commulingo_people"
     }
-    assert commulingo_write_names == set(COMMULINGO_NARROW_WRITE_TOOLS), (
+    assert commulingo_write_names == set(COMMULINGO_NARROW_WRITE_TOOLS) | {
+        "commulingo_event_update", "commulingo_event_section_save", "commulingo_gap_report",
+    }, (
         "global registry must expose only the canonical narrow CommUlingo writes: "
         f"{sorted(commulingo_write_names)}"
     )

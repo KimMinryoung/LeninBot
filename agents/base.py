@@ -31,27 +31,29 @@ _AGENT_PROMPT_DIR = Path(
 
 _CONTEXT_AWARENESS_BODY = """\
 You were delegated this task by the orchestrator. Your input contains:
-- <current_state>: status of completed/in-progress/pending tasks. **Do not repeat already-completed work.**
+- <current_state>: recorded task statuses, not proof that every requested outcome was achieved.
 - <mission-context>: shared timeline of the ongoing mission (if linked)
 - <agent-execution-history>: your previous task executions — tool call logs and results. \
 Use this to avoid redundant work and build on past results.
 - <task-chain>: if this is a child/retry task, shows the parent chain's work (content, result, tool log). \
-**CRITICAL: Read the parent's <tool-log> FIRST to understand what was already completed.** \
-Resume from where the parent stopped — do NOT redo work that is already done.
+Read the current task and its completion criteria first, then inspect the parent's evidence. \
+Resume verified work; an attempted call or an earlier claim is not proof of completion. \
+Avoid repeating successful writes, but re-read mutable state when needed for the current decision.
 - <agent-board>: messages from sibling agents on the same mission (if any)
-- <dependency-results>: outputs of earlier plan stages your task depends on — treat as your primary input when present
+- <dependency-results>/<subtask-results>: earlier plan outcomes; check status, verification, omissions, and evidence before using them
 - <past-experiences>: lessons from similar past tasks; do not repeat recorded mistakes
 - <task>: your specific instructions
 
 **Context isolation**: The orchestrator only sees high-level summaries of your work. \
 You have full access to your own execution history (tool logs, results). \
 Use this to maintain continuity across multiple sessions.
-Read ALL context sections carefully before starting. Before submitting, re-read <task>: \
+Some execution paths omit these sections. Do not assume absent context was loaded. \
+Read the relevant context before starting. Before submitting, re-read <task>: \
 your report must answer THAT task — history and prior context are background, not the assignment.
 
 **Inter-agent messaging**: To pass information to other agents on the same mission:
-- `send_message(message)`: Post a message to the mission board. Other agents working in parallel can see it.
-- `read_messages()`: Read messages left by other agents.
+- When present in this run's tool schemas, `send_message(message)` posts to the mission board.
+- When present, `read_messages()` reads that board.
 Use this when you have important discoveries, warnings, or dependency information.
 NOTE: send_message is a passive bulletin board — it does NOT trigger task execution or delegate work. \
 Only the orchestrator can create tasks. If a task requires capabilities you don't have, \
@@ -63,13 +65,32 @@ Instead, report back: what the task needs, why you can't do it, and which agent 
 
 
 _MISSION_GUIDELINES_BODY = """\
-- save_finding: Record important intermediate discoveries/decisions to the mission timeline.
+- When available, save_finding records important intermediate discoveries/decisions to the mission timeline.
 - KG storage — use `write_kg_structured(facts=[...])` for all new writes. YOU specify each (subject_name, subject_type, predicate, object_name, object_type, fact). Deterministic, no LLM extraction, exact entity reuse by name+type. Use for analyst conclusions, OSINT confirmations, news facts, structured updates. Predicates: Affiliation/PersonalRelation/OrgRelation/Funding/AssetTransfer/ThreatAction/Involvement/Presence/PolicyEffect/Participation/Statement/Causation. Entity types: Person/Organization/Location/Asset/Incident/Policy/Campaign/Concept/Role/Industry. See the tool description for the (subject → object) → predicate matrix. group_id: geopolitics_conflict, economy, korea_domestic, agent_knowledge.
-- The system will automatically terminate your work when budget/limits are reached. Don't worry — just do as much as you can.
+- Work toward the task's acceptance criteria, not a quota of tool calls. Save durable findings
+  before limits are reached; prioritize the remaining action that most directly completes the task.
   If there is unfinished work, state **what was done + what was not done + what should be done next** in your final response.
   The orchestrator will read your response and decide whether to re-delegate.
-- Completed tasks are independently verified against actual state (files, DB, URLs). Claiming work \
-that was not done FAILs verification and triggers re-delegation — report done vs not-done precisely."""
+- Tasks may be independently verified against actual state (files, DB, URLs). A skipped check
+is not proof. Report completion, partial work, blockers and unverified claims precisely."""
+
+_EXECUTION_CONTRACT_BODY = """\
+Identify the requested outcome, target, constraints, and evidence needed for completion.
+Act within the commissioned scope; use only tools actually exposed in this run. Missing
+capabilities are a concrete blocker, not permission to simulate actions. Prefer relevant
+evidence over exhaustive context reading. Preserve sources and artifact identifiers.
+Separate successful writes, failed attempts, and unverified results. Verify material outcomes
+with a read or other independent evidence when available; never repeat a successful write
+merely to verify it. A terminal tool ends the run: prepare and validate before calling it,
+and rely on its validated success receipt instead of promising a later check.
+For internal task reports, lead with: status (complete/partial/blocked), result, verification
+and evidence, artifact paths/IDs/URLs, and remaining requirements with the next action.
+Keep raw material in retrievable artifacts; include only decision-relevant excerpts and
+failure diagnostics in the report. Match the task language. This report format does not
+replace public artifact formats or a terminal tool's required payload.
+For synthesis, map every original requirement to the subtask outcomes. Include failures,
+missing results, and unverified claims; partial success never implies overall completion.
+"""
 
 
 _CHAT_AUDIENCE_BODY = """\
@@ -88,6 +109,7 @@ context that should not be exposed publicly; web chat is already public."""
 CONTEXT_AWARENESS_SECTION: tuple[str, str] = ("context-awareness", _CONTEXT_AWARENESS_BODY)
 MISSION_GUIDELINES_SECTION: tuple[str, str] = ("mission-guidelines", _MISSION_GUIDELINES_BODY)
 CHAT_AUDIENCE_SECTION: tuple[str, str] = ("chat-audience", _CHAT_AUDIENCE_BODY)
+EXECUTION_CONTRACT_SECTION: tuple[str, str] = ("execution-contract", _EXECUTION_CONTRACT_BODY)
 
 
 def load_political_line_body() -> str | None:
@@ -273,6 +295,11 @@ class AgentSpec:
                 for section in (political_line, prompt_overlay, rate_limit_note)
                 if section is not None
             ]
+            # Every registered IR agent gets the trust boundary, including
+            # diary/review/curator identities that do not import AGENT_CONTEXT.
+            if EXTERNAL_SOURCE_RULE not in self.prompt_ir.identity:
+                extra_sections.append(("source-boundary", EXTERNAL_SOURCE_RULE))
+            extra_sections.append(EXECUTION_CONTRACT_SECTION)
             if extra_sections:
                 prompt_ir = SystemPrompt(
                     identity=self.prompt_ir.identity,

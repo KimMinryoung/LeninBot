@@ -87,6 +87,12 @@ validation failure, the dispatcher supplies the tool name, attempted arguments
 and error so the curator can preserve its draft for repair. Callback failures
 are logged and never change the rejection or audit verdict; outside that scope
 the hook is inactive. The observer does not weaken validation or invoke tools.
+Scheduled CommuLingo runs extend existing narrow write schemas locally with
+draft_id/repairs. Authorization and the outer schema still run in the dispatcher;
+the wrapper reconstructs only its scoped rejected draft and validates the full
+arguments against the original schema before the same handler executes. Target,
+action and revision cannot change through a repair. No new tool name or permission
+is introduced. See `commulingo_editorial.md` for source IDs and run outcomes.
 CommuLingo's handler wrappers may reuse dated research after gateway checks;
 the gateway itself still does not cache reads. See
 `multi_agent_architecture.md` for evidence retention and repair-mode behavior.

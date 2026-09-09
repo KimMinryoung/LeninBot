@@ -69,9 +69,8 @@ BROWSER = AgentSpec(
   - `extraction_or_dynamic_page`: use browse_web or a site-specific extraction approach.
 """.strip()),
             ("output-format", """
-Your final response is delivered to the orchestrator. Information density matters more than formatting.
-Include what was done, extracted data, and any issues encountered as-is.
-Do not omit trial-and-error details — they help the orchestrator make decisions.
+Report the requested outcome, verification evidence, extracted-data artifact and remaining issues.
+Include only diagnostic failures that affect the result or next action; keep long extracted data in a file.
 """.strip()),
             MISSION_GUIDELINES_SECTION,
         ],

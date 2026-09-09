@@ -1210,7 +1210,7 @@ async def _exec_read_task_reports(
         row = await asyncio.to_thread(
             _db_query_one,
             "SELECT id, user_id, content, status, result, tool_log, agent_type, "
-            "mission_id, parent_task_id, depth, created_at, completed_at "
+            "mission_id, parent_task_id, depth, created_at, completed_at, verification_status, verification_details "
             "FROM telegram_tasks WHERE id = %s",
             (task_id,),
         )
@@ -1235,7 +1235,8 @@ async def _exec_read_task_reports(
             f"Task #{row['id']} | status={row['status']} | agent={row.get('agent_type', '?')}\n"
             f"created={ts} | completed={completed}\n"
             f"mission_id={row.get('mission_id', 'N/A')} | parent={row.get('parent_task_id', 'N/A')} | depth={row.get('depth', 0)}\n"
-            f"\n## Request\n{content[:1000]}\n"
+            f"\n## Verification\n{row.get('verification_status') or 'unverified'}\n{row.get('verification_details') or 'No verification evidence available.'}\n"
+            f"\n## Request\n{content}\n"
             f"\n## Full Report\n{report_header}{result}"
         )
         if tool_log:
@@ -2522,7 +2523,9 @@ def build_run_agent_handler(chat_with_tools_fn):
             # injected into the user message by the orchestrator's chat_with_tools.
             system_prompt = spec.render_prompt(provider=_agent_provider)
 
-            content_parts = []
+            content_parts = ["This is an inline analyst call: no durable task history or mission-board tools are automatically loaded. "
+                             "Return a concise result with evidence and remaining requirements within 3500 characters. "
+                             "Use read_self for a referenced durable task report if needed."]
             if context:
                 content_parts.append(f"<delegation-context>\n{context}\n</delegation-context>")
             content_parts.append(f"<task agent=\"{agent}\">\n{task}\n</task>")
@@ -2538,9 +2541,8 @@ def build_run_agent_handler(chat_with_tools_fn):
                 agent_name=agent,
                 runtime_kind="task",
             )
-            # Truncate to avoid blowing up orchestrator context
-            if len(result) > 4000:
-                result = result[:4000] + "\n\n[... truncated]"
+            # There is no durable task ID for this report. Keep the complete
+            # bounded-loop output so citations and blockers are not silently lost.
             return result
 
         except Exception as e:

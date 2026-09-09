@@ -7,6 +7,7 @@ import json
 import asyncio
 from types import SimpleNamespace
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
@@ -80,7 +81,7 @@ NARROW_TOOLS = {
     "commulingo_section_save", "commulingo_event_link", "commulingo_term_create",
 }
 assert set(COMMULINGO_CURATOR.tools) == {
-    "wiki_search", "wiki_get", "web_search", "fetch_url", "commulingo_people", *NARROW_TOOLS,
+    "wiki_search", "wiki_get", "web_search", "fetch_url", "knowledge_graph_search", "commulingo_people", *NARROW_TOOLS,
 }
 assert set(COMMULINGO_CURATOR.terminal_tools) == NARROW_TOOLS
 assert set(COMMULINGO_CURATOR.finalization_tools) == NARROW_TOOLS
@@ -220,7 +221,7 @@ assert "unknown patch key" not in (_validate(
 ) or "")
 assert "no flag icon" in _validate(
     CURSOR, "person", "update", "example",
-    {"citizenship": {"code": "mali", "label": {"ko": "말리", "en": "Mali"}}},
+    {"citizenship": {"code": "not-a-country", "label": {"ko": "미등록", "en": "Unregistered"}}},
 )
 assert "citizenship must be" in _validate(
     CURSOR, "person", "update", "example", {"citizenship": "vietnam"},
@@ -380,10 +381,10 @@ try:
     stale_params = captured_selection["params"]
 finally:
     maintainer.db_query = original_db_query
-assert stale_params["prefer_stale"] is True and stale_params["stale_days"] == 45
-assert stale_params["enrich_non_soviet_revolutionaries"] is True
-assert "excluded_role.category_id = 'non-soviet-revolutionary'" in captured_selection["sql"]
-assert "COALESCE(lm.at, p.created_at) < NOW() - %(stale_days)s * INTERVAL '1 day'" in captured_selection["sql"]
+assert stale_params["stale"] is True and stale_params["stale_days"] == 45
+assert stale_params["non_soviet"] is True
+assert "r.category_id='non-soviet-revolutionary'" in captured_selection["sql"]
+assert "COALESCE(last_edit,created_at)<NOW()-%(stale_days)s*INTERVAL '1 day'" in captured_selection["sql"]
 # Default (non-stale) selection keeps the old ordering switch off.
 assert maintainer.select_sparse_person.__defaults__[-2] is False
 
@@ -722,7 +723,8 @@ def assert_rejected_candidate_memory():
     assert maintainer.rejected_candidate_note([]) == ""
 
     # The discovery task must actually carry the note, or the memory is inert.
-    task = maintainer.build_discovery_task("all", box["rejected"])
+    with patch.object(maintainer, "db_query", return_value=[]):
+        task = maintainer.build_discovery_task("all", box["rejected"])
     assert "ALREADY PROPOSED AND REJECTED" in task and "Vladimir Chelomey" in task
 
     # load_state is a whitelist; the list has to survive a save/load round trip.
@@ -780,7 +782,7 @@ def assert_enrich_failure_cooldown():
     try:
         maintainer.select_sparse_person = fake_select
         maintainer.select_claimable_person(
-            maintainer.load_config(Path("/nonexistent")), "",
+            {**maintainer.load_config(Path("/nonexistent")), "stale_priority_every": 0}, "",
             exclude_ids=["mikhail-kozlovsky"],
         )
     finally:

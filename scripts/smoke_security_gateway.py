@@ -48,9 +48,10 @@ def main() -> int:
         _ALTERS,
         _IMMUTABILITY_DDL,
         _INDEXES,
-        _INSERT,
         redact_args,
     )
+    from audit_sink import _insert_sql
+    audit_insert = _insert_sql("tool")
 
     print("== registry: every tool has a risk class ==")
     from runtime_tools.registry import TOOLS
@@ -269,8 +270,8 @@ def main() -> int:
     ):
         check(
             f"audit insert includes {field}",
-            f"%({field})s" in _INSERT,
-            _INSERT,
+            f"%({field})s" in audit_insert,
+            audit_insert,
         )
         check(
             f"existing audit table adds {field}",

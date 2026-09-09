@@ -24,16 +24,56 @@ section_save는 expected_revision이 필수다. 최신 버전의 자동 재대�
 stance는 supports/disputes다. 한영 부분 수정과 aliasEdits/careerEdits/sceneEdits는 Admin과 같다.
 정확한 검증과 분량 원본은 frontend `person-editorial-contract.json`이다.
 Python도 이 파일을 읽는다(`COMMULINGO_PERSON_CONTRACT`로 테스트 파일을 지정 가능).
+
 인물 도구의 evidence/expectedRevision/reviewFlags는 fields 안에, citations는 최상위에
-둔다. 절 저장은 evidence/expected_revision을 최상위로 받는다. evidence.source는
+둔다. 절 저장은 evidence/expected_revision을 최상위로 받는다. evidence.source_id는
+S1=citations[0], S2=citations[1]처럼 해당 요청의 출처를 명시적으로 선택한다.
+Python은 이를 원래 출처 문자열로 바꾸어 공통 저장소에 전달하며 두 값이 충돌하면 거절한다.
+기존 형식 evidence.source는
 설명을 포함한 citations 항목 전체와 정확히 일치해야 하며 URL만 복사하면 안 된다.
 Python RPC 직전 진단은 contract.factFields의 누락 근거와 출처 문자열 불일치,
-현재 수정에 없는 필드 근거를 한 번에 알려준다. 근거를 자동 생성·재매핑하거나
+현재 수정에 없는 필드 근거를 한 번에 알려준다. 근거를 자동 생성·추론하거나
 revision을 갱신하지 않으며 JS 저장소의 최종 검증은 계속 적용된다.
 `tests/test_commulingo_evidence_diagnostics.py`는 이 진단을 DB 없이 검증한다.
 
 lane health는 pending_review와 과거 no_edit/OK — pending 결과를 별도로 집계한다.
 no_edit 상태만으로 라운드 소진을 단정하지 않는다.
+
+## 스케줄 작업의 실행·복구
+
+인물·gap·사건·용어는 people maintainer의 `_call_curator_stage`를 공통 실행기로 쓴다.
+`scripts/commulingo_run.py`는 gateway request_id에 대응하는 run_id, 시도 합산 비용,
+라운드, 480초 조사 제한과 결과를 기존 SQLite의 runs 테이블에 기록한다.
+출력 이어쓰기와 새 대화 재시도는 별개이며 새 대화는 최대 한 번만 허용한다.
+이어쓰기 라운드는 남은 라운드에서 예약한다. 재시도는 남은 예산만 받으며
+신규 인물의 발견·생성·보강 fallback도 같은 예산을 공유한다. 이미 발행된 LLM 요청의
+실제 비용은 응답 후 확정되므로 단일 요청의 예산 초과까지 막는 선결제 한도는 아니다.
+공용 LLM 루프는 예외·취소에도 완료된 호출 비용을 tracker에 남긴다.
+
+성공은 해당 handler가 반환한 제출 번호로 확인한다. 다른 실행의 편집 수 증가는
+성공 근거가 아니다. 제출 결과는 즉시 기록하며 이미 쓰기가 있는 작업은 통째로 재시도하지 않는다.
+정상 결과 complete/not_applicable/sources_unavailable은 실패 cooldown에 넣지 않는다.
+gap의 조사 실패는 resolution의 retry: 표식으로 6시간 재선정을 미루고,
+sources_unavailable: 표식은 90일 동안 미룬다. 검토 실행도 같은 ledger에 조사 비용과
+최종 승인·반려·보류 상태를 기록하되 작성기의 원문 캐시는 사용하지 않는다.
+
+`scripts/commulingo_write_session.py`는 스케줄 실행에만 기존 쓰기 도구의 인자로
+draft_id와 repairs를 추가한다. 별도 저장 도구나 권한은 만들지 않는다.
+repairs는 JSON pointer의 set/remove 작업이며 완성된 인자를 원래 스키마로 다시
+검증한 뒤 같은 handler에 전달한다. 대상·action·revision 변경은 금지한다.
+초안은 작업/대상/주제/revision 범위에 남고, 성공한 쓰기를 재생하지 않는다.
+기존 인물 스냅샷은 실행기가 최초 문맥에 제공하고 expectedRevision을 그대로 바인딩한다.
+
+후보 SQL은 bio/years/citizenship/nationalOrigin/moment의 근거 누락을 각각 확인한다.
+주제별 승인 편집 시각을 모아 cooldown을 적용하며, 다른 주제를 편집했다는 이유로
+현재 주제를 지연하지 않는다. CTE를 materialize하고 최근 편집을 한 번 집계하여
+후보별 같은 집계의 반복 실행을 피한다. 절 수와 글자 수는 분량 상한이다.
+
+lane health는 실행 ledger에서 첫 저장 성공, 원문 캐시 적중, 쓰기 거절, 실패 비용을
+추가 표시한다. 기존 $/edit는 실패·보류를 포함한 lane 전체 비용/반영 건수로 명시한다.
+ledger는 도입 후 실행만 포함하며 과거 로그에서 소급 생성하지 않는다.
+같은 조회 기간에 기록된 작성·검토 실행은 제출 번호로 연결하여 검토 비용을 포함한
+반영 건당 비용도 표시한다. 기간 밖의 이전 검토 비용까지 소급 포함하는 지표는 아니다.
 
 ## 검토와 보강
 
@@ -79,7 +119,7 @@ security_gateway/policy.py에 state로 등록하며 소유자와 commulingo_revi
 허용한다. 테스트는 handler 직호출 대신 실제 dispatcher를 거쳐 차단 재발을 검사한다. 검토 실행기는 검증된 판단을
 기존 JS 공통 승인 서비스로 전달한다. Telegram 명령도 같은 서비스를 사용한다.
 
-- 구조화 판단의 checks[].citation은 source_refs 문자열 전체를 그대로 복사하고 resolved_risks는 risks 식별자만 담는다. 설명은 reason/finding에 쓴다. 검증 오류는 빠진 원본 문자열·식별자를 반환해 재조사 결과를 잘못된 라벨 때문에 반복 폐기하지 않게 한다.
+- 검토기는 checks[].citation_id(S1=source_refs[0])와 자신이 가져온 source_id 및 line_start/line_end로 원문 범위를 고른다. 실행기가 원문 인용을 추출하고 기존 citation/source/quote/finding 형식으로 저장한다. 긴 원문 행은 표시할 때만 240자 단위로 나누며 추출한 인용에는 번호나 추가 개행을 넣지 않는다. 원문은 현재 검토에서 직접 가져온 것만 인정하며 기존 정확한 문자열 형식도 지원한다. resolved_risks는 risks 식별자만 담고 설명은 reason/finding에 쓴다.
 - 승인: 새로 가져온 원문에 실제로 있는 인용, 모든 제안 출처의 확인, 검토 사유의 해소,
   위키백과 밖의 근거가 필요하다. 검색 요약·작성자가 적은 인용만으로 승인하지 않는다.
 - 반려: 확인한 근거로 오류/해로운 삭제임이 드러났을 때. 버전이 없거나 오래된 제안은
@@ -130,3 +170,17 @@ bosnia-herzegovina, switzerland를 함께 등록했다. 유고슬라비아는 �
 ## 사전 등록 국가 코드
 
 세계 지도에 사전 등록된 현대 국가도 인물·사건이 없어도 등록 도구에서 선택할 수 있다. `_NATIONALITY_CODES`는 frontend `modern-country-codes.json`과 기존 역사·지역 코드에 대응한다. 신규 코드의 국기 SVG와 영역 등록은 frontend에서 관리하며 `commulingo_people_maintainer.py`도 동일한 Python 코드 집합을 가져온다. 국가 추가 시 양쪽 코드 집합의 일치를 검증한다.
+
+## 이벤트 요청 인물의 검토 대기
+
+gap worker는 pending 인물/절 제안이 있는 작업을 claim에서 제외한다. 기존 인물은
+target_id, 대기 중인 신규 등록은 resolved_id 및 한영 이름/별칭으로 연결한다.
+신규 등록 도구가 pending을 반환하면 gap을 완료로 닫거나 실패로 재조사하지 않고
+제안 target_id와 번호를 기록하여 pending_review로 종료한다. 이미 생성된 대기 제안도
+이름으로 차단한다. 승인 후에는 실제 카드 확인과 이벤트 연결을 진행할 수 있고,
+반려 후에는 더 이상 pending 제안이 없는 작업만 다시 조사 대상이 된다.
+
+자동 검토의 출력 길이 제한 중단은 기존 조사 문맥과 수집 원문을 유지한 채 최대 2회
+이어받는다. AgentSpec의 max_output_continuations=2를 실행기가 continue_on_length와
+max_length_continuations로 실제 도구 루프에 전달한다. 응답당 8,000토큰과 회당 예산,
+전체 조사 시간 제한은 유지하며 유효한 검토 판단 도구가 성공하면 즉시 종료한다.

@@ -463,3 +463,11 @@ async def run_tool_loop(
             was_still_working=early.was_still_working,
             interrupted=early.interrupted,
         )
+    except BaseException:
+        # Scheduled job budgets must retain completed-call usage even when a
+        # later provider/tool call raises or the enclosing deadline cancels us.
+        adapter.update_tracker(
+            budget_tracker, rounds_used=round_num, was_interrupted=True,
+            tool_work_details=tool_work_details, response=response,
+        )
+        raise

@@ -751,6 +751,7 @@ Context passing — agents automatically receive recent conversation and their o
 3. Why you are delegating to this agent (reason and expected outcome)
 4. The correct target identifier when the user supplied one: public URL, slug, post_id, DB document identifier, error text, command output, or visible symptom. Do not invent or pass filesystem paths; delegated agents that need code context can inspect the repository themselves.
 
+Pass concrete acceptance criteria: required deliverables, target IDs, constraints, and the evidence that will demonstrate completion. Distinguish existing authorization from new requested actions.
 Delegation discipline: delegate what must be achieved, not how. Do not invent unverified implementation details; let workers inspect and choose the implementation.
 
 Do not delegate routine public-content edits to programmer. For requests like "fix this published post", "correct a diary/report/blog typo", "revise this curation", or "edit an already-published research page", delegate to the agent that owns the content/editor tool: diary for diary entries; analyst for research documents, task reports, blog posts, and curations. Delegate to programmer only when the required change is source code, configuration, scripts, templates, frontend behavior, deployment, or debugging.
@@ -2186,7 +2187,7 @@ async def bot_main():
                     verification_section = (
                         f"\n\n⚠️ Independent verification FAILED.{retry_note}\n"
                         f"Verifier findings:\n{_truncate_for_prompt(verification.get('details', ''), 800)}\n"
-                        f"Mention this caveat to the user when relaying the results."
+                        f"Report goal completion separately from execution quality. Blocked or unverified work is not complete; relay the remaining requirements and retry conditions."
                     )
 
                 prompt = (

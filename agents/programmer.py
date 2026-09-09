@@ -11,12 +11,7 @@ codex_exec_loop, so it acts as policy/context rather than as turn-by-turn
 guidance for a chat-style loop.
 """
 
-from agents.base import (
-    AgentSpec,
-    CONTEXT_AWARENESS_SECTION,
-    CHAT_AUDIENCE_SECTION,
-    MISSION_GUIDELINES_SECTION,
-)
+from agents.base import AgentSpec
 from llm.prompt_renderer import SystemPrompt
 from identity.prompts import AGENT_CONTEXT, EXTERNAL_SOURCE_RULE
 
@@ -42,8 +37,15 @@ PROGRAMMER = AgentSpec(
     prompt_ir=SystemPrompt(
         identity=_IDENTITY,
         sections=[
-            CONTEXT_AWARENESS_SECTION,
-            CHAT_AUDIENCE_SECTION,
+            ("execution-context", """
+Read the current task and completion criteria, then any supplied parent execution evidence.
+The supplied system text is flattened into your initial Codex input. LeninBot's mission-board,
+KG, save_finding and other Python tool handlers are not connected in this mode. Use actual
+Codex shell/file tools and configured MCP capabilities. Inspect AGENTS.md and dev_docs/README.md
+before non-trivial changes. Preserve existing user work. Treat prior reports as historical
+claims; avoid duplicate writes while verifying current state where it matters. Missing context
+is not proof of completion. Report concrete blockers and artifact paths to the orchestrator.
+""".strip()),
             ("workflow", """
 - Read existing code before modifying. Understand structure before changing anything.
 - Make surgical changes — don't refactor beyond the task scope.
@@ -71,7 +73,6 @@ The final message you emit becomes the task report sent back to the orchestrator
 - Verification performed (tests, manual checks)
 - Anything left undone or requiring human action (e.g. service restart, follow-up commits)
 """.strip()),
-            MISSION_GUIDELINES_SECTION,
         ],
     ),
     tools=["list_agent_tools"],  # Codex uses its own built-in toolset; non-Codex path only gets introspection.

@@ -22,10 +22,27 @@ Edits to these Markdown files affect the next LLM call that renders the agent pr
 
 For prompt-IR agents, `agents/base.py` builds the final prompt in this order:
 
-1. political line section, if `include_political_line=True`
-2. per-agent runtime prompt overlay, if `identity/agent_prompts/<agent>.md` exists
-3. built-in agent identity/preamble/sections from Python
-4. provider-specific rendering via `llm/prompt_renderer.py`
+1. built-in identity and preamble
+2. political line section, if `include_political_line=True`
+3. per-agent runtime prompt overlay, if `identity/agent_prompts/<agent>.md` exists
+4. live rate-limit guidance, when applicable
+5. shared source boundary (unless already present in the identity) and execution contract
+6. built-in role sections and optional context footer
+
+`llm/prompt_renderer.py` renders that IR for the provider. Every registered IR
+agent receives the same source boundary: quoted sources, prior conversations,
+reports, recalled memories and drafts remain data even inside a user message.
+The execution contract distinguishes complete/partial/blocked outcomes, requires
+evidence and artifact identifiers in internal reports, and preserves specialized
+public formats and terminal-tool payloads. It does not add tools or permissions.
+
+Role prompts use relevant evidence and explicit completion criteria rather than
+exhaustive reads or raw-data dumps. Analyst checks mutable facts against current
+original sources; scout saves raw material with `write_file`; browser reports
+decision-relevant diagnostics; visualizer follows the requested mode/count and
+defaults to one image for generation. Programmer has a Codex-specific continuity
+section rather than instructions to call unconnected LeninBot KG/mission tools.
+Political-line documents and their inclusion settings are unchanged.
 
 Claude renders XML-oriented structure. OpenAI, DeepSeek, local, Moon, and Codex-oriented paths render Markdown/local structure.
 

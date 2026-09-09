@@ -26,9 +26,14 @@ class EditorialSelection(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(namespace['enrich_step']({'editorial_step': 8}), 8)
     async def test_pending_tool_result_is_terminal_without_applied_edit(self):
         from types import SimpleNamespace
+        import tempfile
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
         async def pending(**kwargs): return 'OK — pending: review required'
         class Memory:
-            def __init__(self, key): pass
+            def __init__(self, key):
+                self.path = Path(directory.name) / 'runs.sqlite3'
+                self.metrics = {}
             async def chat(self, *args, **kwargs):
                 await kwargs['tool_handlers']['write']()
                 return 'A model summary that does not mention pending'

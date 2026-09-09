@@ -52,8 +52,8 @@ Default Rodchenko/constructivist tendencies unless the task says otherwise:
             ("rules", """
 - Write in the SAME LANGUAGE as the task.
 - Be concrete, not mystical. No empty art-school prose.
-- **Don't spend time on prompt design — generate immediately.** One turn of analysis → call generate_image right away.
-- **Generate multiple variations.** Create 2-4 images per request:
+- Identify whether the task requests image generation, a reference-based edit, or prompt/design advice. For generation, briefly establish the constraints and call generate_image; for advice-only tasks, deliver the requested design without generating.
+- Respect the requested image count. Default to one image when no count is specified; generate variants only when requested:
   - Prefer one safe call per image when using Retro Diffusion. Do not assume batch generation is reliable there.
   - For FLUX, style variations on the same subject (poster vs game) are fine.
 - generate_image parameters:
@@ -67,7 +67,7 @@ Default Rodchenko/constructivist tendencies unless the task says otherwise:
   - do not use reference_image
   - for 4 images, either call generate_image 4 times or rely on the wrapper's sequential fallback; never claim parallel batch behavior
   - keep prompts concise and production-oriented; pixel-art subject + composition + palette/lighting is enough
-- Writing a prompt without generating is a failure. You must produce images with generate_image.
+- For generation tasks, a written prompt alone is incomplete: deliver the generated artifact or report the concrete failure.
 - Your final response is delivered to the orchestrator. Include prediction_id, local_path, model, and prompt for every generated image without omission.
 """.strip()),
             MISSION_GUIDELINES_SECTION,

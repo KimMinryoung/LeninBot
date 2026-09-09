@@ -213,7 +213,7 @@ async def main():
 
     tasks._query = lambda sql, params=None: (_ for _ in ()).throw(RuntimeError("db down")) if "id = ANY" in sql else []
     built = tasks._build_task_context_content(task, "Analyze X.", context_provider="claude")
-    check("injection failure degrades gracefully", "<dependency-results>" not in built and "Analyze X." in built)
+    check("injection failure degrades gracefully", "Dependency lookup failed" in built and "Analyze X." in built)
 
     print()
     print("=" * 72)

@@ -28,3 +28,11 @@ class LaneHealth(unittest.TestCase):
         alerts = health.problems("gap", stats)
         self.assertTrue(any("ended with no edit" in alert for alert in alerts))
         self.assertFalse(any("rounds exhausted" in alert for alert in alerts))
+
+    def test_completed_topic_is_successful_work_without_an_edit(self):
+        with patch.object(health,'journal',return_value='  "status": "not_applicable",\n  "cost_usd": 0.02'):
+            stats=health.tally('enrich','-24h')
+        self.assertEqual(stats['completed'],1)
+        self.assertEqual(stats['total'],1)
+        self.assertEqual(stats['cost'],.02)
+        self.assertEqual(health.problems('enrich',stats),[])

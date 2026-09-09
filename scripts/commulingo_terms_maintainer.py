@@ -7,7 +7,7 @@ shows the curator that material together with every already-registered term
 alias, and asks it to find ONE concept term genuinely used in the material that
 the glossary does not cover yet, research it, and register it via the narrow
 commulingo_term_create tool. When the material contains no unregistered
-concept the run ends with NO_CANDIDATE and no write, which is a success.
+concept the run ends with a typed commulingo_no_edit judgment, which is a success.
 """
 
 from __future__ import annotations
@@ -198,11 +198,11 @@ Workflow:
    the parent, or for anything that outlives it — those stay independent entries. The
    glossary nests one level, so the parent must not itself be nested.
 4. If every concept in the material is already registered, reply with the single line
-   NO_CANDIDATE and STOP — do not call commulingo_term_create, do not stretch the definition
+   call commulingo_no_edit with status=complete and a sourced reason, then STOP — do not call commulingo_term_create, do not stretch the definition
    of a term to justify a write.
 
 If a create is rejected: a duplicate/alias-collision means the concept is not a gap, so go
-straight to your next candidate, or answer NO_CANDIDATE when none is left. An unknown
+straight to your next candidate, or call commulingo_no_edit when none is left. An unknown
 people/event id means only that link is wrong — verify it with search_people/list_events, or
 drop the link and send the same term again. Fix and finish; do not restart the survey.
 
@@ -256,82 +256,33 @@ async def run_once() -> dict:
         label, material, registered_aliases(), registered_events()
     ) + EDITORIAL_POLICY
 
-    # A run that spends its rounds surveying and never reaches the write is a
-    # normal outcome of a 16-round budget, not a broken lane; raising on the
-    # first one failed the unit roughly one run in seven. Give the attempt the
-    # same second chance the people lane gets, and only then call it a failure.
-    attempts = max(1, ATTEMPTS)
-    total_cost = 0.0
-    total_rounds = 0
-    result = ""
-    ctx = new_run_context(
-        interface="autonomous", agent_name=spec.name, is_owner=True,
-        scope_type="maintenance_job", scope_id="commulingo_terms_maintainer",
-    )
-    memory = maintainer.ResearchMemory(f"terms:{label}:{material}")
-    for attempt in range(1, attempts + 1):
-        tracker: dict = {}
-        retry_note = "" if attempt == 1 else (
-            "\n\nRETRY: the previous attempt ran out of rounds without registering a term "
-            "or answering NO_CANDIDATE. Spend rounds on the write, not the survey: check "
-            "at most two candidates with commulingo_people(action='list_terms', q=...), "
-            "research the first gap, and call commulingo_term_create. If the material "
-            "genuinely holds no unregistered concept, answer NO_CANDIDATE now."
-        )
+    no_edit_box = {}
+    tools = [*tools, maintainer.COMMULINGO_NO_EDIT_TOOL]
+    handlers["commulingo_no_edit"] = maintainer.build_no_edit_handler(no_edit_box)
+    task += "\nIf no suitable term remains, call commulingo_no_edit with reason/status/sources. Free-text NO_CANDIDATE alone does not finish the job."
+    ctx = new_run_context(interface="autonomous", agent_name=spec.name, is_owner=True,
+        scope_type="maintenance_job", scope_id="commulingo_terms_maintainer")
+    from scripts.commulingo_run import RunFailure, submitted_edit
+    try:
         with caller_scope(ctx):
-            result = await memory.chat(binding.chat,
-                [{"role": "user", "content": task + retry_note}],
-                client=binding.client,
-                model=binding.model,
-                tools=tools,
-                tool_handlers=handlers,
-                system_prompt=spec.render_prompt(provider=binding.render_provider),
-                max_rounds=policy.max_rounds,
-                max_tokens=policy.max_output_tokens,
-                max_input_tokens=policy.max_input_tokens,
-                recover_input_via_tools=True,
-                continue_on_length=policy.max_output_continuations > 0,
-                max_length_continuations=policy.max_output_continuations,
-                budget_usd=policy.budget_usd,
-                budget_tracker=tracker,
-                agent_name=spec.name,
-                finalization_tools=[write_name],
-                terminal_tools=[write_name],
-                **binding.reasoning,
+            result, tracker, _ = await maintainer._call_curator_stage(
+                task=task, spec=spec, tools=tools, handlers=handlers, policy=policy,
+                stage="terms", expect_edit=True, before_count=before,
+                research_key=f"terms:{label}:{material}", no_edit_box=no_edit_box,
+                finalization_tools=[write_name, "commulingo_no_edit"],
+                terminal_tools=[write_name, "commulingo_no_edit"],
             )
-        total_cost += float(tracker.get("total_cost") or 0.0)
-        total_rounds += int(tracker.get("rounds_used") or 0)
-        if completed_run_count() != before or "NO_CANDIDATE" in str(result):
-            break
-        logger.warning(
-            "term attempt %d/%d ended with neither an edit nor NO_CANDIDATE: %s",
-            attempt, attempts, str(result)[:300],
-        )
-
-    after = completed_run_count()
-    summary = {
-        "material": label,
-        "model": binding.model,
-        "cost_usd": round(total_cost, 4),
-        "rounds": total_rounds,
-        "attempts": attempt,
-    }
-    if after == before:
-        if "NO_CANDIDATE" in str(result):
-            return {"status": "skipped", "reason": "no unregistered term in material", **summary}
-        # Nothing was written and nothing is inconsistent — report the barren run
-        # and exit clean, so the timer's next tick is the retry.
-        logger.warning("term run produced no edit after %d attempt(s)", attempt)
-        return {
-            "status": "no_edit",
-            "reason": "ran out of rounds without a write or NO_CANDIDATE",
-            "result": str(result)[:500],
-            **summary,
-        }
-    if after != before + 1:
-        raise RuntimeError(f"expected exactly one applied edit, count changed {before} -> {after}")
-    edit = latest_lane_edit()
-    if not edit or edit.get("status") != "approved" or edit.get("target_type") != "term":
+    except RunFailure as exc:
+        return {"status": exc.summary["status"], "material": label,
+                "run_id": exc.summary["run_id"], "cost_usd": exc.summary["cost_usd"],
+                "rounds": exc.summary["rounds_used"], "error": str(exc)[:500]}
+    summary = {"material": label, "model": binding.model, "run_id": tracker["run_id"],
+        "cost_usd": round(tracker["total_cost"], 4), "rounds": tracker["rounds_used"],
+        "attempts": tracker["attempts"]}
+    if no_edit_box.get("reason"):
+        return {"status": no_edit_box["status"], "reason": no_edit_box["reason"], **summary}
+    edit = submitted_edit(tracker["writes"], db_query_one)
+    if edit.get("status") != "approved" or edit.get("target_type") != "term":
         raise RuntimeError(f"applied edit was not an approved term edit: {edit}")
     return {"status": "applied", "edit": edit, "result": result, **summary}
 

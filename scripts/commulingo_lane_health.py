@@ -20,9 +20,62 @@ import argparse
 import re
 import subprocess
 import sys
+import json
+import sqlite3
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+
+
+def execution_metrics(since: str, path: Path | None = None) -> list[str]:
+    """Read the shared runner ledger without opening production credentials."""
+    path = path or ROOT / "data" / "commulingo_research.sqlite3"
+    if not path.exists():
+        return []
+    match = re.fullmatch(r"-(\d+)h", since.strip())
+    hours = int(match[1]) if match else 24
+    try:
+        with sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True) as db:
+            rows = db.execute("SELECT stage,target,status,summary FROM runs WHERE ts>? AND status NOT IN ('running','submitted','selected') ORDER BY ts",
+                              (time.time() - hours * 3600,)).fetchall()
+    except sqlite3.Error:
+        return []  # workers from before ledger rollout have no runs table
+    lanes = {}
+    reviews = {}
+    for stage, target, status, raw in rows:
+        if stage == 'review':
+            review = reviews.setdefault(target, {"cost": 0.0, "status": status})
+            review["cost"] += json.loads(raw).get("cost_usd", 0)
+            review["status"] = status
+    for stage, target, status, raw in rows:
+        summary = json.loads(raw)
+        item = lanes.setdefault(stage, {"runs": 0, "first_write": 0, "written": 0,
+            "calls": 0, "hits": 0, "rejections": 0, "failed_cost": 0.0,
+            "approved": 0, "approved_cost": 0.0})
+        metrics = summary.get("metrics") or {}
+        item["runs"] += 1
+        item["calls"] += metrics.get("read_calls", 0)
+        item["hits"] += metrics.get("cache_hits", 0)
+        item["rejections"] += metrics.get("write_rejections", 0)
+        if status in {"applied", "pending_review"}:
+            item["written"] += 1
+            item["first_write"] += metrics.get("write_rejections", 0) == 0
+            receipt = next((re.search(r"Logged as edit #(\d+)", w.get('result', ''))
+                            for w in reversed(summary.get('writes') or [])
+                            if re.search(r"Logged as edit #(\d+)", w.get('result', ''))), None)
+            review = reviews.get(receipt[1], {}) if receipt else {}
+            if status == 'applied' or review.get('status') == 'approved':
+                item['approved'] += 1
+                item['approved_cost'] += summary.get('cost_usd', 0) + review.get('cost', 0)
+        if status in {"error", "exhausted", "retryable_error", "retry"}:
+            item["failed_cost"] += summary.get("cost_usd", 0)
+    return [(f"  review: {v['runs']} recorded reviews, failed research ${v['failed_cost']:.4f}" if stage == 'review' else
+            f"  {stage}: first-write {v['first_write']}/{v['written']}, "
+            f"source cache {v['hits']}/{v['calls']} reads, write rejections {v['rejections']}, "
+            f"failed work ${v['failed_cost']:.4f} ({v['runs']} recorded runs)"
+            + (f", approved-work ${v['approved_cost']/v['approved']:.4f}/edit incl. linked reviews in window" if v['approved'] else ""))
+            for stage,v in sorted(lanes.items())]
 
 # Active batch lanes plus the independent review timer. enrich came back on
 # 2026-08-29 (existing-person standard fields); new/terms stay installed but not
@@ -175,11 +228,12 @@ def tally(unit: str, since: str) -> dict:
     applied = len(APPLIED.findall(text))
     skipped = len(SKIPPED.findall(text))
     idle = len(IDLE.findall(text))
-    failed = len(FAILED.findall(text))
+    failed = max(len(FAILED.findall(text)), len(re.findall(r'^\s*"status": "(?:error|exhausted|retryable_error)"', text, re.M)))
+    completed = len(re.findall(r'^\s*"status": "(?:complete|not_applicable|sources_unavailable)"', text, re.M))
     legacy_pending = len(LEGACY_PENDING_REVIEW.findall(text))
     pending_review = len(PENDING_REVIEW.findall(text)) + legacy_pending
     no_edit = len(NO_EDIT.findall(text)) - legacy_pending
-    total = applied + skipped + failed + no_edit + pending_review
+    total = applied + skipped + failed + no_edit + pending_review + completed
     return {
         "applied": applied,
         "skipped": skipped,
@@ -187,6 +241,7 @@ def tally(unit: str, since: str) -> dict:
         "failed": failed,
         "no_edit": no_edit,
         "pending_review": pending_review,
+        "completed": completed,
         "fallback": len(FALLBACK.findall(text)),
         "total": total,
         "cost": sum(float(v) for v in COST.findall(text)),
@@ -208,7 +263,7 @@ def problems(lane: str, stats: dict) -> list[str]:
     # Runs that had a subject in hand. Idle runs exited on an empty queue and
     # spent nothing, so they are a wait, not a failure to apply.
     busy = stats["total"] - stats["idle"]
-    if stats["applied"] == 0 and not stats.get("pending_review", 0) and busy:
+    if stats["applied"] == 0 and not stats.get("pending_review", 0) and not stats.get("completed", 0) and busy:
         found.append(
             f"{lane}: {busy} runs found work, nothing applied"
             + (f" ({stats['idle']} idle, queue empty)" if stats["idle"] else "")
@@ -368,6 +423,7 @@ def main() -> int:
             f"fallback {stats['fallback']:3}  "
             f"${stats['cost']:.2f}"
             + (f"  pending_review {stats['pending_review']}" if stats.get("pending_review") else "")
+            + (f"  completed {stats['completed']}" if stats.get("completed") else "")
             + (f"  ({stats['total']} runs)" if drain else "")
         )
         alerts.extend(drain_problems(lane, stats) if drain else problems(lane, stats))
@@ -380,7 +436,7 @@ def main() -> int:
                 f"(median {median} per run)"
             )
     if waste_lines:
-        lines.append("cost of what worked:")
+        lines.append("total lane cost and rounds per applied edit (includes failed/deferred work):")
         lines.extend(f"  {line}" for line in waste_lines)
 
     rejection_lines, rejection_alerts = tool_rejections(args.since)
@@ -392,6 +448,9 @@ def main() -> int:
     drift_lines, drift_alerts = bio_length_drift()
     lines.extend(drift_lines)
     alerts.extend(drift_alerts)
+    metrics = execution_metrics(args.since)
+    if metrics:
+        lines.extend(["runner metrics (since rollout):", *metrics])
 
     header = f"[commulingo-lanes] since {args.since} — total ${total_cost:.2f}"
     print(header)

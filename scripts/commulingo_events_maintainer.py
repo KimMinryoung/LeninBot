@@ -23,6 +23,7 @@ narrative actually leans on rather than with whatever was sparsest.
 
 from __future__ import annotations
 
+import hashlib
 import argparse
 import asyncio
 import fcntl
@@ -444,13 +445,6 @@ async def run_once(forced_id: str = "", lane: int = 0, lanes: int = 1, skeleton:
             ),
         }
 
-    before = completed_run_count()
-    # Highest suggestion id this lane had written before the run, so the tally
-    # below counts only what this run added.
-    before_max_id = int(((db_query_one(
-        "SELECT COALESCE(MAX(id), 0) AS id FROM commulingo_agent_suggestions WHERE suggested_by = %(s)s",
-        {"s": SUGGESTED_BY},
-    ) or {}).get("id")) or 0)
     spec = get_agent("commulingo_event_curator")
     policy = resolve_agent_inference_policy(spec)
     tools, handlers = spec.filter_tools(TOOLS, TOOL_HANDLERS)
@@ -460,61 +454,24 @@ async def run_once(forced_id: str = "", lane: int = 0, lanes: int = 1, skeleton:
     binding = resolve_agent_tool_loop(spec, policy)
 
     task = build_skeleton_task(event) if skeleton else build_task(event, brief)
-    memory = maintainer.ResearchMemory(
-        f"event:{event['id']}:{skeleton}:{event.get('body_ko') or ''}:{event.get('body_en') or ''}"
-    )
     ctx = new_run_context(
         interface="autonomous", agent_name=spec.name, is_owner=True,
-        scope_type="maintenance_job", scope_id=f"commulingo_events:{SUGGESTED_BY}",
+        scope_type="maintenance_job", scope_id=f"commulingo_event:{event['id']}",
     )
-    total_cost = 0.0
-    total_rounds = 0
-    result = ""
-    for attempt in range(1, max(1, ATTEMPTS) + 1):
-        tracker: dict = {}
-        # Research and rejected drafts survive attempts and process restarts.
-        retry_note = "" if attempt == 1 else (
-            "\n\nRETRY: the previous attempt ended without saving anything, which is the "
-            "one way this run can fail. Almost always the cause is writing the draft into "
-            "the reply instead of into the tool call. Reuse the saved research and "
-            "repair the saved draft. The section text belongs in the `body` argument of "
-            f"`{WRITE_TOOL}` and nowhere else."
-        )
+    from scripts.commulingo_run import RunFailure, submitted_edit
+    try:
         with caller_scope(ctx):
-            result = await memory.chat(binding.chat,
-                [{"role": "user", "content": task + retry_note}],
-                client=binding.client,
-                model=binding.model,
-                tools=tools,
-                tool_handlers=handlers,
-                system_prompt=spec.render_prompt(provider=binding.render_provider),
-                max_rounds=policy.max_rounds,
-                max_tokens=policy.max_output_tokens,
-                max_input_tokens=policy.max_input_tokens,
-                recover_input_via_tools=True,
-                continue_on_length=policy.max_output_continuations > 0,
-                max_length_continuations=policy.max_output_continuations,
-                budget_usd=policy.budget_usd,
-                budget_tracker=tracker,
-                agent_name=spec.name,
-                finalization_tools=spec.finalization_tools,
-                terminal_tools=spec.terminal_tools,
-                **binding.reasoning,
+            result, tracker, _ = await maintainer._call_curator_stage(
+                task=task, spec=spec, tools=tools, handlers=handlers, policy=policy,
+                stage="events", expect_edit=True, before_count=0,
+                research_key=f"event:{event['id']}:{skeleton}:{hashlib.sha256(((event.get('body_ko') or '') + (event.get('body_en') or '')).encode()).hexdigest()}",
+                finalization_tools=spec.finalization_tools, terminal_tools=spec.terminal_tools,
             )
-        total_cost += float(tracker.get("total_cost") or 0.0)
-        total_rounds += int(tracker.get("rounds_used") or 0)
-        # The run is done when the BODY is written, not when anything is. Since
-        # the curator can also link people, a plain "did the count move" test
-        # would call it finished on a run that linked three names and never
-        # wrote the section it was commissioned for.
-        if writes_since(before_max_id).get("body", 0):
-            break
-        logger.warning(
-            "event attempt %d/%d ended without a body write: %s",
-            attempt, ATTEMPTS, str(result)[:300],
-        )
-
-    after = completed_run_count()
+    except RunFailure as exc:
+        return {"status": exc.summary["status"], "event": event["id"],
+                "run_id": exc.summary["run_id"], "cost_usd": exc.summary["cost_usd"],
+                "rounds": exc.summary["rounds_used"], "error": str(exc)[:500]}
+    writes = tracker.get("writes", [])
     fresh = db_query_one(
         "SELECT body_ko, body_en FROM commulingo_history_events WHERE id = %(id)s",
         {"id": event["id"]},
@@ -522,35 +479,21 @@ async def run_once(forced_id: str = "", lane: int = 0, lanes: int = 1, skeleton:
     summary = {
         "event": event["id"],
         "model": binding.model,
-        "cost_usd": round(total_cost, 4),
-        "rounds": total_rounds,
-        "attempts": attempt,
+        "cost_usd": round(tracker["total_cost"], 4),
+        "rounds": tracker["rounds_used"],
+        "attempts": tracker["attempts"],
+        "run_id": tracker["run_id"],
         "sections_before": len(event_section_headings(event["body_ko"] or "")),
         "sections_after": len(event_section_headings(fresh.get("body_ko") or "")),
         "body_ko_chars": len(fresh.get("body_ko") or ""),
         "gaps_open": len(open_gaps(event["id"])),
     }
-    if after == before:
-        # Nothing written and nothing inconsistent: report the barren run and exit
-        # clean, so the next tick is the retry.
-        return {"status": "no_edit", "result": str(result)[:500], **summary}
-
-    # A run writes one piece of the event and may also link the people that
-    # piece is about, so "exactly one edit" is no longer the shape to check for.
-    # What has to stay true is that the run produced one body/card write; the
-    # person links are supporting work and are counted, not forbidden.
-    counts = writes_since(before_max_id)
-    summary["links_made"] = counts.get("links", 0)
-    if counts.get("body", 0) != 1:
-        raise RuntimeError(
-            f"expected one body or card write, got {counts.get('body', 0)} (all writes: {counts})"
-        )
-    if counts.get("other"):
-        raise RuntimeError(f"run wrote {counts['other']} edit(s) of a type it should not touch")
-    edit = latest_lane_edit()
-    if not edit or edit.get("status") != "approved":
-        raise RuntimeError(f"applied edit was not approved: {edit}")
-    return {"status": "applied", "edit": edit, **summary}
+    body_writes = [w for w in writes if w["tool"] in spec.terminal_tools]
+    summary["links_made"] = sum(w["tool"] == "commulingo_event_link" for w in writes)
+    if len(body_writes) != 1:
+        raise RuntimeError("expected exactly one commissioned event write")
+    edit = submitted_edit(body_writes, db_query_one)
+    return {"status": "pending_review" if edit["status"] == "pending" else "applied", "edit": edit, **summary}
 
 
 def main() -> int:

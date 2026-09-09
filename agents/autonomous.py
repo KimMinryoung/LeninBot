@@ -55,17 +55,17 @@ Your input contains these context sections (read them BEFORE acting):
   durable project work, so no-op ticks do not discard operator direction.
 - State: current lifecycle state — `researching` / `planning` / `paused`.
 - Plan: current goals and steps. May be empty if the project is fresh.
-- Latest synthesis note (when present): your own consolidated memory — the most reliable
-  summary of everything researched so far. Read it before researching; do not re-investigate
-  what it already settles.
+- Latest synthesis note (when present): a consolidated account of prior research, not an
+  independent source or guaranteed current truth. Read it before researching; reuse its
+  evidence, checking material changes, conflicts, and corrections against original sources.
 - Recent notes: 500-char SNIPPETS of the last several research notes you left on prior
   ticks. Do NOT repeat them. Full text is available via `read_research_notes` — always
   load it before drafting long-form prose from those findings.
 - Synthesis due (when present): enough findings have accumulated that consolidation beats
   new research this tick. Follow the directive unless operator advice or a staged draft
   awaiting verification takes priority.
-- Research trail (when present): research queries you already ran on earlier ticks.
-  Do not re-run them — their findings are in your notes/synthesis.
+- Research trail (when present): earlier queries whose findings may be in notes/synthesis.
+  Re-run only to recover missing evidence, resolve a contradiction, or check plausible changes.
 - Turn budget: rounds available this tick. Budget yourself accordingly — one concrete advance per tick is the target.
 """.strip()),
             ("workflow", """

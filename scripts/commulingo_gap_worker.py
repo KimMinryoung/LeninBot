@@ -111,6 +111,55 @@ maintainer.latest_maintainer_edit = lambda: db_query_one(
 maintainer.LOCK_PATH = LOCK_PATH
 
 
+# Match staged cards too: a pending create deliberately has no dictionary row.
+# resolved_id links subsequent runs to the exact proposal target; labels also
+# cover older gaps and independent event requests for the same unregistered card.
+PENDING_PERSON_REVIEW_SQL = """
+    SELECT 1 FROM commulingo_agent_suggestions q
+    WHERE g.kind = 'person' AND q.status = 'pending'
+      AND q.target_type IN ('person', 'person_section')
+      AND (
+        q.target_id = NULLIF(g.target_id, '')
+        OR q.target_id = NULLIF(g.resolved_id, '')
+        OR (q.target_type = 'person' AND q.action = 'create' AND EXISTS (
+            SELECT 1 FROM (VALUES ('ko', g.label_ko), ('en', g.label_en)) AS labels(lang, label)
+            WHERE NULLIF(btrim(labels.label), '') IS NOT NULL AND (
+                lower(btrim(labels.label)) = lower(btrim(concat_ws(' ',
+                    q.patch_json->'givenName'->>labels.lang,
+                    q.patch_json->'familyName'->>labels.lang)))
+                OR lower(btrim(labels.label)) = lower(btrim(q.patch_json->'name'->>labels.lang))
+                OR EXISTS (
+                    SELECT 1 FROM jsonb_array_elements_text(
+                        CASE WHEN jsonb_typeof(q.patch_json->'aliases'->labels.lang) = 'array'
+                             THEN q.patch_json->'aliases'->labels.lang ELSE '[]'::jsonb END
+                    ) AS alias(value)
+                    WHERE lower(btrim(alias.value)) = lower(btrim(labels.label))
+                )
+            )
+        ))
+      )
+"""
+
+
+def hold_pending_review(gap: dict, result: str) -> dict | None:
+    """Keep the commissioned gap open, linked to its staged card, without retrying."""
+    if not result.startswith("OK — pending:"):
+        return None
+    match = re.search(r"Logged as edit #(\d+)", result)
+    if not match:
+        raise RuntimeError("pending person write did not identify its suggestion")
+    row = db_query_one(
+        """SELECT id, target_id FROM commulingo_agent_suggestions
+           WHERE id = %(id)s AND status = 'pending'
+             AND target_type IN ('person', 'person_section')""",
+        {"id": int(match.group(1))},
+    )
+    if not row:
+        return None  # Already reviewed; let the normal dictionary lookup decide.
+    close_gap(gap["id"], "pending", row["target_id"], f"awaiting review #{row['id']}")
+    return {"status": "pending_review", "suggestionId": row["id"]}
+
+
 def claim_gap(kind: str = "", events: list[str] | None = None) -> dict | None:
     """Take the highest-priority pending gap and mark it claimed, atomically.
 
@@ -125,11 +174,11 @@ def claim_gap(kind: str = "", events: list[str] | None = None) -> dict | None:
     with get_conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
-                """UPDATE commulingo_curation_gaps
+                f"""UPDATE commulingo_curation_gaps
                       SET status = 'claimed', claimed_by = %(by)s, claimed_at = NOW(),
                           updated_at = NOW()
                     WHERE id = (
-                        SELECT id FROM commulingo_curation_gaps
+                        SELECT g.id FROM commulingo_curation_gaps g
                          WHERE (status = 'pending'
                                 -- A worker that died mid-run leaves its row claimed
                                 -- forever. Nothing else would ever pick it up, so a
@@ -148,6 +197,11 @@ def claim_gap(kind: str = "", events: list[str] | None = None) -> dict | None:
                            -- 1107, 2026-08-11). They stay pending for human triage,
                            -- like 'doc'.
                            AND kind IN ('person', 'term')
+                           AND NOT (COALESCE(resolution,'') LIKE 'retry:%%'
+                             AND updated_at > NOW() - INTERVAL '6 hours')
+                           AND NOT (COALESCE(resolution,'') LIKE 'sources_unavailable:%%'
+                             AND updated_at > NOW() - INTERVAL '90 days')
+                           AND NOT EXISTS ({PENDING_PERSON_REVIEW_SQL})
                            AND (%(events)s::text[] IS NULL
                                 OR event_id = ANY(%(events)s::text[]))
                          ORDER BY priority DESC, id
@@ -353,24 +407,27 @@ async def run_once(kind: str = "", events: list[str] | None = None) -> dict:
         # invisible to every other worker until the 40-minute reclaim — seven of
         # them were sitting like that on 2026-08-09 with their sections already
         # written.
-        before_enrich = completed_run_count()
         try:
             result = await maintainer.run_once(
                 mode="enrich", candidate_id=gap["target_id"], config=config
             )
         except Exception as exc:
-            landed = completed_run_count() != before_enrich
+            failed_run = getattr(exc, "summary", {})
+            landed = any(w.get("target") == gap["target_id"] and
+                w.get("result", "").startswith("OK — approved:") for w in failed_run.get("writes", []))
             close_gap(
                 gap["id"], "done" if landed else "pending", gap["target_id"],
-                f"enrich raised after {'a' if landed else 'no'} write: {exc}",
+                f"retry: enrich raised after {'a' if landed else 'no'} confirmed write: {exc}",
             )
             return {"status": "applied" if landed else "error", "gap": gap["id"],
                     "kind": "person-enrich", "target": gap["target_id"],
+                    "cost_usd": failed_run.get("cost_usd", 0), "rounds": failed_run.get("rounds_used", 0),
+                    "run_id": failed_run.get("run_id"),
                     "error": str(exc)[:300]}
         enrich_status = result.get("status")
         if enrich_status == "applied":
             row_status = "done"
-        elif enrich_status == "skipped":
+        elif enrich_status in {"skipped", "complete", "not_applicable"}:
             # A skipped enrich is a completed judgement ("card already deep
             # enough"), not a transient failure. Returning the row to 'pending'
             # parked gap 368 at the head of the queue on 2026-08-17: every
@@ -381,10 +438,13 @@ async def run_once(kind: str = "", events: list[str] | None = None) -> dict:
             row_status = "pending"
         close_gap(
             gap["id"], row_status, gap["target_id"],
-            f"enrich run: {enrich_status}: {str(result.get('reason') or '')[:200]}".rstrip(': '),
+            ("sources_unavailable:" if enrich_status == "sources_unavailable" else
+             "retry:" if enrich_status in {"error", "exhausted"} else "")
+            + f"enrich run: {enrich_status}: {str(result.get('reason') or '')[:200]}".rstrip(': '),
         )
         return {"status": result.get("status"), "gap": gap["id"], "kind": "person-enrich",
                 "target": gap["target_id"], "cost_usd": result.get("cost_usd"),
+                "run_id": result.get("run_id"),
                 "rounds": result.get("rounds")}
 
     spec = get_agent("commulingo_curator")
@@ -435,8 +495,11 @@ async def run_once(kind: str = "", events: list[str] | None = None) -> dict:
         if made:
             close_gap(gap["id"], "done", made, f"written, then the stage raised: {exc}")
             raise
-        close_gap(gap["id"], "pending", "", f"requeued after stage error: {exc}")
+        close_gap(gap["id"], "pending", "", f"retry: stage error: {exc}")
         return {"status": "error", "gap": gap["id"], "kind": gap["kind"],
+                "cost_usd": getattr(exc, "summary", {}).get("cost_usd", 0),
+                "rounds": getattr(exc, "summary", {}).get("rounds_used", 0),
+                "run_id": getattr(exc, "summary", {}).get("run_id"),
                 "label": gap["label_ko"], "error": str(exc)[:300]}
 
     text = str(result or "")
@@ -444,7 +507,11 @@ async def run_once(kind: str = "", events: list[str] | None = None) -> dict:
         "gap": gap["id"], "kind": gap["kind"], "label": gap["label_ko"],
         "event": gap["event_id"], "cost_usd": round(float(tracker.get("total_cost") or 0), 4),
         "rounds": int(tracker.get("rounds_used") or 0),
+        "run_id": tracker.get("run_id"),
     }
+    waiting = hold_pending_review(gap, text)
+    if waiting:
+        return {**waiting, **summary}
     made = produced_entry(gap)
     if made:
         close_gap(gap["id"], "done", made, "created")
@@ -452,11 +519,14 @@ async def run_once(kind: str = "", events: list[str] | None = None) -> dict:
         return {"status": "applied", "created": made, **summary}
     reason = str(no_edit_box.get("reason") or "")
     if reason:
+        if no_edit_box.get("status") == "sources_unavailable":
+            close_gap(gap["id"], "pending", "", "sources_unavailable:" + reason)
+            return {"status": "sources_unavailable", "reason": reason[:200], **summary}
         close_gap(gap["id"], "skipped", "", reason)
-        return {"status": "skipped", "reason": reason[:200], **summary}
+        return {"status": no_edit_box.get("status", "complete"), "reason": reason[:200], **summary}
     # Nothing written and no verdict given: put it back for the next worker
     # rather than burning the row on one barren run.
-    close_gap(gap["id"], "pending", "", "no edit; requeued")
+    close_gap(gap["id"], "pending", "", "retry: no edit")
     return {"status": "no_edit", "result": text[:400], **summary}
 
 

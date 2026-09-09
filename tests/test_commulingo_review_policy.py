@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import sys
 import unittest
+import tempfile
 from unittest.mock import AsyncMock, patch
 from types import SimpleNamespace
 
@@ -24,6 +25,20 @@ DECISION={'decision':'approve','reason':'원본 기록의 생년과 직책을 �
     'resolved_risks':['identity_uncertain'],'checks':[{'citation':SOURCE,'source':SOURCE,'quote':QUOTE,'finding':'서로 다른 인물임을 확인'}]}
 
 class PolicyTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        ledger = patch('scripts.commulingo_research_memory.STORE_PATH', Path(directory.name) / 'review.sqlite3')
+        ledger.start()
+        self.addCleanup(ledger.stop)
+        # All sync dependencies in this suite are mocks. Avoid creating an
+        # executor solely for them (sandbox loop shutdown can lose its wakeup).
+        async def inline(call, *args, **kwargs):
+            return call(*args, **kwargs)
+        threaded = patch('asyncio.to_thread', side_effect=inline)
+        threaded.start()
+        self.addCleanup(threaded.stop)
+
     def test_only_retrieved_quotes_covering_sources_and_risks_can_approve(self):
         self.assertEqual(validate_decision(DECISION,PROPOSAL,{SOURCE:QUOTE}),DECISION)
         for fetched in ({},{SOURCE:'search result snippet'}):
@@ -60,6 +75,8 @@ class PolicyTests(unittest.IsolatedAsyncioTestCase):
         from tool_gateway.dispatcher import execute_tool
         async def chat(*args,**kwargs):
             self.assertEqual(get_caller().agent_name,'commulingo_reviewer')
+            self.assertTrue(kwargs['continue_on_length'])
+            self.assertEqual(kwargs['max_length_continuations'], 2)
             self.assertEqual(set(kwargs['tool_handlers']),{'wiki_search','wiki_get','web_search','fetch_url','commulingo_people','commulingo_review_decision'})
             self.assertFalse(any(k.startswith('commulingo_person_') for k in kwargs['tool_handlers']))
             await kwargs['tool_handlers']['fetch_url'](url=SOURCE)

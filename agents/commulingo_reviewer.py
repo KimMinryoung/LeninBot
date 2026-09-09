@@ -26,7 +26,10 @@ approve only when the complete patch and all review risks are substantiated;
 reject when retrieved evidence establishes that the proposal is wrong or harmful;
 escalate when sources are inaccessible, identity/disputes remain unresolved, or judgment is uncertain.
 Do not infer truth from confidence scores, citation presence, or the fact that an author wrote it.
-Each check must name its original citation, the fetched source URL, an exact short quotation
+Prefer checks with citation_id (S1=source_refs[0], S2=source_refs[1]), source_id returned
+by your own fetch_url/wiki_get, inclusive line_start/line_end, and a Korean finding.
+The runner extracts the exact quote. Select only the lines that support your finding.
+The alternative legacy format names its original citation, the fetched source URL, an exact short quotation
 from that fetched text, and a Korean finding. For approval, cover every cited reference and
 list every resolved risk. checks[].citation MUST copy the COMPLETE original source_refs
 string verbatim, including its URL and annotation; a replacement label is invalid.
@@ -39,6 +42,6 @@ what the operator must establish to decide. A valid decision ends the run; never
     tools=["wiki_search", "wiki_get", "web_search", "fetch_url", "commulingo_people"],
     provider="deepseek", model="deepseek_pro", budget_usd=0.20,
     max_rounds=12, max_input_tokens=120_000, max_output_tokens=8000,
-    max_output_continuations=0, thinking_policy="tool_loop", thinking_budget_tokens=4096,
+    max_output_continuations=2, thinking_policy="tool_loop", thinking_budget_tokens=4096,
     include_political_line=False,
 )

@@ -1648,8 +1648,8 @@ def _build_task_prompt(
             parts.append(
                 "### Research Trail (queries from earlier ticks)\n\n"
                 "Research calls you already ran on ticks BEFORE the last one. Their findings "
-                "live in your notes/synthesis — do not re-run these unless the world has "
-                "plausibly changed since.\n\n" + research_trail
+                "may be in your notes/synthesis. Re-run only to recover missing evidence, resolve conflicts, or check "
+                "plausible changes since.\n\n" + research_trail
             )
         last_log = _fetch_last_tick_tool_log(project["id"])
         if last_log and last_log.get("content"):
@@ -1706,8 +1706,8 @@ def _build_task_prompt(
     if synthesis_block:
         parts.append(
             "<latest-synthesis>\n"
-            "Your consolidated memory — the most reliable summary of past research. "
-            "Read before researching; do not re-investigate what it already settles.\n"
+            "Your consolidated account of past research, not an independent source or guaranteed current truth. "
+            "Read before researching; reuse evidence and check material changes, conflicts, and corrections against original sources.\n"
             f"{synthesis_block}\n</latest-synthesis>"
         )
     parts.append(
@@ -1733,8 +1733,8 @@ def _build_task_prompt(
         parts.append(
             "<research-trail>\n"
             "Research calls you already ran on ticks BEFORE the last one. Their findings "
-            "live in your notes/synthesis — do not re-run these unless the world has "
-            "plausibly changed since.\n"
+            "may be in your notes/synthesis. Re-run only to recover missing evidence, resolve conflicts, or check "
+            "plausible changes since.\n"
             f"{research_trail}\n</research-trail>"
         )
 
