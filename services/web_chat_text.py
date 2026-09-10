@@ -6,6 +6,7 @@ from urllib.parse import urlparse
 
 from services.chat_history_sanitize import clean_chat_history_text
 from prompt_context import uses_xml
+from llm.execution_context import RUNTIME_EVENTS_KEY
 
 _HISTORY_USER_CHAR_LIMIT = 6000
 _HISTORY_ASSISTANT_CHAR_LIMIT = 8000
@@ -22,12 +23,17 @@ def _truncate_history_content(text: str, limit: int) -> str:
 
 def _fit_history_budget(messages: list[dict], limit: int = _HISTORY_TOTAL_CHAR_LIMIT) -> list[dict]:
     """Drop the oldest history messages if per-message trimming is still too large."""
-    total = sum(len(str(m.get("content", ""))) for m in messages)
+    def size(message):
+        return len(str(message.get("content", ""))) + (
+            len(json.dumps(message[RUNTIME_EVENTS_KEY], ensure_ascii=False, default=str))
+            if RUNTIME_EVENTS_KEY in message else 0
+        )
+    total = sum(size(m) for m in messages)
     if total <= limit:
         return messages
     start = 0
     while start < len(messages) and total > limit:
-        total -= len(str(messages[start].get("content", "")))
+        total -= size(messages[start])
         start += 1
     return messages[start:]
 
@@ -360,8 +366,7 @@ def _history_rows_to_messages(
     deleted_turn_marker = "[지워진 턴]"
     if excluded_ids:
         rows = [row for row in rows if int(row.get("id") or 0) not in excluded_ids]
-    # Only the most recent turns carry their tool trace: old traces add
-    # tokens without teaching the model anything new about the pattern.
+    # Keep bounded runtime metadata separate from the assistant's utterance.
     trace_row_ids = {
         int(row["id"]) for row in rows[-_HISTORY_TOOL_TRACE_TURNS:]
         if row.get("id") is not None
@@ -378,14 +383,24 @@ def _history_rows_to_messages(
                 ),
             })
         if row.get("bot_answer"):
+            events = []
             if row.get("bot_answer_active", True):
                 content = _truncate_history_content(row["bot_answer"], _HISTORY_ASSISTANT_CHAR_LIMIT)
                 trace = str(row.get("tool_trace") or "").strip()
-                if trace and int(row.get("id") or 0) in trace_row_ids:
-                    content = f"[도구 실행 기록]\n{trace}\n\n{content}"
+                if int(row.get("id") or 0) in trace_row_ids:
+                    events = [{
+                        "source": "chat_logs.tool_trace",
+                        "chat_log_id": row.get("id"),
+                        "recorded_at": str(row.get("created_at") or ""),
+                        "coverage": "abbreviated trace" if trace else "no trace recorded",
+                        "trace": trace,
+                    }]
             else:
                 content = deleted_turn_marker
-            messages.append({"role": "assistant", "content": content})
+            message = {"role": "assistant", "content": content}
+            if events:
+                message[RUNTIME_EVENTS_KEY] = events
+            messages.append(message)
     return _fit_history_budget(messages)
 
 

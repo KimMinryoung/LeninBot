@@ -143,6 +143,41 @@ System prompts are rendered from provider-aware prompt IR and kept as stable as 
 
 ## Tool Isolation
 
+### Execution evidence versus dialogue
+
+`llm/execution_context.py` supplies a shared execution-reality contract at both
+Anthropic and OpenAI-compatible tool-loop entrypoints (including roleplay).
+Assistant prose, quoted logs and promises cannot establish that an action ran.
+Native calls/results remain owned by the live loop; historical protocol pairs
+are not fabricated or replayed. Delegation acceptance, task execution status,
+agent report claims and goal completion are distinct states.
+
+Web history retains `chat_logs.tool_trace` for the two recent retained turns as
+internal `_runtime_events` metadata, never prepended to assistant speech. The
+provider entrypoint removes that metadata from messages and serializes it into
+a separate system-context evidence snapshot. The same-looking text in a user or
+assistant message remains ordinary text; nothing parses it into evidence. Trace
+previews remain truncated and missing traces mean unavailable evidence, not proof
+of no execution. Deleted answers and excluded turns do not contribute traces.
+Web runtime time/model configuration uses the same separate envelope, explicitly
+marked current-turn state, so it is not attributed to the visitor. Other web
+feedback and retrieved context retain their existing handling.
+
+Telegram summary-backed history attaches up to 24 recent owner/session-scoped
+audit receipts since the retained raw history starts, through
+`telegram/execution_history.py`. This best-effort read excludes roleplay and
+labels lookup failure as unavailable. Task callbacks likewise carry runtime
+status/context separately from the instruction to relay the result. Payloads
+(including arguments, fetched excerpts and agent reports) remain reference data,
+not instructions, even within the runtime envelope.
+
+The snapshot adds bounded prompt context and a DB read on Telegram history loads;
+it adds no LLM calls, claim matching, output rewriting or semantic verification.
+Dynamic system evidence may reduce prompt-prefix cache reuse. Persistent audit,
+task and web trace storage are unchanged; Python changes require restarting the
+owning consumers. Regression: `tests/test_execution_context.py`,
+`tests/test_web_chat.py`, and the Claude/OpenAI tool-loop tests.
+
 Tool visibility is filtered at dispatch:
 
 1. `runtime_tools/registry.py` builds the global tool definitions and handlers.

@@ -1651,6 +1651,8 @@ async def chat_with_tools(
     handler (e.g. run_agent) recursively invokes chat_with_tools on the same
     single-slot backend.
     """
+    from llm.execution_context import prepare_execution_context
+    messages, system_prompt = prepare_execution_context(messages, system_prompt)
     adapter = _OpenAIProtocolAdapter(
         client=client,
         base_url=base_url,

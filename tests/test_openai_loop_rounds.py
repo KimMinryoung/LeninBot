@@ -135,8 +135,20 @@ class TestPlainTextTurn(unittest.TestCase):
         self.assertGreater(tracker["total_cost"], 0)
         self.assertEqual(len(client.calls), 1)
         # system prompt injected as the first message
-        self.assertEqual(client.calls[0]["messages"][0],
-                         {"role": "system", "content": "sys"})
+        self.assertEqual(client.calls[0]["messages"][0]["role"], "system")
+        self.assertTrue(client.calls[0]["messages"][0]["content"].startswith("sys\n\nExecution reality:"))
+
+    def test_runtime_receipts_do_not_become_assistant_messages(self):
+        client = FakeSDKClient([_resp("ok")])
+        asyncio.run(chat_with_tools(
+            [{"role": "assistant", "content": "claimed action",
+              "_runtime_events": [{"source": "test_runtime", "status": "failed"}]},
+             {"role": "user", "content": "continue"}],
+            client=client, model="deepseek-chat", **BASE_KWARGS,
+        ))
+        payload = client.calls[0]["messages"]
+        self.assertIn('"source": "test_runtime"', payload[0]['content'])
+        self.assertEqual(payload[1], {"role": "assistant", "content": "claimed action"})
 
     def test_return_metadata_shape(self):
         client = FakeSDKClient([_resp("답")])

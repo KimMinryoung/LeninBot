@@ -85,6 +85,20 @@ TOOLS = [{
 
 
 class TestPlainTextTurn(unittest.TestCase):
+    def test_runtime_receipts_do_not_become_assistant_messages(self):
+        client = FakeClient([_response([_text_block("ok")])])
+        asyncio.run(chat_with_tools(
+            [{"role": "assistant", "content": "claimed action",
+              "_runtime_events": [{"source": "test_runtime", "status": "failed"}]},
+             {"role": "user", "content": "continue"}],
+            client=client, model="claude-sonnet-4-6", tools=TOOLS,
+            tool_handlers={}, system_prompt="sys",
+        ))
+        payload = client.calls[0]
+        self.assertIn('"source": "test_runtime"', payload['system'][0]['text'])
+        self.assertEqual(payload['messages'][0]['role'], 'assistant')
+        self.assertNotIn('test_runtime', str(payload['messages']))
+
     def test_audited_client_defers_usage_audit_to_loop(self):
         raw = FakeClient([_response([_text_block("ok")])])
         client = AuditedAsyncAnthropic(

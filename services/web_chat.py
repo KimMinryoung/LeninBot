@@ -983,9 +983,8 @@ async def _prepare_web_chat(
         len(history), history_chars, profile.budget_usd,
     )
 
-    # Fold the runtime header directly into the current user turn so the
-    # history prefix stays byte-stable across requests (→ prompt caching).
-    # Provider-native format: XML for Claude, Markdown for OpenAI/DeepSeek.
+    # Current time/model state travels as runtime metadata, not visitor speech.
+    # Feedback and retrieved context below keep their existing user-turn scope.
     now = datetime.now(KST)
     runtime_context = _build_web_runtime_context(
         now.strftime("%Y-%m-%d %H:%M KST (%A)"),
@@ -1014,7 +1013,10 @@ async def _prepare_web_chat(
             preflight_context = await _build_gramsci_preflight_context(message, provider)
             if preflight_context:
                 preflight_tool_detail = f"[preflight] vector_search({json.dumps({'query': preflight_query, 'layer': 'core_theory', 'author': 'Gramsci', 'num_results': 3}, ensure_ascii=False)})"
-    runtime_parts = [runtime_context, _build_web_model_context(profile, provider=provider)]
+    runtime_state = "\n\n".join([
+        runtime_context, _build_web_model_context(profile, provider=provider),
+    ])
+    runtime_parts = []
     # Entity-gated KG recall (KG_ENTITY_GATED_RECALL=1): alias match only, no embedding.
     try:
         from kg_runtime.recall import entity_gated_kg_block
@@ -1026,7 +1028,14 @@ async def _prepare_web_chat(
         kg_recall_context, tone_policy_context, feedback_context, preflight_context,
     ) if part)
     runtime_context = "\n\n".join(runtime_parts)
-    history.append({"role": "user", "content": f"{runtime_context}\n\n{message}"})
+    from llm.execution_context import RUNTIME_EVENTS_KEY
+    history.append({
+        "role": "user", "content": f"{runtime_context}\n\n{message}".strip(),
+        RUNTIME_EVENTS_KEY: [{
+            "source": "web_runtime_configuration", "temporal_scope": "current turn",
+            "state": runtime_state,
+        }],
+    })
     system_prompt = render_system_prompt(spec, provider)
 
     return _PreparedWebChat(

@@ -1187,6 +1187,19 @@ def _load_context_with_summaries(user_id: int) -> list[dict]:
 
         context.append({"role": role, "content": text or "(empty)"})
 
+    if raw_rows and context:
+        from llm.execution_context import RUNTIME_EVENTS_KEY
+        from telegram.execution_history import recent_execution_events
+        try:
+            context[-1][RUNTIME_EVENTS_KEY] = recent_execution_events(
+                user_id, raw_rows[0]["created_at"],
+            )
+        except Exception as exc:
+            logger.warning("Telegram execution history unavailable: %s", exc)
+            context[-1][RUNTIME_EVENTS_KEY] = [{
+                "source": "tool_audit_log", "coverage": "unavailable",
+            }]
+
     return context
 
 
@@ -2219,7 +2232,25 @@ async def bot_main():
 
             # Load recent chat history for context
             history = await asyncio.to_thread(_load_context_with_summaries, chat_id)
-            history.append({"role": "user", "content": prompt})
+            from llm.execution_context import RUNTIME_EVENTS_KEY
+            history.append({
+                "role": "user",
+                "content": (
+                    "Relay the runtime-supplied task outcome to the user concisely, without markdown. "
+                    "Distinguish recorded task status from the agent's claims and goal completion. "
+                    "Only delegate follow-up when the agent was interrupted by budget/turn limits, "
+                    "further work can improve the result, and the cause is not an external blocker "
+                    "such as permissions, CAPTCHA or API failure. Otherwise relay the outcome."
+                    + mission_close_hint
+                ),
+                RUNTIME_EVENTS_KEY: [{
+                    "source": "telegram_task_callback",
+                    "task_id": task_id,
+                    "agent": agent_type,
+                    "recorded_status": status,
+                    "callback_context": prompt,
+                }],
+            })
 
             # Run orchestrator — budget enough for response + optional redelegate call
             from runtime_tools.registry import build_mission_handler

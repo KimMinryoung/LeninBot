@@ -905,6 +905,8 @@ async def chat_with_tools(
             Events: "thinking" (model's intermediate text), "tool_call" (tool invoked),
             "tool_result" (tool finished), "budget" (budget status update).
     """
+    from llm.execution_context import prepare_execution_context
+    messages, system_prompt = prepare_execution_context(messages, system_prompt)
     adapter = _ClaudeProtocolAdapter(
         client=client,
         model=model,

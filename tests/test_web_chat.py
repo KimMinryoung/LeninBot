@@ -23,8 +23,11 @@ class HistoryTests(unittest.TestCase):
         messages = text._history_rows_to_messages(rows, {4})
         self.assertEqual([m['role'] for m in messages], ['user', 'assistant'] * 3)
         self.assertEqual([m['content'] for m in messages], [
-            'q1', 'a1', '[지워진 턴]', '[도구 실행 기록]\ntrace2\n\na2', 'q3', '[지워진 턴]',
+            'q1', 'a1', '[지워진 턴]', 'a2', 'q3', '[지워진 턴]',
         ])
+        self.assertEqual(messages[3]['_runtime_events'][0]['trace'], 'trace2')
+        self.assertNotIn('_runtime_events', messages[1])
+        self.assertNotIn('_runtime_events', messages[5])
         self.assertEqual(len(rows), 4)
 
     def test_per_side_limits_and_empty_sides(self):
