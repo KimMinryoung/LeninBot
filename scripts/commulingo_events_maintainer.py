@@ -529,6 +529,10 @@ def main() -> int:
     except BlockingIOError:
         logger.info("another events run is active; exiting")
         return 0
+    from secrets_loader import get_secret
+    if not get_secret("NEO4J_PASSWORD"):
+        logger.error("NEO4J_PASSWORD is missing; mount neo4j_password in the events service before running the curator")
+        return 1
     result = asyncio.run(run_once(args.event, args.lane, args.lanes, skeleton=args.skeleton, brief=args.brief))
     print(json.dumps(result, ensure_ascii=False, default=str, indent=2))
     return 0

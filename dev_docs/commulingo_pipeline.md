@@ -7,6 +7,11 @@ LLM 호출을 하지 않는다. 운영은 `phase=canary`, `legacy_shared_budget=
 기존 작성 스크립트는 롤백을 위해 유지한다. `leninbot-commulingo-batch`는 사건·연결만
 실행하고 과거 제안의 review 타이머도 유지한다.
 
+사건 작업은 `knowledge_graph_search`를 사용하므로 `leninbot-commulingo-events.service`에
+`neo4j_password` credential이 필요하다. 실행 CLI는 이 값이 없으면 LLM 호출 전에
+exit 1로 중단한다(`--print-candidate` 조회는 제외). 유닛의 credential 변경은 설치와
+daemon-reload 후 다음 타이머 실행부터 적용된다.
+
 ## 대기열과 선정
 
 명시적 migration `scripts/schema_migrations.py --only commulingo-pipeline`이
