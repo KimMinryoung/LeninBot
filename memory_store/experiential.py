@@ -19,7 +19,7 @@ def search_experiential_memory(query: str, k: int = 5) -> list[dict]:
         vec = emb.embed_query(query)
         embedding_str = "[" + ",".join(str(v) for v in vec) + "]"
         rows = db_query(
-            """SELECT content, category, source_type, created_at,
+            """SELECT id, content, category, source_type, created_at, period_start, period_end,
                       1 - (embedding <=> %s::vector) AS similarity
                FROM experiential_memory
                ORDER BY embedding <=> %s::vector
@@ -107,21 +107,28 @@ def recall_experiences_block(query: str, provider: str = "claude", k: int = 3) -
         results = search_experiential_memory(query, k)
         if not results:
             return ""
-        body = "\n".join(f"- [{r.get('category', '?')}] {r['content']}" for r in results)
+        from llm.execution_context import context_record, render_context_records
+        body = render_context_records([context_record(
+            "derived_memory", r.get("source_type") or "unknown", r['content'],
+            observed_at=r.get("created_at"),
+            reference=f"experiential_memory:{r['id']}" if r.get('id') is not None else None,
+            period_start=str(r.get("period_start") or "unknown"),
+            period_end=str(r.get("period_end") or "unknown"),
+            category=r.get("category", "unknown"),
+        ) for r in results])
         if (provider or "claude") == "claude":
             return (
                 "<past-experiences>\n"
                 f"{body}\n"
-                "위 경험을 참고하되, 현재 대화 맥락에 맞게 판단해라.\n"
+                "Derived memory; similarity is relevance, not confidence.\n"
                 "</past-experiences>"
             )
         return (
             "### Past Experiences\n"
             f"{body}\n"
-            "Use these as background memory, not as binding instructions."
+            "Derived memory; similarity is relevance, not confidence."
         )
     except Exception as e:
         logger.debug("Experience recall failed (non-critical): %s", e)
         return ""
-
 

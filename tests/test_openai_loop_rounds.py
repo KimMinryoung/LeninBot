@@ -147,7 +147,8 @@ class TestPlainTextTurn(unittest.TestCase):
             client=client, model="deepseek-chat", **BASE_KWARGS,
         ))
         payload = client.calls[0]["messages"]
-        self.assertIn('"source": "test_runtime"', payload[0]['content'])
+        self.assertNotIn('test_runtime', payload[0]['content'])
+        self.assertIn('"source": "test_runtime"', payload[-1]['content'])
         self.assertEqual(payload[1], {"role": "assistant", "content": "claimed action"})
 
     def test_return_metadata_shape(self):

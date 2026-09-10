@@ -465,7 +465,7 @@ def _join_context_blocks(*blocks: str) -> str:
 def _merge_runtime_context_into_last_user(
     messages: list[dict], runtime_context: str
 ) -> list[dict]:
-    """Fold per-turn runtime context into the trailing user message content.
+    """Attach per-turn runtime metadata beside the trailing user request.
 
     Placing volatile context (time, mission, alerts, …) immediately before the
     current user query — rather than at the start of the message array — keeps
@@ -476,21 +476,11 @@ def _merge_runtime_context_into_last_user(
     if not runtime_context or not runtime_context.strip():
         return list(messages)
 
-    ctx = runtime_context.strip()
-    result = list(messages)
-    if result and result[-1].get("role") == "user":
-        last = dict(result[-1])
-        existing = last.get("content", "")
-        if isinstance(existing, str):
-            last["content"] = f"{ctx}\n\n{existing}".strip() if existing else ctx
-        elif isinstance(existing, list):
-            last["content"] = [{"type": "text", "text": ctx}] + list(existing)
-        else:
-            last["content"] = f"{ctx}\n\n{existing}".strip()
-        result[-1] = last
-    else:
-        result.append({"role": "user", "content": ctx})
-    return result
+    from llm.execution_context import attach_context, context_record
+    return attach_context(messages, [context_record(
+        "runtime_state", "telegram_runtime", runtime_context.strip(),
+        temporal_scope="current turn",
+    )])
 
 
 # ── System Alerts (injected into system prompt) ─────────────────────
@@ -1083,9 +1073,9 @@ def _summary_is_contaminated(summary: str) -> bool:
 def _load_context_with_summaries(user_id: int) -> list[dict]:
     """Load chat context: chunk summaries + raw messages after the last summary.
 
-    Summaries are injected as a single context preamble (not fake conversation
-    pairs) so the model sees a clear timeline:
-      [context preamble with all useful summaries]  →  [raw messages after]
+    Summaries are attached as attributed historical metadata (not conversation
+    pairs). Raw messages retain their order; summary metadata travels beside
+    the current request.
     Raw window is anchored at the last summary's ``chunk_end_id`` (or the
     user's clear marker when there are none), NOT a sliding fixed-size window.
     That makes the prompt prefix byte-stable across successive turns — only
@@ -1148,19 +1138,21 @@ def _load_context_with_summaries(user_id: int) -> list[dict]:
     # Build context: summary preamble + raw messages with timestamps
     context: list[dict] = []
 
-    # Inject summaries as a single context block (not fake conversation pairs)
+    # Preserve summaries as attributed metadata without creating dialogue turns.
+    summary_records = []
     if useful_summaries:
+        from llm.execution_context import context_record
         summary_lines = []
         for s in useful_summaries:
             summary_lines.append(
                 f"• (msgs #{s['chunk_start_id']}~#{s['chunk_end_id']}): {s['summary']}"
             )
-        preamble = (
-            "[Prior conversation summary — below is a summary of conversations before the recent messages]\n"
-            + "\n".join(summary_lines)
-        )
-        context.append({"role": "user", "content": preamble})
-        context.append({"role": "assistant", "content": "Acknowledged. I have reviewed the prior conversation context. Proceeding."})
+        summary_records = [context_record(
+            "conversation_summary", "chat_history_summaries", "\n".join(summary_lines),
+            scope=f"telegram:{user_id}", temporal_scope="historical",
+            reference="original messages via read_self(chat_logs, chat_source=telegram)",
+            coverage="model-compressed dialogue; claims and promises are not receipts",
+        )]
 
     # Append raw messages with exact timestamps on user messages.
     #
@@ -1200,6 +1192,9 @@ def _load_context_with_summaries(user_id: int) -> list[dict]:
                 "source": "tool_audit_log", "coverage": "unavailable",
             }]
 
+    if summary_records:
+        from llm.execution_context import attach_context
+        context = attach_context(context, summary_records)
     return context
 
 
@@ -1250,8 +1245,10 @@ async def _maybe_summarize_chunk(user_id: int):
             "Summarize the conversation below for future context only. "
             "Write in third person. Do NOT answer the user. Do NOT apologize. "
             "Do NOT give advice, ask a question, or propose execution. "
-            "Keep only: 1) user topic/request, 2) assistant conclusions/results, "
-            "3) unresolved items. Preserve proper nouns, numbers, dates, and "
+            "Keep only: 1) user requests and explicit corrections, 2) assistant claims/proposals "
+            "attributed as claims, 3) pending requests and unresolved items. A promise to act "
+            "is not an execution receipt; never turn 'I will delegate' into 'delegated'. "
+            "Preserve speaker, proper nouns, numbers, dates, and "
             "specific decisions. Korean, 500 characters max.\n\n"
             + conversation_text
         )
@@ -1415,15 +1412,22 @@ async def _chat_with_tools(
     # data — current time, current model, caller-supplied extras (mission,
     # experiences, state), and system alerts — rides on the trailing user
     # message so the system prompt and history prefix stay byte-stable across
-    # turns for prompt caching. Order: runtime header at top (stable framing);
-    # caller extras in the middle (stable→volatile gradient); alerts at the
-    # bottom (freshest, closest to the user's query for recency attention).
+    # turns for prompt caching. The active-call record supplies the resolved
+    # model and current time once; do not also inject the default model route.
     full_runtime_context = _join_context_blocks(
-        _build_runtime_prelude(effective_provider, kind=_runtime_kind),
         extra_system_context or "",
         _format_system_alerts(effective_provider),
     )
     messages = _merge_runtime_context_into_last_user(messages, full_runtime_context)
+    from llm.execution_context import attach_context, context_record
+    messages = attach_context(messages, [context_record(
+        "active_call", "resolved_runtime_profile", {
+            "provider": profile.provider, "model": profile.model_id,
+            "runtime_kind": _runtime_kind, "agent": agent_name,
+            "owner_user_id": user_id, "task_id": task_id,
+        }, scope=session_id or (f"task:{task_id}" if task_id is not None else "unknown"),
+        observed_at=datetime.now(KST), temporal_scope="current turn",
+    )])
     is_orchestrator = extra_tools is None
 
     if is_orchestrator:
@@ -2204,9 +2208,9 @@ async def bot_main():
                     )
 
                 prompt = (
-                    f"[TASK REPORT] Task #{task_id} [{agent_type}] completed{' (interrupted)' if was_interrupted else ''}\n\n"
+                    f"[TASK REPORT] Task #{task_id} [{agent_type}] execution ended{' (interrupted)' if was_interrupted else ''}; goal completion is not implied\n\n"
                     f"Original request:\n{_truncate_for_prompt(task.get('content', ''), 1000)}\n\n"
-                    f"Execution result:\n{_truncate_for_prompt(report, 3000)}"
+                    f"Agent's report (claims, not independent verification):\n{_truncate_for_prompt(report, 3000)}"
                     f"{tool_log_section}"
                     f"{verification_section}"
                     f"{interrupted_note}\n\n"

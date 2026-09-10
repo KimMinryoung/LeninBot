@@ -95,9 +95,9 @@ class TestPlainTextTurn(unittest.TestCase):
             tool_handlers={}, system_prompt="sys",
         ))
         payload = client.calls[0]
-        self.assertIn('"source": "test_runtime"', payload['system'][0]['text'])
+        self.assertNotIn('test_runtime', payload['system'][0]['text'])
         self.assertEqual(payload['messages'][0]['role'], 'assistant')
-        self.assertNotIn('test_runtime', str(payload['messages']))
+        self.assertIn('test_runtime', str(payload['messages'][-1]))
 
     def test_audited_client_defers_usage_audit_to_loop(self):
         raw = FakeClient([_response([_text_block("ok")])])

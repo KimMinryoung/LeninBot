@@ -99,7 +99,8 @@ class QueryTests(unittest.IsolatedAsyncioTestCase):
                 "q", providers=("brave", "tavily"), max_results=5,
                 search_depth="basic", topic="general", time_range=None,
             )
-            self.assertEqual(result, "No results for: q")
+            self.assertTrue(result.startswith("No results for: q\n"))
+            self.assertIn("not evidence", result)
             self.assertFalse(search._PROVIDER_UNAVAILABLE_UNTIL)
 
 

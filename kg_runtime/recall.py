@@ -36,7 +36,7 @@ def entity_gated_kg_block(text: str, provider: str = "claude", *, max_entities: 
             node, edges = _entity_neighborhood(hit.uuid, cap=max_facts * 3)
             if not node:
                 continue
-            active = [e for e in edges if not e.get("expired_at")] or edges
+            active = [e for e in edges if not e.get("expired_at") and not e.get("invalid_at")]
             # "Document X mentions it" edges are bookkeeping, not knowledge:
             # they neither qualify a node for recall nor appear in the block.
             active = [e for e in active if e.get("predicate") != "Reference"]
@@ -60,14 +60,17 @@ def entity_gated_kg_block(text: str, provider: str = "claude", *, max_entities: 
             return (
                 "<knowledge-graph>\n"
                 f"{body}\n"
-                "위 사실은 지식 그래프에서 이름이 일치해 자동 회수된 것이다. 근거로 쓰되, "
+                "위 기록은 이름이 일치해 자동 회수된 저장 자료이며, 현재 사실의 보증이 아니다. "
+                "원문의 출처·유효 기간과 자체 분석 여부를 구분하고, "
                 "더 필요하면 knowledge_graph_search로 확인해라.\n"
                 "</knowledge-graph>"
             )
         return (
             "### Knowledge Graph\n"
             f"{body}\n"
-            "Auto-recalled by entity name match; verify with knowledge_graph_search when it matters."
+            "Stored records recalled by name match, not guaranteed current facts. "
+            "Observe validity and source; internal analysis is not independent corroboration. "
+            "Verify with knowledge_graph_search when it matters."
         )
     except Exception as exc:
         logger.debug("[KG recall] skipped: %s", exc)

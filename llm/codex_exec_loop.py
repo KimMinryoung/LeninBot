@@ -83,6 +83,8 @@ def _flatten_messages_to_prompt(messages: list[dict], system_prompt: str) -> str
     as readable XML blocks so Codex can use them as background context
     while focusing on the latest task.
     """
+    from llm.execution_context import prepare_execution_context
+    messages, system_prompt = prepare_execution_context(messages, system_prompt)
     parts: list[str] = []
 
     if system_prompt:

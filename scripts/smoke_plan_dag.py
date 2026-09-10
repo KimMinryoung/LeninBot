@@ -7,6 +7,7 @@ Run:  venv/bin/python scripts/smoke_plan_dag.py
 """
 
 import asyncio
+import json
 import os
 import sys
 
@@ -208,7 +209,9 @@ async def main():
             "metadata": '{"depends_on_task_ids": [101, 102]}'}
     built = tasks._build_task_context_content(task, "Analyze the collected coverage.", context_provider="claude")
     print(f"  built head:\n{built[:300]}")
-    check("subtask prompt contains <dependency-results>", "<dependency-results>" in built)
+    records = json.loads(built.split("\n", 1)[1].split("\n</runtime-context>", 1)[0])
+    check("subtask prompt contains attributed dependency results",
+          any(r["kind"] == "dependency_outcome" and "<dependency-results>" in r["payload"] for r in records))
     check("task text preserved", "Analyze the collected coverage." in built)
 
     tasks._query = lambda sql, params=None: (_ for _ in ()).throw(RuntimeError("db down")) if "id = ANY" in sql else []

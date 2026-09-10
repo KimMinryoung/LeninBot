@@ -157,3 +157,14 @@ Do not assume the autonomous loop uses the same provider as Telegram chat. Use `
 - Use shared KG group_ids such as `economy`, `korea_domestic`, `geopolitics_conflict`, `diplomacy`, or `agent_knowledge`; keep project-only working notes in autonomous project notes instead of creating project-specific KG groups.
 - Use `paused` rather than deleting projects when a project should stop temporarily.
 - Use stable slugs for public artifacts so later ticks edit/republish instead of duplicating.
+
+## Runtime evidence and operator authority
+
+The main tick sends the existing bounded project snapshot as reference context,
+the project goal as an assignment, and pending advisories as separately identified
+operator instructions with IDs/dates. Prior plans, notes, tool traces, staged
+artifacts and critic judgments remain historical data rather than fresh actions.
+Shared reality guidance distinguishes stored work, publication and goal progress.
+Existing planner/critic calls, durable-action checks, advisory consumption, budgets
+and publication gates are unchanged; paused projects are never enabled by this
+context change. Experience recall now includes source and period metadata.

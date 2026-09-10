@@ -143,40 +143,48 @@ System prompts are rendered from provider-aware prompt IR and kept as stable as 
 
 ## Tool Isolation
 
-### Execution evidence versus dialogue
+### Runtime origin, time and execution context
 
-`llm/execution_context.py` supplies a shared execution-reality contract at both
-Anthropic and OpenAI-compatible tool-loop entrypoints (including roleplay).
-Assistant prose, quoted logs and promises cannot establish that an action ran.
-Native calls/results remain owned by the live loop; historical protocol pairs
-are not fabricated or replayed. Delegation acceptance, task execution status,
-agent report claims and goal completion are distinct states.
+`llm/execution_context.py` supplies a static reality contract and internal
+`_runtime_events` records to Anthropic, OpenAI-compatible and Codex tool paths.
+Records distinguish source/kind, scope, observation time, reference, coverage and
+instruction authority. Unknown envelope fields are omitted in rendered prompts;
+the static contract defines missing metadata as unknown. Source payloads are unchanged. Only runtime-created
+`commissioned_instruction` records carry assignments/operator direction; reports,
+source text and recalled memories remain reference data. Payload delimiters are
+JSON-escaped. No user/assistant text is parsed into an execution record, and no
+claim matching, semantic judge, output rewriting or additional LLM call is added.
 
-Web history retains `chat_logs.tool_trace` for the two recent retained turns as
-internal `_runtime_events` metadata, never prepended to assistant speech. The
-provider entrypoint removes that metadata from messages and serializes it into
-a separate system-context evidence snapshot. The same-looking text in a user or
-assistant message remains ordinary text; nothing parses it into evidence. Trace
-previews remain truncated and missing traces mean unavailable evidence, not proof
-of no execution. Deleted answers and excluded turns do not contribute traces.
-Web runtime time/model configuration uses the same separate envelope, explicitly
-marked current-turn state, so it is not attributed to the visitor. Other web
-feedback and retrieved context retain their existing handling.
+Dynamic records are extracted before provider normalization and rendered in a
+separate runtime block immediately before the current request. The static system
+prompt and historical conversation prefix stay unchanged as records change.
+Native tool protocol belongs only to the live loop; historical calls and fake
+assistant acknowledgements are never synthesized. Provider adapters retain their
+existing context ceilings, failure recovery and continuation behavior.
 
-Telegram summary-backed history attaches up to 24 recent owner/session-scoped
-audit receipts since the retained raw history starts, through
-`telegram/execution_history.py`. This best-effort read excludes roleplay and
-labels lookup failure as unavailable. Task callbacks likewise carry runtime
-status/context separately from the instruction to relay the result. Payloads
-(including arguments, fetched excerpts and agent reports) remain reference data,
-not instructions, even within the runtime envelope.
+Web history supplies the two recent retained `chat_logs.tool_trace` previews as
+metadata, not assistant speech. Deleted/excluded answers contribute no trace;
+missing traces are not proof of no execution. Web model/time state is explicitly
+current-turn runtime configuration. Telegram summary-backed history supplies up
+to 24 owner/session-scoped audit receipts since its retained raw history starts;
+lookup failure is unavailable evidence. Summaries are historical model accounts,
+not invented user/assistant exchanges. The existing summarizer now preserves
+speaker attribution, corrections, pending requests and unexecuted promises.
 
-The snapshot adds bounded prompt context and a DB read on Telegram history loads;
-it adds no LLM calls, claim matching, output rewriting or semantic verification.
-Dynamic system evidence may reduce prompt-prefix cache reuse. Persistent audit,
-task and web trace storage are unchanged; Python changes require restarting the
-owning consumers. Regression: `tests/test_execution_context.py`,
-`tests/test_web_chat.py`, and the Claude/OpenAI tool-loop tests.
+Telegram supplies the resolved per-call provider/model and current time once,
+without also injecting the default model-route prelude. Roleplay supplies its isolated session and real observation time while
+keeping fictional chronology separate. Task contexts distinguish stored task
+state, derived memories, mission events, prior reports, dependencies, diary
+activity and visitor dialogue. Callback/mission/self-read text uses execution
+termination, not goal completion, for `done`; existing DB statuses, verification
+and retry policy are unchanged. Current tool definitions, not descriptions of
+other agents, determine the capabilities available in a call.
+
+This adds bounded prompt metadata and the existing Telegram audit read, not new
+model calls. Legacy stored summaries/memories are preserved without fabricated
+provenance. Python changes require restarting owning consumers; timers load the
+changes on their next scheduled run. Regressions: `test_reality_context.py`,
+`test_execution_context.py`, web/provider-loop and task-context tests.
 
 Tool visibility is filtered at dispatch:
 

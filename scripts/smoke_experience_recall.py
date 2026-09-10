@@ -8,6 +8,7 @@ Run:  venv/bin/python scripts/smoke_experience_recall.py
 """
 
 import asyncio
+import json
 import os
 import sys
 
@@ -44,7 +45,7 @@ async def main():
     print(f"  md head: {md_block.splitlines()[0]!r}")
     check(
         "claude gets <past-experiences> with categories",
-        xml_block.startswith("<past-experiences>") and "[mistake]" in xml_block and "[lesson]" in xml_block,
+        xml_block.startswith("<past-experiences>") and '"category": "mistake"' in xml_block and '"category": "lesson"' in xml_block,
     )
     check("non-claude gets markdown section", md_block.startswith("### Past Experiences"))
 
@@ -123,14 +124,16 @@ async def main():
     task = {"id": 7, "user_id": 0, "content": "", "parent_task_id": None, "mission_id": None, "agent_type": "analyst"}
     built = tasks._build_task_context_content(task, "Analyze June semiconductor exports.", context_provider="claude")
     print(f"  built content:\n{built[:400]}")
-    check("task prompt contains past-experiences block", "<past-experiences>" in built)
+    records = json.loads(built.split("\n", 1)[1].split("\n</runtime-context>", 1)[0])
+    check("task prompt contains attributed past experiences",
+          any(r["kind"] == "derived_memory" and "<past-experiences>" in r["payload"] for r in records))
     check("task content preserved inside <task>", "Analyze June semiconductor exports." in built)
 
     def recall_boom(q, p="claude", k=3):
         raise RuntimeError("down")
     exp.recall_experiences_block = recall_boom
     built = tasks._build_task_context_content(task, "Analyze X.", context_provider="claude")
-    check("recall failure degrades to no block", "<past-experiences>" not in built and "Analyze X." in built)
+    check("recall failure degrades to no block", "past-experiences" not in built and "Analyze X." in built)
 
     print()
     print("=" * 72)

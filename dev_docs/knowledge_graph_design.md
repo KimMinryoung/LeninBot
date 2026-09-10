@@ -131,3 +131,26 @@ Operational rules:
 - If `check_kg_integrity.py --smoke-query` reports degraded search with `429 RESOURCE_EXHAUSTED`, rerun after a short wait; repeated failures usually mean Gemini embedding quota pressure.
 - Any schema expansion must update entity/edge models, `EDGE_TYPE_MAP` or `REFERENCE_EDGE_PAIRS`, write-tool descriptions, `knowledge_graph_schema.md` and this document (`scripts/smoke_kg_schema_docs.py` guards drift).
 - Tests: `tests/test_kg_identity.py`, `test_kg_sync_mapping.py`, `test_kg_search_format.py`, `test_kg_doc_extract.py` (hermetic, `scripts/run_unit_tests.sh kg_`).
+
+## Derived source provenance and recall
+
+Scout-generated findings are ingested as `internal_report`, with task reference
+and report-cited URLs (not independently verified at ingestion). Existing scout
+episodes are preserved: search recognizes their `scout-patrol-` episode names,
+including trust-tier prefixes, and labels them internal scout reports even when
+the old source description says news. KG copies and the original internal report
+are not independent corroboration. No stored episode is rewritten by this change.
+
+Entity-gated automatic recall excludes expired/invalidated relations instead of
+falling back to them when no active relations exist. Explicit historical search
+retains validity/expiry labels. Node summaries and edges are stored knowledge, not
+a guarantee of current truth; unknown source/time metadata is not inferred.
+
+Experience recall preserves existing row ID, source type, creation time and period
+from `experiential_memory`. Similarity denotes relevance, not confidence. Old
+entries remain usable as attributed model-derived recollections; no migration,
+re-embedding, quarantine or new extraction call is introduced.
+
+Experience recall states its interpretation caveat once per block, rather than
+repeating it in every memory record. Available source/date/reference fields stay
+attached to each memory; unknown envelope fields are omitted only at rendering.

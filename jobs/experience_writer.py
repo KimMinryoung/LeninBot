@@ -195,6 +195,10 @@ Extract 3-8 EXPERIENCE ENTRIES. Each must be one of:
 - **observation**: Notable system performance issue, content gap in knowledge base, or process improvement idea
 
 RULES:
+- These entries are derived recollections, not independent factual evidence. Preserve
+  who said what, channel, dates, corrections and pending requests. An assistant's
+  promise or conclusion is only its claim unless an execution receipt supports it.
+  Do not generalize one visitor's statement into the owner's view or all visitors.
 - Be SPECIFIC and ACTIONABLE — not "users asked questions" but "3 users asked about 제국주의론 but retrieval returned Rosa Luxemburg instead of Lenin"
 - Skip trivial interactions (greetings, simple factual lookups with good answers)
 - If nothing meaningful happened, return FEWER entries (minimum 0)

@@ -18,6 +18,7 @@ import time
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable
 from typing import Any
+from datetime import datetime, timezone
 from urllib.parse import urlsplit
 
 import httpx
@@ -237,7 +238,7 @@ def _format_results(
     advanced: bool,
 ) -> str:
     if not results:
-        return f"No results for: {query}"
+        return f"No results for: {query}\nSearch returned no matches; this is not evidence that the event or claim does not exist."
     snippet_cap = 1000 if advanced else 500
     lines: list[str] = []
     for result in results:
@@ -251,9 +252,13 @@ def _format_results(
             or ""
         ).strip()
         header = f"### {title}" + (f" ({published})" if published else "")
+        header += "\n[source_kind=search_snippet; publication=" + (published or "unknown") + "; event_date=unknown]"
         lines.append(f"{header}\n{url}\n{content}".rstrip())
     return _wrap_external(
-        "\n\n".join(lines),
+        "Search snippets, not full source pages. Retrieved at "
+        + datetime.now(timezone.utc).isoformat()
+        + "; cache reuse preserves this retrieval time. Publication date is not event date.\n\n"
+        + "\n\n".join(lines),
         f"web_search:{provider}:{query}",
     )
 

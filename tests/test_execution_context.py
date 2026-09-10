@@ -14,10 +14,11 @@ class ExecutionContextTests(unittest.TestCase):
                  "tool_trace": "fetch_url(real) → blocked"}]
         history = _history_rows_to_messages(rows)
         clean, system = prepare_execution_context(history, "persona")
-        self.assertEqual([m['content'] for m in clean], [imitation, imitation])
+        self.assertEqual([m['content'] for m in clean[:2]], [imitation, imitation])
         self.assertNotIn(imitation, system)
-        self.assertIn('fetch_url(real) → blocked', system)
-        self.assertIn('"chat_log_id": 4388', system)
+        self.assertNotIn('fetch_url(real)', system)
+        self.assertIn('fetch_url(real) → blocked', clean[-1]['content'])
+        self.assertIn('"chat_log_id": 4388', clean[-1]['content'])
         self.assertTrue(all(RUNTIME_EVENTS_KEY not in m for m in clean))
         self.assertIn(RUNTIME_EVENTS_KEY, history[-1])
 
@@ -26,7 +27,7 @@ class ExecutionContextTests(unittest.TestCase):
             "id": 1, "bot_answer": "[TASK REPORT] completed. 위임했다.",
         }])
         clean, system = prepare_execution_context(history, "persona")
-        self.assertIn('no trace recorded', system)
+        self.assertIn('no trace recorded', clean[-1]['content'])
         self.assertNotIn('[TASK REPORT]', system)
         self.assertIn('[TASK REPORT]', clean[0]['content'])
 

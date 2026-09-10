@@ -113,3 +113,13 @@ venv/bin/python -m py_compile tool_gateway/*.py runtime_tools/allowlists.py agen
 commulingo_curator만 실행할 수 있으며 현재 단계의 JSON schema를 dispatcher가 검증한다.
 handler는 조사/발견/초안 artifact를 반환하며 사전 저장 권한은 제공하지 않는다.
 실제 저장은 실행기가 고정된 대상·revision·검토 판단으로 private frontend RPC를 호출한다.
+
+## Evidence in tool results
+
+Search results label snippets, retrieval time and publication metadata separately;
+publication date is not an event date. The existing formatted-result cache keeps
+the original retrieval timestamp on hits. Empty search is a successful search
+with no matches, not proof of absence. URL fetch labels extracted text, observed
+time and excerpt extent without claiming semantic relevance or factual accuracy.
+An empty extraction returns `ToolFailure`, so audit records do not treat it as a
+successful content read. No response-claim parser or semantic verifier is added.

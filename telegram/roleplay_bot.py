@@ -199,6 +199,15 @@ async def handle_message(message: Message) -> None:
 
     await asyncio.to_thread(save_message, user_id, "user", user_text)
     history = await asyncio.to_thread(load_history, user_id)
+    from datetime import datetime, timezone
+    from llm.execution_context import attach_context, context_record
+    history = attach_context(history, [context_record(
+        "runtime_state", "telegram_roleplay_runtime", {
+            "model": ROLEPLAY_MODEL, "channel": "telegram_roleplay",
+            "persona_time": "fictional; infer from the roleplay, not the server clock",
+        }, scope=f"telegram-roleplay:{message.chat.id}",
+        observed_at=datetime.now(timezone.utc), temporal_scope="current turn",
+    )])
 
     try:
         await message.bot.send_chat_action(message.chat.id, "typing")

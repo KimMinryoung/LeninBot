@@ -192,6 +192,11 @@ def _tier_from_names(names) -> str | None:
 
 
 def _source_label(row: dict) -> str:
+    # Historical scout episodes used the news label. Their stable episode name
+    # establishes their actual origin without rewriting any stored KG records.
+    if any(re.match(r"^(?:\[T:[^]]+\]\s*|T-(?:anchor|corroborated|single)-)?scout-patrol-",
+                    str(name or "")) for name in row.get("ep_names") or ()):
+        return "internal_scout_report"
     key = row.get("sync_key") or ""
     if key:
         head = key.split(":", 1)[0]

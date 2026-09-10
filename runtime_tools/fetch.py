@@ -122,7 +122,8 @@ async def _exec_fetch_url(
 
         content = await fetch_url_content_async(url, max_chars=fetch_limit)
         if not content:
-            return "Failed to extract content from this URL.\n" + diagnose_url_fetch_failure(url)
+            return ToolFailure("Failed to extract content from this URL. No usable body was obtained; "
+                               "this is not evidence about the page's claims.\n" + diagnose_url_fetch_failure(url))
         if start >= len(content):
             return (
                 f"[fetch_url] url={url}\n"
@@ -139,6 +140,10 @@ async def _exec_fetch_url(
             f"chars {start}:{end} of {'at least ' if more else ''}{known_chars} "
             f"truncated={more}{next_hint}\n\n"
         )
+        from datetime import datetime, timezone
+        header += (f"source_kind=extracted_page_text; observed_at={datetime.now(timezone.utc).isoformat()}; "
+                   "publication_date=unknown; event_date=unknown. Extraction success alone "
+                   "does not establish relevance, freshness or factual accuracy.\n\n")
         return header + _wrap_external(body, f"url:{url}")
     except Exception as exc:
         logger.error("fetch_url error: %s", exc)

@@ -1276,21 +1276,20 @@ def _build_task_context_content(
             diary_activity_ctx = _format_diary_activity_context(context_provider)
             diary_web_ctx = _format_diary_web_chat_context(context_provider)
 
-    context_parts = [
-        part for part in (
-            state_ctx,
-            experiences_ctx,
-            kg_recall_ctx,
-            diary_activity_ctx,
-            diary_web_ctx,
-            mission_ctx,
-            history_ctx,
-            board_ctx,
-            *result_contexts,
-        ) if part
-    ]
+    from llm.execution_context import context_record, render_context_records
+    context_parts = [(kind, part) for kind, part in (
+        ("task_state", state_ctx), ("derived_memory", experiences_ctx),
+        ("stored_knowledge", kg_recall_ctx), ("diary_activity", diary_activity_ctx),
+        ("visitor_dialogue", diary_web_ctx), ("mission_events", mission_ctx),
+        ("previous_agent_report", history_ctx), ("agent_board", board_ctx),
+        *(("dependency_outcome", part) for part in result_contexts),
+    ) if part]
     if context_parts:
-        return "\n\n".join(context_parts) + "\n\n" + wrap_task_content(content, context_provider)
+        return render_context_records([context_record(
+            kind, "telegram_task_context", part,
+            scope=f"telegram_task:{task_id}; owner:{user_id}; mission:{mission_id}",
+            reference=f"read_self(content_type='task_report', id={task_id})",
+        ) for kind, part in context_parts]) + "\n\n" + wrap_task_content(content, context_provider)
     return wrap_task_content(content, context_provider)
 
 
@@ -1405,7 +1404,7 @@ async def _persist_task_success(
             summary = _extract_summary(report, 1500)
             add_mission_event(
                 mission_id, f"task#{task_id}", "task_completed",
-                f"Done{agent_label}: {summary}",
+                f"Execution ended{agent_label}; agent report (goal completion unverified): {summary}",
             )
         except Exception:
             pass
@@ -1483,7 +1482,7 @@ async def _handle_task_failure(
     if mission_id:
         try:
             from telegram.mission import add_mission_event
-            add_mission_event(mission_id, f"task#{task_id}", "task_completed", f"Failed: {str(error)[:500]}")
+            add_mission_event(mission_id, f"task#{task_id}", "task_completed", f"Execution failed: {str(error)[:500]}")
         except Exception:
             pass
     await asyncio.to_thread(

@@ -1870,7 +1870,30 @@ async def _run_one_tick(project: dict) -> dict:
          "max_rounds": spec.max_rounds, "budget_usd": spec.budget_usd},
     )
 
-    tick_messages = [{"role": "user", "content": user_content}]
+    from llm.execution_context import attach_context, context_record
+    # Keep authority in the assignment/advisory records. Research notes, old
+    # traces and critic judgments in the snapshot are attributed reference data.
+    tick_messages = attach_context([{"role": "user", "content": (
+        "Advance the commissioned project by one concrete step within this tick's "
+        "budget and existing publication rules. Apply pending operator advisories over "
+        "conflicting prior plans; they remain pending until durable work is saved. "
+        "save findings before your final response and finish with a brief self-critique. "
+        "Use the pre-tick objective as the working target and check synthesis reminders. "
+        "The snapshot distinguishes prior plans/reports from stored work and publications. "
+        + (_EDITORIAL_DIAGNOSIS_GUIDANCE if editorial_diagnosis else "")
+    )}], [context_record(
+        "project_snapshot", "autonomous_project_runtime", user_content,
+        scope=f"autonomous_project:{project['id']}", observed_at=tick_started_at_utc,
+        reference=f"read_self(content_type='autonomous_project', id={project['id']})",
+    ), context_record(
+        "assignment", "autonomous_projects.goal", project['goal'],
+        scope=f"autonomous_project:{project['id']}", authority="commissioned_instruction",
+    ), *[context_record(
+        "operator_advisory", "autonomous_project_advisories", a['content'],
+        scope=f"autonomous_project:{project['id']}", observed_at=a.get('created_at'),
+        reference=f"autonomous_project_advisories:{a['id']}",
+        authority="commissioned_instruction", status="pending",
+    ) for a in pending_advisories]])
 
     from jobs.autonomous_publication_controls import current_tick_staged_slugs
 

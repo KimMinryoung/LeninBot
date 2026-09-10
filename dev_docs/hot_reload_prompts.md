@@ -82,3 +82,12 @@ Keep these in Python/spec/config instead:
 - DB schema and runtime logic
 
 This boundary keeps prompt tuning fast while preserving reviewable capability changes.
+
+## Runtime reality contract
+
+Tool-loop entrypoints now add the static `llm/execution_context.py` reality
+contract. Runtime records are injected next to the current request, not appended
+to the system prompt, preserving stable history/system prefixes. Character voice
+and political interpretation cannot establish facts; hypothetical/roleplay time,
+visitor testimony, stored model conclusions and real runtime events stay distinct.
+This Python-owned contract requires consumer restart; no new LLM call is used.

@@ -88,7 +88,7 @@ class SearchCacheTests(unittest.IsolatedAsyncioTestCase):
     async def test_empty_results_have_short_ttl_and_no_fallback(self):
         self.result = []
         with patch.dict(search.os.environ, WEB_SEARCH_PROVIDERS="tavily,brave"):
-            self.assertEqual(await search.execute_web_search("empty"), "No results for: empty")
+            self.assertTrue((await search.execute_web_search("empty")).startswith("No results for: empty\n"))
             await search.execute_web_search("empty")
             self.assertEqual(len(self.calls), 1)
             self.now += 30

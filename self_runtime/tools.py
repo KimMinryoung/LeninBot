@@ -1233,7 +1233,7 @@ async def _exec_read_task_reports(
             result = body
         header = (
             f"Task #{row['id']} | status={row['status']} | agent={row.get('agent_type', '?')}\n"
-            f"created={ts} | completed={completed}\n"
+            f"created={ts} | execution_ended={completed}; done is not proof of goal completion\n"
             f"mission_id={row.get('mission_id', 'N/A')} | parent={row.get('parent_task_id', 'N/A')} | depth={row.get('depth', 0)}\n"
             f"\n## Verification\n{row.get('verification_status') or 'unverified'}\n{row.get('verification_details') or 'No verification evidence available.'}\n"
             f"\n## Request\n{content}\n"
@@ -1261,7 +1261,7 @@ async def _exec_read_task_reports(
 
         entry = (
             f"[{i}] Task #{row.get('id', '?')} | status={st} | "
-            f"created={ts} | completed={completed or 'N/A'}\n"
+            f"created={ts} | execution_ended={completed or 'N/A'}; done is not proof of goal completion\n"
             f"  Request: {content}\n"
         )
         if result:

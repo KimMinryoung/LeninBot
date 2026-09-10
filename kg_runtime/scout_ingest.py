@@ -73,7 +73,7 @@ def process_scout_report_to_kg(
     This function:
     1. Extracts key findings from the scout report
     2. Determines appropriate group_id (geopolitics, economy, korea_domestic)
-    3. Calls add_kg_episode() with source_type='osint_news'
+    3. Calls add_kg_episode() with source_type='internal_report'
 
     Args:
         report: Full task report text (markdown)
@@ -141,14 +141,22 @@ def process_scout_report_to_kg(
         # Build episode content
         ts = datetime.now(KST).strftime("%Y-%m-%d %H:%M KST")
         episode_content = "\n".join(f"- {line}" for line in content_lines)
-        episode_content = f"[Scout Report: {ts}]\n\n{episode_content}"
+        import re
+        reported_urls = list(dict.fromkeys(re.findall(r'https?://[^\s<>\]\)]+', report)))[:10]
+        episode_content = (
+            f"[Internal Scout Report: {ts}; task_id={task_id or 'unknown'}]\n"
+            "Derived agent claims, not a primary news article or independent corroboration.\n"
+            f"Full report: telegram_tasks:{task_id or 'unknown'}\n"
+            f"URLs cited by the report (not independently verified here): {reported_urls}\n\n"
+            + episode_content
+        )
 
         # Write to KG
         result = add_kg_episode(
             content=episode_content,
             name=f"scout-patrol-{datetime.now(KST).strftime('%Y%m%d-%H%M%S')}"
                  + (f"-t{task_id}" if task_id else ""),
-            source_type="osint_news",
+            source_type="internal_report",
             group_id=group_id,
         )
 
