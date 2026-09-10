@@ -49,6 +49,19 @@ class Structure(unittest.TestCase):
         self.assertNotIn('x = "한글"', masked)
         self.assertNotIn('/연구', masked)
 
+    def test_code_validation_explains_diagram_and_fence_failures(self):
+        source = '```\n첫째\n\n둘째\n```\n'
+        target = '```\nFirst\nSecond\n```\n'
+        problems = markdown_problems(source, target)
+        self.assertIn('Markdown code differs from source', problems)
+        self.assertTrue(any('expected 3 lines, got 2' in p for p in problems))
+        self.assertTrue(any('type/language' in p for p in
+                            markdown_problems(source, source.replace('```\n', '```text\n', 1))))
+        self.assertTrue(any('protected content changed' in p for p in
+                            markdown_problems('`x`', '`y`')))
+        self.assertTrue(any('Code span count' in p for p in
+                            markdown_problems('`x` and `y`', '`x` and y')))
+
     def test_chunks_preserve_top_level_table_and_list(self):
         source = '# Title\n\n' + ('Paragraph.\n\n' * 12) + '- a\n- b\n\n| x |\n|---|\n| y |\n'
         chunks = markdown_chunks(source, 70)
@@ -91,6 +104,19 @@ class SharedExecution(unittest.TestCase):
             with self.assertRaises(TranslationProviderError):
                 generate_translation('x', 'p', system='s')
             self.assertEqual(gen.call_count, 1)
+
+    def test_diagram_retry_receives_specific_line_count(self):
+        from scripts.translate_research_markdown import _translate_segment
+        source = '```\n첫째\n\n둘째\n```\n'
+        good = '```\nFirst\n\nSecond\n```\n'
+        def translate(masked, *, correction, **kwargs):
+            result = masked.replace('첫째', 'First').replace('둘째', 'Second')
+            return result if 'expected 3 lines, got 2' in correction else result.replace('First\n\n', 'First\n')
+        with patch('scripts.translate_research_markdown._call_translator',
+                   side_effect=translate) as generate:
+            result = _translate_segment(source, max_hangul_ratio=.03, attempts=2)
+        self.assertEqual(result, good)
+        self.assertIn('expected 3 lines, got 2', generate.call_args.kwargs['correction'])
 
     def test_markdown_resume_only_failed_chunk(self):
         source = '# 제목\n\n첫 문단.\n\n둘째 문단.'

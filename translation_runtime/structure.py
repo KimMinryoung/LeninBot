@@ -111,6 +111,31 @@ def markdown_problems(source: str, target: str) -> list[str]:
                          (2, "code"), (4, "reference definitions"), (5, "footnotes")):
         if a[index] != b[index]:
             problems.append(f"Markdown {label} differs from source")
+            if index == 2:
+                if len(a[2]) != len(b[2]):
+                    problems.append(
+                        f"Code span count: expected {len(a[2])}, got {len(b[2])}; "
+                        "preserve every inline code span and fenced block"
+                    )
+                for position, (expected, actual) in enumerate(zip(a[2], b[2]), 1):
+                    if expected == actual:
+                        continue
+                    if expected[:2] != actual[:2]:
+                        problems.append(
+                            f"Code span {position}: expected type/language {expected[:2]!r}, "
+                            f"got {actual[:2]!r}; preserve fence language tags"
+                        )
+                    elif isinstance(expected[2], int):
+                        problems.append(
+                            f"Text diagram at code span {position}: expected {expected[2]} lines, "
+                            f"got {actual[2]}; preserve all lines, including blank lines"
+                        )
+                    else:
+                        problems.append(
+                            f"Code span {position}: protected content changed; "
+                            "copy the placeholder unchanged"
+                        )
+                    break  # One concrete correction per attempt keeps prompts bounded.
     problems.extend(html_problems(a[3], b[3]))
     return problems
 
