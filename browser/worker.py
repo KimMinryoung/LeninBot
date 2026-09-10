@@ -18,15 +18,12 @@ from datetime import datetime
 from pathlib import Path
 import importlib
 
-from llm.provider_registry import OPENAI_MODEL_MAP, TIER_MODEL_KEYS
+from llm.provider_registry import (
+    DEEPSEEK_FLASH_MODEL, OPENAI_MODEL_MAP, TIER_MODEL_KEYS, resolve_deepseek_model,
+)
 
 BROWSER_MODEL_OVERRIDE = os.getenv("BROWSER_MODEL", "").strip() or None
 BROWSER_PROVIDER_OVERRIDE = os.getenv("BROWSER_PROVIDER", "").strip().lower() or None
-
-_DEEPSEEK_BROWSER_MODEL_ALIASES = {
-    "deepseek_pro": "deepseek-v4-pro",
-    "deepseek_flash": "deepseek-v4-flash",
-}
 
 _OPENAI_BROWSER_MODEL_ALIASES = OPENAI_MODEL_MAP
 
@@ -35,32 +32,25 @@ def _normalize_browser_model(raw_model: str | None, provider: str = "deepseek") 
     model = str(raw_model or "").strip()
     if not model:
         return (
-            "deepseek-v4-flash"
+            DEEPSEEK_FLASH_MODEL
             if provider == "deepseek"
             else OPENAI_MODEL_MAP[TIER_MODEL_KEYS["openai"]["medium"]]
         )
 
     lowered = model.lower()
-    if lowered in {"high", "medium", "low"}:
-        if provider == "deepseek":
-            tier_map = {"high": "deepseek-v4-pro", "medium": "deepseek-v4-flash", "low": "deepseek-v4-flash"}
-        elif provider == "openai":
-            tier_map = {
-                tier: OPENAI_MODEL_MAP[key]
-                for tier, key in TIER_MODEL_KEYS["openai"].items()
-            }
-        else:
-            tier_map = {"high": "deepseek-v4-pro", "medium": "deepseek-v4-flash", "low": "deepseek-v4-flash"}
-        return tier_map[lowered]
+    if lowered in TIER_MODEL_KEYS["deepseek"]:
+        if provider == "openai":
+            return OPENAI_MODEL_MAP[TIER_MODEL_KEYS["openai"][lowered]]
+        return resolve_deepseek_model(lowered)
 
-    if provider == "deepseek" and lowered in _DEEPSEEK_BROWSER_MODEL_ALIASES:
-        return _DEEPSEEK_BROWSER_MODEL_ALIASES[lowered]
+    if provider == "deepseek":
+        model = resolve_deepseek_model(model)
     if provider == "openai" and lowered in _OPENAI_BROWSER_MODEL_ALIASES:
         return _OPENAI_BROWSER_MODEL_ALIASES[lowered]
 
     if lowered in {"opus", "sonnet", "haiku"} or lowered.startswith("claude"):
         print(f"[browser_worker] WARNING: Claude model override '{model}' ignored for browser worker")
-        return "deepseek-v4-flash"
+        return DEEPSEEK_FLASH_MODEL
 
     return model
 

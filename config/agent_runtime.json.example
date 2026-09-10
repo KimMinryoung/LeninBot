@@ -7,7 +7,7 @@
   },
   "autonomous_project": {
     "provider": "deepseek",
-    "model": "deepseek_pro",
+    "model": "deepseek_flash",
     "budget_usd": 0.6,
     "max_rounds": 20,
     "finalization_tools": [
@@ -29,7 +29,7 @@
   },
   "diary": {
     "provider": "deepseek",
-    "model": "deepseek_pro",
+    "model": "deepseek_flash",
     "budget_usd": 1.0,
     "max_rounds": 30,
     "terminal_tools": [
@@ -69,7 +69,7 @@
   },
   "commulingo_curator": {
     "provider": "deepseek",
-    "model": "deepseek_pro",
+    "model": "deepseek_flash",
     "budget_usd": 0.35,
     "max_rounds": 16,
     "max_input_tokens": 160000,
@@ -95,7 +95,7 @@
   },
   "commulingo_event_curator": {
     "provider": "deepseek",
-    "model": "deepseek_pro",
+    "model": "deepseek_flash",
     "budget_usd": 0.8,
     "max_rounds": 24,
     "max_input_tokens": 160000,

@@ -73,9 +73,9 @@ SECTION_CURSOR = SectionCursor()
 
 
 assert COMMULINGO_CURATOR.provider == "deepseek"
-assert COMMULINGO_CURATOR.model == "deepseek_pro"
+assert COMMULINGO_CURATOR.model == "deepseek_flash"
 assert COMMULINGO_EVENT_CURATOR.provider == "deepseek"
-assert COMMULINGO_EVENT_CURATOR.model == "deepseek_pro"
+assert COMMULINGO_EVENT_CURATOR.model == "deepseek_flash"
 NARROW_TOOLS = {
     "commulingo_person_create", "commulingo_person_update",
     "commulingo_section_save", "commulingo_event_link", "commulingo_term_create",

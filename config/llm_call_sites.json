@@ -9,7 +9,7 @@
   },
   "archival_document_translation_zh": {
     "provider": "deepseek_anthropic",
-    "model": "deepseek-v4-pro",
+    "model": "deepseek-flash",
     "temperature": 0.2,
     "max_tokens": 48000,
     "timeout": 600,
@@ -55,7 +55,7 @@
   },
   "archival_term_extraction": {
     "provider": "deepseek",
-    "model": "deepseek-v4-flash",
+    "model": "deepseek-flash",
     "temperature": 0.0,
     "max_tokens": 8000,
     "timeout": 180,
@@ -67,7 +67,7 @@
   },
   "commulingo_event_evidence_labels": {
     "provider": "deepseek",
-    "model": "deepseek-v4-pro",
+    "model": "deepseek-flash",
     "temperature": 0.1,
     "max_tokens": 8000,
     "timeout": 180,
@@ -120,7 +120,7 @@
   },
   "vector_query_translation": {
     "provider": "deepseek",
-    "model": "deepseek-v4-flash",
+    "model": "deepseek-flash",
     "temperature": 0.0,
     "max_tokens": 200,
     "timeout": 12,
@@ -132,7 +132,7 @@
   },
   "task_routing_advisor": {
     "provider": "deepseek",
-    "model": "deepseek-v4-flash",
+    "model": "deepseek-flash",
     "temperature": 0.0,
     "max_tokens": 500,
     "timeout": 12,
@@ -144,13 +144,13 @@
   },
   "writer_critic_diagnosis": {
     "provider": "deepseek",
-    "model": "deepseek_pro",
+    "model": "deepseek_flash",
     "managed": "model-only",
     "note": "writer 퇴고 진단 critic 모델 별칭. 실행은 writer 자체 클라이언트 (writer/models.py에서 조회)"
   },
   "razvedchik_comment": {
     "provider": "deepseek_anthropic",
-    "model": "deepseek-v4-flash",
+    "model": "deepseek-flash",
     "temperature": 0.85,
     "max_tokens": 2048,
     "timeout": 120,
@@ -161,7 +161,7 @@
   },
   "razvedchik_observation": {
     "provider": "deepseek_anthropic",
-    "model": "deepseek-v4-flash",
+    "model": "deepseek-flash",
     "temperature": 0.9,
     "max_tokens": 2048,
     "timeout": 120,
@@ -172,7 +172,7 @@
   },
   "razvedchik_reply": {
     "provider": "deepseek_anthropic",
-    "model": "deepseek-v4-flash",
+    "model": "deepseek-flash",
     "temperature": 0.8,
     "max_tokens": 2048,
     "timeout": 120,
@@ -183,7 +183,7 @@
   },
   "razvedchik_debrief_scout": {
     "provider": "deepseek_anthropic",
-    "model": "deepseek-v4-flash",
+    "model": "deepseek-flash",
     "temperature": 0.7,
     "max_tokens": 2048,
     "timeout": 120,
@@ -194,7 +194,7 @@
   },
   "razvedchik_debrief_commander": {
     "provider": "deepseek_anthropic",
-    "model": "deepseek-v4-flash",
+    "model": "deepseek-flash",
     "temperature": 0.7,
     "max_tokens": 2048,
     "timeout": 120,
@@ -270,7 +270,7 @@
   },
   "db_content_translation": {
     "provider": "deepseek",
-    "model": "deepseek-v4-flash",
+    "model": "deepseek-flash",
     "temperature": 0.1,
     "max_tokens": 12000,
     "timeout": 180,
@@ -282,7 +282,7 @@
   },
   "research_markdown_translation": {
     "provider": "deepseek",
-    "model": "deepseek-v4-flash",
+    "model": "deepseek-flash",
     "temperature": 0.1,
     "max_tokens": 20000,
     "timeout": 240,

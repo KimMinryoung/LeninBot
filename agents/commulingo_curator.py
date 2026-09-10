@@ -219,7 +219,7 @@ COMMULINGO_CURATOR = AgentSpec(
     # the write-boundary script validator remains as a provider-independent
     # final guard.
     provider="deepseek",
-    model="deepseek_pro",
+    model="deepseek_flash",
     budget_usd=0.35,
     max_rounds=16,
     max_input_tokens=160_000,

@@ -9,6 +9,9 @@ import anthropic
 from secrets_loader import get_secret
 
 from llm.call_registry import resolve as _resolve_call_site
+from llm.provider_registry import (
+    DEEPSEEK_FLASH_MODEL, MODEL_DISPLAY_NAMES, deepseek_price_triple,
+)
 
 from writer.store import get_writer_setting, set_writer_setting
 from writer.config import WriterCallPolicy
@@ -55,19 +58,10 @@ WRITER_MODEL_CHOICES: dict[str, dict] = {
             "output_config": {"effort": "low"},
         },
     },
-    "deepseek_pro": {
-        "provider": "deepseek",
-        "model": "deepseek-v4-pro",
-        "display": "DeepSeek V4 Pro",
-        "input_price_per_mtok": 0.435,
-        "output_price_per_mtok": 0.87,
-    },
     "deepseek_flash": {
         "provider": "deepseek",
-        "model": "deepseek-v4-flash",
-        "display": "DeepSeek V4 Flash",
-        "input_price_per_mtok": 0.14,
-        "output_price_per_mtok": 0.28,
+        "model": DEEPSEEK_FLASH_MODEL,
+        "display": MODEL_DISPLAY_NAMES[DEEPSEEK_FLASH_MODEL],
     },
     "kimi_k3": {
         "provider": "kimi",
@@ -81,11 +75,11 @@ WRITER_MODEL_CHOICES: dict[str, dict] = {
 WRITER_DEFAULT_CHOICE = "fable"
 
 # Light-agent tiers for delegated subtasks. Easy work runs on cheap DeepSeek
-# regardless of the (usually heavy) main writer model: the line-edit critic
-# gets the pro tier for craft, web research digestion gets flash. Both fall
+# regardless of the (usually heavy) main writer model. Critic and research
+# both use the current Flash model. Both fall
 # back to the main model when DeepSeek is unconfigured.
 # 선택은 config/llm_call_sites.json이 관리 (여기 상수는 최종 폴백).
-WRITER_CRITIC_CHOICE = _resolve_call_site("writer_critic_diagnosis", model="deepseek_pro").model
+WRITER_CRITIC_CHOICE = _resolve_call_site("writer_critic_diagnosis", model="deepseek_flash").model
 WRITER_RESEARCH_CHOICE = _resolve_call_site("writer_research_digest", model="deepseek_flash").model
 
 _writer_client: anthropic.AsyncAnthropic | None = None
@@ -140,30 +134,38 @@ def list_writer_models() -> list[dict]:
             available = _deepseek_available()
         else:
             available = _kimi_available()
+        rates = deepseek_price_triple(spec["model"]) if spec["provider"] == "deepseek" else None
         out.append({
             "key": key,
             "id": spec["model"],
             "display_name": spec["display"],
             "provider": spec["provider"],
-            "input_price_per_mtok": spec["input_price_per_mtok"],
-            "output_price_per_mtok": spec["output_price_per_mtok"],
+            "input_price_per_mtok": rates[0] if rates else spec["input_price_per_mtok"],
+            "output_price_per_mtok": rates[1] if rates else spec["output_price_per_mtok"],
             "available": available,
             "default": key == WRITER_DEFAULT_CHOICE,
         })
     return out
 
 
+def _normalize_writer_choice(choice: str | None) -> str:
+    """Read old saved/client Pro choices without duplicating the model catalog."""
+    key = (choice or "").strip()
+    return "deepseek_flash" if key == "deepseek_pro" else key
+
+
 def get_selected_model_choice() -> str:
     """The admin's persisted model choice; falls back to the built-in default
     when unset or when the saved key no longer exists."""
     saved = get_writer_setting("model_choice")
+    saved = _normalize_writer_choice(saved) if isinstance(saved, str) else None
     if isinstance(saved, str) and saved in WRITER_MODEL_CHOICES:
         return saved
     return WRITER_DEFAULT_CHOICE
 
 
 def set_selected_model_choice(choice: str) -> str:
-    key = (choice or "").strip()
+    key = _normalize_writer_choice(choice)
     if key not in WRITER_MODEL_CHOICES:
         raise ValueError(f"Unknown writer model choice: {choice!r}")
     set_writer_setting("model_choice", key)
@@ -178,7 +180,7 @@ def resolve_writer_model(choice: str | None) -> tuple[Any, str, str, dict]:
     persisted selection wins over the built-in default. Raises ValueError for
     an unknown key and RuntimeError if the chosen provider is not configured.
     """
-    key = (choice or "").strip() or get_selected_model_choice()
+    key = _normalize_writer_choice(choice) or get_selected_model_choice()
     spec = WRITER_MODEL_CHOICES.get(key)
     if spec is None:
         raise ValueError(f"Unknown writer model choice: {choice!r}")

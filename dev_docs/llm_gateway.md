@@ -121,9 +121,15 @@ DeepSeek V4는 **시간대별 요금**이다: 2026-08-16 16:00 UTC(베이징 08-
 호출 시각으로 해석하며, `anthropic_pricing_table()`·`openai_compatible_pricing()`·
 `gateway.estimate_cost_usd()`가 이를 경유한다. 컷오버 전은 옛 평면 단가. 큐레이터
 레인은 17:00~23:20 UTC라 전 구간 오프피크다([[commulingo-curator-lanes]]).
+2026-09-10 04:00 UTC부터 `deepseek-flash`와 기존 Flash ID는 V4.1 Flash 요금으로
+전환한다. 실제 Pro ID는 2026-09-14 04:00 UTC까지 기존 요금을 유지한다. 새 피크 규칙은 9월 10일부터 Pro를 포함해 월–금에만 적용하고 주말은 전 시간 오프피크다. 근거는
+2026-09-10 사용자가 제공한 갱신 DeepSeek API 이메일 공지이며 공개 웹 검증과 구분한다.
+이전 요금 구간은 유지한다. 모델 ID와 공급자 측 Pro 라우팅의 경계는
+`llm_provider_architecture.md`를 따른다.
 2026-08-14에는 비용 절감을 위해 큐레이터 두 스펙(people/event)을 GPT-5.6 Luna로
 옮겼지만, 한국어 공개 문서에서 외국어 토큰 혼입이 반복되어 2026-08-29부터 두 레인
-모두 DeepSeek V4 Pro(`deepseek`/`deepseek_pro`)를 사용한다. 바인딩은
+모두 DeepSeek를 사용한다. 2026-09-10부터 기존 `deepseek_pro` 별칭도
+V4.1 Flash(`deepseek-flash`)로 해석한다. 바인딩은
 `bot_config.resolve_agent_tool_loop`가 스펙과 `config/agent_runtime.json`에서 해석한다.
 DeepSeek 시간대 단가는 이 큐레이터들과 webchat 등 모든 DeepSeek 호출부의 과금에
 계속 쓰인다.

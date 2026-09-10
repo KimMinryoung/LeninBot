@@ -40,7 +40,9 @@ from scripts.commulingo_backfill_event_links import (
     VALID_KINDS, FALLBACK_KIND, normalize_label, resolve_person_id,
 )
 
-MODEL = "deepseek-v4-pro"
+from llm.provider_registry import DEEPSEEK_FLASH_MODEL
+
+MODEL = DEEPSEEK_FLASH_MODEL
 CHANGED_BY = "operator:claude-code"
 REPORT_DIR = PROJECT_ROOT / "logs" / "commulingo"
 # Wikimedia asks bots to go serial rather than parallel. Concurrency 8 took

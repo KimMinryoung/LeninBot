@@ -17,7 +17,7 @@ class HubCuratorSpecTests(unittest.TestCase):
 
     def test_provider_and_model(self):
         self.assertEqual(HUB_CURATOR.provider, "deepseek")
-        self.assertEqual(HUB_CURATOR.model, "deepseek_pro")
+        self.assertEqual(HUB_CURATOR.model, "deepseek_flash")
         self.assertTrue(HUB_CURATOR.skip_orchestrator_report)
 
     def test_every_tool_has_a_gateway_risk_class(self):

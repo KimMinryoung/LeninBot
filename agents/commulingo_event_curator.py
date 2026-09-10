@@ -185,7 +185,7 @@ COMMULINGO_EVENT_CURATOR = AgentSpec(
     # as the people/glossary curator. The shared write validator remains the
     # provider-independent final guard against script leakage.
     provider="deepseek",
-    model="deepseek_pro",
+    model="deepseek_flash",
     # A section is several times the text of a person card and is researched from
     # more sources, so both the round count and the budget sit above the people
     # curator's 16 / $0.35. Neither has been the binding constraint on that lane

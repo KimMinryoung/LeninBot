@@ -156,7 +156,7 @@ HUB_CURATOR = AgentSpec(
     # text is already validated on that lane. The write-boundary validator in
     # telegram.curate remains the provider-independent final guard.
     provider="deepseek",
-    model="deepseek_pro",
+    model="deepseek_flash",
     budget_usd=0.30,
     max_rounds=14,
     max_input_tokens=160_000,

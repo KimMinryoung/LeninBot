@@ -17,9 +17,11 @@ OPENAI_MODEL_MAP = {
     "gpt56luna": "gpt-5.6-luna",
 }
 
+DEEPSEEK_FLASH_MODEL = "deepseek-flash"
+# Compatibility for persisted selections; active defaults use deepseek_flash.
 DEEPSEEK_MODEL_MAP = {
-    "deepseek_pro": "deepseek-v4-pro",
-    "deepseek_flash": "deepseek-v4-flash",
+    "deepseek_pro": DEEPSEEK_FLASH_MODEL,
+    "deepseek_flash": DEEPSEEK_FLASH_MODEL,
 }
 
 KIMI_MODEL_MAP = {"kimi_k3": "kimi-k3"}
@@ -28,13 +30,25 @@ TIER_MODEL_KEYS = {
     "claude": {"high": "opus", "medium": "sonnet", "low": "haiku"},
     "openai": {"high": "gpt56", "medium": "gpt56terra", "low": "gpt56luna"},
     "deepseek": {
-        "high": "deepseek_pro",
+        "high": "deepseek_flash",
         "medium": "deepseek_flash",
         "low": "deepseek_flash",
     },
     "kimi": {"high": "kimi_k3", "medium": "kimi_k3", "low": "kimi_k3"},
     "local": {"high": "local", "medium": "local", "low": "local"},
 }
+
+
+def resolve_deepseek_model(model: str | None = None) -> str:
+    """Resolve application tiers/aliases, preserving explicit upstream model IDs.
+
+    In particular, an explicit V4 Pro ID remains usable for comparison and
+    historical billing is independent of this application selection policy.
+    """
+    value = str(model or "").strip() or "deepseek_flash"
+    key = TIER_MODEL_KEYS["deepseek"].get(value.lower(), value.lower())
+    return DEEPSEEK_MODEL_MAP.get(key, value)
+
 
 MODEL_DISPLAY_NAMES = {
     "claude-opus-5": "Claude Opus 5",
@@ -43,6 +57,7 @@ MODEL_DISPLAY_NAMES = {
     "gpt-5.6-sol": "GPT-5.6 Sol",
     "gpt-5.6-terra": "GPT-5.6 Terra",
     "gpt-5.6-luna": "GPT-5.6 Luna",
+    "deepseek-flash": "DeepSeek V4.1 Flash",
     "deepseek-v4-pro": "DeepSeek V4 Pro",
     "deepseek-v4-flash": "DeepSeek V4 Flash",
     "kimi-k3": "Kimi K3",
@@ -87,8 +102,17 @@ _DEEPSEEK_PEAK = {
     "deepseek-v4-pro": (1.32, 3.96, 0.044),
 }
 
+# Source: https://api-docs.deepseek.com/quick_start/pricing/ (2026-09-10).
+# Weekday-only peak windows apply to both models from the Flash release.
+# Flash pricing starts September 10; Pro retains its old rate until September 14.
+DEEPSEEK_V41_START = datetime(2026, 9, 10, 4, 0, tzinfo=timezone.utc)
+DEEPSEEK_PRO_RETIREMENT = datetime(2026, 9, 14, 4, 0, tzinfo=timezone.utc)
+_DEEPSEEK_V41_PEAK = (0.30, 1.20, 0.006)
+
 
 def _deepseek_key(model: str) -> str | None:
+    if model == "deepseek-flash":
+        return "deepseek-v4-flash"
     if model in _DEEPSEEK_FLAT:
         return model
     for base in _DEEPSEEK_FLAT:
@@ -103,16 +127,23 @@ def deepseek_price_triple(
     """(cache-miss input, output, cache-hit input) USD **per 1M tokens** for a
     DeepSeek model at ``now`` (UTC, defaults to current time), or None if the
     model is not DeepSeek. Flat until the 2026-08-16 16:00 UTC cutover, then
-    peak/off-peak; the caller divides by 1_000_000 for a per-token rate."""
+    peak/off-peak. Flash switches on September 10, Pro on September 14
+    (04:00 UTC). Weekday-only peaks apply to both from September 10.
+    The caller divides by 1_000_000 for a per-token rate.
+    """
     key = _deepseek_key(model)
     if key is None:
         return None
     now = now or datetime.now(timezone.utc)
     if now < DEEPSEEK_TIERED_START:
         return _DEEPSEEK_FLAT[key]
-    miss, out, hit = _DEEPSEEK_PEAK[key]
-    hour = now.astimezone(timezone.utc).hour
-    if (1 <= hour < 4) or (6 <= hour < 10):
+    utc_now = now.astimezone(timezone.utc)
+    cutover = DEEPSEEK_PRO_RETIREMENT if key == "deepseek-v4-pro" else DEEPSEEK_V41_START
+    v41 = utc_now >= cutover
+    miss, out, hit = _DEEPSEEK_V41_PEAK if v41 else _DEEPSEEK_PEAK[key]
+    hour = utc_now.hour
+    peak_day = utc_now < DEEPSEEK_V41_START or utc_now.weekday() < 5
+    if peak_day and ((1 <= hour < 4) or (6 <= hour < 10)):
         return miss, out, hit
     return miss / 2, out / 2, hit / 2
 
@@ -243,6 +274,7 @@ def anthropic_pricing_table(
         "claude-opus-5": _anthropic_row(5.00, 25.00, 0.50),
         "claude-sonnet-5": sonnet,
         "claude-haiku-4-5": _anthropic_row(1.00, 5.00, 0.10),
+        "deepseek-flash": _deepseek("deepseek-flash"),
         "deepseek-v4-flash": _deepseek("deepseek-v4-flash"),
         "deepseek-v4-pro": _deepseek("deepseek-v4-pro"),
         "kimi-k3": {

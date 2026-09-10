@@ -31,7 +31,9 @@ if str(PROJECT_ROOT) not in sys.path:
 from db import query as db_query, execute as db_execute
 from secrets_loader import get_secret
 
-MODEL = "deepseek-v4-pro"
+from llm.provider_registry import DEEPSEEK_FLASH_MODEL
+
+MODEL = DEEPSEEK_FLASH_MODEL
 CHANGED_BY = "operator:claude-code"
 REPORT_DIR = PROJECT_ROOT / "logs" / "commulingo"
 

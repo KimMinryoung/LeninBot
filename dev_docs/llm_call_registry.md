@@ -67,3 +67,5 @@ registry 항목의 max_tokens는 여전히 첫 시도 예산이다. 추론 호�
 - KG graphiti 모델(kg_extraction_*, kg_embedding)도 KG 서비스 초기화 시점 해석 — 반영은 재시작 또는 KG unhealthy→재초기화 시.
 - `kg_document_extraction` (2026-09-03): 발행 문서 → fact 추출 (gemini-3.5-flash-lite, json_mode). `KG_DOC_EXTRACT_LLM=1`일 때만 `jobs/kg_sync_documents`·리서치 발행 훅이 호출한다. 백필 ≈$1 일회, 이후 월 <$0.05.
 - `vision_fallback`은 조회용 등재만 — 실제 모델은 bot_config 티어 시스템이 결정.
+
+2026-09-10부터 DeepSeek executor 모델 ID는 `deepseek-flash`(V4.1 Flash)다. Writer의 model-only 기본 선택은 `deepseek_flash`이며 옛 Pro 선택 호환은 Writer 입력 경계에서 처리한다.

@@ -12,6 +12,7 @@ from secrets_loader import get_secret
 from llm.provider_registry import (
     CLAUDE_MODEL_ALIASES,
     DEEPSEEK_MODEL_MAP,
+    resolve_deepseek_model,
     KIMI_MODEL_MAP,
     MODEL_DISPLAY_NAMES,
     OPENAI_MODEL_MAP,
@@ -156,7 +157,7 @@ _CONFIG_DEFAULTS = {
     "task_concurrency": 2,     # max parallel background tasks
     "autonomous_active": True, # toggle the hourly autonomous project loop (run_tick)
     "autonomous_provider": "deepseek", # scheduled autonomous loop provider
-    "autonomous_model": "high", # autonomous model tier; high=DeepSeek V4 Pro
+    "autonomous_model": "high", # autonomous model tier; high=DeepSeek V4.1 Flash
     # Web chat runs independently from Telegram's /config. These keys pin what
     # cyber-lenin.com users get; the API service snapshots them at startup
     # (bot_config is imported once, no live reload), so edits take effect on
@@ -358,7 +359,7 @@ def _tier_to_display(tier: str, provider: str | None = None) -> str:
     if provider == "openai":
         model_name = _OPENAI_MODEL_MAP.get(alias, alias)
     elif provider == "deepseek":
-        model_name = _DEEPSEEK_MODEL_MAP.get(alias, alias)
+        model_name = resolve_deepseek_model(alias)
     elif provider == "kimi":
         model_name = _KIMI_MODEL_MAP.get(alias, alias)
     elif provider == "local":
@@ -406,7 +407,7 @@ def _resolve_openai_model(alias: str) -> str:
 
 def _resolve_deepseek_model(alias: str) -> str:
     """Resolve DeepSeek model alias to the current official API model ID."""
-    return _DEEPSEEK_MODEL_MAP.get(alias, alias)
+    return resolve_deepseek_model(alias)
 
 
 def _resolve_kimi_model(alias: str) -> str:
@@ -451,7 +452,7 @@ def resolve_agent_tool_loop(spec, policy) -> AgentLoopBinding:
             raise RuntimeError("DEEPSEEK_API_KEY is not configured")
         return AgentLoopBinding(
             chat_with_tools, _deepseek_anthropic_client,
-            _resolve_deepseek_model(spec.model or "deepseek_pro"), "deepseek", reasoning,
+            _resolve_deepseek_model(spec.model or "deepseek_flash"), "deepseek", reasoning,
         )
     raise ValueError(f"unsupported tool-loop provider for {spec.name}: {provider!r}")
 

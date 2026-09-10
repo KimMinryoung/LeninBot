@@ -15,7 +15,9 @@ import time
 
 from browser_use import Agent, Browser
 from browser_use.llm.anthropic.chat import ChatAnthropic
-from llm.provider_registry import OPENAI_MODEL_MAP, TIER_MODEL_KEYS
+from llm.provider_registry import (
+    DEEPSEEK_FLASH_MODEL, OPENAI_MODEL_MAP, TIER_MODEL_KEYS, resolve_deepseek_model,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -25,18 +27,13 @@ _COOKIE_PATH = os.path.join(_DATA_DIR, "browser_use_cookies.json")
 # Default limits
 _DEFAULT_MAX_STEPS = 20
 _DEFAULT_BROWSER_USE_PROVIDER = "deepseek"
-_DEFAULT_BROWSER_USE_MODEL = "deepseek-v4-flash"
+_DEFAULT_BROWSER_USE_MODEL = DEEPSEEK_FLASH_MODEL
 _DEFAULT_BROWSER_USE_MODELS = {
-    "deepseek": "deepseek-v4-flash",
+    "deepseek": DEEPSEEK_FLASH_MODEL,
     "openai": OPENAI_MODEL_MAP[TIER_MODEL_KEYS["openai"]["medium"]],
     "google": "gemini-2.5-flash",
 }
 _DEFAULT_VISION_FALLBACK_PROVIDER = "google"
-
-_DEEPSEEK_MODEL_ALIASES = {
-    "deepseek_pro": "deepseek-v4-pro",
-    "deepseek_flash": "deepseek-v4-flash",
-}
 
 _OPENAI_MODEL_ALIASES = OPENAI_MODEL_MAP
 
@@ -163,11 +160,7 @@ def _normalize_model(model: str | None, provider: str) -> str:
     lowered = value.lower()
 
     if provider == "deepseek":
-        if lowered == "high":
-            return "deepseek-v4-pro"
-        if lowered in {"medium", "low"}:
-            return "deepseek-v4-flash"
-        return _DEEPSEEK_MODEL_ALIASES.get(lowered, value)
+        return resolve_deepseek_model(value)
 
     if provider == "openai":
         if lowered in {"high", "medium", "low"}:
@@ -202,8 +195,8 @@ def _build_llm(model: str | None = None, provider: str | None = None):
         default_model = _DEFAULT_BROWSER_USE_MODELS.get(provider, _DEFAULT_BROWSER_USE_MODEL)
     model = _normalize_model(model or default_model, provider)
     if str(model).lower().startswith("claude") or str(model).lower() in {"opus", "sonnet", "haiku"}:
-        logger.warning("browser-use forbids Claude model override %r; using deepseek-v4-flash", model)
-        model = "deepseek-v4-flash"
+        logger.warning("browser-use forbids Claude model override %r; using %s", model, DEEPSEEK_FLASH_MODEL)
+        model = DEEPSEEK_FLASH_MODEL
 
     from secrets_loader import get_secret
 
@@ -259,7 +252,7 @@ def _build_llm(model: str | None = None, provider: str | None = None):
         logger.warning("browser-use forbids Claude provider; using DeepSeek instead")
 
     llm = _DeepSeekAnthropicBrowserChat(
-        model="deepseek-v4-flash",
+        model=DEEPSEEK_FLASH_MODEL,
         api_key=_deepseek_key(),
         base_url=_deepseek_anthropic_base(),
         timeout=120,

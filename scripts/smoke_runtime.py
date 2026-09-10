@@ -1364,7 +1364,7 @@ def _assert_autonomous_cli_status_uses_config_without_db() -> None:
         assert json_rc == 0
         assert json_output["autonomous_active"] is False
         assert json_output["provider"] == "deepseek"
-        assert json_output["model_id"] == "deepseek-v4-flash"
+        assert json_output["model_id"] == "deepseek-flash"
         assert json_output["timer"]["next"] == "Mon 2026-05-25 14:17:00 UTC"
         assert json_output["service"]["result"] == "success"
         assert json_output["service"]["exit_status"] == "0"
@@ -1376,7 +1376,7 @@ def _assert_autonomous_cli_status_uses_config_without_db() -> None:
         assert rc == 0
         assert "autonomous_active: false" in output
         assert "provider: deepseek" in output
-        assert "model: medium (deepseek-v4-flash)" in output
+        assert "model: medium (deepseek-flash)" in output
         assert "paused by config" in output
         assert "timer:" not in output
     finally:

@@ -146,7 +146,7 @@ Rough drafts should stay in project notes. Publishing is for artifacts that meet
 
 ## Provider and Budget
 
-Defaults come from `bot_config.py` and can be overlaid in `config/agent_runtime.json`. The example pins autonomous work to DeepSeek Pro with a smaller budget and finalization tools for state/publishing persistence.
+Defaults come from `bot_config.py` and can be overlaid in `config/agent_runtime.json`. The example pins autonomous work to DeepSeek V4.1 Flash (`deepseek-flash`; legacy `deepseek_pro` selections resolve to Flash) with a smaller budget and finalization tools for state/publishing persistence.
 
 Do not assume the autonomous loop uses the same provider as Telegram chat. Use `get_current_model_selection(kind="autonomous")` for display/runtime metadata.
 

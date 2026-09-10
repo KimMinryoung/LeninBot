@@ -46,7 +46,7 @@ Explain the final decision in Korean. An escalation must identify
 what the operator must establish to decide. A valid decision ends the run; never invent evidence.
 """),
     tools=["wiki_search", "wiki_get", "web_search", "fetch_url", "commulingo_people"],
-    provider="deepseek", model="deepseek_pro", budget_usd=0.20,
+    provider="deepseek", model="deepseek_flash", budget_usd=0.20,
     max_rounds=12, max_input_tokens=120_000, max_output_tokens=8000,
     max_output_continuations=2, thinking_policy="tool_loop", thinking_budget_tokens=4096,
     include_political_line=False,
