@@ -18,6 +18,24 @@ Default paths can be overridden with:
 
 Edits to these Markdown files affect the next LLM call that renders the agent prompt. No service restart is needed for prompt text alone.
 
+The standalone roleplay bot separately reads `identity/roleplay_persona.md` on every
+turn in `telegram.roleplay_bot.build_system_prompt()`, then appends `EXTERNAL_SOURCE_RULE`.
+Persona edits therefore apply on the next turn without a restart. Existing conversation
+history is retained and can still influence style; changing the persona does not clear it.
+
+The roleplay identity distinguishes historical background, a behavioral interpretation,
+and user-established canon. Its current interpretation expresses organizational judgment
+through questions and choices rather than repeated paperwork metaphors or omniscient
+self-analysis. Kovno/Kaunas is the birthplace; the Petersburg official biography and
+Marijampol interrogation account are distinct. The owner has explicitly adopted private-life
+interrogation statements, including the Goloshchyokin relationship, as roleplay canon;
+do not reintroduce uncertainty about them into in-character dialogue. Existing female
+appearance and personal preferences remain canon, without determining political character.
+The historical behavioral specification now distinguishes personnel work, policy defense,
+security investigations, loss of authority, and private relationships. Source passages,
+interpretive limits, and evaluation prompts are maintained in `roleplay_persona_design.md`;
+that evidence document is not automatically injected into the runtime prompt.
+
 ## Prompt Assembly
 
 For prompt-IR agents, `agents/base.py` builds the final prompt in this order:

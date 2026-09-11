@@ -82,3 +82,6 @@ local_graffiti/
 .pw_cookies.json
 .env.bak-*
 .watchdog_ping_token
+
+# 로컬 페르소나 비교 테스트와 생성 결과
+/experiments/roleplay_personas/
