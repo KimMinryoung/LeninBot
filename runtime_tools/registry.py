@@ -302,7 +302,7 @@ TOOLS = [
             "policies and documents across current affairs, the CommuLingo Soviet-history "
             "dictionary (people/terms/events, Korean canonical names) and published research/"
             "archival documents. Facts come back as 'Subject —Predicate→ Object: fact' with "
-            "validity dates, trust tier and source. When the query names one known entity the "
+            "validity dates, trust tier and source. When the query consists of one unambiguous entity name the "
             "result is that entity's full neighbourhood (aliases, external ids, active and "
             "expired facts). Do not invent English names for Korean organizations/publications; "
             "prefer canonical names already used in KG, e.g. '디아마트 (DiaMat)' and "
@@ -322,7 +322,7 @@ TOOLS = [
                         "Korean name if known."
                     ),
                 },
-                "num_results": {"type": "integer", "description": "Results count (1-20).", "default": 10},
+                "num_results": {"type": "integer", "description": "Maximum returned entity/fact items (1-20).", "default": 10},
                 "entity": {
                     "type": "string",
                     "description": (
@@ -334,13 +334,14 @@ TOOLS = [
                     "type": "string",
                     "enum": ["auto", "entity", "semantic"],
                     "description": (
-                        "auto (default): entity view when the query names exactly one known entity, "
+                        "auto (default): entity view for an entity name alone, "
                         "else semantic search. entity: force the entity view. semantic: force hybrid search."
                     ),
                     "default": "auto",
                 },
             },
-            "required": ["query"],
+            "anyOf": [{"required": ["query"], "properties": {"query": {"pattern": "\\S"}}},
+                      {"required": ["entity"], "properties": {"entity": {"pattern": "\\S"}}}],
         },
     },
     {
@@ -465,7 +466,7 @@ async def _exec_vector_search(
         return ToolFailure(f"Vector search failed: {e}")
 
 
-async def _exec_kg_search(query: str, num_results: int = 10, entity: str | None = None,
+async def _exec_kg_search(query: str = "", num_results: int = 10, entity: str | None = None,
                           mode: str = "auto") -> str:
     """Execute knowledge graph search (entity view or semantic) off the event loop."""
     try:
@@ -478,7 +479,10 @@ async def _exec_kg_search(query: str, num_results: int = 10, entity: str | None 
             search_knowledge_graph, query, num_results, None,
             entity=(entity or "").strip() or None, mode=mode or "auto",
         )
-        return result or "No knowledge graph results found."
+        if not result:
+            from tool_gateway.results import ToolResult
+            return ToolResult("No knowledge graph results found.", getattr(result, "result_metadata", None))
+        return result
     except Exception as e:
         logger.error("kg_search error: %s", e)
         return ToolFailure(f"Knowledge graph search failed; do not treat this as no KG data: {e}")

@@ -47,29 +47,35 @@ def _ensure_table() -> None:
             stats        JSONB
         )
     """)
+    db_execute("ALTER TABLE kg_sync_state ADD COLUMN IF NOT EXISTS last_attempt_at TIMESTAMPTZ")
     _table_ensured = True
 
 
-def get_state(source: str) -> dict:
-    _ensure_table()
-    row = db_query_one("SELECT * FROM kg_sync_state WHERE source = %s", (source,))
+def get_state(source: str, *, dry_run: bool = False) -> dict:
+    if not dry_run:
+        _ensure_table()
+    exists = db_query_one("SELECT to_regclass('kg_sync_state') AS name")
+    row = db_query_one("SELECT * FROM kg_sync_state WHERE source = %s", (source,)) if exists and exists['name'] else None
     return dict(row) if row else {"source": source, "watermark": None, "last_run_at": None,
                                   "last_full_at": None, "stats": None}
 
 
 def set_state(source: str, *, watermark: datetime, full: bool, stats: dict) -> None:
     _ensure_table()
+    complete = bool(stats.get("complete")) and not stats.get("error")
     db_execute(
         """
-        INSERT INTO kg_sync_state (source, watermark, last_run_at, last_full_at, stats)
-        VALUES (%s, %s, NOW(), CASE WHEN %s THEN NOW() ELSE NULL END, %s)
+        INSERT INTO kg_sync_state (source, watermark, last_run_at, last_full_at, stats, last_attempt_at)
+        VALUES (%s, %s, CASE WHEN %s THEN NOW() END, CASE WHEN %s THEN NOW() END, %s, NOW())
         ON CONFLICT (source) DO UPDATE SET
-            watermark    = EXCLUDED.watermark,
-            last_run_at  = NOW(),
+            watermark    = coalesce(EXCLUDED.watermark, kg_sync_state.watermark),
+            last_run_at  = coalesce(EXCLUDED.last_run_at, kg_sync_state.last_run_at),
+            last_attempt_at = NOW(),
             last_full_at = CASE WHEN %s THEN NOW() ELSE kg_sync_state.last_full_at END,
             stats        = EXCLUDED.stats
         """,
-        (source, watermark, full, json.dumps(stats, ensure_ascii=False, default=str), full),
+        (source, watermark if complete else None, complete, full and complete,
+         json.dumps(stats, ensure_ascii=False, default=str), full and complete),
     )
 
 
@@ -83,13 +89,17 @@ def _load_source(name: str):
     return mod
 
 
-def run_source(name: str, *, full: bool = False, limit: int | None = None,
+def _run_source(name: str, *, full: bool = False, limit: int | None = None,
                dry_run: bool = False, since: datetime | None = None, force: bool = False) -> dict:
     """Run one source; returns its stats dict (also persisted unless dry-run)."""
     mod = _load_source(name)
-    state = get_state(name)
+    if limit is not None and limit < 1:
+        raise ValueError("limit must be positive")
+    state = get_state(name, dry_run=dry_run)
     started = datetime.now(timezone.utc)
 
+    if (state.get("stats") or {}).get("mode") == "full" and (state.get("stats") or {}).get("complete") is False:
+        full = True
     if not full:
         last_full = state.get("last_full_at")
         if state.get("watermark") is None:
@@ -107,13 +117,32 @@ def run_source(name: str, *, full: bool = False, limit: int | None = None,
     logger.info("[kg-sync] %s: %s (since=%s, limit=%s, dry_run=%s)", name, reason, since, limit, dry_run)
     t0 = time.monotonic()
     extra = {"force": True} if (force and name == "documents") else {}
-    stats = mod.run(since=since, full=full, limit=limit, dry_run=dry_run, **extra)
+    if not dry_run:
+        # Persist intent before any graph writes, so SIGTERM/crash also resumes
+        # a requested full pass without advancing its prior watermark.
+        set_state(name, watermark=started, full=full,
+                  stats={"complete": False, "phase": "running", "mode": "full" if full else "incremental",
+                         "remaining": None, "failed": 0})
+    try:
+        stats = mod.run(since=since, full=full, limit=limit, dry_run=dry_run, **extra)
+    except Exception as exc:
+        logger.exception("[kg-sync] %s failed", name)
+        stats = {"error": str(exc), "complete": False, "failed": 1, "remaining": None}
     stats = dict(stats or {})
     stats.update({"mode": "full" if full else "incremental", "reason": reason,
                   "elapsed_s": round(time.monotonic() - t0, 1), "dry_run": dry_run})
-    if not dry_run and not stats.get("error"):
+    stats.setdefault("failed", int(bool(stats.get("error"))))
+    stats.setdefault("remaining", 0)
+    stats.setdefault("complete", not stats.get("error") and not stats["remaining"])
+    if not dry_run:
         set_state(name, watermark=started, full=full, stats=stats)
     return stats
+
+
+def run_source(name: str, **kwargs) -> dict:
+    from kg_runtime.locks import kg_write_lock
+    with kg_write_lock("sync:" + name):
+        return _run_source(name, **kwargs)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -122,6 +151,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="comma-separated: " + ",".join(SOURCES))
     parser.add_argument("--full", action="store_true", help="full reconciliation pass")
     parser.add_argument("--limit", type=int, default=None, help="cap items processed (documents: docs; commulingo: facts)")
+    parser.add_argument("--commulingo-limit", type=int, help="override --limit for CommuLingo facts")
+    parser.add_argument("--documents-limit", type=int, help="override --limit for documents")
     parser.add_argument("--dry-run", action="store_true", help="compute facts, write nothing")
     parser.add_argument("--force", action="store_true",
                         help="documents: re-extract even when the content hash is unchanged (LLM backfill)")
@@ -135,7 +166,9 @@ def main(argv: list[str] | None = None) -> int:
     failed = False
     for name in [s.strip() for s in args.source.split(",") if s.strip()]:
         try:
-            results[name] = run_source(name, full=args.full, limit=args.limit, dry_run=args.dry_run, force=args.force)
+            source_limit = getattr(args, name + "_limit", None)
+            results[name] = run_source(name, full=args.full, limit=source_limit if source_limit is not None else args.limit,
+                                       dry_run=args.dry_run, force=args.force)
             if results[name].get("error"):
                 failed = True
         except Exception as exc:

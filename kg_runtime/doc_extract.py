@@ -324,7 +324,7 @@ def build_llm_prompt(rec: DocRecord) -> str:
     return "\n".join(head) + "\n\n---\n" + text
 
 
-def parse_llm_facts(raw: str) -> list[dict]:
+def parse_llm_facts(raw: str, *, strict: bool = False) -> list[dict]:
     """Parse the model's JSON; tolerate fences and a bare list."""
     if not raw:
         return []
@@ -337,12 +337,18 @@ def parse_llm_facts(raw: str) -> list[dict]:
     except ValueError:
         m = re.search(r"\{.*\}", text, flags=re.S)
         if not m:
+            if strict:
+                raise ValueError("Document extraction returned invalid JSON")
             return []
         try:
             data = json.loads(m.group(0))
         except ValueError:
+            if strict:
+                raise ValueError("Document extraction returned invalid JSON")
             return []
     facts = data.get("facts") if isinstance(data, dict) else data
+    if strict and not isinstance(facts, list):
+        raise ValueError("Document extraction must return a facts array")
     return [f for f in (facts or []) if isinstance(f, dict)]
 
 
@@ -389,9 +395,8 @@ def run_llm_extraction(rec: DocRecord) -> list[dict]:
 
     raw = generate_sync(LLM_FEATURE, build_llm_prompt(rec), system=EXTRACTION_SYSTEM)
     if not raw:
-        logger.warning("[doc-extract] %s: LLM returned nothing", rec.ref)
-        return []
-    return llm_facts(rec, parse_llm_facts(raw))
+        raise RuntimeError(f"Document extraction returned no response: {rec.ref}")
+    return llm_facts(rec, parse_llm_facts(raw, strict=True))
 
 
 # ── Per-document pipeline ─────────────────────────────────────────────────────
@@ -439,22 +444,25 @@ def stamp_document_node(rec: DocRecord) -> None:
     from kg_runtime.search import _get_neo4j_sync_driver
     with _get_neo4j_sync_driver() as (drv, db):
         with drv.session(database=db) as s:
-            s.run(
+            result = s.run(
                 "MATCH (n:Entity:Document) WHERE $ref IN coalesce(n.external_ids, []) "
                 "SET n.content_sha256 = $sha, n.doc_kind = $kind, n.slug = $ident, n.url = $url, "
-                "    n.lang = $lang, n.published_at = $pub, n.extracted_at = datetime()",
+                "    n.lang = $lang, n.published_at = $pub, n.extracted_at = datetime() RETURN count(n) AS c",
                 ref=rec.ref, sha=rec["sha"], kind=rec["kind"], ident=rec["ident"], url=rec.get("url"),
                 lang=rec.get("lang"), pub=rec.get("published_at"),
-            ).consume()
+            ).single()
+            if not result or result["c"] != 1:
+                raise RuntimeError(f"Expected one Document node for {rec.ref}")
 
 
-def expire_document_edges(ref: str) -> int:
+def expire_document_edges(ref: str, *, keep_uuids: list[str] | None = None) -> int:
     from kg_runtime.search import _get_neo4j_sync_driver
     with _get_neo4j_sync_driver() as (drv, db):
         with drv.session(database=db) as s:
             rec = s.run(
                 "MATCH ()-[r:RELATES_TO]->() WHERE r.doc_ref = $ref AND r.expired_at IS NULL "
-                "SET r.expired_at = datetime() RETURN count(r) AS cnt", ref=ref,
+                "AND NOT r.uuid IN $keep "
+                "SET r.expired_at = datetime() RETURN count(r) AS cnt", ref=ref, keep=keep_uuids or [],
             ).single()
             return rec["cnt"] if rec else 0
 
@@ -470,22 +478,33 @@ def existing_document_hashes(prefix: str) -> dict[str, str]:
             return {r["ref"]: r["sha"] for r in rows}
 
 
-def extract_document(rec: DocRecord, *, names=None, alias_index=None, use_llm: bool | None = None,
+def _extract_document(rec: DocRecord, *, names=None, alias_index=None, use_llm: bool | None = None,
                      force: bool = False, existing_sha: str | None = None) -> dict:
     """Full per-document pipeline: skip unchanged, expire old edges when the
     content changed, build facts, write, stamp the node."""
     use_llm = llm_enabled() if use_llm is None else use_llm
     if not force and existing_sha and existing_sha == rec["sha"]:
         return {"ref": rec.ref, "status": "unchanged"}
-    expired = expire_document_edges(rec.ref) if existing_sha else 0
     facts = build_document_facts(rec, names=names, alias_index=alias_index, use_llm=use_llm)
     res = write_document_facts(rec, facts)
-    stamp_document_node(rec)
+    successful = (res.get("status") == "ok" and not res.get("facts_rejected")
+                  and res.get("facts_written", 0) == len(facts)
+                  and len(res.get("edge_uuids", [])) == len(facts))
+    expired = 0
+    if successful:
+        expired = expire_document_edges(rec.ref, keep_uuids=res.get("edge_uuids", []))
+        stamp_document_node(rec)
     return {
-        "ref": rec.ref, "status": res.get("status"), "facts": len(facts), "written": res.get("facts_written", 0),
+        "ref": rec.ref, "status": "ok" if successful else "error", "facts": len(facts), "written": res.get("facts_written", 0),
         "rejected": res.get("facts_rejected", 0), "expired": expired, "llm": use_llm,
         "message": res.get("message", "")[:200],
     }
+
+
+def extract_document(rec: DocRecord, **kwargs) -> dict:
+    from kg_runtime.locks import kg_write_lock
+    with kg_write_lock("document:" + rec.ref):
+        return _extract_document(rec, **kwargs)
 
 
 # ── Convenience for publish hooks ─────────────────────────────────────────────

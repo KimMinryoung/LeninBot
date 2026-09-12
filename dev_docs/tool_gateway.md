@@ -123,3 +123,11 @@ with no matches, not proof of absence. URL fetch labels extracted text, observed
 time and excerpt extent without claiming semantic relevance or factual accuracy.
 An empty extraction returns `ToolFailure`, so audit records do not treat it as a
 successful content read. No response-claim parser or semantic verifier is added.
+
+## Search outcome metadata
+
+`ToolResult` is a `str` subclass with optional `result_metadata`; `ToolFailure` inherits
+it while retaining failure semantics. The dispatcher forwards metadata to audit before
+returning ordinary text to provider loops. KG metadata contains only route, counts,
+empty-result and fallback flags; it does not include result bodies. The KG search schema
+accepts a nonblank `query` or `entity` (either is sufficient).

@@ -59,9 +59,9 @@ def load_records(kinds=ORDER, *, since: datetime | None = None) -> list[dx.DocRe
                     html = html_path.read_text(encoding="utf-8") if html_path.is_file() else None
                     recs.append(dx.archival_record(doc, html))
             except Exception as exc:
-                logger.warning("[kg-sync documents] manifest unreadable: %s", exc)
+                raise RuntimeError(f"archival manifest unreadable: {exc}") from exc
         else:
-            logger.info("[kg-sync documents] archival manifest not found at %s — skipped", MANIFEST_PATH)
+            raise FileNotFoundError(f"archival manifest not found: {MANIFEST_PATH}")
     if "autonote" in kinds:
         sql = "SELECT id, project_id, turn, text, sources, created_at, kind FROM autonomous_project_notes WHERE kind = 'synthesis'"
         params = ()
@@ -73,12 +73,29 @@ def load_records(kinds=ORDER, *, since: datetime | None = None) -> list[dx.DocRe
     return recs
 
 
+def refresh_curated_links(rec, names, existing):
+    """Repair deterministic endpoints after identity splits without re-extracting text."""
+    from jobs.kg_sync_commulingo import fact_changed, expire_edges
+    facts = [dx.collection_fact(rec), *dx.curated_link_facts(rec, names)]
+    changes = [f for f in facts if f["attributes"]["sync_key"] not in existing
+               or fact_changed(f, existing[f["attributes"]["sync_key"]])]
+    if not changes:
+        return 0
+    result = dx.write_document_facts(rec, changes)
+    if result.get("status") != "ok" or result.get("facts_written") != len(changes):
+        raise RuntimeError(f"curated document links failed for {rec.ref}")
+    keep = set(result.get("edge_uuids", []))
+    expire_edges([existing[f["attributes"]["sync_key"]]["uuid"] for f in changes
+                  if f["attributes"]["sync_key"] in existing and existing[f["attributes"]["sync_key"]]["uuid"] not in keep])
+    return len(changes)
+
+
 def run(*, since: datetime | None = None, full: bool = False, limit: int | None = None,
         dry_run: bool = False, kinds=ORDER, use_llm: bool | None = None, force: bool = False) -> dict:
     use_llm = dx.llm_enabled() if use_llm is None else use_llm
     recs = load_records(kinds, since=None if full else since)
     stats: dict = {"documents": len(recs), "by_kind": {}, "llm": use_llm, "processed": 0,
-                   "unchanged": 0, "written": 0, "rejected": 0, "expired": 0, "errors": [], "items": []}
+                   "unchanged": 0, "written": 0, "rejected": 0, "expired": 0, "errors": [], "items": [], "remaining": 0, "failed": 0, "complete": True}
     for r in recs:
         stats["by_kind"][r["kind"]] = stats["by_kind"].get(r["kind"], 0) + 1
     if not recs:
@@ -103,18 +120,33 @@ def run(*, since: datetime | None = None, full: bool = False, limit: int | None 
 
     existing: dict[str, str] = {}
     for prefix in ("research:", "archival:", "autonote:"):
-        try:
-            existing.update(dx.existing_document_hashes(prefix))
-        except Exception as exc:
-            logger.warning("[kg-sync documents] hash lookup failed (%s): %s", prefix, exc)
+        existing.update(dx.existing_document_hashes(prefix))
     names = _commulingo_names()
     from kg_runtime.identity import get_alias_index
     idx = get_alias_index()
     idx.ensure_loaded()
 
+    from jobs.kg_sync_commulingo import existing_sync_edges
+    link_edges = existing_sync_edges(prefix="doc:") if full else {}
+    stats["links_repaired"] = 0
+    attempted = 0
     for rec in recs:
-        if limit is not None and stats["processed"] >= limit:
-            break
+        if not force and existing.get(rec.ref) == rec["sha"]:
+            if full:
+                try:
+                    from kg_runtime.locks import kg_write_lock
+                    with kg_write_lock("document:" + rec.ref):
+                        repaired = refresh_curated_links(rec, names, link_edges)
+                        stats["links_repaired"] += repaired
+                        stats["written"] += repaired
+                except Exception as exc:
+                    stats["errors"].append(f"{rec.ref}: {exc}")
+            stats["unchanged"] += 1
+            continue
+        if limit is not None and attempted >= limit:
+            stats["remaining"] += 1
+            continue
+        attempted += 1
         try:
             # ``full`` widens the candidate set to every document; it never
             # forces re-extraction — unchanged hashes are still skipped, so a
@@ -139,6 +171,13 @@ def run(*, since: datetime | None = None, full: bool = False, limit: int | None 
             idx.refresh_from_neo4j()  # new entities become matchable for the next document
         except Exception:
             pass
+    stats["failed"] = len(stats["errors"])
+    stats["remaining"] += stats["failed"]
+    stats["complete"] = stats["remaining"] == 0
+    if full and stats["complete"]:
+        live_refs = {r.ref for r in recs}
+        for ref in existing.keys() - live_refs:
+            stats["expired"] += dx.expire_document_edges(ref)
     if stats["errors"]:
         stats["error"] = f"{len(stats['errors'])} document(s) failed: {stats['errors'][0][:200]}"
     stats["items"] = stats["items"][:50]

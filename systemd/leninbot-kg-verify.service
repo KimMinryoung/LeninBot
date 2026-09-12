@@ -1,0 +1,14 @@
+[Unit]
+Description=LeninBot read-only KG retrieval and audit verification
+After=network.target leninbot-neo4j.service leninbot-llm-proxy.service
+Requires=leninbot-neo4j.service leninbot-llm-proxy.service
+
+[Service]
+Type=oneshot
+User=grass
+WorkingDirectory=/home/grass/leninbot
+EnvironmentFile=/home/grass/leninbot/.env
+LoadCredentialEncrypted=neo4j_password:/etc/credstore.encrypted/neo4j_password.cred
+LoadCredentialEncrypted=db_password:/etc/credstore.encrypted/db_password.cred
+ExecStart=/home/grass/leninbot/venv/bin/python scripts/verify_kg_runtime.py
+TimeoutStartSec=120

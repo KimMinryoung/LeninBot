@@ -115,6 +115,7 @@ def _restore_relates(tx, edges: list[dict]) -> int:
         r.expired_at = row.expired_at,
         r.episodes = row.episodes,
         r.attributes = row.attributes
+    SET r += coalesce(row.props, {})
     """
     total = 0
     for chunk in _batched(edges):

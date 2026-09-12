@@ -46,6 +46,8 @@ def entity_gated_kg_block(text: str, provider: str = "claude", *, max_entities: 
             if len(summary) > 160:
                 summary = summary[:160].rstrip() + "…"
             head = f"- {node.get('name')}"
+            if node.get("summary_source"):
+                head += f" (summary src: {node['summary_source']})"
             if summary:
                 head += f": {summary}"
             lines.append(head)

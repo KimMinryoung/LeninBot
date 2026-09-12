@@ -55,10 +55,12 @@ CREATE TABLE IF NOT EXISTS tool_audit_log (
     args_summary  TEXT,
     result_status TEXT,
     latency_ms    INTEGER,
-    error_excerpt TEXT
+    error_excerpt TEXT,
+    result_metadata JSONB
 );
 """
 _ALTERS = [
+    "ALTER TABLE tool_audit_log ADD COLUMN IF NOT EXISTS result_metadata JSONB",
     "ALTER TABLE tool_audit_log ADD COLUMN IF NOT EXISTS session_id TEXT",
     "ALTER TABLE tool_audit_log ADD COLUMN IF NOT EXISTS request_id TEXT",
     "ALTER TABLE tool_audit_log ADD COLUMN IF NOT EXISTS parent_request_id TEXT",
@@ -214,6 +216,7 @@ def audit(
     result_status: str,
     latency_ms: int | None = None,
     error_excerpt: str | None = None,
+    result_metadata: dict | None = None,
 ) -> None:
     """Record one tool-call audit event. Never raises into the caller."""
     try:
@@ -263,6 +266,7 @@ def audit(
             "result_status": result_status,
             "latency_ms": latency_ms,
             "error_excerpt": error_excerpt,
+            "result_metadata": result_metadata,
         }
 
         # Sink 1: structured log line (always, synchronous, cheap).

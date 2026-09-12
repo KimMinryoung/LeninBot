@@ -130,7 +130,7 @@ def normalize_alias_key(value) -> str:
     # NAME_NORMALIZATION keys are raw lowercase forms ("u.s.a.", "usa", "rok");
     # try the raw, dot-less and stripped forms before giving up.
     for candidate in (lowered, lowered.replace(".", ""), text):
-        canonical = NAME_NORMALIZATION.get(candidate)
+        canonical = NAME_NORMALIZATION.get(candidate) if candidate not in {"diamat", "dia mat", "다이아마트"} else None
         if canonical:
             return _strip_key(unicodedata.normalize("NFKC", canonical).lower())
     return text
@@ -249,8 +249,8 @@ OPTIONAL MATCH (n)-[r:RELATES_TO]-()
 WITH n, count(r) AS rels
 RETURN n.uuid AS uuid, n.name AS name, labels(n) AS labels, rels,
        ($etype IN labels(n)) AS same_label, coalesce(n.external_ids, []) AS external_ids
-ORDER BY same_label DESC, rels DESC
-LIMIT 5
+ORDER BY (n.name = $names[0]) DESC, same_label DESC, rels DESC
+LIMIT 20
 """
 
 # Weak-key fallback: only when exactly ONE same-label node carries the key
@@ -371,7 +371,8 @@ RETURN count(*) AS cnt
 CYPHER_ALIAS_INDEX_LOAD = """
 MATCH (n:Entity)
 RETURN n.uuid AS uuid, n.name AS name, labels(n) AS labels,
-       coalesce(n.alias_keys, []) AS keys, coalesce(n.weak_keys, []) AS weak_keys
+       coalesce(n.alias_keys, []) AS keys, coalesce(n.weak_keys, []) AS weak_keys,
+       coalesce(n.aliases, []) AS raw_aliases, n.name_ko AS name_ko, n.name_en AS name_en
 """
 
 IDENTITY_INDEX_STATEMENTS = (
@@ -441,14 +442,14 @@ def _filter_rows(rows: list[dict], *, exclude_uuid: str | None, external_id: str
     return out
 
 
-# Label compatibility for name/alias hits. Only Person is strict: a person
+# Label compatibility for name/alias hits. Person and Document are strict: a person
 # never folds into a non-person and vice versa. Every other pair is the same
 # thing under a different extractor label — a country typed Location vs
 # Organization, a treaty typed Policy vs the Concept term, a book typed Asset
 # vs the Document node, a company typed Asset (its stock) vs Organization.
 # Strict matching gave the 2026-09-04 re-sync 160 label conflicts and as many
 # twin nodes (미국/소련 [Location], 트루먼 독트린 [Policy], TSMC [Asset] …).
-STRICT_LABELS = frozenset({"Person"})
+STRICT_LABELS = frozenset({"Person", "Document"})
 
 
 def _labels_compatible(entity_type: str, labels) -> bool:
@@ -461,7 +462,11 @@ def _labels_compatible(entity_type: str, labels) -> bool:
 def _pick_key_hit(rows: list[dict], entity_type: str, name: str) -> ResolveResult:
     if not rows:
         return ResolveResult(None, "none")
-    best = rows[0]
+    exact = [r for r in rows if _strip_key(r.get("name", "").casefold()) == _strip_key(name.casefold())]
+    candidates = exact or [r for r in rows if _labels_compatible(entity_type, r.get("labels"))]
+    if len(candidates) > 1:
+        return ResolveResult(None, "ambiguous")
+    best = candidates[0] if candidates else rows[0]
     if best.get("same_label") or _labels_compatible(entity_type, best.get("labels")):
         return ResolveResult(best["uuid"], "alias", best.get("name"), list(best.get("labels") or []))
     logger.info(
@@ -503,7 +508,7 @@ def resolve_entity_sync(
     rows = [dict(r) for r in session.run(CYPHER_RESOLVE_BY_KEY, names=names, keys=keys, etype=entity_type)]
     rows = _filter_rows(rows, exclude_uuid=exclude_uuid, external_id=external_id, name=name)
     hit = _pick_key_hit(rows, entity_type, name)
-    if hit.found or hit.method == "label_conflict":
+    if hit.found or hit.method in {"label_conflict", "ambiguous"}:
         return hit
     weak_rows = [dict(r) for r in session.run(CYPHER_RESOLVE_BY_WEAK_KEY, keys=keys, etype=entity_type)]
     weak_rows = _filter_rows(weak_rows, exclude_uuid=exclude_uuid, external_id=external_id, name=name)
@@ -533,7 +538,7 @@ async def resolve_entity_async(
     result = await session.run(CYPHER_RESOLVE_BY_KEY, names=names, keys=keys, etype=entity_type)
     rows = _filter_rows([dict(r) async for r in result], exclude_uuid=None, external_id=external_id, name=name)
     hit = _pick_key_hit(rows, entity_type, name)
-    if hit.found or hit.method == "label_conflict":
+    if hit.found or hit.method in {"label_conflict", "ambiguous"}:
         return hit
     result = await session.run(CYPHER_RESOLVE_BY_WEAK_KEY, keys=keys, etype=entity_type)
     weak_rows = _filter_rows([dict(r) async for r in result], exclude_uuid=None, external_id=external_id, name=name)
@@ -772,18 +777,28 @@ class AliasIndex:
                 continue
             labels = [l for l in (r.get("labels") or []) if l != "Entity"]
             entry = (uuid, name, labels)
-            for k in alias_keys_for(name, *(r.get("keys") or [])):
+            if "raw_aliases" in r:
+                strong_keys, weak_keys = split_alias_keys(name, r["raw_aliases"], r.get("name_ko"), r.get("name_en"))
+                # Parenthesized spelling is a search candidate, never a write identity hint.
+                strong_keys += [normalize_alias_key(a) for a in re.findall(r"\(([^()]+)\)", name)]
+            else:
+                strong_keys, weak_keys = r.get("keys") or [], r.get("weak_keys") or []
+            for k in alias_keys_for(name, *strong_keys):
                 if k in GENERIC_ENTITY_NAMES:
                     continue
                 keys.setdefault(k, []).append(entry)
-            for k in alias_keys_for(*(r.get("weak_keys") or [])):
+            for k in alias_keys_for(*weak_keys):
                 if k in GENERIC_ENTITY_NAMES:
                     continue
                 weak.setdefault(k, []).append(entry)
         # Surname-style keys only count when they point at exactly one entity
         # and no entity owns that key as a strong one.
         for k, entries in weak.items():
-            if k not in keys and len({e[0] for e in entries}) == 1:
+            if k in keys:
+                # A strong spelling owned by another node makes this ambiguous,
+                # not evidence that its legitimate weak alias disappeared.
+                keys[k].extend(entries)
+            elif len({e[0] for e in entries}) == 1:
                 keys[k] = entries[:1]
         with self._lock:
             self._keys = keys
@@ -831,7 +846,7 @@ class AliasIndex:
         for key, entries in keys:
             if not self._eligible(key):
                 continue
-            if not broad and key in BROAD_ENTITY_KEYS:
+            if not broad and (key in BROAD_ENTITY_KEYS or len({e[0] for e in entries}) > 1):
                 continue
             if _HANGUL_RE.search(key):
                 # The key must START a word ("우리가" / "리델리가" must not match
@@ -844,6 +859,10 @@ class AliasIndex:
                     hits.append((key, entries))
             elif key in latin_tokens:
                 hits.append((key, entries))
+        exact = {e[0] for _, entries in hits for e in entries
+                 if _strip_key(e[1].casefold()) == _strip_key(text.casefold())}
+        if exact:
+            hits = [(k, [e for e in entries if e[0] in exact]) for k, entries in hits]
         hits.sort(key=lambda kv: -len(kv[0]))
         out: list[AliasHit] = []
         covered: list[str] = []

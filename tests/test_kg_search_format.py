@@ -94,7 +94,7 @@ class EntityModeDispatchTests(unittest.TestCase):
         with mock.patch.object(kgs, "_alias_hits", return_value=[hit]), \
              mock.patch.object(kgs, "_entity_neighborhood", return_value=(self._node(), self._edges())), \
              mock.patch.object(kgs, "get_kg_service", side_effect=AssertionError("must not be called")):
-            out = kgs.search_knowledge_graph("흐루쇼프가 비밀연설을 했나?")
+            out = kgs.search_knowledge_graph("흐루쇼프")
         self.assertIn("[Knowledge Graph: entity view — 니키타 흐루쇼프 (1 active fact(s), 1 expired; matched via '흐루쇼프')]", out)
         self.assertIn("- [anchor] 니키타 흐루쇼프 —Involvement→ 비밀연설: 연설했다 (valid 1956-02-25; src: commulingo)", out)
         self.assertIn("- [?|expired] 니키타 흐루쇼프 —Statement→ X: old (src: scout)", out)
@@ -111,8 +111,8 @@ class EntityModeDispatchTests(unittest.TestCase):
         self.assertIn("- [single] N —Statement→ M: f (src: analyst)", out)
 
     def test_entity_mode_without_hit_returns_none(self):
-        with mock.patch.object(kgs, "_resolve_entity_arg", return_value=None):
-            self.assertIsNone(kgs.search_knowledge_graph("q", entity="Nobody", mode="entity"))
+        with mock.patch.object(kgs, "_alias_hits", return_value=[]):
+            self.assertFalse(kgs.search_knowledge_graph("q", entity="Nobody", mode="entity"))
 
     def test_multiple_hits_add_mini_views_to_semantic(self):
         hits = [AliasHit("u1", "A", ["Person"], "a"), AliasHit("u2", "B", ["Person"], "b")]
@@ -122,8 +122,8 @@ class EntityModeDispatchTests(unittest.TestCase):
              mock.patch.object(kgs, "run_kg_task", return_value={"nodes": [], "edges": []}), \
              mock.patch.object(kgs, "_entity_neighborhood", side_effect=lambda uuid, cap: (dict(node_a, uuid=uuid, name=uuid.upper()), [])):
             out = kgs.search_knowledge_graph("A and B")
-        self.assertIn("entity view — U1", out)
-        self.assertIn("entity view — U2", out)
+        self.assertIn("- A [Person]", out)
+        self.assertIn("- B [Person]", out)
 
 
 class RecallTests(unittest.TestCase):

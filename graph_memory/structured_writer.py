@@ -30,9 +30,10 @@ Returns a structured summary of what was written.
 from __future__ import annotations
 
 import logging
+import json
 import os
 from datetime import datetime, timezone
-from uuid import uuid4
+from uuid import uuid4, uuid5, NAMESPACE_URL
 
 from graphiti_core.nodes import EntityNode, EpisodicNode, EpisodeType
 from graphiti_core.edges import EntityEdge, EpisodicEdge
@@ -227,8 +228,12 @@ def _make_entity_edge(source_uuid: str, target_uuid: str, predicate: str,
                       episode_uuid: str,
                       attributes: dict | None = None,
                       invalid_at: datetime | None = None) -> EntityEdge:
+    sync_key = (attributes or {}).get("sync_key")
+    # A retry after a committed batch must not duplicate the same fact version.
+    version = json.dumps([group_id, sync_key, source_uuid, target_uuid, predicate,
+                          fact_text, str(valid_at), str(invalid_at)], ensure_ascii=False)
     return EntityEdge(
-        uuid=str(uuid4()),
+        uuid=str(uuid5(NAMESPACE_URL, version)) if sync_key else str(uuid4()),
         source_node_uuid=source_uuid,
         target_node_uuid=target_uuid,
         name=predicate,
@@ -546,6 +551,7 @@ async def write_structured_facts(
     # New nodes carried their identity in attributes; existing nodes were not
     # re-saved (that would re-embed them), so union ids/aliases in place.
     identity_updates = 0
+    identity_errors = 0
     for uuid, hints in identity_hints.items():
         if uuid in seen_new_uuids:
             continue
@@ -562,6 +568,7 @@ async def write_structured_facts(
                 )
             identity_updates += 1
         except Exception as exc:
+            identity_errors += 1
             logger.warning("[KG STRUCTURED] identity upsert failed for %s: %s", uuid[:8], exc)
 
     # ── 5. Conformance gate (defensive) ──────────────────────────────────
@@ -580,14 +587,30 @@ async def write_structured_facts(
         logger.error("[KG STRUCTURED] conformance check failed (non-fatal): %s", exc)
         report = None
 
+    if report:
+        removed = {item["edge_uuid"] for item in report.self_loops + report.non_entity_endpoints}
+        kept_edges, kept_indices = [], []
+        for edge, index in zip(entity_edges, written_fact_indices):
+            if edge.uuid in removed:
+                rejected_facts.append(_reject_fact(index, facts[index], "hard conformance violation"))
+            else:
+                kept_edges.append(edge)
+                kept_indices.append(index)
+        entity_edges, written_fact_indices = kept_edges, kept_indices
+    elif allow_sync_predicates:
+        return {"status": "error", "message": "sync conformance check did not complete",
+                "facts_written": 0, "facts_rejected": len(facts), "written_fact_indices": [], "edge_uuids": []}
+
     new_count = len(new_entity_nodes)
     reused_count = len(touched_uuids) - new_count
-    status = "partial_success" if rejected_facts else "ok"
+    status = "error" if not entity_edges or (allow_sync_predicates and identity_errors) else "partial_success" if rejected_facts else "ok"
     msg = (
         f"wrote {len(entity_edges)} fact(s) — "
         f"{new_count} new entity(ies), {reused_count} reused, "
         f"episode={episode.name}"
     )
+    if identity_errors:
+        msg += f" | identity updates failed: {identity_errors}"
     if rejected_facts:
         msg += (
             f" | rejected {len(rejected_facts)} invalid fact(s); "
@@ -610,6 +633,7 @@ async def write_structured_facts(
         "reused_entities": reused_count,
         "identity_updates": identity_updates,
         "entity_uuids": {k[0]: v for k, v in entity_lookup_cache.items()},
+        "edge_uuids": [e.uuid for e in entity_edges],
         "episode_name": episode.name,
         "violations": report.summary_line() if report else "",
     }

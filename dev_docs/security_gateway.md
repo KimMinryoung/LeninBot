@@ -260,3 +260,11 @@ are enforced from day one.
 Low-level connector wrapping (`db.py` / `kg_runtime` / HTTP clients) and routing the
 inbound `mcp_gateway` through this same policy. The tool layer is where capability is
 granted, so it is the right first control plane.
+
+## Bounded result diagnostics
+
+The additive `tool-audit-log` migration adds nullable `result_metadata JSONB`.
+`audit_sink` accepts only `path`, `node_count`, `edge_count`, `result_count`, `empty`,
+and `fallback`, capped at 2,000 JSON characters. Old rows remain null/unknown.
+Apply the migration and refresh the proxy sink before deploying metadata-producing
+consumers. Existing text responses, status codes, redaction and append-only rules remain.

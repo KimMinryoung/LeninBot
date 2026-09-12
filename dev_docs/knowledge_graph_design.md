@@ -1,6 +1,6 @@
 # Knowledge Graph Design
 
-최종 확인 기준: 2026-09-04 코드 트리 (저장소 간 허브 재설계 + 별칭 오염 수리).
+최종 확인 기준: 2026-09-12 코드 트리 (동기화 완료 판정·조회 정확성·감사 지표 개선).
 
 Cyber-Lenin's knowledge graph is the **hub across the project's knowledge stores**: CommuLingo people/terms/events, published research and archival documents, and news/analysis facts written by agents all live in one Neo4j graph. Every mirrored node carries stable external ids, so the same real-world entity converges on one node regardless of which store or agent mentioned it first. The public runtime talks through `kg_runtime/`; Graphiti/Neo4j implementation details live under `graph_memory/`.
 
@@ -61,7 +61,7 @@ Every Entity may carry `external_ids`, `aliases`, `alias_keys`, `name_ko`, `name
 
 **Trusted vs untrusted sides (2026-09-04).** A fact side is *trusted* only when it carries an `external_id` (CommuLingo rows, document manifest entries, Document nodes). An untrusted side — every LLM-extracted document fact, every agent `write_kg_structured` triple — is resolved **by name only** (its aliases are not lookup keys), may **never change an existing node's identity** (no alias/name_ko/name_en/summary union), and when it creates a new node its aliases pass `filter_untrusted_aliases` (no generic nouns, nothing another node already owns as name or strong key, no single-token Korean alias of ≤2 chars or Latin of ≤3). Why: on 2026-09-03 the first document extraction resolved a Soviet subject onto `United States` through an overlapping LLM alias and then unioned everything into it — the node ended up with 60 aliases (소련, 중국, 프랑스, 스탈린, CIA, 연준 …), every later '소련' mention attached to it, and the recall block answered "소련은 왜 무너졌지?" with tariff facts. `skills/kg-maintenance/scripts/repair_alias_pollution.py` (dry-run by default) strips the poisoned aliases, deletes every `doc_ref` edge and orphaned `documents`-group node, and repairs fact text mangled by the abbreviation map; `python -m jobs.kg_sync --source documents --full --force` then rebuilds the document layer under the new rules.
 
-**Label compatibility.** Only `Person` is a strict label (`identity.STRICT_LABELS`): a name/alias hit on a non-person node is reused whatever the extractor's type (a country typed Location, a treaty typed Policy, a book typed Asset, a company typed Asset). Strict same-label matching gave the 2026-09-04 re-sync 160 `label_conflict` twins; `skills/kg-maintenance/scripts/merge_label_twins.py` (dry-run by default, multi-pass, explicit `EXCLUDE` pairs for abbreviation collisions such as WTO = Warsaw Treaty Organization) folded 318 of them into their canonical nodes (survivor: external id > Document > degree > age).
+**Label compatibility.** `Person` and `Document` are strict labels (`identity.STRICT_LABELS`): a name/alias hit on a non-person node is reused whatever the extractor's type (a country typed Location, a treaty typed Policy, a non-document work typed Asset, a company typed Asset). Strict same-label matching gave the 2026-09-04 re-sync 160 `label_conflict` twins; `skills/kg-maintenance/scripts/merge_label_twins.py` (dry-run by default, multi-pass, explicit `EXCLUDE` pairs for abbreviation collisions such as WTO = Warsaw Treaty Organization) folded 318 of them into their canonical nodes (survivor: external id > Document > degree > age).
 
 `GENERIC_ENTITY_NAMES` also blocks the common nouns that run handed out as aliases (정권, 노조, 회사, 선언, 음모, 여당, 대통령, http …). `BROAD_ENTITY_KEYS` (사회주의, 노동계급, 에너지, 전환, 비상, 하니 …) are real, searchable nodes that `AliasIndex.match(broad=False)` skips for recall and document mentions — a chat about 에너지 전환 정책 is not about the 정의당 faction 전환.
 
@@ -84,7 +84,7 @@ See `knowledge_graph_schema.md` for field-level schema details and the mirror ma
 ## Write Paths
 
 - **`write_kg_structured`** (agents): deterministic typed triples. Entities are resolved through the identity layer, so a fact about "Nikita Khrushchev" attaches to the CommuLingo node "니키타 흐루쇼프" via its `name_en` alias. Per-fact `attributes` (dict) are now stored on the edge; `invalid_at` is accepted. Sync-only identity hints (`subject_external_id`, `subject_aliases`, `subject_summary`, `subject_name_ko/en`, and the `object_*` twins — `IDENTITY_FACT_FIELDS`) are honoured by `write_structured_facts` but not exposed in the tool schema.
-- **Sync jobs** (`python -m jobs.kg_sync --source commulingo,documents [--full] [--limit N] [--dry-run]`): deterministic, no LLM for CommuLingo; every edge carries `attributes.sync_key`, re-runs are idempotent, changed facts expire the old edge and write a new one, vanished rows are expired on full passes (automatic every 7 days or `--full`). `kg_sync_state` (Postgres) holds the per-source watermark. Runs nightly at 04:00 KST via `systemd/leninbot-kg-sync.timer`.
+- **Sync jobs** (`python -m jobs.kg_sync --source commulingo,documents [--full] [--documents-limit N] [--commulingo-limit N] [--dry-run]`): deterministic, no LLM for CommuLingo; every edge carries `attributes.sync_key`, re-runs are idempotent, changed facts expire the old edge and write a new one, vanished rows are expired on full passes (automatic every 7 days or `--full`). `kg_sync_state` (Postgres) holds the per-source watermark. Runs nightly at 04:00 KST via `systemd/leninbot-kg-sync.timer`.
   - CommuLingo → Person/Role/Concept/Incident/Location with Korean canonical names, `name_en`/cyrillic/curated aliases, curated summaries; `commulingo_id_redirects` merge or alias the old id. Incremental runs use `updated_at` columns and `commulingo_people_revisions`.
   - Documents → `Document` nodes for public research documents, the archival manifest (`$FRONTEND_DIR/data/commulingo/docs/manifest.json`, whose curated people/terms/events slugs become `Reference(about)` edges to the `commulingo:*` nodes — the archival ↔ CommuLingo hub link) and autonomous `synthesis` notes; `Reference(mentions)` for alias-index hits in title/description/opening text. With `KG_DOC_EXTRACT_LLM=1` the registry site `kg_document_extraction` (gemini-3.5-flash-lite, JSON) adds ≤15 agent-schema facts per document with `attributes.doc_ref` provenance. Idempotent per `content_sha256` stored on the Document node. LLM facts whose subject or object is a generic name (`kg_runtime.identity.GENERIC_ENTITY_NAMES`: common nouns such as 국가/개인/경찰/청년/주주, and schema labels such as Organization/Concept) are dropped and the prompt forbids them — the first run (2026-09-03) created 20+ such nodes because the `Concept` type plus `Statement/Causation: any→any` invited "국가 —Causation→ 계급 적대"-style facts; the mention edge that every LLM entity receives then turned them into nodes.
 - **Publish hook**: `runtime_tools/research.py` schedules `doc_extract.extract_research_by_slug` after a public publish/edit (fire-and-forget; the nightly job is the backstop).
@@ -97,8 +97,8 @@ Typical `group_id` values for agent writes: `geopolitics_conflict`, `diplomacy`,
 
 `knowledge_graph_search(query, num_results, entity=, mode=auto|entity|semantic)`:
 
-1. **Alias match first** (no embedding): the query is matched against `AliasIndex`. Exactly one entity → **entity view**: the node (aliases, external id, summary) plus its 1-hop neighbourhood, active facts first then expired, capped at 25. `entity=` forces this for a named entity; `mode=entity` without a hit returns no result.
-2. Otherwise Graphiti hybrid search (BM25 + cosine, RRF) as before, with a small entity view prepended for up to two alias hits.
+1. **Alias match first** (no embedding): the query is matched against `AliasIndex`. A query consisting only of one unambiguous entity name → **entity view**: the node (aliases, external id, summary) plus its 1-hop neighbourhood, active facts first then expired, bounded by `num_results` (1–20 entity/fact items combined). `entity=` forces this for a named entity; `mode=entity` without a hit returns no result.
+2. Otherwise Graphiti hybrid search (BM25 + cosine, RRF) as before, with descriptors for up to two alias hits. Unrelated neighbourhood edges do not displace query-specific semantic matches.
 3. Every edge is **hydrated** in one Cypher pass (`_hydrate_edges`): subject/object + labels, predicate, `valid_at`/`invalid_at`/`expired_at`, trust tier parsed from the episode name (both `[T:x]` and the sanitized `T-x` form — the pre-redesign parser only knew `T-`, so every structured-write edge showed `?`), and a source label (`commulingo`, `research:<slug>`, `scout`, `analyst`, `news`, …).
 4. Output: `- [tier|expired] 주어 —Predicate→ 목적어: fact (valid 1953-01-01 → 1964-10-01; src: commulingo)` and `- 이름 [Person] (aka: …; id: commulingo:person:x): summary`.
 5. Graphiti failures still fall back to the direct-Cypher text match (now including `alias_text`).
@@ -154,3 +154,44 @@ re-embedding, quarantine or new extraction call is introduced.
 Experience recall states its interpretation caveat once per block, rather than
 repeating it in every memory record. Available source/date/reference fields stay
 attached to each memory; unknown envelope fields are omitted only at rendering.
+
+## Completion, provenance and search diagnostics (2026-09-12)
+
+- The nightly unit uses `--documents-limit 40`; CommuLingo has no per-run fact cap and still writes in batches of 200. Legacy `--limit` applies to both sources unless an explicit source limit overrides it. Limits must be positive.
+- `kg_sync_state.last_attempt_at` and `stats` describe the latest attempt, including `complete`, `remaining`, and `failed`. `watermark`, `last_run_at`, and `last_full_at` advance only on complete success. Interrupted/failed full passes resume as full; unchanged documents and already-written facts are skipped. Dry-run only reads state, never creates its table.
+- Old CommuLingo relations expire only after their replacement was written. Vanished source records are expired only after a complete full pass. Sync edges use deterministic UUIDs per fact version for safe retries. Document hashes are stamped only after every fact was saved; replacement expires old source-owned edges while retaining the new edge UUIDs. Manifest/hash-read failure is an error, not an empty source.
+- Source and per-document replacements use shared host-local file locks in ignored `data/kg_locks/`. Services and ad-hoc jobs run as grass.
+- `curated_name`, `curated_summary`, `curated_source`, and `curated_updated_at` are CommuLingo-owned display fields refreshed even when relation text is unchanged. Search and recall prefer them and show their source ID. The original extracted name/summary remain stored; LLM writes do not own curated fields.
+- Identity normalization does not expand the ambiguous `diamat` spelling into an organization name. Search derives keys from raw aliases/language names, also treating parenthesized spellings as search-only candidates. Exact names win; ambiguous aliases display candidates and are excluded from automatic recall. Person and Document cannot resolve by alias onto other entity classes. Alias conflicts never choose a survivor by degree alone.
+- `knowledge_graph_search` accepts either nonblank `query` or `entity`; absent/blank values for both are invalid. `entity` and `mode=entity` request an entity lookup. Name-only `auto` queries use entity lookup; topical questions use hybrid search. The combined entity/fact item count never exceeds `num_results`.
+- Search returns a string-compatible `ToolResult`/`ToolFailure` carrying `result_metadata`: `path`, `node_count`, `edge_count`, `result_count`, `empty`, `fallback`. Empty success is distinct from failure (`empty=null`). Audit keeps these in `tool_audit_log.result_metadata`; historical null metadata is unknown, never counted as a measured empty result.
+- Hourly integrity checks require the exact organization `디아마트 (DiaMat)`, exercise a semantic query, and include `--metrics`. Source coverage compares current CommuLingo facts and document hashes rather than trusting recent timer success. Weekly reports include coverage, status, empty/fallback rates and p95 latency. These are retrieval diagnostics, not proof that an answer used the results correctly.
+- `scripts/repair_kg_identity.py` is dry-run by default. After a KG backup, `--execute` rebuilds derived keys and detaches archival/research/autonote IDs from non-Document nodes; follow with a full document sync. It never deletes or merges entities. Backup/restore now preserve flattened relation properties (`sync_key`, `doc_ref`, etc.) as well as node properties.
+- Apply the additive `tool-audit-log` migration before restarting the LLM proxy/audit sink, then refresh consumers. Scheduled CommuLingo maintainer/new/enrich/terms/pipeline units mount `neo4j_password`, like the events unit. Missing credentials fail before Graphiti initialization.
+
+### Deterministic identity repair and verification
+
+`repair_kg_identity.py --split-live-terms` additionally detects multiple distinct active
+CommuLingo term IDs on one node. It keeps the source whose canonical name exactly matches
+the node, detaches the other live IDs and their exclusive aliases, and preserves retired
+redirect IDs. If the canonical owner is ambiguous it refuses the split. A subsequent full
+sync creates the missing source node and replaces relations whose endpoint no longer
+carries the intended external ID. A full document pass also refreshes collection/about
+links deterministically, preserving extracted facts and unchanged hashes (no extra LLM call).
+Hard-conformance-rejected edges are excluded from written counts and successful indices.
+
+`systemd/leninbot-kg-verify.service` runs `scripts/verify_kg_runtime.py` on demand with the
+same Neo4j/DB credential mechanism as the curators. It checks exact and ambiguous entities,
+curated Lenin information, hybrid search, empty-result handling and document separation.
+Its five normal tool audit events use `agent_name=kg_verification`; usage reports exclude
+that caller so probes do not inflate organic use. There is no timer or notification for it.
+Coverage counts describe current pending source changes; hourly alerts use failed/incomplete
+runs and >48h successful-sync lag, rather than paging for normal edits waiting until tonight.
+
+Before graph writes, sync persists `phase=running` and the intended full/incremental
+mode without advancing the watermark. Thus process termination also preserves full-pass
+resume intent. Health checks allow a two-hour running grace (the sync unit timeout is
+90 minutes), then flag a stuck attempt. Empty/invalid LLM responses fail extraction rather
+than stamping the document hash. Source coverage includes deterministic document-link
+endpoints as well as hashes. `empty_summary` measures effective display summaries;
+`raw_empty_summary` retains the original extracted-field metric.

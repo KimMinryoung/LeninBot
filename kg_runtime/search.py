@@ -22,7 +22,7 @@ from contextlib import contextmanager
 
 from kg_runtime.service_runtime import get_kg_service, reset_kg_service, run_kg_task
 from secrets_loader import get_secret
-from tool_gateway.results import ToolFailure
+from tool_gateway.results import ToolFailure, ToolResult
 
 logger = logging.getLogger(__name__)
 # Neo4j emits a WARNING notification whenever a query touches a property key
@@ -129,6 +129,8 @@ def _get_neo4j_sync_driver():
         raise RuntimeError("NEO4J_URI not configured")
     user = os.getenv("NEO4J_USER", "neo4j")
     password = get_secret("NEO4J_PASSWORD", "") or ""
+    if not password:
+        raise RuntimeError("NEO4J_PASSWORD is not configured for this service")
     db = os.getenv("NEO4J_DATABASE", "neo4j")
     driver = GraphDatabase.driver(uri, auth=(user, password))
     try:
@@ -152,8 +154,8 @@ OPTIONAL MATCH (ep:Episodic) WHERE ep.uuid IN coalesce(r.episodes, [])
 WITH a, r, b, collect(DISTINCT ep.name) AS ep_names,
      collect(DISTINCT ep.source_description) AS ep_sources
 RETURN r.uuid AS uuid, r.name AS predicate, coalesce(r.fact, '') AS fact,
-       a.name AS subject, labels(a) AS subject_labels,
-       b.name AS object, labels(b) AS object_labels,
+       coalesce(a.curated_name, a.name) AS subject, labels(a) AS subject_labels,
+       coalesce(b.curated_name, b.name) AS object, labels(b) AS object_labels,
        toString(r.valid_at) AS valid_at, toString(r.invalid_at) AS invalid_at,
        toString(r.expired_at) AS expired_at, toString(r.created_at) AS created_at,
        r.group_id AS group_id, r.sync_key AS sync_key, r.reference_type AS reference_type,
@@ -162,7 +164,8 @@ RETURN r.uuid AS uuid, r.name AS predicate, coalesce(r.fact, '') AS fact,
 
 _HYDRATE_NODES_CYPHER = """
 MATCH (n:Entity) WHERE n.uuid IN $uuids
-RETURN n.uuid AS uuid, n.name AS name, labels(n) AS labels, coalesce(n.summary, '') AS summary,
+RETURN n.uuid AS uuid, coalesce(n.curated_name, n.name) AS name, labels(n) AS labels, CASE WHEN coalesce(n.curated_summary, '') <> '' THEN n.curated_summary ELSE coalesce(n.summary, '') END AS summary,
+       CASE WHEN coalesce(n.curated_summary, '') <> '' THEN n.curated_source ELSE null END AS summary_source,
        coalesce(n.aliases, []) AS aliases, coalesce(n.external_ids, []) AS external_ids
 """
 
@@ -295,6 +298,8 @@ def _format_node_line(n: dict) -> str:
     ids = [i for i in (n.get("external_ids") or []) if i][:1]
     if ids:
         extras.append("id: " + ids[0])
+    if n.get("summary_source"):
+        extras.append("summary src: " + n["summary_source"])
     summary = (n.get("summary") or "").strip()
     if len(summary) > SUMMARY_CHARS:
         summary = summary[:SUMMARY_CHARS].rstrip() + "…"
@@ -344,7 +349,7 @@ def _format_kg_results(nodes: list[dict], edges: list[dict], edge_tier: dict[str
                 lines.append(f"- [{e.get('tier') or '?'}] {e['fact']}")
             else:
                 lines.append(_format_edge_line(e))
-    return "\n".join(lines)
+    return _result("\n".join(lines), "entity" if entity_header else "semantic", len(nodes), len(edges))
 
 
 # ── Direct Cypher fallback ────────────────────────────────────────────────────
@@ -403,11 +408,15 @@ def _direct_cypher_search(query: str, num_results: int = 10) -> str | None:
         return None
 
     nodes = [r for r in node_rows if r.get("name")]
+    display = _hydrate_nodes([n["uuid"] for n in nodes])
+    nodes = [display.get(n["uuid"], n) for n in nodes]
     hydrated = _hydrate_edges([r["uuid"] for r in edge_rows])
     edges = list(hydrated.values())
     if not nodes and not edges:
         return None
-    return "[Knowledge Graph fallback: direct Cypher text match]\n" + _format_kg_results(nodes, edges)
+    nodes, edges = _cap_results(nodes, edges, num_results)
+    return _result("[Knowledge Graph fallback: direct Cypher text match]\n" + _format_kg_results(nodes, edges),
+                   "fallback", len(nodes), len(edges), fallback=True)
 
 
 # ── Stats ─────────────────────────────────────────────────────────────────────
@@ -494,49 +503,55 @@ def fetch_kg_stats() -> dict:
 
 # ── Entity matching ───────────────────────────────────────────────────────────
 
-def _alias_hits(text: str, limit: int = 5, *, broad: bool = True):
+def _alias_hits(text: str, limit: int = 5, *, broad: bool = True, strict: bool = False):
     """Alias-index hits for ``text`` (empty on any failure). ``broad=False``
     skips category words (사회주의, 에너지 …) — used by recall."""
     try:
         from kg_runtime.identity import get_alias_index
         idx = get_alias_index()
         if not idx.ensure_loaded():
+            if strict:
+                raise RuntimeError("KG alias index unavailable; check Neo4j credentials/connectivity")
             return []
         return idx.match(text, limit=limit, broad=broad)
     except Exception as exc:
+        if strict:
+            raise
         logger.debug("[KG] alias match skipped: %s", exc)
         return []
 
 
 def _resolve_entity_arg(entity: str):
-    """Resolve an explicit ``entity=`` argument: exact/alias-index match, then
-    a name/alias_text lookup in Neo4j."""
-    hits = _alias_hits(entity, limit=3)
-    exact = [h for h in hits if h.name == entity or h.key == entity.lower().strip()]
-    if exact:
-        return exact[0]
-    if len(hits) == 1:
-        return hits[0]
-    try:
-        from kg_runtime.identity import AliasHit, normalize_alias_key
-        key = normalize_alias_key(entity)
-        rows = _run_rows(
-            "MATCH (n:Entity) WHERE n.name = $name OR $key IN coalesce(n.alias_keys, []) "
-            "OR toLower(n.name) = $key "
-            "OPTIONAL MATCH (n)-[r:RELATES_TO]-() WITH n, count(r) AS d "
-            "RETURN n.uuid AS uuid, n.name AS name, labels(n) AS labels ORDER BY d DESC LIMIT 1",
-            name=entity, key=key,
-        )
-        if rows:
-            r = rows[0]
-            return AliasHit(r["uuid"], r["name"], [l for l in r["labels"] if l != "Entity"], key)
-    except Exception as exc:
-        logger.debug("[KG] entity arg lookup failed: %s", exc)
-    return hits[0] if hits else None
+    hits = _alias_hits(entity, limit=20)
+    exact = [h for h in hits if h.name.casefold().strip() == entity.casefold().strip()]
+    candidates = exact or hits
+    return candidates[0] if len(candidates) == 1 else None
+
+
+def _result(text, path, nodes=0, edges=0, *, fallback=False, error=False):
+    return (ToolFailure if error else ToolResult)(text, {
+        "path": path, "node_count": nodes, "edge_count": edges,
+        "result_count": nodes + edges, "empty": not (nodes or edges) if not error else None,
+        "fallback": fallback,
+    })
+
+
+def _cap_results(nodes, edges, cap):
+    # Reserve one entity descriptor; use the rest for the relevant relations.
+    kept_nodes = nodes[:1] if nodes else []
+    kept_edges = edges[:max(0, cap - len(kept_nodes))]
+    kept_nodes += nodes[1:1 + max(0, cap - len(kept_nodes) - len(kept_edges))]
+    return kept_nodes, kept_edges
+
+
+def _simple_entity_query(query, hits):
+    from kg_runtime.identity import normalize_alias_key
+    return bool(hits) and normalize_alias_key(query) in {h.key for h in hits}
 
 
 def _entity_mode_result(hit, cap: int = ENTITY_NEIGHBORHOOD_CAP) -> str | None:
-    node, edges = _entity_neighborhood(hit.uuid, cap=cap)
+    node, edges = _entity_neighborhood(hit.uuid, cap=max(0, cap - 1))
+    edges = edges[:max(0, cap - 1)]
     if not node:
         return None
     active = sum(1 for e in edges if not e.get("expired_at"))
@@ -549,7 +564,7 @@ def _entity_mode_result(hit, cap: int = ENTITY_NEIGHBORHOOD_CAP) -> str | None:
 
 # ── Public search ─────────────────────────────────────────────────────────────
 
-def search_knowledge_graph(query: str, num_results: int = 10, query_en: str | None = None,
+def search_knowledge_graph(query: str = "", num_results: int = 10, query_en: str | None = None,
                            *, entity: str | None = None, mode: str = "auto") -> str | None:
     """Search the knowledge graph and return formatted results.
 
@@ -562,28 +577,32 @@ def search_knowledge_graph(query: str, num_results: int = 10, query_en: str | No
     Handles connection resets with retry + auto-reset.
     If query_en is provided, searches with both queries and merges results.
     """
+    query = (query or entity or "").strip()
+    if not query:
+        raise ValueError("query or entity is required")
+    num_results = max(1, min(int(num_results), 20))
     mode = (mode or "auto").lower()
     if mode not in ("auto", "entity", "semantic"):
         mode = "auto"
 
-    # ── Entity-centric path (no embedding) ──
+    # Exact entity requests are resolved before semantic query expansion.
     hits = []
     if mode != "semantic":
-        if entity:
-            hit = _resolve_entity_arg(entity)
-            hits = [hit] if hit else []
-        else:
-            hits = _alias_hits(query, limit=4)
-        if mode == "entity" or (mode == "auto" and len(hits) == 1):
-            if hits:
-                try:
-                    rendered = _entity_mode_result(hits[0])
-                    if rendered:
-                        return rendered
-                except Exception as exc:
-                    logger.warning("[KG] entity view failed (%s); falling back to semantic: %s", hits[0].name, exc)
-            elif mode == "entity":
-                return None
+        hits = _alias_hits(entity or query, limit=20, strict=bool(entity) or mode == "entity")
+        simple = bool(entity) or mode == "entity" or _simple_entity_query(query, hits)
+        if simple and len(hits) > 1:
+            nodes = list(_hydrate_nodes([h.uuid for h in hits[:num_results]]).values())
+            return _result("[Knowledge Graph: ambiguous entity; select an exact name]\n" +
+                           _format_kg_results(nodes, []), "ambiguous", len(nodes))
+        if simple and len(hits) == 1:
+            try:
+                rendered = _entity_mode_result(hits[0], cap=num_results)
+                if rendered:
+                    return rendered
+            except Exception as exc:
+                logger.warning("[KG] entity view failed: %s", exc)
+        elif mode == "entity" or entity:
+            return _result("", "entity")
 
     # ── Semantic path ──
     _CONN_ERRORS = ("connection reset", "defunct", "connectionreseterror")
@@ -598,14 +617,15 @@ def search_knowledge_graph(query: str, num_results: int = 10, query_en: str | No
     if not svc:
         fallback = _direct_cypher_search(query, num_results)
         if fallback:
-            return (
+            return ToolResult(
                 "Knowledge graph semantic search failed because the Graphiti service "
                 "is unavailable; using direct Cypher fallback.\n"
-                + fallback
+                + fallback, getattr(fallback, "result_metadata", {"path": "fallback", "fallback": True})
             )
-        return ToolFailure(
+        return _result(
             "Knowledge graph search failed; do not treat this as no KG data. "
-            "Graphiti service unavailable and direct Cypher fallback found no exact text matches."
+            "Graphiti service unavailable and direct Cypher fallback found no exact text matches.",
+            "error", fallback=True, error=True,
         )
 
     def _do_search(q):
@@ -622,6 +642,7 @@ def search_knowledge_graph(query: str, num_results: int = 10, query_en: str | No
                     reset_kg_service()
                     _svc_ref[0] = get_kg_service()
                     if not _svc_ref[0]:
+                        search_errors.append(str(e))
                         return None
                     continue
 
@@ -654,40 +675,25 @@ def search_knowledge_graph(query: str, num_results: int = 10, query_en: str | No
     if not all_nodes and not all_edges and search_errors:
         fallback = _direct_cypher_search(query, num_results)
         if fallback:
-            return (
+            return ToolResult(
                 "Knowledge graph semantic search failed; using direct Cypher fallback. "
                 f"Graphiti error: {search_errors[-1][:500]}\n"
-                + fallback
+                + fallback, getattr(fallback, "result_metadata", {"path": "fallback", "fallback": True})
             )
-        return ToolFailure(
+        return _result(
             "Knowledge graph search failed; do not treat this as no KG data. "
             "Direct Cypher fallback found no exact text matches. "
-            f"Graphiti error: {search_errors[-1][:500]}"
+            f"Graphiti error: {search_errors[-1][:500]}", "error", fallback=True, error=True,
         )
 
-    # Mini entity views for alias hits (multiple matched entities).
-    sections: list[str] = []
-    shown_nodes: set[str] = set()
-    shown_edges: set[str] = set()
+    # Keep semantic relations first; alias matches supply descriptors only,
+    # so unrelated newest neighbours cannot displace answers to the question.
     for hit in hits[:2]:
-        try:
-            node, edges = _entity_neighborhood(hit.uuid, cap=MINI_NEIGHBORHOOD_CAP)
-        except Exception as exc:
-            logger.debug("[KG] mini view failed for %s: %s", hit.name, exc)
-            continue
-        if not node:
-            continue
-        shown_nodes.add(node["uuid"])
-        shown_edges.update(e["uuid"] for e in edges)
-        sections.append(_format_kg_results(
-            [node], edges, entity_header=f"[Knowledge Graph: entity view — {node.get('name')} (matched via '{hit.key}')]",
-        ))
-    # Don't repeat what the entity views already showed.
-    all_nodes = [n for n in all_nodes if n.get("uuid") not in shown_nodes]
-    all_edges = [e for e in all_edges if e.get("uuid") not in shown_edges]
-
-    if not all_nodes and not all_edges and not sections:
-        return None
+        if hit.uuid not in seen_nodes:
+            all_nodes.append({"uuid": hit.uuid, "name": hit.name, "labels": hit.labels})
+            seen_nodes.add(hit.uuid)
+    if not all_nodes and not all_edges:
+        return _result("", "semantic")
 
     all_nodes, all_edges = _prioritize_canonical_hits(all_nodes, all_edges, query)
 
@@ -703,7 +709,5 @@ def search_knowledge_graph(query: str, num_results: int = 10, query_en: str | No
     except Exception as exc:
         logger.debug("[KG] edge hydration skipped: %s", exc)
 
-    body = _format_kg_results(all_nodes, all_edges)
-    if body:
-        sections.append(body)
-    return "\n\n".join(sections)
+    all_nodes, all_edges = _cap_results(all_nodes, all_edges, num_results)
+    return _format_kg_results(all_nodes, all_edges)

@@ -79,3 +79,13 @@ Relevant implementation files:
 - Add optional cost-report credentials with `scripts/manage_secrets.py add OPENAI_ADMIN_KEY` / `ANTHROPIC_ADMIN_KEY`, then run `scripts/apply_credentials_dropin.sh`. Until then `scripts/llm-balances` reports the deduplicated local audit estimate instead of failing.
 - Shell exports and `.env` values take precedence during the bridge via `setdefault`, so local development can override credentials intentionally.
 - `PROJECT_ROOT` is derived from `secrets_loader.py` location when not set, so clones should not need a machine-specific project-root secret.
+
+### KG-capable scheduled curators (2026-09-12)
+
+`leninbot-commulingo-maintainer`, `new`, `enrich`, `terms`, and `pipeline` static units
+load `neo4j_password` alongside DB credentials; `events` already declares it.
+A visible KG tool requires this credential in the actual executing unit, not merely
+in `leninbot-autonomous.service`. Graphiti and direct Cypher reject missing passwords
+before opening a driver. Provider keys remain exclusively at the LLM proxy.
+
+`leninbot-kg-verify.service` is an on-demand retrieval probe using only Neo4j and DB credentials; it sends no notifications.

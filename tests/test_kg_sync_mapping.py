@@ -9,6 +9,7 @@ schema gate with allow_sync_predicates=True.
 import os
 import sys
 import unittest
+from unittest import mock
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
@@ -176,7 +177,8 @@ class RunDiffTests(unittest.TestCase):
         orig_load = sync.load_source
         sync.load_source = lambda: src
         try:
-            stats = sync.run(full=True, dry_run=True)
+            with mock.patch.object(sync, "existing_sync_edges", return_value={}):
+                stats = sync.run(full=True, dry_run=True)
         finally:
             sync.load_source = orig_load
         self.assertEqual(stats["facts_total"], stats["facts_new_or_changed"])

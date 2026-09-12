@@ -42,7 +42,7 @@ POST_ATTEMPTS = 2  # a second try after 0.5s absorbs a proxy restart blip
 # Column whitelist per ledger: name → (kind, cap). Unknown columns are
 # rejected (schema drift must surface in tests, not become silent nulls);
 # over-long strings are truncated, never rejected.
-_STR, _INT, _FLOAT, _BOOL = "str", "int", "float", "bool"
+_STR, _INT, _FLOAT, _BOOL, _JSON = "str", "int", "float", "bool", "json"
 TABLES: dict[str, dict] = {
     "llm": {
         "table": "llm_audit_log",
@@ -66,6 +66,7 @@ TABLES: dict[str, dict] = {
             "risk_class": (_STR, 40), "decision": (_STR, 40), "enforced": (_BOOL, None),
             "deny_reason": (_STR, 1000), "args_summary": (_STR, 2000), "result_status": (_STR, 40),
             "latency_ms": (_INT, None), "error_excerpt": (_STR, 1000),
+            "result_metadata": (_JSON, 2000),
         },
     },
 }
@@ -76,7 +77,7 @@ def _insert_sql(kind: str) -> str:
     cols = list(spec["columns"])
     return (
         f"INSERT INTO {spec['table']} ({', '.join(cols)}) VALUES ("
-        + ", ".join(f"%({c})s" for c in cols) + ")"
+        + ", ".join(f"%({c})s::jsonb" if spec["columns"][c][0] == _JSON else f"%({c})s" for c in cols) + ")"
     )
 
 
@@ -105,6 +106,17 @@ def normalize_row(kind: str, row: dict) -> dict:
         if typ == _STR:
             val = val if isinstance(val, str) else json.dumps(val, ensure_ascii=False, default=str)
             out[col] = val if cap is None or len(val) <= cap else val[:cap] + "…"
+        elif typ == _JSON:
+            value = json.loads(val) if isinstance(val, str) else val
+            if not isinstance(value, dict):
+                raise ValueError(f"{col} must be an object")
+            allowed = {"path", "node_count", "edge_count", "result_count", "empty", "fallback"}
+            if set(value) - allowed:
+                raise ValueError(f"unsupported {col} fields")
+            encoded = json.dumps(value, ensure_ascii=False, allow_nan=False)
+            if len(encoded) > cap:
+                raise ValueError(f"{col} exceeds {cap} characters")
+            out[col] = encoded
         elif typ == _INT:
             out[col] = int(val)
         elif typ == _FLOAT:
@@ -230,7 +242,7 @@ def insert_rows(kind: str, rows: list[dict]) -> int:
         return 0
     with _SinkConn() as conn:
         with conn.cursor() as cur:
-            cur.executemany(_INSERT_SQL[kind], rows)
+            cur.executemany(_INSERT_SQL[kind], normalize_rows(kind, rows))
     return len(rows)
 
 

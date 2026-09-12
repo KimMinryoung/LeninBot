@@ -13,6 +13,6 @@ LoadCredentialEncrypted=neo4j_password:/etc/credstore.encrypted/neo4j_password.c
 LoadCredentialEncrypted=db_password:/etc/credstore.encrypted/db_password.cred
 LoadCredentialEncrypted=telegram_bot_token:/etc/credstore.encrypted/telegram_bot_token.cred
 # Incremental by default; jobs.kg_sync promotes to a full reconciliation pass
-# every 7 days. Document extraction is capped per run (--limit) to bound spend.
-ExecStart=/home/grass/leninbot/venv/bin/python -m jobs.kg_sync --source commulingo,documents --limit 40 --notify-on-error
+# every 7 days. Document extraction is capped per run (--documents-limit) to bound spend.
+ExecStart=/home/grass/leninbot/venv/bin/python -m jobs.kg_sync --source commulingo,documents --documents-limit 40 --notify-on-error
 TimeoutStartSec=5400

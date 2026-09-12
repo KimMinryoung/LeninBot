@@ -70,9 +70,15 @@ def backup(include_embeddings: bool = True):
                    r.group_id AS group_id, r.created_at AS created_at,
                    r.valid_at AS valid_at, r.invalid_at AS invalid_at,
                    r.episodes AS episodes, r.expired_at AS expired_at,
-                   r.attributes AS attributes
+                   r.attributes AS attributes,
+                   [k IN keys(r) WHERE NOT k IN ['uuid', 'name', 'fact', 'fact_embedding', 'group_id', 'created_at',
+                    'valid_at', 'invalid_at', 'episodes', 'expired_at', 'attributes'] | [k, r[k]]] AS props
         """)
-        relates_list = [dict(r) for r in relates]
+        relates_list = []
+        for r in relates:
+            row = dict(r)
+            row["props"] = dict(row.get("props") or [])
+            relates_list.append(row)
 
         # ── MENTIONS edges ──
         mentions = session.run("""

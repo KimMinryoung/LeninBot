@@ -534,12 +534,22 @@ def existing_sync_edges(prefix: str | None = None) -> dict[str, dict]:
     with _neo4j_session() as (drv, db):
         with drv.session(database=db) as s:
             rows = s.run(
-                "MATCH ()-[r:RELATES_TO]->() WHERE r.sync_key STARTS WITH $prefix "
-                "RETURN r.sync_key AS key, r.uuid AS uuid, r.fact AS fact, r.expired_at AS expired_at",
+                "MATCH (a:Entity)-[r:RELATES_TO]->(b:Entity) WHERE r.sync_key STARTS WITH $prefix "
+                "RETURN r.sync_key AS key, r.uuid AS uuid, r.fact AS fact, r.expired_at AS expired_at, "
+                "coalesce(a.external_ids, []) AS subject_ids, coalesce(b.external_ids, []) AS object_ids "
+                "ORDER BY (r.expired_at IS NULL) ASC, r.created_at ASC",
                 prefix=prefix,
             )
-            return {r["key"]: {"uuid": r["uuid"], "fact": r["fact"], "expired": r["expired_at"] is not None}
+            return {r["key"]: {"uuid": r["uuid"], "fact": r["fact"], "expired": r["expired_at"] is not None,
+                               "subject_ids": r["subject_ids"], "object_ids": r["object_ids"]}
                     for r in rows}
+
+
+def fact_changed(fact: dict, old: dict) -> bool:
+    from graph_memory.graphiti_patches import normalize_entity_names_in_text
+    return (old["expired"] or (old["fact"] or "") != normalize_entity_names_in_text(fact["fact"])
+            or any(fact.get(side + "_external_id") and side + "_ids" in old
+                   and fact[side + "_external_id"] not in old[side + "_ids"] for side in ("subject", "object")))
 
 
 def expire_edges(uuids: list[str]) -> int:
@@ -586,7 +596,7 @@ def apply_redirects(redirects: list[dict]) -> dict:
 def write_facts(facts: list[dict], *, batch_size: int = BATCH_SIZE, group_id: str = GROUP_ID) -> dict:
     from kg_runtime.writes import add_kg_structured
 
-    stats = {"written": 0, "rejected": 0, "new_entities": 0, "reused_entities": 0, "batches": 0, "errors": []}
+    stats = {"written": 0, "rejected": 0, "new_entities": 0, "reused_entities": 0, "batches": 0, "errors": [], "successful_keys": []}
     for i in range(0, len(facts), batch_size):
         batch = facts[i:i + batch_size]
         res = add_kg_structured(
@@ -602,6 +612,8 @@ def write_facts(facts: list[dict], *, batch_size: int = BATCH_SIZE, group_id: st
         stats["rejected"] += res.get("facts_rejected", 0)
         stats["new_entities"] += res.get("new_entities", 0)
         stats["reused_entities"] += res.get("reused_entities", 0)
+        indices = res.get("written_fact_indices", range(len(batch)) if res.get("status") == "ok" else [])
+        stats["successful_keys"].extend(batch[i]["attributes"]["sync_key"] for i in indices)
         for rej in (res.get("rejected_facts") or [])[:5]:
             logger.warning("[kg-sync commulingo] rejected: %s", rej.get("reason"))
     return stats
@@ -622,24 +634,27 @@ def run(*, since: datetime | None = None, full: bool = False, limit: int | None 
         "facts_total": len(facts),
     }
 
-    existing = {} if dry_run else existing_sync_edges()
-    to_write, to_expire = [], []
+    existing = existing_sync_edges()
+    to_write, replacements, stale = [], {}, []
     for f in facts:
         key = f["attributes"]["sync_key"]
         old = existing.get(key)
         if old is None:
             to_write.append(f)
-        elif old["expired"] or (old["fact"] or "") != f["fact"]:
-            to_expire.append(old["uuid"])
+        elif fact_changed(f, old):
+            if not old["expired"]:
+                replacements[key] = old["uuid"]
             to_write.append(f)
     if full and existing:
         current_keys = {f["attributes"]["sync_key"] for f in facts}
         stale = [v["uuid"] for k, v in existing.items() if k not in current_keys and not v["expired"]]
-        to_expire.extend(stale)
         stats["stale_expired"] = len(stale)
+    pending = len(to_write)
     if limit is not None:
         to_write = to_write[:limit]
-    stats.update({"facts_new_or_changed": len(to_write), "edges_to_expire": len(to_expire)})
+    stats.update({"facts_new_or_changed": pending, "selected": len(to_write),
+                  "remaining": pending - len(to_write), "failed": 0,
+                  "complete": pending == len(to_write), "edges_to_expire": len(replacements) + len(stale)})
 
     if dry_run:
         stats["sample"] = [
@@ -648,10 +663,39 @@ def run(*, since: datetime | None = None, full: bool = False, limit: int | None 
         ]
         return stats
 
-    stats["expired"] = expire_edges(to_expire)
     stats["write"] = write_facts(to_write)
+    successful = set(stats["write"].pop("successful_keys"))
+    stats["failed"] = len(to_write) - len(successful)
+    stats["remaining"] += stats["failed"]
+    stats["complete"] = stats["remaining"] == 0 and not stats["write"]["errors"]
+    stats["expired"] = expire_edges([uuid for key, uuid in replacements.items() if key in successful])
+    if full and stats["complete"]:
+        stats["expired"] += expire_edges(stale)
+    stats["curated_profiles"] = refresh_curated_profiles(facts)
     # After the writes so a first (full) run already sees the canonical nodes.
     stats["redirects"] = apply_redirects(src.redirects)
     if stats["write"]["errors"]:
         stats["error"] = f"{len(stats['write']['errors'])} batch(es) failed: {stats['write']['errors'][0][:200]}"
+    elif stats["failed"]:
+        stats["error"] = f"{stats['failed']} fact(s) rejected or not written"
     return stats
+
+
+def refresh_curated_profiles(facts: list[dict]) -> int:
+    """Refresh source-owned display fields even when no relation changed."""
+    profiles = {}
+    for fact in facts:
+        for side in ("subject", "object"):
+            eid = fact.get(side + "_external_id")
+            if eid and eid.startswith(NAMESPACE + ":"):
+                profiles[eid] = {"id": eid, "name": fact.get(side + "_name_ko") or fact[side + "_name"],
+                                 "summary": fact.get(side + "_summary") or ""}
+    with _neo4j_session() as (drv, db):
+        with drv.session(database=db) as session:
+            row = session.run(
+                "UNWIND $profiles AS p MATCH (n:Entity) WHERE p.id IN coalesce(n.external_ids, []) "
+                "SET n.curated_name = p.name, n.curated_summary = p.summary, "
+                "n.curated_source = p.id, n.curated_updated_at = datetime() RETURN count(n) AS c",
+                profiles=list(profiles.values()),
+            ).single()
+            return row['c'] if row else 0

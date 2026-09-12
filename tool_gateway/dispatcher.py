@@ -610,6 +610,7 @@ async def execute_tool(
                 ),
                 latency_ms=int((time.perf_counter() - started) * 1000),
                 error_excerpt=result if is_error else None,
+                result_metadata=getattr(result, "result_metadata", None),
             )
     except Exception as exc:
         logger.warning("gateway audit failed (ignored) for %s: %s", name, exc)

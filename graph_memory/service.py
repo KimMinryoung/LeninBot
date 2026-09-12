@@ -212,6 +212,8 @@ class GraphMemoryService:
             neo4j_uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
             neo4j_user = os.getenv("NEO4J_USER", "neo4j")
             neo4j_password = get_secret("NEO4J_PASSWORD", "") or ""
+            if not neo4j_password:
+                raise RuntimeError("NEO4J_PASSWORD is not configured for this service")
             neo4j_database = os.getenv("NEO4J_DATABASE", "neo4j")
             gemini_api_key = (get_secret("GEMINI_API_KEY", "") or "").strip()
 

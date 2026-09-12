@@ -32,7 +32,16 @@ bury the real failures.
 from __future__ import annotations
 
 
-class ToolFailure(str):
+class ToolResult(str):
+    """A backwards-compatible text result with bounded diagnostic metadata."""
+
+    def __new__(cls, text: str, result_metadata: dict | None = None):
+        obj = super().__new__(cls, text)
+        obj.result_metadata = result_metadata
+        return obj
+
+
+class ToolFailure(ToolResult):
     """A tool result string that the gateway must audit as a failure."""
 
     __slots__ = ()
