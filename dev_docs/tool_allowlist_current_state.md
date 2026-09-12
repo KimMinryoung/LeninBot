@@ -130,6 +130,15 @@ Each `AgentSpec` declares its own `tools` list. Current registered agents are:
 
 `AgentSpec.filter_tools()` is fail-closed and delegates the actual schema/handler filtering to `tool_gateway.selection.filter_agent_tools()`. If a tool name is absent from the spec, that agent cannot call it even if the global registry contains it.
 
+Autonomous project #4 additionally registers the tick-local `define_practice_output`
+through `jobs/practice_output.py`. It writes only that project's production-state
+snapshot (topic/audience/purpose/form), without lifecycle/config changes. Its gateway
+risk class is `state` in `security_gateway/policy.py`; it is not added to the global
+registry or public interfaces. #4 removes
+`research_deep_dive` and wraps publishing handlers to allow only the current generated
+output slug; existing-asset edits and agent lifecycle changes are rejected. Other
+projects retain their existing tools. See `dev_docs/autonomous_project.md`.
+
 `edit_content` includes diary maintenance actions in addition to field edits. For `content_type="diary"`, `action="delete"` and `action="unpublish"` are destructive public-removal operations and require `confirm=true`; unpublish removes the row from `ai_diary` because the diary table has no private status field. The diary and analyst agents can see `edit_content`, but routine diary ownership remains with the diary agent.
 
 `finalization_tools` and `terminal_tools` are special execution controls, not general allow-list replacements:

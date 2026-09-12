@@ -23,6 +23,7 @@ from dotenv import load_dotenv
 from db import execute as db_execute, query as db_query, query_one as db_query_one
 from prompt_context import fenced_text, uses_xml
 from shared import KST
+from jobs import practice_output as practice
 
 load_dotenv()
 
@@ -710,6 +711,10 @@ def _build_project_tools(project_id: int) -> tuple[list[dict], dict]:
         steps = steps or []
         if not isinstance(goals, list) or not isinstance(steps, list):
             return "error: goals and steps must be lists of strings"
+        if practice.applies(project_id):
+            problem = practice.validate_plan(goals, steps)
+            if problem:
+                return problem
         new_plan = {
             "goals": [str(g)[:500] for g in goals][:20],
             "steps": [str(s)[:500] for s in steps][:40],
@@ -1774,6 +1779,43 @@ def _build_task_prompt(
 
 # ── Tick execution ──────────────────────────────────────────────────
 async def _run_one_tick(project: dict) -> dict:
+    """Guard #4 even on direct invocation, serialize workers, reserve before work."""
+    if not practice.applies(project["id"]):
+        return await _execute_one_tick(project)
+    from bot_config import is_autonomous_active
+    from db import get_conn
+    from tool_gateway.security import new_request_id
+    if not is_autonomous_active():
+        return {"project_id": project["id"], "skipped": "autonomous_active=false"}
+    # Session lock spans the async wake; committed state uses separate short
+    # transactions. Concurrent timer/manual calls cannot spend the same slot.
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT pg_try_advisory_lock(734004, %s)", (project["id"],))
+            if not cur.fetchone()[0]:
+                return {"project_id": project["id"], "skipped": "already running"}
+        # Session locks survive commit; do not leave a transaction idle during
+        # the potentially long model/tool loop.
+        conn.commit()
+        try:
+            current = db_query_one("SELECT * FROM autonomous_projects WHERE id=%s", (project["id"],))
+            if not current or current["state"] not in ACTIVE_STATES or not is_autonomous_active():
+                return {"project_id": project["id"], "skipped": "inactive"}
+            request_id = new_request_id()
+            production = practice.begin(request_id)
+            try:
+                result = await _execute_one_tick(current, production=production)
+            except BaseException as exc:
+                practice.complete(request_id, error=repr(exc))
+                raise
+            practice.complete(request_id)
+            return result
+        finally:
+            with conn.cursor() as cur:
+                cur.execute("SELECT pg_advisory_unlock(734004, %s)", (project["id"],))
+
+
+async def _execute_one_tick(project: dict, *, production: dict | None = None) -> dict:
     """Run a single agent wake on the given project. Returns a result dict."""
     from agents import get_agent
     from llm.claude_loop import dedupe_tools_by_name
@@ -1807,16 +1849,24 @@ async def _run_one_tick(project: dict) -> dict:
     pending_advisories = _fetch_pending_advisories(project["id"])
 
     from telegram.bot import _chat_with_tools
-    tick_request_id = new_request_id()
+    tick_request_id = production["attempts"][-1]["request_id"] if production else new_request_id()
 
     # Deep-dive sub-agent needs the chat closure, so it is registered here
     # rather than in _build_project_tools.
-    dd_schemas, dd_handlers = _build_deep_dive_tool(
-        project["id"], provider, _chat_with_tools, tick_request_id,
-    )
-    agent_tools.extend(dd_schemas)
-    agent_handlers.update(dd_handlers)
-    agent_tools = dedupe_tools_by_name(agent_tools)
+    if production:
+        agent_tools = [t for t in agent_tools if t["name"] != "research_deep_dive"]
+        agent_handlers.pop("research_deep_dive", None)
+        schemas, handlers = practice.build_tools(production)
+        agent_tools.extend(schemas)
+        agent_handlers.update(handlers)
+        agent_handlers = practice.guard_handlers(agent_handlers, production)
+    else:
+        dd_schemas, dd_handlers = _build_deep_dive_tool(
+            project["id"], provider, _chat_with_tools, tick_request_id,
+        )
+        agent_tools.extend(dd_schemas)
+        agent_handlers.update(dd_handlers)
+        agent_tools = dedupe_tools_by_name(agent_tools)
 
     # Reflexion pre-publish gate: staged drafts get an independent editorial
     # diagnosis injected into this tick's prompt (cached per draft version, so
@@ -1824,15 +1874,16 @@ async def _run_one_tick(project: dict) -> dict:
     # injection — never blocks the tick.
     editorial_diagnosis = None
     try:
-        editorial_diagnosis = await _diagnose_staged_drafts_for_tick(
-            project, provider, _chat_with_tools,
-        )
+        if not production:
+            editorial_diagnosis = await _diagnose_staged_drafts_for_tick(
+                project, provider, _chat_with_tools,
+            )
     except Exception as e:
         logger.warning("editorial diagnosis skipped for project %s: %s", project["id"], e)
 
     user_content = _build_task_prompt(
         project,
-        turn_budget=spec.max_rounds,
+        turn_budget=min(spec.max_rounds, practice.TICK_ROUNDS) if production else spec.max_rounds,
         advisories=pending_advisories,
         provider=provider,
         editorial_diagnosis=editorial_diagnosis,
@@ -1842,7 +1893,7 @@ async def _run_one_tick(project: dict) -> dict:
     # turns "advance by exactly one concrete step" into a concrete, externally
     # chosen step. Logged as tick_objective; the post-tick critic judges
     # against it.
-    tick_objective = await _plan_tick_objective(
+    tick_objective = practice.objective(production) if production else await _plan_tick_objective(
         project, user_content, provider, _chat_with_tools, tick_request_id,
     )
     if tick_objective:
@@ -1857,6 +1908,15 @@ async def _run_one_tick(project: dict) -> dict:
         max_tokens_override=16384,
         budget_override=spec.budget_usd,
     )
+    if production:
+        from dataclasses import replace
+        profile = replace(profile, budget_usd=min(profile.budget_usd, practice.TICK_BUDGET),
+                          max_rounds=min(profile.max_rounds, practice.TICK_ROUNDS))
+        system_prompt += ("\n\nProject #4 runtime production policy overrides generic workflow:\n"
+                          + tick_objective.split("STATE:", 1)[0]
+                          + "\n" + practice.GUIDANCE)
+        _log_event(project["id"], "tick_objective", tick_objective,
+                   {"output_id": production["output_id"], "source": "runtime_policy"})
     model_for_log = profile.model_id or "unknown"
     budget_tracker: dict = {}
 
@@ -1867,7 +1927,8 @@ async def _run_one_tick(project: dict) -> dict:
         project["id"], "tick_start",
         f"turn #{(project.get('turn_count') or 0) + 1}, state={project['state']}",
         {"provider": provider, "model": model_for_log,
-         "max_rounds": spec.max_rounds, "budget_usd": spec.budget_usd},
+         "max_rounds": profile.max_rounds if production else spec.max_rounds,
+         "budget_usd": profile.budget_usd if production else spec.budget_usd},
     )
 
     from llm.execution_context import attach_context, context_record
@@ -1987,7 +2048,7 @@ async def _run_one_tick(project: dict) -> dict:
     # the objective. Durable across ticks — partial/no-op verdicts feed the
     # next tick's warnings, unlike the self-critique paragraph that dies with
     # the chat text.
-    tick_review = await _review_tick_outcome(
+    tick_review = None if production else await _review_tick_outcome(
         project, tick_objective, actions, provider, _chat_with_tools, tick_request_id,
     )
     if tick_review and tick_review.get("verdict") == "no-op":
@@ -2062,6 +2123,9 @@ def run_tick() -> dict | None:
         project["id"], project["title"], project["state"], project.get("turn_count"),
     )
     result = asyncio.run(_run_one_tick(project))
+    if result.get("skipped"):
+        logger.info("Autonomous tick skipped: %s", result["skipped"])
+        return result
     logger.info(
         "Tick complete: project=%s cost=$%.4f rounds=%s",
         result["project_id"], result["cost_usd"], result["rounds_used"],

@@ -1707,7 +1707,7 @@ async def _get_model_for_agent(spec):
         return await _get_model_moon()
     if spec.provider == "codex":
         from llm.codex_exec_loop import CODEX_DEFAULT_MODEL
-        return CODEX_DEFAULT_MODEL
+        return spec.model or CODEX_DEFAULT_MODEL
     provider = spec.provider or _get_task_provider()
     if provider == "local":
         if spec.model:

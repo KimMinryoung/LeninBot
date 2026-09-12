@@ -51,7 +51,7 @@
   },
   "programmer": {
     "provider": "codex",
-    "model": null,
+    "model": "gpt-6-astra",
     "budget_usd": 0.01,
     "max_rounds": 50
   },

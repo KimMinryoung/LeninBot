@@ -168,3 +168,70 @@ Shared reality guidance distinguishes stored work, publication and goal progress
 Existing planner/critic calls, durable-action checks, advisory consumption, budgets
 and publication gates are unchanged; paused projects are never enabled by this
 context change. Experience recall now includes source and period metadata.
+
+## Project #4: practice output policy
+
+`data/project_designs/practice_output_loop.md`가 #4의 발주 명세다. 다른 프로젝트는
+기존 경로를 유지한다. `jobs/practice_output.py:applies`가 적용 대상을 ID 4로 제한한다.
+코드 설치는 프로젝트·설정 활성화나 advisory 소비를 수행하지 않는다.
+
+- `objective` / `build_tools`: 별도 planner 대신 단계별 산출물 objective를 생성한다.
+  tick 전용 `define_practice_output`으로 주제, 독자, 사용 목적, 전달 형태를 저장한다.
+  런타임이 만든 `p4-<uuid>`가 산출물 ID이자 유일한 쓰기 허용 slug다. 주제 문자열의
+  정확 일치 중복과 진행 중 descriptor 변경을 거부한다. 의미가 같은 주제의 다른
+  표현을 판정하는 LLM 관문은 두지 않는다.
+- `begin` / `reserve` / `complete` / `finish`: 기존 `autonomous_project_events`에
+  `practice_output_state` JSON snapshot을 영속화한다. 한 산출물에 a 1회, b 2회,
+  c 1회를 배정한다. b 2회는 상한이며 오류도 시도로 소비한다. 예약을 실행 전에
+  커밋하므로 `turn_count`가 증가하지 않은 실패도 무료 재시도가 되지 않는다.
+  프로세스 중단 시 다음 실행이 기존 예약의 실제 event ID를 먼저 회수하고 실패로
+  기록한다. c 시도 후 주제를 닫고 다음 tick은 새 산출물로 이동한다. 반복 실패에
+  따른 프로젝트 자동 종료/일시정지 정책은 추가하지 않았다.
+- `_run_one_tick`: config와 DB 상태를 다시 확인하고 PostgreSQL advisory session
+  lock으로 #4의 동시 tick을 차단한다. 상태 저장 실패는 삼키지 않는다. `paused`나
+  `archived`에서는 상태 예약도 할 수 없다. 운영자 상태 변경은 이 루프에 맡기지 않는다.
+  실행 도중 운영자가 중단해도 이미 예약한 시도의 종료·발행 증거는 저장한다.
+  이 저장은 프로젝트를 재개하거나 새 시도를 예약하지 않는다. session lock 획득 후
+  트랜잭션은 커밋하여 모델 실행 동안 idle transaction을 유지하지 않는다.
+- `validate_plan` / `passive_wait`: #4의 `revise_plan` 쓰기 전 발표 대기 목표를 거절하고
+  차단 사유 기록 및 수행 가능한 산출물 작업으로 전환하도록 반환한다. 날짜나 이미
+  발표된 자료 활용은 허용한다. 한국어·영어의 명시적 대기/발표일 확인 표현에 대한
+  보수적 어휘 필터이며 모든 자연어 우회 표현을 의미론적으로 검출하지는 않는다.
+- `_execute_one_tick`: #4에서 기존 편집진단, planner, critic, `research_deep_dive`를
+  실행하지 않는다. 기본 모델·권한 체계는 유지한다. 본 실행은 기존 엔진 예산 제한에
+  `min(config, $0.30)`와 일반 라운드 `min(config, 12)`를 전달한다. 발행 보안검수
+  `run_stasova_publication_review`는 #4에서 `min(config, $0.05)`/2라운드로 제한한다.
+  본 실행에 더해 산출물별 발행 시도는 1회다. 기존 엔진은 응답 뒤 비용을 확인하고
+  최종 저장 호출을 허용하므로 이 수치는 선불 결제 한도나 최종 청구액 상한이 아니다.
+- `guard_handlers`: a/b에서는 현재 산출물의 초안 저장/수정만, c에서 발행 시도 1회를
+  허용한다. 실제 발행 handler와 cross-tick staging·출처·권한·보안 검사는 그대로다.
+  상한에 도달했다고 사실 검증을 통과한 것으로 취급하지 않는다. 기존 공개 콘텐츠
+  수정 및 다른 slug 쓰기는 거절한다. c에서 새로 staging해 기존 gate에 막히면 그
+  산출물을 재시도하지 않고 차단 사유를 남긴다.
+- `complete` / `matches_output`: 초안(`research_draft_staged`), 검수
+  (`publication_reviewed`/`publication_review_error`), 실제 발행(`publication_created`)을
+  서로 다른 event ID로 저장하고 발행 관련 기록은 현재 산출물 ID로 대조한다.
+  c 종료는 루프 종료이지 발행 성공이 아니다. 발행 receipt가 없으면
+  `publication_unconfirmed`; receipt가 있으면 `published`다. 오류와 발행 상태는
+  독립적이므로 발행 직후 오류가 나도 저장된 발행 증거를 버리지 않는다.
+
+`value_metrics`는 웹 재사용/후속 질문, 재료 소비, 실무자 응답을 모두
+`value=null, status=unknown`으로 기록한다. 현재 `chat_logs`는 대화/도구 추적 텍스트,
+`web_chat_feedback`은 chat ID에 대한 반응이며, `research_documents`에는 산출물 소비
+관계나 실무자 검증 요청–응답의 구조화된 식별자가 없다. 임의 문자열 매칭이나 모델
+자가평가로 이 세 지표를 0 또는 달성으로 바꾸지 않는다. 실제 계측 추가는 후속 작업이다.
+
+운영 시작 전 결정할 제안(아직 설정·자동 정책 아님): 첫 실행부터 예약된 8 tick,
+즉 최대 두 산출물 순환 뒤 운영자가 방향을 검토한다. 분모는 오류/중단을 포함한
+고유 `request_id` 예약 수, 초안·발행 건수는 산출물 ID로 중복 제거한다. 무진전은
+이 구간의 초안/실제 발행 receipt 부재로 점검하되 가치 지표 unknown을 0으로
+취급하지 않는다. 별도 LLM 비용 없이 이벤트를 읽는다. 지표 관측 기간·대상 집단과
+추가 계측은 운영자가 결정해야 하며, 이 제안으로 자동 종료시키지 않는다.
+
+검증: `venv/bin/python -m pytest -q tests/test_practice_output.py`는 DB/LLM/발행을
+모킹하여 필터, 단계 상한, 재시작·오류, 발행 receipt 구분, descriptor 불변성,
+비활성·동시 실행 보호 경로와 실제 tick의 예산/검토 호출 구성을 검사한다.
+기존 smoke는 `scripts/smoke_autonomous_research.py`,
+`scripts/smoke_autonomous_publication_gates.py`다. 운영 DB에 tick을 실행하는 검증은 아니다.
+다음 승인된 timer 실행이 새 프로세스로 코드를 읽으므로 이 변경을 위해 Telegram
+서비스를 재시작할 필요는 없다.

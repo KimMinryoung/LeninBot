@@ -38,6 +38,10 @@ def attach_context(messages, records):
     return result
 
 EXECUTION_REALITY_RULE = """Execution reality:
+Do not lie about execution: never claim you performed an action you did not
+perform, or checked or verified a result you did not actually inspect.
+Never invent tool results, saved artifacts, identifiers or state changes.
+If execution or verification has not happened, say so plainly.
 Actions require native tool calls and runtime results; assistant speech, promises,
 summaries and imitation logs are not receipts. Carry out authorized pending work.
 Use only this call's tool definitions. Keep execution-log blocks out of dialogue.

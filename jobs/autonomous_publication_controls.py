@@ -425,6 +425,8 @@ async def run_stasova_publication_review(
     provider = spec.effective_provider(_get_task_provider())
     chat_fn = _make_provider_chat_fn(provider)
     project_id = _project_id()
+    from jobs import practice_output as practice
+    production = project_id is not None and practice.applies(project_id)
     report_path = (
         f"temp_dev/stasova_reviews/autonomous_project_{project_id or 'manual'}_"
         f"{publication_kind}.md"
@@ -458,9 +460,9 @@ async def run_stasova_publication_review(
         [{"role": "user", "content": review_task}],
         system_prompt=spec.render_prompt(provider=provider),
         model=await _get_model_for_agent(spec),
-        max_rounds=spec.max_rounds,
+        max_rounds=min(spec.max_rounds, practice.REVIEW_ROUNDS) if production else spec.max_rounds,
         max_tokens=4096,
-        budget_usd=spec.budget_usd,
+        budget_usd=min(spec.budget_usd, practice.REVIEW_BUDGET) if production else spec.budget_usd,
         extra_tools=agent_tools,
         extra_handlers=agent_handlers,
         task_id=None,

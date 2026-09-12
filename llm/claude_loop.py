@@ -693,6 +693,15 @@ class _ClaudeProtocolAdapter:
                 "Continue exactly from where the previous answer stopped. "
                 "Do not restart, summarize, or repeat earlier text.",
             )
+        elif any(b.type in _REPLAY_ONLY_BLOCK_TYPES for b in turn.raw.content) and not any(
+            b.type == "tool_use" for b in turn.raw.content
+        ):
+            _append_user_text_message(
+                msgs,
+                "Your previous response reached the output limit before producing "
+                "a visible answer. Keep reasoning brief and answer the user's "
+                "last request directly and concisely now.",
+            )
         else:
             # Truncation landed mid-tool_use: no text block survived, so there
             # is nothing to stitch — the whole round would otherwise be dropped

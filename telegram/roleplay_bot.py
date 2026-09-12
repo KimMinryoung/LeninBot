@@ -28,6 +28,7 @@ from secrets_loader import get_secret
 from db import query as _query, execute as _execute
 from bot_config import _deepseek_anthropic_client, _resolve_deepseek_model
 from llm.claude_loop import chat_with_tools
+from llm.tool_loop_common import EMPTY_RESPONSE_FALLBACK
 from runtime_tools.registry import TOOLS, TOOL_HANDLERS
 from tool_gateway.profiles import ROLEPLAY_TELEGRAM_TOOLS
 from tool_gateway.security import caller_scope, new_run_context
@@ -59,7 +60,8 @@ PERSONA_PATH = Path(__file__).resolve().parent.parent / "identity" / "roleplay_p
 # separates the inner monologue from the final answer; the OpenAI path instead
 # prepends reasoning to the reply, which is why it leaked.
 ROLEPLAY_MODEL = _resolve_deepseek_model("deepseek_flash")  # "deepseek-v4-flash"
-ROLEPLAY_MAX_TOKENS = int(os.getenv("ROLEPLAY_MAX_TOKENS", "4096"))
+# Thinking and visible prose share the output allowance.
+ROLEPLAY_MAX_TOKENS = int(os.getenv("ROLEPLAY_MAX_TOKENS", "16384"))
 ROLEPLAY_MAX_ROUNDS = int(os.getenv("ROLEPLAY_MAX_ROUNDS", "8"))
 ROLEPLAY_BUDGET_USD = float(os.getenv("ROLEPLAY_BUDGET_USD", "0.50"))
 HISTORY_CAP = int(os.getenv("ROLEPLAY_HISTORY_CAP", "40"))  # messages kept in context
@@ -105,8 +107,10 @@ def load_history(user_id: int) -> list[dict]:
     min_id = _clear_after_id(user_id)
     rows = _query(
         "SELECT role, content FROM roleplay_chat_history "
-        "WHERE user_id = %s AND id > %s ORDER BY id DESC LIMIT %s",
-        (user_id, min_id, HISTORY_CAP),
+        "WHERE user_id = %s AND id > %s "
+        "AND NOT (role = 'assistant' AND content = %s) "
+        "ORDER BY id DESC LIMIT %s",
+        (user_id, min_id, EMPTY_RESPONSE_FALLBACK, HISTORY_CAP),
     )
     return [{"role": r["role"], "content": r["content"]} for r in reversed(rows)]
 
@@ -236,6 +240,8 @@ async def handle_message(message: Message) -> None:
                 system_prompt=build_system_prompt(),
                 max_rounds=ROLEPLAY_MAX_ROUNDS,
                 max_tokens=ROLEPLAY_MAX_TOKENS,
+                continue_on_length=True,
+                max_length_continuations=1,
                 budget_usd=ROLEPLAY_BUDGET_USD,
                 on_progress=progress_cb,
                 agent_name="roleplay",
@@ -248,6 +254,11 @@ async def handle_message(message: Message) -> None:
         return
     finally:
         await progress_cb.flush()
+
+    if not reply.strip() or reply.strip() == EMPTY_RESPONSE_FALLBACK:
+        logger.warning("roleplay turn ended without visible text after recovery")
+        await message.answer("답변을 완성하지 못했어. 한 번 더 말해줄래?")
+        return
 
     await asyncio.to_thread(save_message, user_id, "assistant", reply)
     for chunk in _split_message(reply):

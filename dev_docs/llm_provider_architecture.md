@@ -68,6 +68,8 @@ The personal fiction writer (`/writer`, `api_routes/writer.py`, `services/novel_
 
 코드의 `local` 선택지는 호환 경로로 남아 있다. 현재 운영 대상으로 사용하지 않는다(2026-09-07 사용자 확인).
 
+Roleplay output recovery (2026-09-11): `ROLEPLAY_MAX_TOKENS` defaults to 16384 because reasoning and visible text share the output allowance. The bot enables `continue_on_length` with at most one continuation. The Anthropic adapter asks for brief reasoning and a concise answer when truncation leaves only thinking blocks; partial visible answers use the existing continuation path. Recovery preserves thinking privacy. Empty/fallback replies are not saved as assistant history, and existing exact `EMPTY_RESPONSE_FALLBACK` rows are excluded when loading context (the stored rows remain intact). Changing Python defaults requires restarting `leninbot-roleplay.service`; an explicit environment override still takes precedence.
+
 ## Runtime Config Keys
 
 | Key | Values | Applies to |
@@ -142,6 +144,12 @@ Each `AgentSpec` may set `provider` and `model`. `None` means follow task config
 | `commulingo_event_curator` | DeepSeek Pro for Korean history-event document sections and updates |
 | `browser`, `scout`, `stasova`, `diary` | DeepSeek by default |
 | `analyst`, `diplomat`, `visualizer` | inherit task config unless overridden |
+
+The operational programmer override in `config/agent_runtime.json` pins
+`provider="codex"` and `model="gpt-6-astra"`. Agent lookup reloads this overlay
+on file changes. The Codex model selector respects this override before its
+adapter default; already-running Codex processes keep their launch model. The generic
+Codex adapter default is used only when an agent has no explicit model.
 
 `AgentSpec.effective_provider()` renders `codex`, `moon`, and `local` prompts as local/Markdown format. Claude gets XML-style rendering; OpenAI-compatible providers get Markdown rendering through `llm/prompt_renderer.py`.
 

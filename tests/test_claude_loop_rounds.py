@@ -85,6 +85,38 @@ TOOLS = [{
 
 
 class TestPlainTextTurn(unittest.TestCase):
+    def test_thinking_only_length_stop_recovers_without_leaking_reasoning(self):
+        thinking = SimpleNamespace(type="thinking", thinking="private reasoning")
+        client = FakeClient([
+            _response([thinking], stop_reason="max_tokens"),
+            _response([_text_block("완성된 답변")]),
+        ])
+        result = asyncio.run(chat_with_tools(
+            [{"role": "user", "content": "질문"}],
+            client=client, model="deepseek-flash", tools=[], tool_handlers={},
+            system_prompt="sys", max_rounds=1, continue_on_length=True,
+            max_length_continuations=1,
+        ))
+        self.assertEqual(result, "완성된 답변")
+        self.assertEqual(len(client.calls), 2)
+        self.assertIn("Keep reasoning brief", str(client.calls[1]["messages"]))
+        self.assertNotIn("private reasoning", str(client.calls[1]["messages"]))
+
+    def test_thinking_only_recovery_is_bounded(self):
+        thinking = SimpleNamespace(type="thinking", thinking="private reasoning")
+        client = FakeClient([
+            _response([thinking], stop_reason="max_tokens"),
+            _response([thinking], stop_reason="max_tokens"),
+        ])
+        result = asyncio.run(chat_with_tools(
+            [{"role": "user", "content": "질문"}],
+            client=client, model="deepseek-flash", tools=[], tool_handlers={},
+            system_prompt="sys", max_rounds=1, continue_on_length=True,
+            max_length_continuations=1,
+        ))
+        self.assertEqual(result, claude_loop.EMPTY_RESPONSE_FALLBACK)
+        self.assertEqual(len(client.calls), 2)
+
     def test_runtime_receipts_do_not_become_assistant_messages(self):
         client = FakeClient([_response([_text_block("ok")])])
         asyncio.run(chat_with_tools(

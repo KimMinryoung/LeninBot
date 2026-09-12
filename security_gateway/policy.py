@@ -34,6 +34,7 @@ TOOL_RISK_CLASS: dict[str, str] = {
     "mission": "state",
     "save_finding": "state",
     "add_research_note": "state",
+    "define_practice_output": "state",  # project #4 tick-local descriptor only
     "send_message": "state",
     "read_user_chat": "read",
     "read_messages": "read",

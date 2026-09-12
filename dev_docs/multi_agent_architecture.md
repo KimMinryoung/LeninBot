@@ -147,6 +147,8 @@ System prompts are rendered from provider-aware prompt IR and kept as stable as 
 
 `llm/execution_context.py` supplies a static reality contract and internal
 `_runtime_events` records to Anthropic, OpenAI-compatible and Codex tool paths.
+The contract explicitly forbids claiming unperformed actions or uninspected
+verification, and inventing tool results, artifacts, identifiers or state changes.
 Records distinguish source/kind, scope, observation time, reference, coverage and
 instruction authority. Unknown envelope fields are omitted in rendered prompts;
 the static contract defines missing metadata as unknown. Source payloads are unchanged. Only runtime-created
