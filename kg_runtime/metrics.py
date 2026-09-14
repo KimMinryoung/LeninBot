@@ -106,7 +106,8 @@ def usage_metrics(days: int = 14) -> dict:
                    count(*) FILTER (WHERE result_metadata->>'empty' IS NOT NULL) AS measured,
                    count(*) FILTER (WHERE result_metadata->>'empty' = 'true') AS empty,
                    count(*) FILTER (WHERE result_metadata->>'fallback' = 'true') AS fallback,
-                   count(*) FILTER (WHERE result_metadata IS NOT NULL) AS diagnosed
+                   count(*) FILTER (WHERE result_metadata IS NOT NULL) AS diagnosed,
+                   max(ts) AS last_call_at
             FROM tool_audit_log
             WHERE ts > now() - (%s || ' days')::interval
               AND tool_name IN ('knowledge_graph_search', 'write_kg_structured')
@@ -128,6 +129,11 @@ def usage_metrics(days: int = 14) -> dict:
                                      "empty": 0, "measured": 0, "fallback": 0, "diagnosed": 0})
         c["n"] += row["n"]
         c["failed"] += row["n"] if row["result_status"] != "ok" else 0
+        time_key = "last_success_at" if row["result_status"] == "ok" else "last_failure_at"
+        last_call = row.get("last_call_at")
+        if last_call is not None:
+            value = last_call.isoformat() if hasattr(last_call, "isoformat") else str(last_call)
+            c[time_key] = max(c.get(time_key, ""), value)
         for field in ("empty", "measured", "fallback", "diagnosed"):
             c[field] += row[field]
     for c in callers.values():
@@ -203,6 +209,9 @@ def sync_unhealthy(state: dict) -> bool:
 
 
 def format_report(m: dict) -> str:
+    def rate(value):
+        return "미측정" if value is None else f"{value:.1%}"
+
     g, s, u = m.get("graph", {}), m.get("sync", {}), m.get("usage", {})
     lines = [f"📊 KG 주간 리포트 ({m.get('collected_at', '')[:10]})"]
     if "error" in g:
@@ -237,11 +246,15 @@ def format_report(m: dict) -> str:
     else:
         lines.append(f"최근 {u.get('days')}일 검색 {u.get('searches', 0)} · 쓰기 {u.get('writes', 0)}")
         for c in u.get("callers") or []:
+            recency = ""
+            if c.get("failed"):
+                recency = (f", 최근 성공 {c.get('last_success_at', '기간 내 없음')}, "
+                           f"최근 실패 {c.get('last_failure_at', '미측정')}")
             lines.append(f"{c['interface']}/{c['agent'] or '-'}: {c['n']}건, 실패 {c['failed']} ({c['failure_rate']:.0%}), "
-                         f"empty={c['empty_rate']}, fallback={c['fallback_rate']}, 미측정 {c['unknown']}")
+                         f"empty={rate(c['empty_rate'])}, fallback={rate(c['fallback_rate'])}, 미측정 {c['unknown']}{recency}")
         top = [c for c in (u.get("by_caller") or []) if c["tool"] == "knowledge_graph_search"][:4]
         if top:
-            lines.append("검색 호출자: " + ", ".join(f"{c['interface']}/{c['agent'] or '-'} {c['status']} {c['n']} (empty={c['empty_rate']}, fallback={c['fallback_rate']}, p95={c['p95_ms']}ms)" for c in top))
+            lines.append("검색 호출자: " + ", ".join(f"{c['interface']}/{c['agent'] or '-'} {c['status']} {c['n']} (empty={rate(c['empty_rate'])}, fallback={rate(c['fallback_rate'])}, p95={c['p95_ms']}ms)" for c in top))
     coverage = m.get("coverage") or {}
     if coverage:
         lines.append("원천 대조: " + str(coverage))

@@ -311,6 +311,8 @@ Guidelines:
   or drop the fact. Facts using generic entities are discarded.
 - "fact" must be a self-contained sentence in the document's language, with dates/numbers when present.
 - Never extract the document itself, its author's persona, internal task ids, file names or code.
+- Subject and object must be distinct entities. Never use an actor as its own Statement target;
+  use a specifically named work or claim, or omit the fact when no such target exists.
 """ % (_ENTITY_TYPES, _PREDICATES, MAX_LLM_FACTS)
 
 
@@ -356,6 +358,7 @@ def llm_facts(rec: DocRecord, raw_facts: list[dict]) -> list[dict]:
     """Validate model output against the agent schema (Document/Reference are
     NOT allowed here), stamp provenance, and add Document→Entity mentions."""
     from graph_memory.structured_writer import validate_fact
+    from kg_runtime.identity import normalize_alias_key
 
     doc = document_side(rec)
     out, seen_entities = [], set()
@@ -374,6 +377,10 @@ def llm_facts(rec: DocRecord, raw_facts: list[dict]) -> list[dict]:
         err = validate_fact(fact, i)
         if err:
             logger.info("[doc-extract] %s: dropped fact %d: %s", rec.ref, i, err)
+            continue
+        if (fact["subject_type"] == fact["object_type"]
+                and normalize_alias_key(fact["subject_name"]) == normalize_alias_key(fact["object_name"])):
+            logger.info("[doc-extract] %s: dropped fact %d: self-loop", rec.ref, i)
             continue
         out.append(fact)
         for side in ("subject", "object"):
@@ -439,6 +446,38 @@ def write_document_facts(rec: DocRecord, facts: list[dict]) -> dict:
     return res
 
 
+def filter_resolved_self_loops(facts: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Drop only extracted claims whose endpoints resolve to the same entity.
+
+    Deterministic source links remain mandatory. Resolver errors propagate so an
+    unavailable identity store cannot silently turn extraction into success.
+    """
+    from kg_runtime.identity import resolve_entity_sync
+    from kg_runtime.search import _get_neo4j_sync_driver
+
+    if not any(f.get("attributes", {}).get("extraction") == "llm" for f in facts):
+        return facts, []
+    kept, skipped, cache = [], [], {}
+    with _get_neo4j_sync_driver() as (driver, database):
+        with driver.session(database=database) as session:
+            for i, fact in enumerate(facts):
+                if fact.get("attributes", {}).get("extraction") == "llm":
+                    endpoints = []
+                    for side in ("subject", "object"):
+                        key = (fact[f"{side}_name"], fact[f"{side}_type"])
+                        if key not in cache:
+                            cache[key] = resolve_entity_sync(
+                                session, name=key[0], entity_type=key[1], trusted=False).uuid
+                        endpoints.append(cache[key])
+                    if endpoints[0] and endpoints[0] == endpoints[1]:
+                        skipped.append({"index": i, "reason": "self-loop after entity resolution",
+                                        "sync_key": fact["attributes"].get("sync_key")})
+                        logger.info("[doc-extract] dropped resolved self-loop: %s", skipped[-1])
+                        continue
+                kept.append(fact)
+    return kept, skipped
+
+
 def stamp_document_node(rec: DocRecord) -> None:
     """Store hash/url/kind on the Document node (queried for idempotency)."""
     from kg_runtime.search import _get_neo4j_sync_driver
@@ -486,6 +525,7 @@ def _extract_document(rec: DocRecord, *, names=None, alias_index=None, use_llm: 
     if not force and existing_sha and existing_sha == rec["sha"]:
         return {"ref": rec.ref, "status": "unchanged"}
     facts = build_document_facts(rec, names=names, alias_index=alias_index, use_llm=use_llm)
+    facts, skipped = filter_resolved_self_loops(facts)
     res = write_document_facts(rec, facts)
     successful = (res.get("status") == "ok" and not res.get("facts_rejected")
                   and res.get("facts_written", 0) == len(facts)
@@ -494,10 +534,17 @@ def _extract_document(rec: DocRecord, *, names=None, alias_index=None, use_llm: 
     if successful:
         expired = expire_document_edges(rec.ref, keep_uuids=res.get("edge_uuids", []))
         stamp_document_node(rec)
+    # Put the actual rejection first so bounded sync/health alerts retain it.
+    rejected = [{"index": item.get("index"), "reason": item.get("reason", "unknown rejection")}
+                for item in res.get("rejected_facts", [])]
+    message = res.get("message", "")
+    if rejected:
+        reasons = "; ".join(f"fact[{item['index']}]: {item['reason']}" for item in rejected)
+        message = f"{reasons} | {message}"
     return {
         "ref": rec.ref, "status": "ok" if successful else "error", "facts": len(facts), "written": res.get("facts_written", 0),
         "rejected": res.get("facts_rejected", 0), "expired": expired, "llm": use_llm,
-        "message": res.get("message", "")[:200],
+        "message": message[:200], "rejected_facts": rejected, "skipped_facts": skipped,
     }
 
 

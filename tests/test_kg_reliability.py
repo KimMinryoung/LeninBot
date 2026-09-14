@@ -188,6 +188,20 @@ class SearchTests(unittest.TestCase):
 
 
 class ConformanceTests(unittest.IsolatedAsyncioTestCase):
+    def test_usage_report_separates_historical_failure_and_later_success(self):
+        from kg_runtime.metrics import usage_metrics, format_report
+        base = {"tool_name": "knowledge_graph_search", "interface": "autonomous", "agent": "curator",
+                "n": 1, "avg_ms": 3, "p95_ms": 4, "empty": 0, "measured": 1, "fallback": 0, "diagnosed": 1}
+        rows = [dict(base, result_status="error", last_call_at=datetime(2026, 9, 9, tzinfo=timezone.utc)),
+                dict(base, result_status="ok", last_call_at=datetime(2026, 9, 14, tzinfo=timezone.utc))]
+        with patch("db.query", return_value=rows):
+            metrics = usage_metrics()
+        report = format_report({"usage": metrics})
+        self.assertIn("최근 성공 2026-09-14", report)
+        self.assertIn("최근 실패 2026-09-09", report)
+        self.assertEqual(metrics["callers"][0]["failure_rate"], .5)
+        json.dumps(metrics)
+
     async def test_deleted_self_loop_is_not_reported_as_written(self):
         from unittest.mock import AsyncMock
         from graph_memory import structured_writer as writer
@@ -205,6 +219,7 @@ class ConformanceTests(unittest.IsolatedAsyncioTestCase):
             result = await writer.write_structured_facts(graph, [fact], group_id="commulingo", allow_sync_predicates=True)
         self.assertEqual(result["facts_written"], 0)
         self.assertEqual(result["facts_rejected"], 1)
+        self.assertEqual(result["rejected_facts"][0]["reason"], "self-loop after entity resolution")
         self.assertEqual(result["written_fact_indices"], [])
         self.assertEqual(result["edge_uuids"], [])
         self.assertNotEqual(result["status"], "ok")

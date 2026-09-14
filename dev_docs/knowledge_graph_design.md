@@ -179,6 +179,20 @@ sync creates the missing source node and replaces relations whose endpoint no lo
 carries the intended external ID. A full document pass also refreshes collection/about
 links deterministically, preserving extracted facts and unchanged hashes (no extra LLM call).
 Hard-conformance-rejected edges are excluded from written counts and successful indices.
+Document extraction drops same-type, normalized same-name self-loops before writing or
+creating their mention links. Before writes, extracted claims also use the untrusted
+identity resolver to detect alias-based self-loops against existing entities. These claims
+are omitted with indices, reasons and sync keys retained in per-document `skipped_facts`;
+document mentions and mandatory source links remain intact. Unknown endpoints are not
+assumed equal, and resolver failures abort the document. Remaining collisions (including
+concurrent identity changes) still fail the conformance gate. Per-document results and sync
+items retain rejected fact indices/reasons, and bounded error messages put those reasons
+first (including self-loops after identity resolution and non-entity endpoints).
+Weekly report empty/fallback rates render as percentages; absent measurements render
+as `미측정`, keeping them visibly distinct from measured zero rates.
+Callers with failures also show their latest success/failure timestamps within the report
+window, so historical outages are not mistaken for a current failed probe. Verification
+calls remain excluded from organic usage totals.
 
 `systemd/leninbot-kg-verify.service` runs `scripts/verify_kg_runtime.py` on demand with the
 same Neo4j/DB credential mechanism as the curators. It checks exact and ambiguous entities,

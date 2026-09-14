@@ -588,11 +588,12 @@ async def write_structured_facts(
         report = None
 
     if report:
-        removed = {item["edge_uuid"] for item in report.self_loops + report.non_entity_endpoints}
+        removed = {item["edge_uuid"]: "self-loop after entity resolution" for item in report.self_loops}
+        removed.update({item["edge_uuid"]: "non-entity endpoint" for item in report.non_entity_endpoints})
         kept_edges, kept_indices = [], []
         for edge, index in zip(entity_edges, written_fact_indices):
             if edge.uuid in removed:
-                rejected_facts.append(_reject_fact(index, facts[index], "hard conformance violation"))
+                rejected_facts.append(_reject_fact(index, facts[index], removed[edge.uuid]))
             else:
                 kept_edges.append(edge)
                 kept_indices.append(index)

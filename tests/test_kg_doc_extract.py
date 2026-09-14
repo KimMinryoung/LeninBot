@@ -3,6 +3,9 @@
 import os
 import sys
 import unittest
+from unittest.mock import patch
+from unittest.mock import MagicMock
+from types import SimpleNamespace
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
@@ -93,6 +96,26 @@ class FactTests(unittest.TestCase):
 
 
 class LLMParsingTests(unittest.TestCase):
+    def test_self_loop_is_dropped_without_orphan_mention(self):
+        rec = dx.research_record({"slug": "s", "title": "T", "markdown": "x"})
+        loop = {"subject_name": "International Workingmen Association", "subject_type": "Organization",
+                "predicate": "Statement", "object_name": "international workingmen association",
+                "object_type": "Organization", "fact": "The association declared its principles."}
+        valid = dict(loop, object_name="General Rules", object_type="Policy")
+        facts = dx.llm_facts(rec, [loop, valid])
+        extracted = [f for f in facts if f["attributes"].get("extraction") == "llm"]
+        self.assertEqual(len(extracted), 1)
+        self.assertEqual(extracted[0]["object_name"], "General Rules")
+        self.assertEqual(len(facts), 3)
+        self.assertEqual(dx.llm_facts(rec, [loop]), [])
+
+    def test_same_name_different_types_is_not_assumed_self_loop(self):
+        rec = dx.research_record({"slug": "s", "title": "T", "markdown": "x"})
+        facts = dx.llm_facts(rec, [{"subject_name": "Lenin", "subject_type": "Person",
+                                   "predicate": "Statement", "object_name": "Lenin",
+                                   "object_type": "Concept", "fact": "A person discussed a titled work."}])
+        self.assertEqual(len(facts), 3)
+
     RAW = '''```json
 {"facts": [
   {"subject_name": "니키타 흐루쇼프", "subject_type": "Person", "predicate": "Statement", "object_name": "비밀연설",
@@ -177,6 +200,59 @@ class LLMParsingTests(unittest.TestCase):
 
 
 class IdempotencyTests(unittest.TestCase):
+    def test_alias_self_loop_filter_preserves_required_links_and_distinct_claims(self):
+        loop = {"subject_name": "IWMA", "subject_type": "Organization", "object_name": "First International",
+                "object_type": "Organization", "attributes": {"extraction": "llm", "sync_key": "doc:x:llm:0"}}
+        other = dict(loop, object_name="General Rules", object_type="Policy")
+        required = dict(loop, attributes={"reference_type": "about"})
+        driver_context = MagicMock()
+        driver_context.__enter__.return_value = (MagicMock(), "neo4j")
+        def resolve(session, *, name, entity_type, trusted):
+            self.assertFalse(trusted)
+            return SimpleNamespace(uuid="rules" if name == "General Rules" else "iwma")
+        with patch("kg_runtime.search._get_neo4j_sync_driver", return_value=driver_context), \
+             patch("kg_runtime.identity.resolve_entity_sync", side_effect=resolve):
+            kept, skipped = dx.filter_resolved_self_loops([loop, other, required])
+        self.assertEqual(kept, [other, required])
+        self.assertEqual(skipped[0]["sync_key"], "doc:x:llm:0")
+
+    def test_unresolved_entities_are_not_assumed_identical(self):
+        fact = {"subject_name": "Alpha", "subject_type": "Organization", "object_name": "Beta",
+                "object_type": "Organization", "attributes": {"extraction": "llm"}}
+        driver_context = MagicMock()
+        driver_context.__enter__.return_value = (MagicMock(), "neo4j")
+        with patch("kg_runtime.search._get_neo4j_sync_driver", return_value=driver_context), \
+             patch("kg_runtime.identity.resolve_entity_sync", return_value=SimpleNamespace(uuid=None)):
+            self.assertEqual(dx.filter_resolved_self_loops([fact]), ([fact], []))
+
+    def test_identity_failure_does_not_write_or_stamp(self):
+        rec = dx.research_record({"slug": "s", "title": "T", "markdown": "x"})
+        fact = {"attributes": {"extraction": "llm"}}
+        with patch.object(dx, "build_document_facts", return_value=[fact]), \
+             patch("kg_runtime.search._get_neo4j_sync_driver", side_effect=RuntimeError("offline")), \
+             patch.object(dx, "write_document_facts") as write, patch.object(dx, "stamp_document_node") as stamp:
+            with self.assertRaisesRegex(RuntimeError, "offline"):
+                dx.extract_document(rec)
+        write.assert_not_called()
+        stamp.assert_not_called()
+
+    def test_partial_write_reports_rejection_without_stamping_or_expiring(self):
+        rec = dx.research_record({"slug": "s", "title": "T", "markdown": "x"})
+        response = {"status": "partial_success", "facts_written": 1, "facts_rejected": 1,
+                    "edge_uuids": ["saved"], "message": "wrote facts " + "x" * 300,
+                    "rejected_facts": [{"index": 1, "reason": "self-loop after entity resolution", "fact": {}}]}
+        with patch.object(dx, "build_document_facts", return_value=[{}, {}]), \
+             patch.object(dx, "write_document_facts", return_value=response), \
+             patch.object(dx, "stamp_document_node") as stamp, \
+             patch.object(dx, "expire_document_edges") as expire:
+            result = dx.extract_document(rec)
+        self.assertEqual(result["status"], "error")
+        self.assertTrue(result["message"].startswith("fact[1]: self-loop after entity resolution"))
+        self.assertLessEqual(len(result["message"]), 200)
+        self.assertEqual(result["rejected_facts"], [{"index": 1, "reason": "self-loop after entity resolution"}])
+        stamp.assert_not_called()
+        expire.assert_not_called()
+
     def test_unchanged_hash_skips_without_touching_graph(self):
         rec = dx.research_record({"slug": "s", "title": "T", "markdown": "x", "content_sha256": "same"})
         res = dx.extract_document(rec, existing_sha="same", use_llm=False)

@@ -166,7 +166,7 @@ def run(*, since: datetime | None = None, full: bool = False, limit: int | None 
         stats["expired"] += res.get("expired", 0)
         if res.get("status") == "error":
             stats["errors"].append(f"{rec.ref}: {res.get('message')}")
-        stats["items"].append({k: res.get(k) for k in ("ref", "status", "facts", "written", "rejected", "expired")})
+        stats["items"].append({k: res.get(k) for k in ("ref", "status", "facts", "written", "rejected", "expired", "rejected_facts", "skipped_facts")})
         try:
             idx.refresh_from_neo4j()  # new entities become matchable for the next document
         except Exception:
