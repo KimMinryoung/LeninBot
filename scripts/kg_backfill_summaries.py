@@ -2,8 +2,8 @@
 """Fill empty Entity.summary deterministically from the node's best facts.
 
 No LLM: summary = up to N highest-tier, active facts touching the node,
-joined with " / ". Entities the sync jobs own (external_ids) already carry a
-curated summary and are skipped. Dry-run by default.
+joined with " / " and marked as derived KG excerpts with source edge UUIDs.
+Entities the sync jobs own (external_ids) are skipped. Dry-run by default.
 
     NEO4J_PASSWORD=... venv/bin/python scripts/kg_backfill_summaries.py [--execute] [--facts 3] [--limit N]
 """
@@ -26,6 +26,7 @@ TIER_ORDER = {"anchor": 4, "corroborated": 3, "single": 2, "unverified": 1}
 CANDIDATES = """
 MATCH (n:Entity)
 WHERE coalesce(n.summary, '') = '' AND size(coalesce(n.external_ids, [])) = 0
+  AND coalesce(n.curated_summary, '') = ''
   AND (n)-[:RELATES_TO]-()
 RETURN n.uuid AS uuid, n.name AS name
 LIMIT $limit
@@ -33,11 +34,27 @@ LIMIT $limit
 
 FACTS = """
 MATCH (n:Entity {uuid: $uuid})-[r:RELATES_TO]-()
-WHERE r.expired_at IS NULL AND coalesce(r.fact, '') <> ''
+WHERE r.expired_at IS NULL AND (r.invalid_at IS NULL OR r.invalid_at > datetime())
+  AND r.name <> 'Reference' AND coalesce(r.fact, '') <> ''
 OPTIONAL MATCH (ep:Episodic) WHERE ep.uuid IN coalesce(r.episodes, [])
 WITH r, collect(ep.name) AS ep_names
-RETURN r.fact AS fact, ep_names, toString(r.created_at) AS created_at
+RETURN r.uuid AS uuid, r.fact AS fact, ep_names, toString(r.created_at) AS created_at
 """
+
+
+def choose_facts(facts: list[dict], limit: int) -> list[dict]:
+    # Newest first within each tier; unknown timestamps sort last.
+    ordered = sorted(facts, key=lambda f: f.get("created_at") or "", reverse=True)
+    ordered.sort(key=lambda f: -_tier(f["ep_names"]))
+    chosen, seen = [], set()
+    for fact in ordered:
+        if fact["fact"] in seen:
+            continue
+        chosen.append(fact)
+        seen.add(fact["fact"])
+        if len(chosen) >= limit:
+            break
+    return chosen
 
 
 def _tier(names) -> int:
@@ -53,6 +70,8 @@ def main() -> int:
     ap.add_argument("--limit", type=int, default=100000)
     ap.add_argument("--max-chars", type=int, default=600)
     args = ap.parse_args()
+    if args.facts < 1 or args.limit < 1 or args.max_chars < 40:
+        ap.error("facts/limit must be positive and max-chars must be at least 40")
 
     from kg_runtime.search import _get_neo4j_sync_driver
 
@@ -63,25 +82,25 @@ def main() -> int:
             print(f"candidates (empty summary, has facts, not synced): {len(candidates)}")
             for i, c in enumerate(candidates):
                 facts = [dict(r) for r in s.run(FACTS, uuid=c["uuid"])]
-                facts.sort(key=lambda f: (-_tier(f["ep_names"]), f["created_at"] or ""), reverse=False)
-                facts.sort(key=lambda f: -_tier(f["ep_names"]))
-                chosen = []
-                for f in facts:
-                    if f["fact"] in chosen:
-                        continue
-                    chosen.append(f["fact"])
-                    if len(chosen) >= args.facts:
-                        break
+                chosen = choose_facts(facts, args.facts)
                 if not chosen:
                     continue
-                summary = " / ".join(chosen)
+                summary = "KG 관계 발췌: " + " / ".join(f["fact"] for f in chosen)
                 if len(summary) > args.max_chars:
                     summary = summary[: args.max_chars - 1].rstrip() + "…"
                 if i < 5:
                     print(f"  {c['name']}: {summary[:120]}")
                 if args.execute:
-                    s.run("MATCH (n:Entity {uuid: $uuid}) SET n.summary = $summary", uuid=c["uuid"], summary=summary).consume()
-                updated += 1
+                    row = s.run("""MATCH (n:Entity {uuid: $uuid})
+                        WHERE coalesce(n.summary, '') = '' AND coalesce(n.curated_summary, '') = ''
+                          AND size(coalesce(n.external_ids, [])) = 0
+                        SET n.summary = $summary, n.summary_source = 'kg_facts',
+                            n.summary_fact_uuids = $facts, n.summary_generated_at = datetime()
+                        RETURN count(n) AS n""", uuid=c["uuid"], summary=summary,
+                        facts=[f["uuid"] for f in chosen]).single()
+                    updated += row["n"]
+                else:
+                    updated += 1
     print(f"{'updated' if args.execute else 'would update'}: {updated}")
     if not args.execute:
         print("[DRY RUN] re-run with --execute to apply")

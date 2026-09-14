@@ -295,16 +295,11 @@ SET n.external_ids = ids,
 RETURN n.uuid AS uuid, size(ids) AS external_ids, size(als) AS aliases
 """
 
-# Merge: move RELATES_TO (both directions, skipping same-predicate duplicates
-# to the same neighbour), move MENTIONS, fill summary, union identity, delete.
+# Move every relation with its UUID/provenance/validity intact. Equal predicates
+# and neighbours do not imply equal claims or source records.
 CYPHER_MERGE_OUT = """
 MATCH (dup:Entity {uuid: $dup_uuid})-[r:RELATES_TO]->(t)
-WHERE t.uuid <> $canon_uuid
-WITH dup, r, t
-OPTIONAL MATCH (:Entity {uuid: $canon_uuid})-[existing:RELATES_TO]->(t)
-WHERE existing.name = r.name
-WITH dup, r, t, existing
-WHERE existing IS NULL
+WHERE t.uuid <> $canon_uuid AND t.uuid <> $dup_uuid
 MATCH (canon:Entity {uuid: $canon_uuid})
 CREATE (canon)-[r2:RELATES_TO]->(t)
 SET r2 = properties(r)
@@ -314,12 +309,7 @@ RETURN count(r2) AS cnt
 
 CYPHER_MERGE_IN = """
 MATCH (src)-[r:RELATES_TO]->(dup:Entity {uuid: $dup_uuid})
-WHERE src.uuid <> $canon_uuid
-WITH src, r, dup
-OPTIONAL MATCH (src)-[existing:RELATES_TO]->(:Entity {uuid: $canon_uuid})
-WHERE existing.name = r.name
-WITH src, r, dup, existing
-WHERE existing IS NULL
+WHERE src.uuid <> $canon_uuid AND src.uuid <> $dup_uuid
 MATCH (canon:Entity {uuid: $canon_uuid})
 CREATE (src)-[r2:RELATES_TO]->(canon)
 SET r2 = properties(r)
@@ -665,8 +655,9 @@ def _merge_stats(canonical_uuid: str) -> dict:
 def merge_entity_nodes_sync(session, canonical_uuid: str, dup_uuids) -> dict:
     """Fold ``dup_uuids`` into ``canonical_uuid`` (sync session). Returns stats.
 
-    Edges are moved (same-predicate edges to the same neighbour are dropped as
-    duplicates), MENTIONS follow, the canonical summary is filled when empty,
+    Edges retain their UUIDs and properties even for equal predicates/neighbours.
+    Relations between the merged nodes are removed to avoid self-loops.
+    MENTIONS follow, the canonical summary is filled when empty,
     identity lists are unioned and the duplicate is DETACH DELETEd.
     """
     stats = _merge_stats(canonical_uuid)

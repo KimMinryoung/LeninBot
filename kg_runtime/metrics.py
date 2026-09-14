@@ -32,6 +32,7 @@ def graph_metrics() -> dict:
         for r in _cypher_rows("MATCH (n:Entity) RETURN labels(n) AS labels, count(*) AS c")
     }
     out["orphans"] = one("MATCH (n:Entity) WHERE NOT (n)-[:RELATES_TO]-() RETURN count(n) AS c").get("c", 0)
+    out["disconnected"] = one("MATCH (n:Entity) WHERE NOT (n)--() RETURN count(n) AS c").get("c", 0)
     out["raw_empty_summary"] = one("MATCH (n:Entity) WHERE coalesce(n.summary, '') = '' RETURN count(n) AS c").get("c", 0)
     out["empty_summary"] = one("MATCH (n:Entity) WHERE coalesce(n.curated_summary, '') = '' AND coalesce(n.summary, '') = '' RETURN count(n) AS c").get("c", 0)
     out["curated_profiles"] = one("MATCH (n:Entity) WHERE n.curated_source IS NOT NULL RETURN count(n) AS c").get("c", 0)
@@ -221,7 +222,7 @@ def format_report(m: dict) -> str:
             f"노드 {g.get('entities', 0):,} · 엣지 {g.get('edges', 0):,} (만료 {g.get('expired_edges', 0):,}) · 에피소드 {g.get('episodes', 0):,}"
         )
         lines.append(
-            f"고립 {g.get('orphans', 0):,} · 차수≤2 {g.get('degree_le2_share', 0):.0%} · 빈 summary {g.get('empty_summary', 0):,} · "
+            f"관계 없는 노드 {g.get('orphans', 0):,} (완전 미연결 {g.get('disconnected', 0):,}) · 차수≤2 {g.get('degree_le2_share', 0):.0%} · 빈 summary {g.get('empty_summary', 0):,} · "
             f"동명 중복 {g.get('duplicate_name_groups', 0)}그룹/{g.get('duplicate_name_nodes', 0)}노드 · 외부id {g.get('with_external_ids', 0):,}"
         )
         docs = g.get("documents_by_kind") or {}
