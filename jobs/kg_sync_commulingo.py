@@ -694,7 +694,7 @@ def refresh_curated_profiles(facts: list[dict]) -> int:
         with drv.session(database=db) as session:
             row = session.run(
                 "UNWIND $profiles AS p MATCH (n:Entity) WHERE p.id IN coalesce(n.external_ids, []) "
-                "SET n.curated_name = p.name, n.curated_summary = p.summary, "
+                "SET n.curated_name = coalesce(n.reviewed_name, p.name), n.curated_summary = p.summary, "
                 "n.curated_source = p.id, n.curated_updated_at = datetime() RETURN count(n) AS c",
                 profiles=list(profiles.values()),
             ).single()

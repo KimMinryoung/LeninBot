@@ -48,6 +48,23 @@ Robustness rules (2026-07-17):
 
 ## Identity Layer (2026-09-03)
 
+Individually reviewed homonyms live in `config/kg_identity_review.json`: each entry records
+the original name/type, stable target UUID, source IDs, decision and source-link evidence.
+`kg_runtime.identity_review` applies only these exact normalized name/type pairs when no
+external ID is supplied; external IDs always retain priority. Missing or retyped reviewed
+targets fail closed. This also prevents known Person/Role misclassifications of the
+Cyber-Lenin system and the self-employed collective from recreating duplicate nodes.
+Free-text post-episode merges use the same reviewed decisions.
+
+`scripts/apply_kg_identity_review.py` is read-only by default. After a KG backup, `--execute`
+applies pending decisions in one transaction, checks every transferred relation's properties,
+preserves source IDs and old names as aliases, and re-embeds renamed names. `reviewed_name`
+keeps the chosen display name during subsequent source-profile refreshes. Event and glossary
+records that have separate source-owned links retain those roles with explicit names; the
+same historical subject alone is not a reason to erase its source-record separation.
+The review registry is loaded per process; long-running consumers need a restart to load
+changed rules. The graph names and refreshed embeddings are immediately persistent.
+
 Every Entity may carry `external_ids`, `aliases`, `alias_keys`, `name_ko`, `name_en`, `alias_text` (field-level detail in `knowledge_graph_schema.md` §1.1). They ride on `EntityNode.attributes`; graphiti saves attributes with `SET n = $entity_data` and the patched record loader (`graph_memory/graphiti_patches.py`) keeps unknown properties, so they survive graphiti re-saves. **Any graphiti upgrade must re-verify this round-trip.**
 
 `kg_runtime.identity.resolve_entity_{sync,async}` is the single resolver for the structured writer and the sync jobs:

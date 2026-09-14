@@ -34,6 +34,11 @@ graphiti 기본 속성(`uuid`, `name`, `summary`, `group_id`, `created_at`, `nam
 | `weak_keys` | list[str] | 성(姓)만 있는 별칭 등 단독으로 실체를 특정 못 하는 키("카스트로", "Khrushchev", "레닌"). 해석에는 같은 라벨 노드가 정확히 하나일 때만, 검색 매칭에는 유일할 때만 쓴다 (`is_weak_alias`) |
 | `name_ko` / `name_en` | str | 언어별 정식 명칭 |
 | `alias_text` | str | aliases를 " / "로 이은 문자열 (풀텍스트 인덱스 `entity_alias_text`) |
+| `reviewed_name` | str | 개별 판별한 KG 표시명. 원천 profile 갱신에서도 유지하며 원래 이름은 별칭으로 보존 |
+| `identity_review_reason` / `identity_reviewed_at` | str / datetime | 동명 판별에 따른 개명 사유와 적용 시각. 결정 원본은 `config/kg_identity_review.json` |
+
+원천 ID 없는 입력 중 검토 등록부의 정확한 이름·유형 쌍은 지정 UUID로 해석한다.
+그 밖의 이름·유형에는 이 예외를 적용하지 않는다. 원천 ID가 있으면 계속 ID가 우선한다.
 
 엔티티 해석 순서(`resolve_entity_*`): ① `external_ids` 포함 ② 강한 키·정확 이름 일치(그룹 무관, 같은 라벨만; 라벨 불일치는 로그) ③ 약한 키 — 같은 라벨 노드가 정확히 하나일 때만 ④ `KG_RESOLVE_EMBEDDING_NN=1`일 때 이름 임베딩 최근접(cosine ≥ 0.92, 같은 라벨). 들어오는 엔티티의 약한 별칭은 조회에 쓰지 않는다 — 2026-09-03 첫 미러에서 성 별칭이 피델·라울 카스트로 등 40쌍을 한 노드로 묶은 뒤 도입한 규칙.
 

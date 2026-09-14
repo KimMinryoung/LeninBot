@@ -488,6 +488,12 @@ def resolve_entity_sync(
     """Deterministic resolution on a sync neo4j session (jobs, scripts).
     ``exclude_uuid`` lets maintenance passes resolve a node against everything
     but itself. ``trusted=False`` ignores ``aliases`` for lookup."""
+    from kg_runtime.identity_review import reviewed_target, checked_result, CYPHER_REVIEWED_TARGET
+    reviewed = reviewed_target(name, entity_type, external_id=external_id)
+    if reviewed:
+        if reviewed['target_uuid'] == exclude_uuid:
+            return ResolveResult(None, 'reviewed_excluded')
+        return checked_result(session.run(CYPHER_REVIEWED_TARGET, uuid=reviewed['target_uuid']).single(), reviewed)
     if external_id:
         rec = session.run(CYPHER_RESOLVE_BY_EXTERNAL_ID, eid=external_id).single()
         if rec:
@@ -517,6 +523,11 @@ async def resolve_entity_async(
 ) -> ResolveResult:
     """Same as ``resolve_entity_sync`` on an async session, plus the optional
     name-embedding nearest-neighbour step when ``KG_RESOLVE_EMBEDDING_NN=1``."""
+    from kg_runtime.identity_review import reviewed_target, checked_result, CYPHER_REVIEWED_TARGET
+    reviewed = reviewed_target(name, entity_type, external_id=external_id)
+    if reviewed:
+        result = await session.run(CYPHER_REVIEWED_TARGET, uuid=reviewed['target_uuid'])
+        return checked_result(await result.single(), reviewed)
     if external_id:
         result = await session.run(CYPHER_RESOLVE_BY_EXTERNAL_ID, eid=external_id)
         rec = await result.single()
@@ -707,6 +718,14 @@ async def post_episode_merge(session, nodes) -> list[dict]:
         if not uuid or not name:
             continue
         etype = labels[0] if labels else "Entity"
+        from kg_runtime.identity_review import reviewed_target
+        reviewed = reviewed_target(name, etype)
+        if reviewed:
+            if reviewed['target_uuid'] != uuid:
+                hit = await resolve_entity_async(session, name=name, entity_type=etype, trusted=False)
+                stats = await merge_entity_nodes_async(session, hit.uuid, [uuid])
+                merged.append({"name": name, "into": hit.name, "canonical_uuid": hit.uuid, **stats})
+            continue
         names, keys = _lookup_params(name)
         result = await session.run(CYPHER_RESOLVE_BY_KEY, names=names, keys=keys, etype=etype)
         rows = [dict(r) async for r in result]

@@ -1,0 +1,712 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "uuid": "79a2f012-040a-4990-918c-b2ea80f7d814",
+      "target_uuid": "79a2f012-040a-4990-918c-b2ea80f7d814",
+      "original_name": "46인 선언",
+      "name": "46인 선언 (한국어 번역본)",
+      "types": [
+        "Document"
+      ],
+      "target_types": [
+        "Document"
+      ],
+      "external_ids": [
+        "archival:declaration-of-46"
+      ],
+      "action": "rename",
+      "reason": "원 성명을 다루는 발행 번역 문서; about 링크 보존",
+      "evidence_sync_keys": [
+        "doc:archival:declaration-of-46:about:event:new-economic-policy",
+        "doc:archival:declaration-of-46:about:person:alexander-beloborodov",
+        "doc:archival:declaration-of-46:about:person:alexander-voronsky",
+        "doc:archival:declaration-of-46:about:person:andrei-bubnov",
+        "doc:archival:declaration-of-46:about:person:antonov-ovseenko"
+      ]
+    },
+    {
+      "uuid": "fbf9ef2e-4d8b-42ab-b0bd-51da36180abf",
+      "target_uuid": "fbf9ef2e-4d8b-42ab-b0bd-51da36180abf",
+      "original_name": "46인 선언",
+      "name": "46인 선언 (역사 용어)",
+      "types": [
+        "Concept"
+      ],
+      "target_types": [
+        "Concept"
+      ],
+      "external_ids": [
+        "commulingo:term:declaration-of-46"
+      ],
+      "action": "rename",
+      "reason": "원 성명의 역사적 의미를 설명하는 용어 레코드",
+      "evidence_sync_keys": [
+        "commulingo:term_category:declaration-of-46",
+        "commulingo:term_event:declaration-of-46:great-terror",
+        "commulingo:term_person:declaration-of-46:preobrazhensky",
+        "commulingo:term_person:declaration-of-46:shlyapnikov",
+        "commulingo:term_person:declaration-of-46:trotsky"
+      ]
+    },
+    {
+      "uuid": "420508d3-e478-4890-864f-1d968f91aa08",
+      "target_uuid": "420508d3-e478-4890-864f-1d968f91aa08",
+      "original_name": "Cyber-Lenin",
+      "name": "Cyber-Lenin",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "keep",
+      "reason": "같은 AI 시스템을 Person으로 추출한 오분류",
+      "evidence_sync_keys": [
+        "doc:autonote:284:mention:420508d3",
+        "doc:autonote:330:mention:420508d3",
+        "doc:autonote:464:mention:420508d3",
+        "doc:autonote:520:mention:420508d3",
+        "doc:autonote:539:mention:420508d3"
+      ]
+    },
+    {
+      "uuid": "67ff5d39-8974-4b6a-814b-aefc89899785",
+      "target_uuid": "420508d3-e478-4890-864f-1d968f91aa08",
+      "original_name": "Cyber-Lenin",
+      "name": "Cyber-Lenin",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "같은 AI 시스템을 Person으로 추출한 오분류",
+      "evidence_sync_keys": [
+        "doc:research:20260322_gold_forecast_updated:llm-mention:0:subject",
+        "doc:research:20260322_gold_forecast_updated:llm:0",
+        "doc:research:20260404_g0dm0d3_wrapper_lessons_for_assistant_capability:llm-mention:0:subject",
+        "doc:research:20260404_g0dm0d3_wrapper_lessons_for_assistant_capability:llm:0",
+        "doc:research:20260405_cyber_lenin_com_seo_optimization_strategy_2026:llm:0"
+      ]
+    },
+    {
+      "uuid": "36085259-4208-4dac-a820-b28b26b09b0e",
+      "target_uuid": "36085259-4208-4dac-a820-b28b26b09b0e",
+      "original_name": "국제노동자협회 일반규약 (1871년 판)",
+      "name": "국제노동자협회 일반규약 (1871년 판 한국어 번역본)",
+      "types": [
+        "Document"
+      ],
+      "target_types": [
+        "Document"
+      ],
+      "external_ids": [
+        "archival:iwma-general-rules-1871"
+      ],
+      "action": "rename",
+      "reason": "발행된 한국어 사료 문서",
+      "evidence_sync_keys": [
+        "doc:archival:iwma-general-rules-1871:about:person:karl-marx",
+        "doc:archival:iwma-general-rules-1871:about:term:first-international",
+        "doc:archival:iwma-general-rules-1871:collection",
+        "doc:archival:iwma-general-rules-1871:llm-mention:0:object",
+        "doc:archival:iwma-general-rules-1871:llm-mention:0:subject"
+      ]
+    },
+    {
+      "uuid": "f500bfe7-265f-4852-8436-8ec25a254a9b",
+      "target_uuid": "f500bfe7-265f-4852-8436-8ec25a254a9b",
+      "original_name": "국제노동자협회 일반규약 (1871년 판)",
+      "name": "국제노동자협회 일반규약 (1871년 원문 저작)",
+      "types": [
+        "Asset"
+      ],
+      "target_types": [
+        "Asset"
+      ],
+      "external_ids": [],
+      "action": "rename",
+      "reason": "협회의 원칙을 선언한 원문 저작; 번역 문서의 언급 대상",
+      "evidence_sync_keys": [
+        "doc:archival:iwma-general-rules-1871:llm-mention:0:object",
+        "doc:archival:iwma-general-rules-1871:llm:0"
+      ]
+    },
+    {
+      "uuid": "2b694cea-dc9d-42ba-ad52-5efa6968e22c",
+      "target_uuid": "2b694cea-dc9d-42ba-ad52-5efa6968e22c",
+      "original_name": "대숙청",
+      "name": "대숙청 (1937–1938년 대테러)",
+      "types": [
+        "Incident"
+      ],
+      "target_types": [
+        "Incident"
+      ],
+      "external_ids": [
+        "commulingo:event:great-terror"
+      ],
+      "action": "rename",
+      "reason": "원천 사건 레코드의 범위는 1937–1938년 대량 탄압",
+      "evidence_sync_keys": [
+        "commulingo:event_location:great-terror:kolyma-camps",
+        "commulingo:event_location:great-terror:moscow",
+        "commulingo:event_person:great-terror:abakumov",
+        "commulingo:event_person:great-terror:agranov",
+        "commulingo:event_person:great-terror:akhmatova"
+      ]
+    },
+    {
+      "uuid": "326d71bf-08e6-4401-a435-b62ca783345a",
+      "target_uuid": "326d71bf-08e6-4401-a435-b62ca783345a",
+      "original_name": "대숙청",
+      "name": "대숙청 (1936–1938년 정치탄압)",
+      "types": [
+        "Concept"
+      ],
+      "target_types": [
+        "Concept"
+      ],
+      "external_ids": [
+        "commulingo:term:great-purge"
+      ],
+      "action": "rename",
+      "reason": "원천 용어의 범위는 1936–1938년 정치탄압",
+      "evidence_sync_keys": [
+        "commulingo:term_category:great-purge",
+        "commulingo:term_event:great-purge:great-terror",
+        "commulingo:term_parent:family-of-traitor-to-motherland",
+        "commulingo:term_parent:harbin-operation",
+        "commulingo:term_parent:military-fascist-conspiracy"
+      ]
+    },
+    {
+      "uuid": "b0342d98-0536-4b35-bfa8-3a45210cb1c1",
+      "target_uuid": "b0342d98-0536-4b35-bfa8-3a45210cb1c1",
+      "original_name": "러이크 라슬로",
+      "name": "러이크 라슬로",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [
+        "commulingo:person:laszlo-rajk"
+      ],
+      "action": "keep",
+      "reason": "인물 레코드는 재판 용어와 구별하여 유지",
+      "evidence_sync_keys": [
+        "commulingo:event_person:eastern-europe-peoples-democracies:laszlo-rajk",
+        "commulingo:event_person:hungary-1945-1949:laszlo-rajk",
+        "commulingo:person_group:laszlo-rajk",
+        "commulingo:person_role:laszlo-rajk",
+        "commulingo:term_person:cominform:laszlo-rajk"
+      ]
+    },
+    {
+      "uuid": "c6b3428b-09ef-4cb3-94f0-f67f0423d4a7",
+      "target_uuid": "c6b3428b-09ef-4cb3-94f0-f67f0423d4a7",
+      "original_name": "러이크 라슬로",
+      "name": "러이크 재판과 복권 (1949–1956)",
+      "types": [
+        "Concept"
+      ],
+      "target_types": [
+        "Concept"
+      ],
+      "external_ids": [
+        "commulingo:term:rajk-trial"
+      ],
+      "action": "rename",
+      "reason": "rajk-trial은 인물 자체가 아니라 재판·복권을 설명하는 용어",
+      "evidence_sync_keys": [
+        "commulingo:term_category:rajk-trial",
+        "commulingo:term_event:rajk-trial:hungarian-revolution",
+        "commulingo:term_event:rajk-trial:spanish-civil-war",
+        "commulingo:term_person:rajk-trial:laszlo-rajk",
+        "commulingo:term_person:rajk-trial:matyas-rakosi"
+      ]
+    },
+    {
+      "uuid": "26de88ff-d713-4aea-b34e-08f56aa4c568",
+      "target_uuid": "26de88ff-d713-4aea-b34e-08f56aa4c568",
+      "original_name": "레닌그라드 사건",
+      "name": "레닌그라드 사건 (용어 해설)",
+      "types": [
+        "Concept"
+      ],
+      "target_types": [
+        "Concept"
+      ],
+      "external_ids": [
+        "commulingo:term:leningrad-affair"
+      ],
+      "action": "rename",
+      "reason": "동일 역사적 주제의 용어 레코드; 사건과 연결하는 원천 링크 보존",
+      "evidence_sync_keys": [
+        "commulingo:term_category:leningrad-affair",
+        "commulingo:term_event:leningrad-affair:leningrad-affair",
+        "commulingo:term_event:leningrad-affair:twentieth-party-congress",
+        "commulingo:term_person:leningrad-affair:abakumov",
+        "commulingo:term_person:leningrad-affair:alexei-kuznetsov"
+      ]
+    },
+    {
+      "uuid": "d521d1a1-d50e-4868-9472-89bd706b0c01",
+      "target_uuid": "d521d1a1-d50e-4868-9472-89bd706b0c01",
+      "original_name": "레닌그라드 사건",
+      "name": "레닌그라드 사건 (1949–1950년 사건)",
+      "types": [
+        "Incident"
+      ],
+      "target_types": [
+        "Incident"
+      ],
+      "external_ids": [
+        "commulingo:event:leningrad-affair"
+      ],
+      "action": "rename",
+      "reason": "인물의 사건 관여 관계를 소유하는 사건 레코드",
+      "evidence_sync_keys": [
+        "commulingo:event_location:leningrad-affair:leningrad",
+        "commulingo:event_location:leningrad-affair:moscow",
+        "commulingo:event_person:leningrad-affair:abakumov",
+        "commulingo:event_person:leningrad-affair:alexei-kuznetsov",
+        "commulingo:event_person:leningrad-affair:andrei-sushkov"
+      ]
+    },
+    {
+      "uuid": "6b0d0e23-08f9-4eec-8f34-bc37d742c234",
+      "target_uuid": "6b0d0e23-08f9-4eec-8f34-bc37d742c234",
+      "original_name": "반알코올 캠페인",
+      "name": "반알코올 캠페인 (1985–1988년 시행 과정)",
+      "types": [
+        "Incident"
+      ],
+      "target_types": [
+        "Incident"
+      ],
+      "external_ids": [
+        "commulingo:event:anti-alcohol-campaign"
+      ],
+      "action": "rename",
+      "reason": "추진 인물과 장소·시행 과정을 연결하는 사건 레코드",
+      "evidence_sync_keys": [
+        "commulingo:event_location:anti-alcohol-campaign:moscow",
+        "commulingo:event_person:anti-alcohol-campaign:alexandr-nemtsov",
+        "commulingo:event_person:anti-alcohol-campaign:evgeny-andreev",
+        "commulingo:event_person:anti-alcohol-campaign:fyodor-uglov",
+        "commulingo:event_person:anti-alcohol-campaign:gorbachev"
+      ]
+    },
+    {
+      "uuid": "b2a852af-d2c2-4cd6-818a-39d9490285db",
+      "target_uuid": "b2a852af-d2c2-4cd6-818a-39d9490285db",
+      "original_name": "반알코올 캠페인",
+      "name": "반알코올 캠페인 (금주 정책)",
+      "types": [
+        "Concept"
+      ],
+      "target_types": [
+        "Concept"
+      ],
+      "external_ids": [
+        "commulingo:term:anti-alcohol-campaign"
+      ],
+      "action": "rename",
+      "reason": "주류 생산·판매 제한 정책을 설명하는 용어 레코드",
+      "evidence_sync_keys": [
+        "commulingo:term_category:anti-alcohol-campaign",
+        "commulingo:term_event:anti-alcohol-campaign:anti-alcohol-campaign",
+        "commulingo:term_event:anti-alcohol-campaign:economic-reform-debate",
+        "commulingo:term_event:anti-alcohol-campaign:perestroika",
+        "commulingo:term_parent:council-of-ministers-decree-on-relaxing-alcohol-sale-restric"
+      ]
+    },
+    {
+      "uuid": "2e2827d2-a576-4d29-9450-0aa52ec05a15",
+      "target_uuid": "2e2827d2-a576-4d29-9450-0aa52ec05a15",
+      "original_name": "비소련 혁명가",
+      "name": "비소련 혁명가 (인물 분류)",
+      "types": [
+        "Concept"
+      ],
+      "target_types": [
+        "Concept"
+      ],
+      "external_ids": [
+        "commulingo:people-group:international-revolutionary"
+      ],
+      "action": "rename",
+      "reason": "people-group 원천의 편집상 인물 분류",
+      "evidence_sync_keys": [
+        "commulingo:person_group:abdul-fattah-ismail",
+        "commulingo:person_group:adam-michnik",
+        "commulingo:person_group:adrien-duport",
+        "commulingo:person_group:agostinho-neto",
+        "commulingo:person_group:aime-cesaire"
+      ]
+    },
+    {
+      "uuid": "a554c6c1-32f3-447f-8102-6218bb2115f2",
+      "target_uuid": "a554c6c1-32f3-447f-8102-6218bb2115f2",
+      "original_name": "비소련 혁명가",
+      "name": "비소련 혁명가 (인물 역할)",
+      "types": [
+        "Role"
+      ],
+      "target_types": [
+        "Role"
+      ],
+      "external_ids": [
+        "commulingo:role-category:non-soviet-revolutionary"
+      ],
+      "action": "rename",
+      "reason": "인물 Affiliation 대상인 역할 범주",
+      "evidence_sync_keys": [
+        "commulingo:person_role:abram-gots",
+        "commulingo:person_role:adrien-duport",
+        "commulingo:person_role:afanasi-matushenko",
+        "commulingo:person_role:agostinho-neto",
+        "commulingo:person_role:aime-cesaire"
+      ]
+    },
+    {
+      "uuid": "a9178b83-5953-43f5-a392-f81082aec39c",
+      "target_uuid": "a9178b83-5953-43f5-a392-f81082aec39c",
+      "original_name": "숨가이트",
+      "name": "숨가이트 반아르메니아인 폭력 (1988)",
+      "types": [
+        "Incident"
+      ],
+      "target_types": [
+        "Incident"
+      ],
+      "external_ids": [],
+      "action": "rename",
+      "reason": "야조프의 병력 투입·질서 회복 대상 사건",
+      "evidence_sync_keys": [
+        "doc:archival:politburo-1988-02-29-sumgait:llm-mention:5:object",
+        "doc:archival:politburo-1988-02-29-sumgait:llm:5"
+      ]
+    },
+    {
+      "uuid": "f1bd8c9e-4aac-40f3-92ae-66462af36513",
+      "target_uuid": "f1bd8c9e-4aac-40f3-92ae-66462af36513",
+      "original_name": "숨가이트",
+      "name": "숨가이트 (도시)",
+      "types": [
+        "Location"
+      ],
+      "target_types": [
+        "Location"
+      ],
+      "external_ids": [],
+      "action": "rename",
+      "reason": "아르메니아인 대상 폭력이 일어난 도시",
+      "evidence_sync_keys": [
+        "doc:archival:politburo-1988-02-29-sumgait:llm-mention:3:object",
+        "doc:archival:politburo-1988-02-29-sumgait:llm:3",
+        "doc:archival:politburo-1988-02-29-sumgait:llm:4"
+      ]
+    },
+    {
+      "uuid": "7fe0150c-d7cf-4d82-b7d8-4fd5d6aae4e0",
+      "target_uuid": "7fe0150c-d7cf-4d82-b7d8-4fd5d6aae4e0",
+      "original_name": "신경제정책(네프)",
+      "name": "신경제정책(네프) (경제 정책)",
+      "types": [
+        "Concept"
+      ],
+      "target_types": [
+        "Concept"
+      ],
+      "external_ids": [
+        "commulingo:term:nep"
+      ],
+      "action": "rename",
+      "reason": "시장·현물세 등 경제 정책 내용을 설명하는 용어 레코드",
+      "evidence_sync_keys": [
+        "commulingo:term_category:nep",
+        "commulingo:term_event:nep:five-year-plans",
+        "commulingo:term_event:nep:new-economic-policy",
+        "commulingo:term_person:nep:bukharin",
+        "commulingo:term_person:nep:lenin"
+      ]
+    },
+    {
+      "uuid": "d268705f-e685-4117-a7bf-8d57f8338853",
+      "target_uuid": "d268705f-e685-4117-a7bf-8d57f8338853",
+      "original_name": "신경제정책(네프)",
+      "name": "신경제정책(네프) (1921–1928년 시행)",
+      "types": [
+        "Incident"
+      ],
+      "target_types": [
+        "Incident"
+      ],
+      "external_ids": [
+        "commulingo:event:new-economic-policy"
+      ],
+      "action": "rename",
+      "reason": "정책 도입·시행과 인물 관여를 연결하는 사건 레코드",
+      "evidence_sync_keys": [
+        "commulingo:event_location:new-economic-policy:moscow",
+        "commulingo:event_person:new-economic-policy:alexander-chayanov",
+        "commulingo:event_person:new-economic-policy:alexander-rodchenko",
+        "commulingo:event_person:new-economic-policy:alexander-smirnov",
+        "commulingo:event_person:new-economic-policy:alexander-tsyurupa"
+      ]
+    },
+    {
+      "uuid": "9c9dce51-e38d-4783-b18a-541a8b418e0b",
+      "target_uuid": "9c9dce51-e38d-4783-b18a-541a8b418e0b",
+      "original_name": "유럽안보협력회의",
+      "name": "유럽안보협력회의 (CSCE)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "rename",
+      "reason": "최종의정서를 채택한 협력체",
+      "evidence_sync_keys": [
+        "doc:archival:helsinki-final-act-1975:llm-mention:0:subject",
+        "doc:archival:helsinki-final-act-1975:llm:0",
+        "doc:archival:helsinki-final-act-1975:llm:1",
+        "doc:archival:helsinki-final-act-1975:mention:9c9dce51"
+      ]
+    },
+    {
+      "uuid": "a97eeadf-c5c2-4ea6-937d-c207ce5bcd0a",
+      "target_uuid": "a97eeadf-c5c2-4ea6-937d-c207ce5bcd0a",
+      "original_name": "유럽안보협력회의",
+      "name": "헬싱키 유럽안보협력회의 (1975년 회의)",
+      "types": [
+        "Campaign"
+      ],
+      "target_types": [
+        "Campaign"
+      ],
+      "external_ids": [],
+      "action": "rename",
+      "reason": "각국 대표의 참가 관계가 붙은 회의 행사",
+      "evidence_sync_keys": [
+        "doc:archival:helsinki-final-act-1975:llm-mention:5:object",
+        "doc:archival:helsinki-final-act-1975:llm:1",
+        "doc:archival:helsinki-final-act-1975:llm:10",
+        "doc:archival:helsinki-final-act-1975:llm:2",
+        "doc:archival:helsinki-final-act-1975:llm:3"
+      ]
+    },
+    {
+      "uuid": "653e1a96-b301-4fb0-bf49-988653b274dc",
+      "target_uuid": "653e1a96-b301-4fb0-bf49-988653b274dc",
+      "original_name": "이반 뇌제",
+      "name": "이반 뇌제 2부 수정·완성 작업",
+      "types": [
+        "Campaign"
+      ],
+      "target_types": [
+        "Campaign"
+      ],
+      "external_ids": [],
+      "action": "rename",
+      "reason": "예이젠시테인·체르카소프가 허락을 청원한 제작 작업",
+      "evidence_sync_keys": [
+        "doc:archival:stalin-eisenstein-1947:llm-mention:6:object",
+        "doc:archival:stalin-eisenstein-1947:llm:6"
+      ]
+    },
+    {
+      "uuid": "f0bf55ee-431c-47ba-a55c-a2b520d6ea7f",
+      "target_uuid": "f0bf55ee-431c-47ba-a55c-a2b520d6ea7f",
+      "original_name": "이반 뇌제",
+      "name": "이반 뇌제 (예이젠시테인 영화)",
+      "types": [
+        "Asset"
+      ],
+      "target_types": [
+        "Asset"
+      ],
+      "external_ids": [],
+      "action": "rename",
+      "reason": "스탈린·몰로토프·즈다노프가 평가한 영화 작품",
+      "evidence_sync_keys": [
+        "doc:archival:stalin-eisenstein-1947:llm-mention:1:object",
+        "doc:archival:stalin-eisenstein-1947:llm:1",
+        "doc:archival:stalin-eisenstein-1947:llm:2",
+        "doc:archival:stalin-eisenstein-1947:llm:3",
+        "doc:archival:stalin-eisenstein-1947:llm:7"
+      ]
+    },
+    {
+      "uuid": "43accd9a-6d2c-47e1-aac8-bd763951646e",
+      "target_uuid": "43accd9a-6d2c-47e1-aac8-bd763951646e",
+      "original_name": "자영업자",
+      "name": "자영업자",
+      "types": [
+        "Concept"
+      ],
+      "target_types": [
+        "Concept"
+      ],
+      "external_ids": [],
+      "action": "keep",
+      "reason": "특정 개인이 아닌 동일한 한국 자영업자 집단",
+      "evidence_sync_keys": [
+        "doc:autonote:505:llm:2",
+        "doc:research:korea-self-employed-debt-crisis-2026:llm-mention:1:object",
+        "doc:research:korea-self-employed-debt-crisis-2026:llm:1",
+        "doc:research:korea-self-employed-debt-crisis-2026:llm:4",
+        "doc:research:korea-self-employed-debt-crisis-2026:llm:5"
+      ]
+    },
+    {
+      "uuid": "50964f4c-39ea-49e2-9465-b699432e3020",
+      "target_uuid": "43accd9a-6d2c-47e1-aac8-bd763951646e",
+      "original_name": "자영업자",
+      "name": "자영업자",
+      "types": [
+        "Role"
+      ],
+      "target_types": [
+        "Concept"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "특정 개인이 아닌 동일한 한국 자영업자 집단",
+      "evidence_sync_keys": [
+        "doc:autonote:491:mention:50964f4c",
+        "doc:autonote:505:mention:50964f4c",
+        "doc:autonote:589:mention:50964f4c",
+        "doc:autonote:595:mention:50964f4c",
+        "doc:autonote:598:mention:50964f4c"
+      ]
+    },
+    {
+      "uuid": "a0377243-e0ec-43ba-befc-8ff9b55360e7",
+      "target_uuid": "43accd9a-6d2c-47e1-aac8-bd763951646e",
+      "original_name": "자영업자",
+      "name": "자영업자",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Concept"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "특정 개인이 아닌 동일한 한국 자영업자 집단",
+      "evidence_sync_keys": [
+        "doc:autonote:595:llm:0",
+        "doc:autonote:598:llm:1",
+        "doc:research:bok-july-2026-rate-hike-impact-analysis:llm-mention:3:object",
+        "doc:research:bok-july-2026-rate-hike-impact-analysis:llm:3"
+      ]
+    },
+    {
+      "uuid": "32ca1675-3b31-42f8-98d8-8338b4ec6c4c",
+      "target_uuid": "32ca1675-3b31-42f8-98d8-8338b4ec6c4c",
+      "original_name": "코민테른",
+      "name": "코민테른 (국제 조직)",
+      "types": [
+        "Concept"
+      ],
+      "target_types": [
+        "Concept"
+      ],
+      "external_ids": [
+        "commulingo:term:comintern"
+      ],
+      "action": "rename",
+      "reason": "term 원천: 국제 공산주의 조직의 성격·노선을 설명",
+      "evidence_sync_keys": [
+        "commulingo:term_category:comintern",
+        "commulingo:term_event:comintern:february-1934-crisis",
+        "commulingo:term_event:comintern:great-terror",
+        "commulingo:term_event:comintern:october-revolution",
+        "commulingo:term_event:comintern:spanish-civil-war"
+      ]
+    },
+    {
+      "uuid": "414755a7-fda7-4523-91ab-6849b3aba978",
+      "target_uuid": "414755a7-fda7-4523-91ab-6849b3aba978",
+      "original_name": "코민테른",
+      "name": "코민테른 (집행부 직책)",
+      "types": [
+        "Role"
+      ],
+      "target_types": [
+        "Role"
+      ],
+      "external_ids": [
+        "commulingo:office:comintern"
+      ],
+      "action": "rename",
+      "reason": "office 원천: 집행위원장·서기장 등 직책 이력의 연결 대상",
+      "evidence_sync_keys": [
+        "commulingo:office_row:73",
+        "commulingo:office_row:74",
+        "commulingo:office_row:75",
+        "commulingo:office_row:76",
+        "commulingo:person_office:bukharin:comintern"
+      ]
+    },
+    {
+      "uuid": "3e3d118f-5d3e-4932-8250-1ff608c3be31",
+      "target_uuid": "3e3d118f-5d3e-4932-8250-1ff608c3be31",
+      "original_name": "크론시타트 봉기",
+      "name": "크론시타트 봉기 (용어 해설)",
+      "types": [
+        "Concept"
+      ],
+      "target_types": [
+        "Concept"
+      ],
+      "external_ids": [
+        "commulingo:term:kronstadt-rebellion-1921"
+      ],
+      "action": "rename",
+      "reason": "동일 역사적 주제의 용어 해설; 사건 연결 원천 링크 보존",
+      "evidence_sync_keys": [
+        "commulingo:term_category:kronstadt-rebellion-1921",
+        "commulingo:term_event:kronstadt-rebellion-1921:kronstadt-1921",
+        "commulingo:term_event:kronstadt-rebellion-1921:new-economic-policy",
+        "commulingo:term_person:kronstadt-rebellion-1921:anton-denikin",
+        "commulingo:term_person:kronstadt-rebellion-1921:nikolai-yudenich"
+      ]
+    },
+    {
+      "uuid": "742207ec-10bb-47e8-b2f6-06c142092bfb",
+      "target_uuid": "742207ec-10bb-47e8-b2f6-06c142092bfb",
+      "original_name": "크론시타트 봉기",
+      "name": "크론시타트 봉기 (1921년 사건)",
+      "types": [
+        "Incident"
+      ],
+      "target_types": [
+        "Incident"
+      ],
+      "external_ids": [
+        "commulingo:event:kronstadt-1921"
+      ],
+      "action": "rename",
+      "reason": "봉기의 참여·진압 인물과 장소를 소유하는 사건 레코드",
+      "evidence_sync_keys": [
+        "commulingo:event_location:kronstadt-1921:kronstadt",
+        "commulingo:event_person:kronstadt-1921:alexander-kozlovsky-artillery-general",
+        "commulingo:event_person:kronstadt-1921:boris-chagin",
+        "commulingo:event_person:kronstadt-1921:israel-getzler",
+        "commulingo:event_person:kronstadt-1921:kalinin"
+      ]
+    }
+  ]
+}
