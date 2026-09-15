@@ -1206,11 +1206,13 @@ CHECK_INBOX_TOOL = {
     "description": (
         "Read lenin@cyber-lenin.com mail — INBOX + Junk together by default, or "
         "one of them via folder. Returns subject, sender, date, folder, read "
-        "status, body text, and any links. Unread → [UNREAD], junk → [JUNK]."
+        "status, cached body text, links and delivery history as JSON. Delegated tasks default to unbriefed mail, independently of IMAP read flags. Use mail_id for cached pagination."
     ),
     "input_schema": {
         "type": "object",
         "properties": {
+            "mail_id": {"type": "integer", "description": "Stored mail ID: read cached content without IMAP. Follow next for body pagination."},
+            "unbriefed_only": {"type": "boolean", "description": "Only mail without a delivery receipt for this audience. Default true in delegated tasks unless unread_only=true. Set false to browse history."},
             "sender_filter": {
                 "type": "string",
                 "description": "Filter by sender address or domain (e.g. 'substack.com', 'platformer'). Optional.",
@@ -1226,7 +1228,7 @@ CHECK_INBOX_TOOL = {
             },
             "limit": {
                 "type": "integer",
-                "description": "Max emails to return (default 5, max 20).",
+                "description": "Max emails to return (default 5, max 20); coverage reports remaining candidates.",
                 "default": 5,
             },
             "include_body": {
@@ -1236,12 +1238,12 @@ CHECK_INBOX_TOOL = {
             },
             "body_max_chars": {
                 "type": "integer",
-                "description": "Maximum extracted body characters per email (default 4000, max 12000).",
-                "default": 4000,
+                "description": "Maximum body characters per email (default/max 12000). Continue via cached mail_id.",
+                "default": 12000,
             },
             "body_offset": {
                 "type": "integer",
-                "description": "Character offset into a single email body when uid is provided. Default 0.",
+                "description": "Character offset into a single email body with mail_id or uid. Default 0.",
                 "default": 0,
             },
             # The default must stay "" and not "INBOX": _apply_top_level_defaults
@@ -1407,200 +1409,9 @@ def _parse_email_message(
     }
 
 
-async def _exec_check_inbox(
-    sender_filter: str = "",
-    subject_filter: str = "",
-    unread_only: bool = False,
-    limit: int = 5,
-    include_body: bool = True,
-    body_max_chars: int = 4000,
-    body_offset: int = 0,
-    # "" (both folders), not "INBOX": this default has to agree with the schema's,
-    # or a caller that omits the field gets INBOX-only listings from the handler
-    # while the tool advertises INBOX + Junk.
-    folder: str = "",
-    uid: str = "",
-) -> str:
-    """Check IMAP INBOX + Junk folders and extract readable body text plus links from recent emails."""
-    limit = max(1, min(20, limit))
-    body_max_chars = max(0, min(12000, body_max_chars))
-    try:
-        body_offset = max(0, int(body_offset or 0))
-    except (TypeError, ValueError):
-        body_offset = 0
-    uid = str(uid or "").strip()
-
-    # `folder` used to be read only by the uid branch below: a listing call asking
-    # for Junk was answered with INBOX, silently, because the argument passed
-    # schema validation and was then never looked at. An unknown value is now an
-    # error rather than a quiet fallback to INBOX, for the same reason.
-    requested = str(folder or "").strip().lower()
-    if requested not in ("", "inbox", "junk"):
-        return f"Error: unknown folder {folder!r} — use 'INBOX', 'Junk', or omit for both"
-    selected_folder = "Junk" if requested == "junk" else "INBOX"
-    search_folders = {"inbox": ["INBOX"], "junk": ["Junk"]}.get(requested, ["INBOX", "Junk"])
-
-    def _fetch():
-        conn = _imap_connect()
-        if conn is None:
-            return "Error: IMAP credentials not configured"
-
-        results = []
-        successful_folders = 0
-        folder_errors = []
-        try:
-            if uid:
-                status, _ = conn.select(selected_folder, readonly=True)
-                if status != "OK":
-                    return f"Error: could not select folder {selected_folder}"
-                fetch_status, msg_data = conn.uid("fetch", uid, "(FLAGS BODY.PEEK[])")
-                if fetch_status != "OK" or not msg_data or not isinstance(msg_data[0], tuple):
-                    return f"Email not found: folder={selected_folder} uid={uid}"
-                flags_raw = msg_data[0][0] if isinstance(msg_data[0][0], bytes) else b""
-                raw = msg_data[0][1]
-                parsed = _parse_email_message(
-                    raw,
-                    include_body=include_body,
-                    body_max_chars=body_max_chars,
-                    body_offset=body_offset,
-                )
-                parsed["folder"] = selected_folder
-                parsed["uid"] = uid
-                parsed["is_read"] = b"\\Seen" in flags_raw
-                return [parsed]
-
-            for mailbox_folder in search_folders:
-                try:
-                    status, _ = conn.select(mailbox_folder, readonly=True)
-                    if status != "OK":
-                        folder_errors.append(f"{mailbox_folder}: select returned {status}")
-                        continue
-                except Exception as exc:
-                    folder_errors.append(f"{mailbox_folder}: select failed ({type(exc).__name__})")
-                    continue
-
-                search_criteria = "UNSEEN" if unread_only else "ALL"
-                search_status, data = conn.uid("search", None, search_criteria)
-                if search_status != "OK":
-                    folder_errors.append(f"{mailbox_folder}: search returned {search_status}")
-                    continue
-                successful_folders += 1
-                all_uids = data[0].split() if data and data[0] else []
-                if not all_uids:
-                    continue
-
-                candidate_uids = all_uids[-(limit * 5):]
-                candidate_uids.reverse()
-
-                # Budgeted per folder, not against the shared accumulator. INBOX
-                # is walked first and holds hundreds of messages, so a shared
-                # `len(results) >= limit` let it consume the whole budget and
-                # broke out of Junk on its first candidate — Junk contributed
-                # nothing whenever INBOX had `limit` matches, which is why the
-                # advertised [JUNK] tag was effectively unreachable. Each folder
-                # now fills up to `limit`; the date sort below decides which of
-                # them survive the final cut.
-                folder_results = []
-                for candidate_uid in candidate_uids:
-                    if len(folder_results) >= limit:
-                        break
-                    fetch_status, msg_data = conn.uid("fetch", candidate_uid, "(FLAGS BODY.PEEK[])")
-                    if fetch_status != "OK":
-                        continue
-                    if not msg_data or not isinstance(msg_data[0], tuple):
-                        continue
-                    flags_raw = msg_data[0][0] if isinstance(msg_data[0][0], bytes) else b""
-                    raw = msg_data[0][1]
-                    if not raw:
-                        continue
-                    is_read = b"\\Seen" in flags_raw
-                    uid_match = re.search(rb"UID (\d+)", flags_raw)
-                    parsed = _parse_email_message(
-                        raw,
-                        include_body=include_body,
-                        body_max_chars=body_max_chars,
-                        body_offset=0,
-                    )
-
-                    if sender_filter and sender_filter.lower() not in parsed["from"].lower():
-                        continue
-                    if subject_filter and subject_filter.lower() not in parsed["subject"].lower():
-                        continue
-
-                    parsed["folder"] = mailbox_folder
-                    parsed["uid"] = (
-                        uid_match.group(1).decode("ascii")
-                        if uid_match
-                        else candidate_uid.decode("ascii", errors="replace")
-                    )
-                    parsed["is_read"] = is_read
-                    folder_results.append(parsed)
-
-                results.extend(folder_results)
-        finally:
-            conn.logout()
-
-        if not successful_folders:
-            detail = "; ".join(folder_errors) or "no folder completed"
-            return f"Error: IMAP connected, but mailbox checks failed ({detail})"
-        if folder_errors:
-            logger.warning("check_inbox partial mailbox failure: %s", "; ".join(folder_errors))
-        logger.info(
-            "check_inbox IMAP completed: successful_folders=%d matched=%d unread_only=%s",
-            successful_folders,
-            len(results),
-            unread_only,
-        )
-        results.sort(key=lambda x: x.get("date_sort_timestamp", 0.0), reverse=True)
-        return results[:limit]
-
-    try:
-        result = await asyncio.to_thread(_fetch)
-    except Exception as e:
-        return ToolFailure(f"IMAP error: {e}")
-
-    if isinstance(result, str):
-        return result
-    if not result:
-        return "No matching emails found."
-
-    from provenance.runtime import _wrap_external
-    lines = []
-    for i, em in enumerate(result, 1):
-        tags = ""
-        if not em.get("is_read"):
-            tags += " [UNREAD]"
-        if em["folder"] == "Junk":
-            tags += " [JUNK]"
-        lines.append(f"[{i}]{tags} {em['subject']}")
-        lines.append(f"    From: {em['from']}")
-        lines.append(f"    Date: {em['date']}")
-        lines.append(f"    Folder: {em.get('folder') or '?'} | UID: {em.get('uid') or '?'}")
-        if include_body:
-            body = (em.get("body") or "").strip()
-            if body:
-                suffix = " …[truncated]" if em.get("body_truncated") else ""
-                lines.append(
-                    f"    Body chars={em.get('body_chars', 0)} "
-                    f"returned_chars={em.get('body_start', 0)}:{em.get('body_end', 0)}{suffix}\n"
-                    f"      {body.replace(chr(10), chr(10) + '      ')}"
-                )
-                if em.get("body_truncated"):
-                    lines.append(
-                        "    next: check_inbox("
-                        f"folder='{em.get('folder')}', uid='{em.get('uid')}', "
-                        f"body_offset={em.get('body_end', 0)}, body_max_chars={body_max_chars})"
-                    )
-            else:
-                lines.append("    Body: none")
-        if em["links"]:
-            lines.append(f"    Links ({len(em['links'])}):")
-            for lnk in em["links"]:
-                lines.append(f"      - {lnk}")
-        else:
-            lines.append("    Links: none")
-        lines.append("")
-    return _wrap_external("\n".join(lines), "imap_inbox")
+async def _exec_check_inbox(**kwargs) -> str:
+    from mail_runtime.inbox import check_inbox
+    return await check_inbox(**kwargs)
 
 
 # ── allowlist_sender Tool ───────────────────────────────────────────
@@ -1608,7 +1419,7 @@ ALLOWLIST_SENDER_TOOL = {
     "name": "allowlist_sender",
     "description": (
         "Move emails from a sender out of Junk into INBOX, preventing future spam filtering. "
-        "Use after check_inbox shows [JUNK] emails from a legitimate sender."
+        "Use after check_inbox shows folder=Junk emails from a legitimate sender."
     ),
     "input_schema": {
         "type": "object",
@@ -1783,3 +1594,8 @@ def _normalize_tool_schemas_inplace(tools: list[dict]) -> None:
 
 
 _normalize_tool_schemas_inplace(TOOLS)
+
+
+from mail_runtime.inbox import PREPARE_MAIL_BRIEFING_TOOL, prepare_mail_briefing
+TOOLS.append(PREPARE_MAIL_BRIEFING_TOOL)
+TOOL_HANDLERS["prepare_mail_briefing"] = prepare_mail_briefing

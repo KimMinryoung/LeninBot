@@ -2162,6 +2162,20 @@ async def bot_main():
 
         try:
             # Load tool_log from DB — contains the actual work done (tool calls + results)
+            if (status == "done" and not was_interrupted
+                    and (result.get("verification") or {}).get("status") != "failed"):
+                from mail_runtime import store as mail_store
+                from mail_runtime.delivery import deliver as deliver_mail_briefing
+                mail_items = await asyncio.to_thread(mail_store.briefing_items, task_id, chat_id)
+                if mail_items:
+                    try:
+                        await deliver_mail_briefing(b, task_id, chat_id, mail_items,
+                                                   _persist_assistant_turn_after_send)
+                        await asyncio.to_thread(_save_system_event, chat_id, "task_report",
+                                                f"task #{task_id} mail briefing delivery checked")
+                    except Exception:
+                        logger.exception("Mail briefing delivery failed for task #%d; unsent items remain unbriefed", task_id)
+                    return
             tool_log = ""
             try:
                 row = await asyncio.to_thread(

@@ -247,3 +247,7 @@ This does not make all surfaces share one allow-list. It centralizes the mechani
 commulingo_review_decision뿐이다. 판단 도구는 검증된 결과를 메모리에 기록할 뿐 DB를 쓰지 않는다.
 실제 승인/반려는 실행기가 원래 제안 ID와 버전을 유지한 채 공통 JS 서비스를 호출한다.
 `/commulingo_review`는 Telegram 소유자 개인 채팅만 허용하는 결정적 명령이며 LLM에 위임하지 않는다.
+
+## Mail briefing state
+
+`mail_runtime/` persists raw mail, per-task body coverage and per-audience Telegram delivery receipts. `check_inbox` defaults to unbriefed mail in delegated tasks; scout can stage exact per-mail summaries with the write tool `prepare_mail_briefing`. Successful task callbacks send these summaries and record each accepted message, bypassing model rewriting. See [mail_briefing.md](mail_briefing.md) for tool semantics, migration and failure behavior.

@@ -26,6 +26,7 @@
 
 | 문서 | 용도 |
 |---|---|
+| `mail_briefing.md` | 메일 원문 캐시, 본문 확인 이력과 Telegram 브리핑 전달 기록 |
 | `writer_runtime.md` | 개인 소설 작업 공간의 도구·문맥·캐시·퇴고 |
 | `api_reference.md` | `services/api.py` FastAPI 라우트와 인증 |
 | `secret_management.md` | systemd credential 기반 시크릿 로딩 |

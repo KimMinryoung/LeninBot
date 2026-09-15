@@ -203,3 +203,7 @@ Current default chunking for new corpus ingestion is language-specific in `corpu
 - `leninbot-roleplay.service` is a **separate identity**, not Cyber-Lenin. It runs `telegram/roleplay_bot.py`: owner-gated, DeepSeek over the Anthropic-compatible endpoint via `claude_loop` (thinking on, kept out of replies), a hot-reloaded persona at `identity/roleplay_persona.md`, its own isolated chat tables, and a narrow read-only tool set (see `tool_allowlist_current_state.md`). Runtime config is the `ROLEPLAY_*` env vars; the bot token is `ROLEPLAY_BOT_TOKEN`.
 
 번역 실행의 공통 소유자는 `translation_runtime/`이다. 기타 DB 번역 최신성은 원문 테이블의 `translation_source_sha256`가 관리한다. 반복 검증 실패의 임시 보류 기록은 `output/translation_failures/`에 둔다. 2026-09-07 설치한 systemd 정의는 `scripts/run_translation_batch.py`로 두 작업의 실패를 합산하며 `ignore_errors=no`를 확인했다. 사료·연구 Markdown·DB JSON 어댑터가 공통 호출/검증 재시도를 사용하고, DeepL 정적 페이지는 별도 HTTP 경로에서 HTML 검증을 공유한다. 운영 `leninbot.research_documents.markdown_en_source_sha256` 마이그레이션은 2026-09-07 적용·검증했다. 형식별 경계, 타이머 정의, 캐시·TM·원문 최신성 및 평가 방법은 [Translation Pipeline](translation_pipeline.md)을 따른다.
+
+## Mail briefing state
+
+`mail_runtime/` persists raw mail, per-task body coverage and per-audience Telegram delivery receipts. `check_inbox` defaults to unbriefed mail in delegated tasks; scout can stage exact per-mail summaries with the write tool `prepare_mail_briefing`. Successful task callbacks send these summaries and record each accepted message, bypassing model rewriting. See [mail_briefing.md](mail_briefing.md) for tool semantics, migration and failure behavior.

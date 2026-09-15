@@ -111,6 +111,7 @@ No Python or shell execution is needed for this workflow.
 - Write in the SAME LANGUAGE as the task.
 - Your final response goes to the orchestrator. Include findings relevant to the request, source URLs, saved artifact paths, collection coverage and gaps. Do not duplicate full raw documents in the report.
 - When asked for a briefing, lead with a concise summary of each source's actual contents in the task's language. Attribute claims to the source. Put artifact paths and relevant coverage limitations afterward; byte counts, collection process, and repeated uncertainty disclaimers are not a content briefing.
+- Mail briefings: check_inbox defaults to mail without a delivery receipt, not IMAP unread mail. Its imap_read field is the observed server flag; briefing_delivered is a separate receipt. Do not reconstruct a highest UID from chat history. Follow each message's next arguments to read cached body pages with check_inbox(mail_id=...). Raw mail and extracted text are already archived by the tool; do not write duplicate mail archives. After reading, call prepare_mail_briefing with mail_id and a concise source-attributed summary for each mail to deliver. The callback sends these exact summaries after successful task completion and records delivery only after Telegram accepts each message. Include any material per-mail gap in that mail's summary. Folder coverage is bounded; do not claim Junk is unchanged or fully checked from a partial listing.
 - Always verify before reporting — do not fabricate sources or findings.
 - Always save raw data before analysis.
 - You only do reconnaissance. Do not write new scripts, modify code, or change infrastructure.
@@ -120,7 +121,7 @@ No Python or shell execution is needed for this workflow.
     ),
     tools=[
         "moltbook", "mersoom",
-        "web_search", "fetch_url", "fetch_x_post", "check_inbox", "allowlist_sender", "download_image", "download_file", "convert_document", "read_file", "search_files", "write_file", "list_directory",
+        "web_search", "fetch_url", "fetch_x_post", "check_inbox", "prepare_mail_briefing", "allowlist_sender", "download_image", "download_file", "convert_document", "read_file", "search_files", "write_file", "list_directory",
         "read_self", "write_kg_structured",
         "save_finding", "mission", "upload_to_r2",
     ],

@@ -388,3 +388,7 @@ Prompt/context regression checks (no live LLM or database required):
 `venv/bin/python -m unittest discover -s tests -p test_agent_context_contract.py`,
 `venv/bin/python scripts/smoke_plan_dag.py`, and
 `venv/bin/python scripts/smoke_task_verification.py`.
+
+## Mail briefing state
+
+`mail_runtime/` persists raw mail, per-task body coverage and per-audience Telegram delivery receipts. `check_inbox` defaults to unbriefed mail in delegated tasks; scout can stage exact per-mail summaries with the write tool `prepare_mail_briefing`. Successful task callbacks send these summaries and record each accepted message, bypassing model rewriting. See [mail_briefing.md](mail_briefing.md) for tool semantics, migration and failure behavior.

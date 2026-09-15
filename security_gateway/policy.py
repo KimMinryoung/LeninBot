@@ -75,6 +75,7 @@ TOOL_RISK_CLASS: dict[str, str] = {
     # the curator paid retry rounds for a conclusion it had already reached.
     "commulingo_no_edit": "read",
     "check_inbox": "read",
+    "prepare_mail_briefing": "write",
     "check_wallet": "wallet_read",
     # Writes / publication
     "save_self_analysis": "write",
