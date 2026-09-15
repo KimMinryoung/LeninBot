@@ -2,10 +2,40 @@
 import hashlib
 from datetime import datetime, timedelta, timezone
 
+SOURCE_CHUNK_CHARS = 240
+
+
+def resolve_claim_chunks(claims, sources):
+    """Translate displayed chunk IDs to exact offsets; never ask a model to count."""
+    resolved = []
+    for claim in claims:
+        source = sources.get(claim.get('source_id'))
+        if not source or not source.get('body'):
+            raise ValueError('unknown source_id; use an ID from a retrieved source')
+        chunks = claim.get('chunks', [claim['chunk']] if 'chunk' in claim else [])
+        count = (len(source['body']) + SOURCE_CHUNK_CHARS - 1) // SOURCE_CHUNK_CHARS
+        if not chunks or any(type(n) is not int or n < 0 or n >= count for n in chunks):
+            raise ValueError(f'Use displayed chunk IDs in 0..{count-1} for source {source["id"]}')
+        groups = []
+        for chunk in sorted(set(chunks)):
+            if groups and chunk == groups[-1][-1] + 1:
+                groups[-1].append(chunk)
+            else:
+                groups.append([chunk])
+        for group in groups:
+            value = {k:v for k,v in claim.items() if k not in {'chunks','chunk'}}
+            value.update(start=group[0]*SOURCE_CHUNK_CHARS,
+                         end=min(len(source['body']), (group[-1]+1)*SOURCE_CHUNK_CHARS))
+            resolved.append(value)
+    return resolved
+
 
 def snapshot(url, body, now=None):
     if not isinstance(body, str) or not body.strip():
         raise ValueError('source body is empty')
+    # PostgreSQL text cannot store NUL. Normalize before hashing and assigning
+    # chunk offsets so the saved text and the displayed evidence stay identical.
+    body = body.replace('\x00', '\ufffd')
     now = now or datetime.now(timezone.utc)
     digest = hashlib.sha256(body.encode()).hexdigest()
     source_id = hashlib.sha256((url + '\0' + digest).encode()).hexdigest()

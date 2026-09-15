@@ -14,6 +14,30 @@ from commulingo_pipeline.store import Store, LostLease, BudgetUnavailable
 
 
 class EvidenceTests(unittest.TestCase):
+    def test_source_nul_normalization_precedes_hash_and_ranges(self):
+        source = snapshot('https://example.org/source','Historical\x00document with enough context.')
+        self.assertNotIn('\x00',source['body'])
+        same = snapshot(source['url'],source['body'])
+        self.assertEqual(source['id'],same['id'])
+
+    def test_displayed_chunks_resolve_to_exact_unicode_source_ranges(self):
+        from commulingo_pipeline.evidence import resolve_claim_chunks
+        source = snapshot('https://example.org/source', '한글 근거 ' * 100)
+        claim = {'field':'bio','claim':'Supported fact','source_id':source['id'],'chunks':[1,2]}
+        resolved = resolve_claim_chunks([claim], {source['id']:source})
+        self.assertEqual(resolved[0]['start'],240)
+        self.assertEqual(resolved[0]['end'],len(source['body']))
+        compiled = compile_evidence(resolved,{source['id']:source},{'bio'})
+        self.assertEqual(compiled[0]['excerpt'],source['body'][240:])
+        separate = resolve_claim_chunks([{**claim,'chunks':[0,2]}],{source['id']:source})
+        self.assertEqual([(c['start'],c['end']) for c in separate],[(0,240),(480,600)])
+        singular = {k:v for k,v in claim.items() if k!='chunks'}
+        singular['chunk']=1
+        self.assertEqual(resolve_claim_chunks([singular],{source['id']:source})[0]['start'],240)
+        for invalid in ([99], [-1], [True], []):
+            with self.assertRaises(ValueError):
+                resolve_claim_chunks([{**claim,'chunks':invalid}],{source['id']:source})
+
     def test_exact_range_and_expiry(self):
         source = snapshot('https://example.org/source','A documented event happened in 1917.')
         claim = {'field':'bio','claim':'The event happened in 1917',
@@ -28,6 +52,39 @@ class EvidenceTests(unittest.TestCase):
 
 
 class EngineTests(unittest.IsolatedAsyncioTestCase):
+    async def test_explicit_gap_contract_is_single_requested_entry(self):
+        from commulingo_pipeline.stages import Discover
+        from commulingo_pipeline.engine import Usage
+        from jsonschema import validate, ValidationError
+        payload = {'material_id':'gap:2007','requested_kind':'term','label':'독립',
+                   'body':'독립과 주변 인물 및 개념들'}
+        candidate = {'kind':'term','target':'independence','label':'독립','mention':'독립',
+                     'reason':'A historically important concept missing from the dictionary.'}
+        async def model(**kwargs):
+            schema = kwargs['tool']['input_schema']
+            validate({'candidates':[candidate]},schema)
+            for candidates in ([candidate,candidate],[{**candidate,'kind':'person'}],
+                               [{**candidate,'mention':'주변'}], [{**candidate,'label':'다른 항목'}]):
+                with self.assertRaises(ValidationError):
+                    validate({'candidates':candidates},schema)
+            self.assertIn('zero or one', kwargs['prompt'])
+            self.assertNotIn('up to four', kwargs['prompt'])
+            await kwargs['handler']({'candidates':[candidate]})
+        with patch('commulingo_pipeline.stages.model_call',side_effect=model), patch('db.query_one',return_value=None):
+            result = await Discover()({'id':1,'payload':payload},[],Usage(),.2)
+        self.assertEqual(result.value['candidates'],[candidate])
+
+    async def test_canary_wait_is_not_reported_as_daily_budget_failure(self):
+        store = Mock()
+        store.claim.return_value={'id':1,'stage':'submit','attempts':1}
+        store.detail.return_value={'artifacts':[]}
+        async def submit(*args):
+            raise BudgetUnavailable('canary publication slots exhausted')
+        result = await Engine(store,{'submit':submit}).run_one(draft_only=False)
+        self.assertEqual(result['reason'],'canary publication slots exhausted')
+        self.assertEqual(store.defer.call_args.args[1],result['reason'])
+        self.assertFalse(store.defer.call_args.kwargs['failed'])
+
     async def test_model_stage_uses_real_dispatcher_for_artifact_schema(self):
         from commulingo_pipeline.stages import model_call, result_tool
         from commulingo_pipeline.prompts import spec

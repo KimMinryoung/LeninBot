@@ -35,10 +35,13 @@ def execution_metrics(since: str, path: Path | None = None) -> list[str]:
         return []
     match = re.fullmatch(r"-(\d+)h", since.strip())
     hours = int(match[1]) if match else 24
+    cutoff = time.time() - hours * 3600
+    if since == 'today':
+        cutoff = int(time.time() // 86400) * 86400
     try:
         with sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True) as db:
             rows = db.execute("SELECT stage,target,status,summary FROM runs WHERE ts>? AND status NOT IN ('running','submitted','selected') ORDER BY ts",
-                              (time.time() - hours * 3600,)).fetchall()
+                              (cutoff,)).fetchall()
     except sqlite3.Error:
         return []  # workers from before ledger rollout have no runs table
     lanes = {}
@@ -286,62 +289,53 @@ def problems(lane: str, stats: dict) -> list[str]:
     return found
 
 
-def tool_rejections(since: str) -> tuple[list[str], list[str]]:
-    """Per-tool rejection counts from the audit log, plus threshold alerts.
-
-    The lane tallies above only see whole runs; a run that succeeds after three
-    rejected writes looks healthy there while quietly paying for four calls.
-    Queried through `docker exec` like the journal is queried through
-    journalctl: this unit carries no db_password credential, and the digest
-    must not start needing one. Fail-soft either way.
-    """
+def window_boundary(since):
+    if since == 'today':
+        return "date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'"
     match = re.fullmatch(r"-(\d+)h", since.strip())
-    hours = int(match.group(1)) if match else 24
-    # Grouped by status as well as tool: a bare count cannot tell a validation
-    # rejection the model fixes next round from an unknown_tool deny (a typo'd
-    # name — "fetfetch_url rejected 1/1" read as a broken tool on 2026-08-14
-    # until someone opened the audit log).
-    sql = (
-        "SELECT tool_name, result_status, count(*)"
-        "  FROM tool_audit_log"
-        " WHERE agent_name = 'commulingo_curator'"
-        f"  AND ts > now() - interval '{hours} hours'"
-        " GROUP BY 1, 2"
-    )
-    result = subprocess.run(
-        ["docker", "exec", "leninbot-pg", "psql", "-U", "postgres", "-d", "leninbot",
-         "-t", "-A", "-F", "|", "-c", sql],
-        capture_output=True, text=True, check=False,
-    )
-    if result.returncode != 0:
-        return [f"(tool rejection stats unavailable: {result.stderr.strip()[:200]})"], []
-    by_tool: dict[str, dict[str, int]] = {}
-    for raw in result.stdout.strip().splitlines():
-        parts = raw.split("|")
-        if len(parts) != 3:
-            continue
-        by_tool.setdefault(parts[0], {})[parts[1]] = int(parts[2])
+    if not match:
+        raise ValueError("--since supports -Nh or today; all data sources use the same window")
+    return f"now()-interval '{int(match[1])} hours'"
+
+
+def query_json(sql):
+    result = subprocess.run(['docker','exec','leninbot-pg','psql','-X','-U','postgres',
+        '-d','leninbot','-t','-A','-q','-v','ON_ERROR_STOP=1','-c',
+        "BEGIN READ ONLY; SET LOCAL statement_timeout='20s'; " + sql + "; COMMIT"],
+        capture_output=True,text=True,timeout=30,check=True)
+    return json.loads(result.stdout)
+
+
+def tool_rejections(since: str) -> tuple[list[str], list[str]]:
+    """Separate observed refusal reasons from unproven claims of paid retries."""
+    sql = f"""SELECT coalesce(json_agg(t),'[]'::json) FROM (
+        SELECT tool_name,result_status,left(coalesce(error_excerpt,''),220) AS reason,
+               count(*) AS calls, count(DISTINCT scope_id) AS scopes
+        FROM tool_audit_log WHERE agent_name='commulingo_curator'
+          AND ts>{window_boundary(since)}
+        GROUP BY 1,2,3) t"""
+    try:
+        rows = query_json(sql)
+    except (subprocess.SubprocessError, ValueError, StopIteration) as exc:
+        return [f"도구 통계 조회 실패: {type(exc).__name__}"], ['tool metrics unavailable']
+    by_tool = {}
+    for row in rows:
+        item = by_tool.setdefault(row['tool_name'], {'total':0,'failed':0,'reasons':[]})
+        item['total'] += row['calls']
+        if row['result_status'] != 'ok':
+            item['failed'] += row['calls']
+            item['reasons'].append(row)
     lines, alerts = [], []
-    for tool, statuses in sorted(
-        by_tool.items(),
-        key=lambda item: -sum(v for k, v in item[1].items() if k != "ok"),
-    ):
-        total = sum(statuses.values())
-        rejected = total - statuses.get("ok", 0)
-        if not rejected:
+    for tool,item in sorted(by_tool.items(),key=lambda pair:-pair[1]['failed']):
+        if not item['failed']:
             continue
-        rate = rejected / total
-        why = ", ".join(
-            f"{status} {count}"
-            for status, count in sorted(statuses.items(), key=lambda kv: -kv[1])
-            if status != "ok"
-        )
-        lines.append(f"{tool:28} rejected {rejected:4}/{total:<5} ({rate:.0%})  [{why}]")
-        if total >= MIN_CALLS_FOR_REJECTION_ALERT and rate > MAX_REJECTION_RATE:
-            alerts.append(
-                f"tool {tool}: {rejected}/{total} calls rejected ({rate:.0%}, {why}) — "
-                f"paid rounds are being burned on retries"
-            )
+        rate = item['failed']/item['total']
+        lines.append(f"{tool}: 비성공 {item['failed']}/{item['total']} ({rate:.1%})")
+        for row in sorted(item['reasons'],key=lambda r:-r['calls'])[:3]:
+            reason = ' '.join(row['reason'].split()) or '(상세 사유 없음)'
+            lines.append(f"  {row['calls']}회 · {row['result_status']} · {row['scopes']}개 실행 범위: {reason}")
+        if item['total'] >= MIN_CALLS_FOR_REJECTION_ALERT and rate > MAX_REJECTION_RATE:
+            alerts.append(f"{tool}: 비성공 {item['failed']}/{item['total']} ({rate:.1%}); 위 원인별 내역 확인")
     return lines, alerts
 
 
@@ -405,16 +399,14 @@ def bio_length_drift() -> tuple[list[str], list[str]]:
 
 def pipeline_health(since):
     """Queue and budget state via the digest's existing read-only psql path."""
-    match = re.fullmatch(r"-(\d+)h", since.strip())
-    boundary = (f"now()-interval '{int(match[1])} hours'" if match else
-                "date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'" if since=='today'
-                else "now()-interval '24 hours'")
+    boundary = window_boundary(since)
     sql = f"""SELECT json_build_object(
         'applied',(SELECT count(DISTINCT job_id) FROM commulingo_pipeline_artifacts
             WHERE stage='submit' AND value->>'status'='approved' AND created_at>{boundary}),
         'escalated',(SELECT count(*) FROM commulingo_pipeline_jobs WHERE status='escalated'),
         'retrying',(SELECT count(*) FROM commulingo_pipeline_jobs
-            WHERE status='deferred' AND attempts>0 AND last_error NOT IN ('draft-only execution','daily budget unavailable')),
+            WHERE status='deferred' AND attempts>0 AND last_error NOT IN
+                ('draft-only execution','daily budget unavailable','daily budget reserved or spent','canary publication slots exhausted')),
         'running',(SELECT count(*) FROM commulingo_pipeline_jobs WHERE status='running'),
         'expired_leases',(SELECT count(*) FROM commulingo_pipeline_jobs
             WHERE status='running' AND lease_until<now()-interval '10 minutes'),
@@ -423,25 +415,78 @@ def pipeline_health(since):
         'today_actual',(SELECT coalesce(sum(actual),0) FROM commulingo_pipeline_budget
             WHERE day=(now() AT TIME ZONE 'UTC')::date),
         'today_reserved',(SELECT coalesce(sum(reserved),0) FROM commulingo_pipeline_budget
-            WHERE actual IS NULL AND day=(now() AT TIME ZONE 'UTC')::date))"""
+            WHERE actual IS NULL AND day=(now() AT TIME ZONE 'UTC')::date),
+        'publications',(SELECT coalesce(json_agg(p),'[]'::json) FROM (
+            SELECT DISTINCT ON (a.job_id) a.job_id,j.kind,j.action,j.target,j.topic,
+                coalesce(a.value->'value'->'name'->>'ko',a.value->'value'->'term'->>'ko',j.target) AS label,
+                ARRAY(SELECT key FROM jsonb_object_keys(coalesce((SELECT d.value->'fields'
+                    FROM commulingo_pipeline_artifacts d WHERE d.job_id=a.job_id AND d.stage='draft'
+                    ORDER BY d.id DESC LIMIT 1),'{{}}'::jsonb)) key
+                    WHERE key NOT IN ('evidence','expectedRevision','sources') ORDER BY key) AS fields
+            FROM commulingo_pipeline_artifacts a JOIN commulingo_pipeline_jobs j ON j.id=a.job_id
+            WHERE a.stage='submit' AND a.value->>'status'='approved' AND a.created_at>{boundary}
+            ORDER BY a.job_id,a.created_at DESC LIMIT 12) p),
+        'waiting',(SELECT coalesce(json_agg(w),'[]'::json) FROM (
+            SELECT status,stage,last_error,count(*) AS jobs FROM commulingo_pipeline_jobs
+            WHERE status IN ('deferred','escalated') GROUP BY 1,2,3 ORDER BY count(*) DESC LIMIT 10) w),
+        'attention',(SELECT coalesce(json_agg(w),'[]'::json) FROM (
+            SELECT id,target,coalesce(payload->>'label',target) AS label,stage,status,attempts,
+                left(coalesce(nullif(last_error,''),(SELECT a.value->>'error'
+                    FROM commulingo_pipeline_artifacts a WHERE a.job_id=j.id AND a.value ? 'error'
+                    ORDER BY a.id DESC LIMIT 1),''),240) AS error,
+                available_at,updated_at FROM commulingo_pipeline_jobs j
+            WHERE status='escalated' OR (status='deferred' AND attempts>0 AND last_error NOT IN
+                ('draft-only execution','daily budget unavailable','daily budget reserved or spent','canary publication slots exhausted'))
+            ORDER BY updated_at DESC LIMIT 6) w),
+        'cost_by_lane',(SELECT coalesce(json_agg(c),'[]'::json) FROM (
+            SELECT lane,count(*) AS calls,coalesce(sum(actual),0) AS actual,
+                coalesce(sum(reserved) FILTER (WHERE actual IS NULL),0) AS unsettled
+            FROM commulingo_pipeline_budget WHERE created_at>{boundary}
+            GROUP BY lane ORDER BY sum(actual) DESC NULLS LAST) c))"""
     result = subprocess.run(['docker','exec','leninbot-pg','psql','-X','-U','postgres',
         '-d','leninbot','-t','-A','-c',sql],capture_output=True,text=True,timeout=30,check=True)
     value = json.loads(result.stdout)
-    lines = [f"pipeline applied {value['applied']}  running {value['running']}  retrying {value['retrying']}  escalated {value['escalated']}  ${value['pipeline_cost']:.4f}",
+    lines = [f"파이프라인: 기간 내 반영 {value['applied']}건 · 현재 실행 {value['running']} · 실패 재시도 {value['retrying']} · 운영자 확인 {value['escalated']}",
              f"shared budget (UTC today): spent ${value['today_actual']:.4f}, reserved ${value['today_reserved']:.4f}"]
+    for row in value.get('publications', []):
+        action = '신규' if row['action']=='create' else '보강'
+        lines.append(f"  반영 #{row['job_id']} {row['kind']} {action}: {row['label']} ({row['target']}) · {row['topic']}")
+        if row.get('fields'):
+            lines.append(f"    반영 필드: {', '.join(row['fields'])}")
+    if value['applied'] > 12:
+        lines.append(f"  반영 목록은 12건까지 표시 (전체 {value['applied']}건)")
+    if value.get('waiting'):
+        lines.append('현재 대기 사유 (상위 10개 그룹; 기간 내 발생 건수 아님):')
+        for row in value['waiting']:
+            reason = row['last_error'] or '단계 artifact의 검토 판단 확인 필요'
+            if reason == 'daily budget unavailable':
+                reason = '기존 기록: 예산 또는 시범 반영 한도 대기 (사유 미분리)'
+            lines.append(f"  {row['jobs']}건 · {row['status']}/{row['stage']}: {' '.join(reason.split())[:240]}")
+    for row in value.get('attention', []):
+        lines.append(f"  확인 #{row['id']} {row.get('label',row['target'])} · {row['stage']}/{row['status']} · 실패 {row['attempts']}회: {row['error'] or '검토 artifact 확인'}")
+    if value.get('cost_by_lane'):
+        lines.append('기간 내 공용 LLM 원장 (위 총액과 별도 합산하지 않음):')
+        for row in value['cost_by_lane']:
+            lines.append(f"  {row['lane']}: ${row['actual']:.4f} · 미정산 예약 ${row['unsettled']:.4f} · {row['calls']}개 예약")
     alerts = ([f"pipeline: {value['expired_leases']} leases expired over ten minutes ago"]
               if value['expired_leases'] else [])
     if value['retrying']:
         alerts.append(f"pipeline: {value['retrying']} failed stages awaiting retry")
+    if value['escalated']:
+        alerts.append(f"pipeline: 현재 {value['escalated']}건 운영자 확인 필요 (누적 대기열)")
     return lines, alerts, float(value['pipeline_cost'])
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--since", default="-24h", help="journalctl --since value")
+    parser.add_argument("--since", default="-24h", help="-Nh or today (UTC)")
     parser.add_argument("--notify", action="store_true",
                         help="send Telegram only when a lane is unhealthy")
     args = parser.parse_args()
+    try:
+        window_boundary(args.since)
+    except ValueError as exc:
+        parser.error(str(exc))
 
     lines, alerts, total_cost = [], [], 0.0
     config = json.loads((ROOT/'config/commulingo_pipeline.json').read_text())
@@ -451,6 +496,8 @@ def main() -> int:
         drain = lane in DRAIN_LANES
         stats = tally_drain(unit, args.since) if drain else tally(unit, args.since)
         total_cost += stats["cost"]
+        if pipeline_active and lane in {'gap','enrich','new','terms'} and not stats['total']:
+            continue  # Retired writers are configuration, not zero-output failures.
         lines.append(
             f"{lane:7} {'handled' if lane == 'review' else 'applied'} {stats['applied']:4}  skipped {stats['skipped']:3}"
             + (f" (idle {stats['idle']})" if stats.get("idle") else "")
@@ -492,12 +539,12 @@ def main() -> int:
     if pipeline_active:
         try:
             pipeline_lines, pipeline_alerts, pipeline_cost = pipeline_health(args.since)
-            lines.extend(pipeline_lines)
+            lines = pipeline_lines + ['보조 레인:'] + lines
             alerts.extend(pipeline_alerts)
             total_cost += pipeline_cost
         except (subprocess.SubprocessError,ValueError) as exc:
             alerts.append(f"pipeline metrics unavailable: {type(exc).__name__}")
-    header = f"[commulingo-lanes] since {args.since} — total ${total_cost:.2f}"
+    header = f"[commulingo-lanes] since {args.since} — 기록된 LLM 비용 ${total_cost:.4f} (유료 검색 비용 별도)"
     print(header)
     print("\n".join(lines))
     if alerts:
@@ -506,12 +553,31 @@ def main() -> int:
 
     if args.notify and alerts:
         sys.path.insert(0, str(ROOT))
-        from scripts.commulingo_find_name_variants import notify_telegram
+        from scripts._notify import notify_telegram
         message = "\n".join([header, *lines, "", "PROBLEMS:",
                              *(f"- {a}" for a in alerts)])
-        if notify_telegram(message):
+        sent = True
+        for chunk in notification_chunks(message):
+            if not notify_telegram(chunk):
+                sent = False
+                break
+        if sent:
             print(f"[commulingo-lanes] notified {len(alerts)} problems")
     return 0
+
+
+def notification_chunks(message, limit=3500):
+    """Keep complete reports deliverable within Telegram's UTF-16 limit."""
+    chunk, units = '', 0
+    for char in message:
+        size = len(char.encode('utf-16-le')) // 2
+        if units + size > limit:
+            yield chunk
+            chunk, units = '', 0
+        chunk += char
+        units += size
+    if chunk:
+        yield chunk
 
 
 if __name__ == "__main__":

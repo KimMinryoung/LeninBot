@@ -68,9 +68,10 @@ class Engine:
                 delay_seconds=result.delay_seconds)
             return {'status': result.status, 'stage': result.next_stage, 'job_id': job['id'],
                     'cost_usd':usage.tracker.get('total_cost',0)}
-        except BudgetUnavailable:
-            await asyncio.to_thread(self.store.defer, job, 'daily budget unavailable', seconds=3600, failed=False)
-            return {'status': 'budget_deferred', 'job_id': job['id']}
+        except BudgetUnavailable as exc:
+            reason = str(exc) or 'daily budget unavailable'
+            await asyncio.to_thread(self.store.defer, job, reason, seconds=3600, failed=False)
+            return {'status': 'budget_deferred', 'job_id': job['id'], 'reason': reason}
         except LostLease:
             return {'status': 'lease_lost', 'job_id': job['id']}
         except Exception as exc:
