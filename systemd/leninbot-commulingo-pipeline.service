@@ -1,5 +1,5 @@
 [Unit]
-Description=Durable CommuLingo editorial stage
+Description=Durable CommuLingo editorial batch
 Wants=network-online.target leninbot-llm-proxy.service
 After=network-online.target leninbot-llm-proxy.service
 
@@ -12,6 +12,6 @@ Environment=PYTHONUNBUFFERED=1
 LoadCredentialEncrypted=neo4j_password:/etc/credstore.encrypted/neo4j_password.cred
 LoadCredentialEncrypted=db_password:/etc/credstore.encrypted/db_password.cred
 ExecStart=/home/grass/leninbot/venv/bin/python /home/grass/leninbot/scripts/commulingo_pipeline.py tick
-TimeoutStartSec=650
+TimeoutStartSec=1950
 StandardOutput=journal
 StandardError=journal

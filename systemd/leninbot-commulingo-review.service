@@ -1,5 +1,5 @@
 [Unit]
-Description=LeninBot independent CommuLingo person review and owner handoff
+Description=LeninBot independent CommuLingo review and automatic correction
 Wants=network-online.target leninbot-llm-proxy.service
 After=network-online.target leninbot-llm-proxy.service
 
@@ -11,8 +11,7 @@ EnvironmentFile=/home/grass/leninbot/.env
 Environment=PYTHONUNBUFFERED=1
 Environment=COMMULINGO_DAILY_CAP_USD=0
 LoadCredentialEncrypted=db_password:/etc/credstore.encrypted/db_password.cred
-LoadCredentialEncrypted=telegram_bot_token:/etc/credstore.encrypted/telegram_bot_token.cred
-# Budget check is inside the worker, after outstanding operator notifications.
+# Budget check is inside the worker. Unresolved reviews stay internal without notifications.
 ExecStart=/home/grass/leninbot/venv/bin/python /home/grass/leninbot/scripts/commulingo_person_reviewer.py
 TimeoutStartSec=650
 StandardOutput=journal

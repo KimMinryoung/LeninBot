@@ -3790,6 +3790,9 @@ def _person_evidence_errors(fields: dict, sources: list[str]) -> list[str]:
 
 
 def _person_write_tool(name: str, action: str) -> dict:
+    update_only = {'expectedRevision', 'aliasEdits', 'careerEdits', 'sceneEdits'}
+    field_keys = tuple(key for key in _PERSON_NARROW_KEYS
+                       if action != 'create' or key not in update_only)
     required_fields = (
         "groupId", "epithet", "bio", "career", "role", "citizenship", "nationalOrigin",
         "evidence",
@@ -3799,7 +3802,7 @@ def _person_write_tool(name: str, action: str) -> dict:
         "description": (
             f"{action.title()} one CommuLingo person card. This tool accepts person fields only; "
             "citations are a separate top-level argument. Public text is bilingual {ko,en}. "
-            "Put evidence, expectedRevision and reviewFlags INSIDE fields. "
+            "Put evidence and reviewFlags INSIDE fields. expectedRevision and collection edits are update-only. "
             "Read the record and reference lists first. On create, citizenship and "
             "nationalOrigin require evidence; if unknown, research or defer registration, never guess. Soviet and Yugoslav codes are citizenship-only. Preserve mixed ancestry in labels. "
             "nationalOrigin means national/ethnic "
@@ -3816,7 +3819,7 @@ def _person_write_tool(name: str, action: str) -> dict:
             "additionalProperties": False,
             "properties": {
                 "person_id": {"type": "string", "description": "Existing id or new lowercase kebab-case slug."},
-                "fields": _narrow_fields_schema(_PERSON_NARROW_KEYS, required=required_fields),
+                "fields": _narrow_fields_schema(field_keys, required=required_fields),
                 "citations": _CITATIONS_SCHEMA,
                 "confidence": {"type": "number", "minimum": 0, "maximum": 1},
             },

@@ -4,6 +4,7 @@ from decimal import Decimal
 import uuid
 import hashlib
 import json
+from .bundles import advance, bundle_candidates, gap_ids
 
 from psycopg2.extras import Json, RealDictCursor
 
@@ -40,6 +41,32 @@ class Store:
             row = cur.fetchone()
             return row['id'] if row else None
 
+    def enqueue_review_repair(self, proposal, decision):
+        """One durable correction per original proposal, even after completion/replay."""
+        if proposal['action'] not in {'create','update'}:
+            return None
+        section = proposal['target_type']=='person_section'
+        kind = 'person' if section else proposal['target_type']
+        topic = f"review-repair:{proposal['id']}"
+        payload = {'replaces_suggestion_id':proposal['id'], 'original_proposal':proposal,
+                   'review_feedback':decision,'review_revisions':1,
+                   'topics':['sections'] if section else ['review_correction']}
+        # Store only JSON editorial data; DB timestamps are not part of the commission.
+        payload['original_proposal'] = {k:proposal[k] for k in
+            ('id','target_type','target_id','action','patch_json','source_refs')}
+        with self.transaction() as cur:
+            cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))",(topic,))
+            cur.execute('SELECT id FROM commulingo_pipeline_jobs WHERE topic=%s ORDER BY id LIMIT 1',(topic,))
+            existing = cur.fetchone()
+            if existing:
+                return existing['id']
+            cur.execute('''INSERT INTO commulingo_pipeline_jobs
+                (kind,action,target,topic,reason,priority,payload)
+                VALUES (%s,%s,%s,%s,%s,10,%s) RETURNING id''',
+                (kind,'update' if section else proposal['action'],proposal['target_id'],topic,
+                 'Correct independently reviewed proposal',Json(payload)))
+            return cur.fetchone()['id']
+
     def claim(self, *, lease_seconds=120, group=None, job_id=None):
         token = str(uuid.uuid4())
         with self.transaction() as cur:
@@ -69,6 +96,59 @@ class Store:
                             ((groups.index(job['kind']+':'+job['action'])+1)%4,))
             return job
 
+    def consolidate(self, *, apply=False):
+        """Merge only untouched update jobs; preserve every old row for audit."""
+        with self.transaction() as cur:
+            # Serialize against claim/enqueue, including manual workers.
+            if apply:
+                cur.execute("SET LOCAL lock_timeout='5s'")
+                cur.execute('LOCK TABLE commulingo_pipeline_jobs IN SHARE ROW EXCLUSIVE MODE')
+            cur.execute('''SELECT j.* FROM commulingo_pipeline_jobs j
+                WHERE j.action='update' AND j.status='ready' AND j.stage='research'
+                  AND j.attempts=0 AND j.topic!='enrichment'
+                  AND NOT (j.payload ? 'replaces_suggestion_id')
+                  AND NOT EXISTS (SELECT 1 FROM commulingo_pipeline_artifacts a WHERE a.job_id=j.id)
+                  AND NOT EXISTS (SELECT 1 FROM commulingo_pipeline_job_sources s WHERE s.job_id=j.id)
+                  AND NOT EXISTS (SELECT 1 FROM commulingo_pipeline_budget b WHERE b.job_id=j.id)
+                  AND NOT EXISTS (SELECT 1 FROM commulingo_pipeline_jobs other
+                    WHERE other.kind=j.kind AND other.target=j.target AND other.id!=j.id
+                      AND other.status IN ('ready','running','deferred','escalated')
+                      AND (other.action!='update' OR other.topic='enrichment'
+                        OR other.payload ? 'replaces_suggestion_id'
+                        OR other.status!='ready' OR other.stage!='research' OR other.attempts!=0
+                        OR EXISTS (SELECT 1 FROM commulingo_pipeline_artifacts a WHERE a.job_id=other.id)
+                        OR EXISTS (SELECT 1 FROM commulingo_pipeline_job_sources s WHERE s.job_id=other.id)
+                        OR EXISTS (SELECT 1 FROM commulingo_pipeline_budget b WHERE b.job_id=other.id)))
+                ORDER BY j.priority,j.id''')
+            rows = [dict(r) for r in cur.fetchall()]
+            groups = {}
+            for row in rows:
+                groups.setdefault((row['kind'],row['target']), []).append(row)
+            bundles = bundle_candidates(rows)
+            if apply:
+                for bundle in bundles:
+                    members = groups[bundle['kind'],bundle['target']]
+                    parent = members[0]['id']
+                    children = [r['id'] for r in members[1:]]
+                    payload = {**bundle['payload'], 'bundled_job_ids':[r['id'] for r in members]}
+                    cur.execute('''UPDATE commulingo_pipeline_jobs SET topic='enrichment',payload=%s,
+                        baseline=%s,reason=%s,updated_at=now() WHERE id=%s''',
+                        (Json(payload),bundle['baseline'],bundle['reason'],parent))
+                    if children:
+                        cur.execute('''UPDATE commulingo_pipeline_jobs SET status='cancelled',
+                            payload=payload || %s::jsonb,last_error='Consolidated into target bundle',
+                            updated_at=now() WHERE id=ANY(%s)''',(Json({'bundled_into':parent}),children))
+            return {'applied':apply, 'jobs_before':len(rows), 'bundles':len(bundles),
+                    'merged_jobs':len(rows)-len(bundles)}
+
+    def release_publication_waits(self):
+        """Live mode releases only the waits caused by the former canary cap."""
+        with self.transaction() as cur:
+            cur.execute('''UPDATE commulingo_pipeline_jobs SET status='ready',available_at=now(),
+                last_error='',updated_at=now() WHERE status='deferred' AND stage='submit'
+                AND last_error='canary publication slots exhausted' RETURNING id''')
+            return len(cur.fetchall())
+
     def heartbeat(self, job, *, lease_seconds=120):
         with self.transaction() as cur:
             cur.execute('''UPDATE commulingo_pipeline_jobs
@@ -91,6 +171,10 @@ class Store:
                 raise LostLease(str(job['id']))
             metrics = {k:v for k,v in (usage or {}).items() if k in
                        {'total_cost','rounds_used','input_tokens','output_tokens','pipeline_cache_hits'}}
+            if value.get('remaining_topics'):
+                cur.execute('''UPDATE commulingo_pipeline_jobs
+                    SET payload=payload || %s::jsonb WHERE id=%s''',
+                    (Json({'remaining_topics':value['remaining_topics']}),job['id']))
             cur.execute('''INSERT INTO commulingo_pipeline_artifacts(job_id,stage,value,metrics)
                 VALUES (%s,%s,%s,%s)''', (job['id'], job['stage'], Json(value),Json(metrics)))
             if job['stage']=='discover':
@@ -116,10 +200,10 @@ class Store:
                     VALUES (%s,%s) ON CONFLICT(material_id) DO UPDATE
                     SET content_hash=EXCLUDED.content_hash,processed_at=now()''',
                     (job['payload']['material_id'],job['payload']['content_hash']))
-            if job['stage']=='submit' and value.get('status')=='approved' and job['payload'].get('gap_id'):
+            if job['stage']=='submit' and value.get('status')=='approved' and gap_ids(job['payload']):
                 cur.execute('''UPDATE commulingo_curation_gaps SET status='done',resolved_id=%s,
                     resolution='Approved through durable pipeline',updated_at=now()
-                    WHERE id=%s AND status='pending' ''',(job['target'],job['payload']['gap_id']))
+                    WHERE id=ANY(%s) AND status='pending' ''',(job['target'],gap_ids(job['payload'])))
 
     def defer(self, job, error, *, seconds=3600, escalate=False, failed=True):
         with self.transaction() as cur:
@@ -286,16 +370,27 @@ class Store:
 
     def reconcile_reviews(self):
         with self.transaction() as cur:
-            cur.execute('''UPDATE commulingo_pipeline_jobs j SET status='complete',stage='complete',updated_at=now()
-                FROM commulingo_pipeline_artifacts a JOIN commulingo_agent_suggestions s
-                    ON s.id=(a.value->>'suggestionId')::bigint
-                WHERE j.id=a.job_id AND j.status='escalated' AND a.stage='review'
-                    AND s.status IN ('approved','rejected')
-                RETURNING j.target,j.payload,s.status''')
+            cur.execute('''SELECT j.*,s.status AS review_status FROM commulingo_pipeline_jobs j
+                JOIN LATERAL (SELECT id,value FROM commulingo_pipeline_artifacts
+                    WHERE job_id=j.id AND stage='review' ORDER BY id DESC LIMIT 1) a ON true
+                JOIN commulingo_agent_suggestions s ON s.id=(a.value->>'suggestionId')::bigint
+                WHERE j.status='escalated' AND s.status IN ('approved','rejected')
+                    AND NOT EXISTS (SELECT 1 FROM commulingo_pipeline_artifacts newer
+                        WHERE newer.job_id=j.id AND newer.id>a.id AND newer.value ? 'remaining_topics')
+                FOR UPDATE OF j''')
             rows = cur.fetchall()
             for row in rows:
-                if row['status']=='approved' and row['payload'].get('gap_id'):
+                value = advance(row,{'status':row['review_status']}) if row['review_status']=='approved' else {}
+                remaining = value.get('remaining_topics')
+                cur.execute('''UPDATE commulingo_pipeline_jobs SET status=%s,stage=%s,
+                    payload=payload || %s::jsonb,available_at=now(),updated_at=now() WHERE id=%s''',
+                    ('ready' if remaining else 'complete','research' if remaining else 'complete',
+                     Json({'remaining_topics':remaining} if remaining else {}),row['id']))
+                if remaining:
+                    cur.execute('''INSERT INTO commulingo_pipeline_artifacts(job_id,stage,value)
+                        VALUES (%s,'handoff',%s)''',(row['id'],Json(value)))
+                if row['review_status']=='approved' and gap_ids(row['payload']):
                     cur.execute('''UPDATE commulingo_curation_gaps SET status='done',resolved_id=%s,
                         resolution='Approved after pipeline handoff',updated_at=now()
-                        WHERE id=%s AND status='pending' ''',(row['target'],row['payload']['gap_id']))
+                        WHERE id=ANY(%s) AND status='pending' ''',(row['target'],gap_ids(row['payload'])))
             return len(rows)

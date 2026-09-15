@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
-"""Research one pending person edit, apply its bounded decision, and deliver operator handoffs."""
+"""Research one pending person edit, apply its bounded decision, and retain unresolved work internally."""
 from __future__ import annotations
 import argparse
 import asyncio
 import fcntl
 import json
 import logging
-import os
 import re
 import sys
 from pathlib import Path
@@ -142,6 +141,11 @@ async def process(job, tracker):
     else:
         decision,fetched = await asyncio.wait_for(research(row,current,tracker),timeout=480)
     if not queue.save_decision(job,decision,fetched) or not queue.owned(job): return
+    if decision['decision']=='revise':
+        from commulingo_pipeline.store import Store
+        repair_id = await asyncio.to_thread(Store().enqueue_review_repair,row,decision)
+        queue.finish(job,'escalated',f'Automatic correction job {repair_id}; no human review requested')
+        return
     if decision['decision']=='escalate':
         queue.finish(job,'escalated',decision['reason'])
         return
@@ -163,44 +167,14 @@ async def process(job, tracker):
             raise
 
 
-def notify_owner(text):
-    """Explicit owner-only delivery, never a broadcast/group destination."""
-    from secrets_loader import get_secret
-    import urllib.parse
-    import urllib.request
-    owners = [v.strip() for v in os.getenv('ALLOWED_USER_IDS','').split(',') if v.strip()]
-    token = get_secret('TELEGRAM_BOT_TOKEN')
-    if len(owners)!=1 or not owners[0].isdigit() or not token:
-        logger.error('Owner notification configuration unavailable')
-        return False
-    data = urllib.parse.urlencode({'chat_id':owners[0],'text':text[:3900]}).encode()
-    try:
-        with urllib.request.urlopen(urllib.request.Request(f'https://api.telegram.org/bot{token}/sendMessage',data=data,method='POST'),timeout=15) as response:
-            return response.status==200
-    except Exception:
-        logger.error('Owner notification delivery failed; retry is scheduled')
-        return False
-
-
 def deliver_notifications():
-    for job in queue.notifications():
-        row = queue.suggestion(job['suggestion_id'])
-        if not row or row['status']!='pending': continue
-        reason = job['last_error'] or (job.get('decision') or {}).get('reason') or '검토를 완료하지 못했습니다.'
-        text = (f"CommuLingo 검토 요청 #{row['id']} · {row['target_id']}\n"
-                f"자동 검토로 판단하지 못했습니다.\n{reason[:1800]}\n\n"
-                f"내용·근거 보기: /commulingo_review show {row['id']}\n"
-                f"승인: /commulingo_review approve {row['id']} 승인 사유\n"
-                f"반려: /commulingo_review reject {row['id']} 반려 사유\n"
-                f"재조사: /commulingo_review retry {row['id']}\n"
-                "처리 전까지 원문은 유지됩니다. 미처리 요청은 하루 뒤 다시 알립니다.")
-        if notify_owner(text): queue.notification_sent(row['id'])
+    """Compatibility entry point: automatic and repeat review requests are disabled."""
+    return 0
 
 
 async def run(*, notify_only=False, skip_budget=False):
     queue.synchronize()
-    await asyncio.to_thread(deliver_notifications)
-    if notify_only: return {'status':'notifications_checked','cost_usd':0}
+    if notify_only: return {'status':'notifications_disabled','cost_usd':0}
     if not skip_budget:
         from scripts.commulingo_budget_guard import main as budget_ok
         if await asyncio.to_thread(budget_ok): return {'status':'budget_deferred','cost_usd':0}
@@ -219,7 +193,6 @@ async def run(*, notify_only=False, skip_budget=False):
             queue.finish(job,'escalated' if job['attempts']>=3 else 'retry',str(exc))
     finally:
         queue.synchronize()
-        await asyncio.to_thread(deliver_notifications)
     state = queue.detail(job['suggestion_id'])['review_job']['status']
     if budget_deferred:
         state = 'budget_deferred'

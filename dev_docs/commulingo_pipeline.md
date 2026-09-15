@@ -2,8 +2,10 @@
 
 `commulingo_pipeline/`는 인물·용어의 신규 등록과 보강을 단계별 작업으로 실행한다.
 진입점은 `scripts/commulingo_pipeline.py`다. 모듈 import나 조회 명령은 DDL이나
-LLM 호출을 하지 않는다. 운영은 `phase=canary`, `legacy_shared_budget=true`, `term_editorial_service=true`다.
-5분 타이머가 한 단계를 재개하며 작업군별 UTC 하루 한 건만 반영한다.
+LLM 호출을 하지 않는다. 운영은 `phase=live`, `legacy_shared_budget=true`, `term_editorial_service=true`다.
+실행 종료 5분 뒤 타이머가 다음 배치를 재개한다. 한 배치는 기본 12단계·1800초이며, 마지막 단계에서 독립 승인이 끝나면
+같은 작업의 공개 저장만 한 단계 추가로 완료한다(최대 13단계, 시간 제한 유지).
+독립 검토를 통과한 변경에 별도 일일 반영 건수 제한을 두지 않는다.
 기존 작성 스크립트는 롤백을 위해 유지한다. `leninbot-commulingo-batch`는 사건·연결만
 실행하고 과거 제안의 review 타이머도 유지한다.
 
@@ -17,7 +19,8 @@ daemon-reload 후 다음 타이머 실행부터 적용된다.
 명시적 migration `scripts/schema_migrations.py --only commulingo-pipeline`이
 PostgreSQL 작업·근거·artifact·비용·시범 반영 테이블을 생성한다.
 작업은 kind, action, target, topic, baseline, reason, priority와 payload를 가진다.
-같은 대상·주제의 활성 작업은 하나만 허용한다. 조사 시작 시 실제 저장소 revision을 읽고
+DB는 같은 대상·주제의 활성 작업을 하나만 허용하며, 계획기는 같은 대상의 활성 작업이
+있으면 새 보강 묶음을 만들지 않는다. 조사 시작 시 실제 저장소 revision을 읽고
 research artifact에 고정한다. 계획의 baseline은 변경 감지용 타임스탬프이며 저장 권한 토큰이 아니다.
 
 인물은 기본 정보·근거·한영 누락·국적·일화·상세 절, 용어는 정의·역사적 맥락·유사 개념
@@ -25,18 +28,39 @@ research artifact에 고정한다. 계획의 baseline은 변경 감지용 타임
 운영자가 요청한 gap을 우선하고 네 작업군을 순환 배정한다. 검토·반영 준비 작업은 먼저
 처리한다. frontend의 유효한 완료 주제와 대기 제안을 존중한다.
 
+보강 후보는 계획 한도를 적용하기 전에 kind·target 기준으로 묶고 `topic=enrichment`,
+`payload.topics`에 원래 주제를 보존한다. 활성 작업이 있는 대상은 제외한다.
+진행 중 내용의 baseline이 바뀌어도 중복 후보로 계획 한도를 차지하지 않는다.
+완료 작업은 기존처럼 baseline이 같은 경우에만 재선정 유예를 적용한다.
+명시적 gap과 일반 보강 후보가 같은 대상이면 gap을 우선하고 모든 요청 번호를 보존한다.
+인물 기본정보·소개·국적·일화와 용어의 여러 주제는 한 조사·초안·검토로 처리한다.
+인물 상세 절은 별도 저장 계약이므로 같은 작업 안에서 카드 주제 처리 후 새 research 단계로
+넘어간다. 이때 `remaining_topics`를 단계 artifact와 같은 트랜잭션에서 저장한다.
+새 조사는 현재 revision을 다시 읽으며 이전 초안·검토 결과를 다음 절에 재사용하지 않는다.
+수집 원문은 같은 작업에 남아 재사용할 수 있지만 독립 검토는 계속 직접 원문을 확인한다.
+no-edit 판단은 현재 묶음의 모든 주제에 유효해야 하며 공통 서비스에 원래 주제별로 기록한다.
+
+`consolidate`는 미리보기, `consolidate --apply`는 기존 미착수 보강 작업을 통합한다.
+ready/research·attempts=0이며 artifact·수집 원문 연결·비용 이력이 없는 대상만 합친다.
+같은 대상에 진행·보류·검토 필요 작업이 있으면 그 대상 전체를 유지한다.
+대표 작업 번호를 유지하고 나머지는 cancelled 및 bundled_into로 연결하여 이력을 보존한다.
+이 cancelled는 편집 완료가 아니다. 다음 tick에서도 남은 미착수 작업의 통합을 시도한다.
+
 공개 연구 문서·사건·인물·미해결 gap의 내용 hash를 비교해 발견 작업을 만든다.
 발견기는 실제 원문 언급을 제시하고 기존 이름·별칭을 검색한다. 한 문서에서 최대 네 후보,
 명시적인 gap에서는 요청한 종류·한국어 이름과 일치하는 한 후보만 허용한다.
 후보 생성과 처리한 문서 hash는 같은 트랜잭션에서 저장한다. 서로 다른 문서의 언급 수는
 신규 후보 사이의 우선순위에만 사용하며, 역사적 중요성이나 출처 독립성을 증명하지 않는다.
+동일 문서·내용 hash의 활성 발견 작업도 조회 한도 적용 전에 제외하여 다음 문서가
+선정되도록 한다. 내용 hash가 달라지면 새 탐색 후보가 된다.
 
 ## 단계와 복구
 
 `discover → research → draft → validate → review → submit → complete` 중 필요한
 단계만 실행한다. 편집 불필요 판단은 research 결과를 먼저 저장한 뒤 별도 judge 단계가
-동일한 판단으로 보강 상태를 기록한다. 각 단계 완료 결과는 별도 artifact다. 120초 lease를 30초마다 갱신하고
-단계는 480초로 제한한다. 소유권을 잃으면 실행을 취소하며 예전 lease의 결과 저장을 거부한다.
+동일한 판단으로 현재 보강 주제들의 상태를 기록한다. 각 단계 완료 결과는 별도 artifact다. 120초 lease를 30초마다 갱신하고
+단계는 480초로 제한한다. 배치 단계 한도에서 추가하는 저장은 claim 후에도
+submit 단계인지 확인하며, 다른 단계로 바뀌었으면 새 조사를 시작하지 않고 반환한다. 소유권을 잃으면 실행을 취소하며 예전 lease의 결과 저장을 거부한다.
 실패는 1시간 뒤 해당 단계부터 재시도하고 같은 단계의 3회 실패는 escalated로 남긴다.
 
 조사기는 원문과 field별 주장·source ID·화면에 표시된 chunk 번호를 제출한다.
@@ -47,8 +71,26 @@ research artifact에 고정한다. 계획의 baseline은 변경 감지용 타임
 작성기는 제한된
 초안 도구와 사전 조회만 받는다. 실행기가 20~6000자의 원문 인용과 기준 revision을 붙인다.
 작성 모델에는 evidence/revision을 수정하는 인자가 없다. 인물 상세 절도 같은 경로를 사용한다.
+작성 단계의 사전 조회는 최대 세 번의 개별 조회로 제한하고 list_* 탐색은 거절한다.
+인물 작성에는 현재 분류 ID·제목·설명을 미리 제공하고 group/groupId를 실제 ID의
+enum으로 제한한다. 역할 category/categoryId도 현재 역할 분류 ID·라벨을 제공하고 enum으로 제한한다. 분류명 추측으로 저장 단계의 외래키 오류를 반복하지 않는다.
+목록 전체 교체와 부분 수정(aliases/aliasEdits, career/careerEdits, scenes/sceneEdits)은
+동시에 제출할 수 없도록 초안 schema에서 검사하여 같은 작성 호출에서 고친다.
+한영 본문 필드에는 schema 상한의 80%를 초안 목표로 제공한다(실제 검증 상한은 유지).
+길이 초과 시 핵심 주장을 보존하며 부차적 절·문장을 줄이고 몇 글자씩 반복 제출하지 않도록 안내한다.
+`DraftRepair`는 한 작성 호출 안에서 거절된 전체 초안을 보관하고 draft_id와 JSON pointer
+repairs로 실패 필드만 교체할 수 있게 한다. 입력 단계의 길이 제한은 로컬 초안 보관까지
+유예하며, 완성본은 기존 schema의 원래 길이·필드·분류 조건을 모두 다시 검사한다.
+근거·revision은 여전히 실행기가 부착하며, 부분 수정을 이용한 대상·버전 변경은 금지한다.
+작성 호출이 끝나면 임시 초안도 사라지고, 검증된 완성본만 단계 artifact가 된다.
+제공된 조사·현재 스냅샷으로 초안을 일찍 제출하여 길이·형식 오류를 수정할 라운드를 확보한다.
 형식 오류는 기존 조사로 최대 두 번 수정한다. 필드별 근거 누락은 이전 주장·검증 오류를
-조사기에 전달해 research로 돌리며, 같은 근거 실패가 세 번 누적되면 운영자 확인으로 남긴다.
+조사기에 전달해 research로 돌리며, 같은 근거 실패가 세 번 누적되면 알림 없이 내부 보류한다.
+인물의 `evidence must identify`와 용어의 `evidence required for <field>`를 모두 근거 누락으로
+분류한다. 빈 출처 목록 오류도 재작성 대신 재조사로 돌린다. 용어 연도 필드의 근거가 없을 때 같은 초안만 반복 수정하지 않는다.
+재조사는 검증기가 지목한 누락 필드의 주장을 포함해야 ready로 완료된다.
+근거를 찾지 못하면 sources_unavailable로 보류하고 주장·인용을 만들지 않는다.
+근거 누락과 revision 충돌 횟수는 문장 길이·형식 수정 횟수에 합산하지 않는다.
 예산 부족·초안 모드 대기는 실패 재시도 횟수에 포함하지 않는다. 충돌은 새 조사 단계로 돌리며 토큰을 자동 대입하지 않는다.
 명시적 gap의 발견 도구는 최대 한 후보와 요청된 kind·label·mention을 schema에 고정하고,
 현재 지시도 같은 한 항목으로 제한한다. 일반 문서의 최대 네 후보 탐색과 혼용하지 않는다.
@@ -66,8 +108,16 @@ research artifact에 고정한다. 계획의 baseline은 변경 감지용 타임
 
 모든 새 편집은 검증과 독립 검토를 통과해야 반영된다. 실제 제출과 승인은 별개의
 idempotency key를 쓰며 frontend 트랜잭션에 영수증을 저장한다. 프로세스가 저장 직후
-죽어도 같은 결과를 되찾는다. 판단 불가 초안은 pending 제안과 기존 운영자 검토 대기열에
-연결한다. 다음 tick은 운영자 승인·반려를 작업 상태와 gap 완료 여부에 반영한다.
+죽어도 같은 결과를 되찾는다. 독립 검토가 `revise`를 반환하면 검토 근거를 research와
+draft 문맥에 전달하여 최대 두 차례 조사→작성→검증→독립 검토를 반복한다.
+검토기는 매번 원문을 직접 가져오며 작성기의 근거 캐시를 승인 근거로 쓰지 않는다.
+생몰연도 이설은 출처별 병기로 처리할 수 있으며 임의 확정이나 처형 분류를 강요하지 않는다.
+해결되지 않은 초안은 `escalated`라는 기존 DB 상태의 내부 보류 artifact로만 남긴다.
+새 pending 제안이나 사용자 검토 요청을 만들지 않는다. 기존 검토 타이머의 미처리 건도
+자동 알림·재알림을 보내지 않는다. 이전에 만들어진 pending 제안의 수동 처리 결과는
+호환성을 위해 다음 tick에서 작업 상태와 gap 완료 여부에 반영한다.
+기존 검토기의 `revise`는 원 제안 ID별 수정 작업으로 이어진다. 수정 작업은 일반 보강
+묶음에서 제외하고, 원 변경안과 피드백을 보존하며, 독립 승인 후에만 기존 제안을 대체한다.
 
 ## 저장 서비스와 호환성
 
@@ -84,7 +134,7 @@ idempotencyKey를 요구한다. validate는 SAVEPOINT 롤백으로 실제 저장
 
 ## 예산과 운영 명령
 
-`config/commulingo_pipeline.json`의 기본 일일 예산은 $3.39, 단계 예약은 $0.20,
+`config/commulingo_pipeline.json`의 운영 일일 예산은 $10.00, 단계 예약은 $0.20,
 검토 확보 비율은 30%다. UTC 호출 시작일 기준으로 PostgreSQL advisory lock 안에서
 예약하고 응답 후 정산한다. 예약을 초과한 실제 비용은 overrun으로 보이며 후속 호출을 막는다.
 응답 비용이 불명확한 실패는 예약액을 유지한다. 과거 날짜의 미정산분도 costs에서 확인할 수 있다.
@@ -97,6 +147,8 @@ idempotencyKey를 요구한다. validate는 SAVEPOINT 롤백으로 실제 저장
 ```bash
 venv/bin/python scripts/commulingo_pipeline.py plan
 venv/bin/python scripts/commulingo_pipeline.py plan --apply
+venv/bin/python scripts/commulingo_pipeline.py consolidate
+venv/bin/python scripts/commulingo_pipeline.py consolidate --apply
 venv/bin/python scripts/commulingo_pipeline.py list
 venv/bin/python scripts/commulingo_pipeline.py show 123
 venv/bin/python scripts/commulingo_pipeline.py costs
@@ -108,9 +160,18 @@ venv/bin/python scripts/commulingo_pipeline.py run --job-id 123 --publish --limi
 ```
 
 run은 기본적으로 초안까지만 진행한다. `run --review`는 독립 검토까지 허용하되
-승인 결과도 submit 앞에서 멈춘다. 판단 불가 초안은 운영자 pending 제안으로 남을 수 있다. --publish는 phase=canary/live에서만 가능하다.
+승인 결과도 submit 앞에서 멈춘다. 판단 불가 초안은 알림 없이 내부 보류된다. --publish는 phase=canary/live에서만 가능하다.
 `--job-id`는 지정한 작업만 정상 lease·예산·검토 제한 아래 재개한다.
-tick은 변경분 계획·완료 검토 정리·원문 만료·한 단계 실행을 수행하고 phase를 따른다.
+run 기본 한도는 6단계, tick은 12단계다. `--limit`로 조정하며 기본 시간 한도는
+`--max-seconds 1800`이다. 성공한 다음 단계는 같은 작업 번호로 즉시 재개하고,
+완료 후에만 순환 스케줄러로 돌아간다. 지정한 --job-id는 그 작업 종료 시 멈춘다.
+단계마다 lease·artifact·예산 예약과 정산을 유지한다. 예산 대기·초안 경계·lease 상실이면
+배치를 멈추며 오류·보류는 기존 재시도 시각을 존중한다. 남은 시간이 한 단계의 480초보다
+짧으면 새 단계를 시작하지 않는다. service TimeoutStartSec은 정리 여유를 포함해 1950초다.
+tick은 완료 검토 정리·미착수 작업 통합·변경분 계획·원문 만료·연속 실행을 수행하고 phase를 따른다.
+운영 live에서는 반영 건수 제한이 없다. tick은 과거 canary 한도 소진만을 사유로
+보류된 submit 작업을 즉시 다시 열고, 예산·오류에 의한 대기는 그대로 유지한다.
+아래 canary 설정은 수동 롤백용으로 남긴다.
 canary는 네 작업군별 UTC 하루 한 작업의 반영만 허용한다. 실패·장애 후 같은 작업은
 원래 반영 슬롯을 재사용한다. 실패한 작업의 슬롯을 자동 회수하지 않는다.
 metrics는 상태·단계별 형식 오류·기록된 비용·캐시 적중, costs는 실제 비용·미정산 예약·초과를 보여준다.
@@ -156,7 +217,8 @@ bio 길이 분포는 별도로 표시한 7일 창이다. 중단된 작성 레인
 
 2026-09-09 전환 시 기존 당일 비용 $0.071381을 유휴 상태에서 한 번 이관했다.
 초기 네 사례의 첫 형식 통과는 3/4였으며 95% 목표 달성이나 기존 대비 품질 우위는 아직
-입증하지 않았다. 독립 검토를 통과한 건만 시범 반영하며 전체 live 확대는 추가 표본 평가 후 결정한다.
+입증하지 않았다. 이 관찰은 품질 우위의 증거로 해석하지 않는다. 현재는 운영자 요청에 따라 live로 전환했으며
+독립 검토·revision 충돌 검사·공용 비용 예산을 유지하고 반영 건수 제한만 해제했다.
 
 DeepSeek 모델 선택은 큐레이터·이벤트 큐레이터·리뷰어의 스펙과 runtime overlay에서 `deepseek_flash`로 통일한다. 공통 provider registry가 정식 `deepseek-flash`로 해석하며, 타이머 작업은 다음 프로세스 시작부터 읽는다. 옛 `deepseek_pro`는 저장값 호환용으로만 유지한다.
 
@@ -170,3 +232,8 @@ DeepSeek 모델 선택은 큐레이터·이벤트 큐레이터·리뷰어의 스
 구분한다. 기존 독립 검토·저장·재시도·비용 정책은 그대로이며 추가 LLM 호출은 없다.
 
 조사 단계는 제공된 근거를 먼저 재사용하고 위임된 주장에 충분한 근거가 있으면 artifact를 반환한다. 추가 검색은 누락·상충·변경 가능성 검증에 한한다. 유료 검색과 Extract는 LLM 예산과 별도로 [공용 web 일일 예산](web_research.md)을 사용한다.
+
+조사 결과의 `claims.field`는 해당 대상·action의 실제 쓰기 schema 필드만 허용한다.
+주제명 history/distinctions/examples를 필드로 제출하면 같은 조사 호출 안에서 수정하도록
+거절한다. 용어의 역사·구별·사례 근거는 `body`에 연결해야 하며 `definition` 근거로
+자동 대체하거나 조사기가 고른 근거의 필드명을 실행기가 임의 변환하지 않는다.

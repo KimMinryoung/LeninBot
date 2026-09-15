@@ -25,8 +25,15 @@ Judge historical accuracy without ideological sanitization or sensationalism.
 
 Submit commulingo_review_decision exactly once:
 approve only when the complete patch and all review risks are substantiated;
-reject when retrieved evidence establishes that the proposal is wrong or harmful;
-escalate when sources are inaccessible, identity/disputes remain unresolved, or judgment is uncertain.
+revise when retrieved evidence identifies correctable factual errors, unsupported certainty,
+bilingual contradictions or a misclassified fate. In reason, identify affected fields and
+specific evidence-backed corrections for the author; you do not edit or approve the patch.
+Documented date disagreements can be represented with alternatives and attributed prose.
+They do not require choosing one date as truth. Do not equate imprisonment/death in custody
+with execution. Preserve supported information and disclose uncertainty in both languages.
+reject when the proposal is unsuitable or harmful and has no useful supported correction;
+escalate only when evidence or identity remains insufficient for a safe correction.
+Escalate means internal hold without publication. No case is sent to a human for verification.
 Do not infer truth from confidence scores, citation presence, or the fact that an author wrote it.
 Prefer checks with citation_id (S1=source_refs[0], S2=source_refs[1]), source_id returned
 by your own fetch_url/wiki_get, inclusive line_start/line_end, and a Korean finding.
@@ -42,8 +49,7 @@ string verbatim, including its URL and annotation; a replacement label is invali
 resolved_risks MUST contain the exact strings from suggestion.risks, without suffixes or
 explanations. Put your explanations in reason and checks[].finding. quote must be a
 contiguous excerpt of the fetched body, not a paraphrase or a quotation with added ellipses.
-Explain the final decision in Korean. An escalation must identify
-what the operator must establish to decide. A valid decision ends the run; never invent evidence.
+Explain the final decision in Korean. An internal hold must identify the missing evidence. A valid decision ends the run; never invent evidence.
 """),
     tools=["wiki_search", "wiki_get", "web_search", "fetch_url", "commulingo_people"],
     provider="deepseek", model="deepseek_flash", budget_usd=0.20,

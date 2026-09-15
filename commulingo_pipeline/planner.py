@@ -1,6 +1,7 @@
 """Incremental source intake and deterministic missing-content commissions."""
 import hashlib
 from collections import deque
+from .bundles import bundle_candidates
 
 
 class Planner:
@@ -68,14 +69,34 @@ class Planner:
                     row['payload'] = {k:row.pop(k) for k in ('gap_id','label_ko','label_en')}
                     candidates.append(row)
             # Completed judgements are suppressed until changed content or TTL expiry.
-            cur.execute('''SELECT kind,target,topic,baseline FROM commulingo_pipeline_jobs
+            cur.execute('''SELECT kind,target,topic,baseline,status,payload FROM commulingo_pipeline_jobs
                 WHERE status IN ('ready','running','deferred','escalated') OR
                     (status='complete' AND updated_at>now() - CASE WHEN EXISTS (
                         SELECT 1 FROM commulingo_pipeline_artifacts a WHERE a.job_id=commulingo_pipeline_jobs.id
                         AND a.stage='research' AND a.value->>'status'='sources_unavailable')
                         THEN interval '90 days' ELSE interval '180 days' END)''')
-            covered = {(r['kind'],r['target'],r['topic'],r['baseline']) for r in cur.fetchall()}
-            available = [r for r in candidates if (r['kind'],r['target'],r['topic'],r['baseline']) not in covered]
+            jobs = cur.fetchall()
+            active = {(r['kind'],r['target'],r['topic']) for r in jobs if r['status']!='complete'}
+            active_targets = {(r['kind'],r['target']) for r in jobs if r['status']!='complete'}
+            completed = {(r['kind'],r['target'],r['topic'],r['baseline'])
+                         for r in jobs if r['status']=='complete'}
+            for row in jobs:
+                if row['status']=='complete':
+                    completed.update((row['kind'],row['target'],topic,row['baseline'])
+                                     for topic in (row.get('payload') or {}).get('topics',[]))
+            # Match the queue's unique key before applying the plan limit. A
+            # changed baseline cannot create a second active job. Explicit gaps
+            # win over ordinary commissions so their completion link survives.
+            available = []
+            seen = set()
+            for row in sorted(candidates, key=lambda r:r['priority']):
+                key = (row['kind'],row['target'],row['topic'])
+                if (key in active or (key in seen and row['action']!='update') or (*key,row['baseline']) in completed
+                    or row['action']=='update' and key[:2] in active_targets):
+                    continue
+                seen.add(key)
+                available.append(row)
+            available = bundle_candidates(available)
             urgent = sorted((r for r in available if r['priority']<20),key=lambda r:(r['priority'],r['target']))
             groups = [deque(r for r in available if r['priority']>=20 and (r['kind'],r['action'])==g)
                       for g in [('person','create'),('person','update'),('term','create'),('term','update')]]
@@ -100,6 +121,10 @@ class Planner:
                     AND NULLIF(target_id,'') IS NULL AND NULLIF(resolved_id,'') IS NULL)
                 SELECT m.* FROM materials m LEFT JOIN commulingo_pipeline_materials p USING(material_id)
                 WHERE COALESCE(body,'')!='' AND (p.material_id IS NULL OR p.content_hash!=md5(m.body))
+                AND NOT EXISTS (SELECT 1 FROM commulingo_pipeline_jobs j
+                    WHERE j.topic='discovery' AND j.status IN ('ready','running','deferred','escalated')
+                    AND j.payload->>'material_id'=m.material_id
+                    AND j.payload->>'content_hash'=md5(m.body))
                 ORDER BY CASE WHEN material_id LIKE 'gap:%%' THEN 0 ELSE 1 END,material_id LIMIT %s''',(limit,))
             rows = [dict(r) for r in cur.fetchall()]
         for row in rows:

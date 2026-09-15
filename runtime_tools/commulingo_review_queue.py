@@ -1,4 +1,4 @@
-"""Durable leases and operator handoff for pending person suggestions."""
+"""Durable leases and internal holds for pending person suggestions."""
 import json
 import uuid
 from db import get_conn

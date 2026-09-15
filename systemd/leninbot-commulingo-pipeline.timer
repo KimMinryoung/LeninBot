@@ -1,5 +1,5 @@
 [Unit]
-Description=Resume one CommuLingo editorial stage every five minutes
+Description=Resume CommuLingo editorial batches five minutes after completion
 
 [Timer]
 OnBootSec=5min

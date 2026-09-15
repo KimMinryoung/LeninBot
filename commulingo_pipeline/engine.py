@@ -34,10 +34,42 @@ class Engine:
             await asyncio.sleep(self.heartbeat_seconds)
             await asyncio.to_thread(self.store.heartbeat, job)
 
-    async def run_one(self, *, group=None, job_id=None, draft_only=True, allow_review=False):
+    async def run_batch(self, *, limit=12, max_seconds=1800, job_id=None,
+                        draft_only=True, allow_review=False):
+        """Resume the same job between committed stages; bound each invocation."""
+        deadline = asyncio.get_running_loop().time() + max_seconds
+        results = []
+        next_job = job_id
+        for _ in range(limit):
+            # Give every admitted stage its full timeout, without killing useful
+            # research just because the batch is nearing its wall-clock limit.
+            if asyncio.get_running_loop().time() + self.timeout > deadline:
+                break
+            result = await self.run_one(job_id=next_job, draft_only=draft_only,
+                                        allow_review=allow_review)
+            results.append(result)
+            if result['status'] in {'idle','budget_deferred','draft_ready','lease_lost'}:
+                break
+            next_job = result['job_id'] if result['status']=='ready' else job_id
+            if job_id is not None and result['status']!='ready':
+                break
+        # Finish the approved write at the stage-count boundary, never begin
+        # another investigation. Keep the normal wall-clock and lease checks.
+        if (results and len(results)==limit and not draft_only
+                and results[-1].get('status')=='ready'
+                and results[-1].get('stage')=='submit'
+                and asyncio.get_running_loop().time()+self.timeout<=deadline):
+            results.append(await self.run_one(job_id=results[-1]['job_id'],
+                draft_only=False, expected_stage='submit'))
+        return results
+
+    async def run_one(self, *, group=None, job_id=None, draft_only=True, allow_review=False, expected_stage=None):
         job = await asyncio.to_thread(self.store.claim, group=group, job_id=job_id)
         if not job:
             return {'status': 'idle'}
+        if expected_stage is not None and job['stage']!=expected_stage:
+            await asyncio.to_thread(self.store.defer,job,'stage changed before final write',seconds=0,failed=False)
+            return {'status':'stage_changed','job_id':job['id']}
         if draft_only and (job['stage']=='submit' or
                            (job['stage']=='review' and not allow_review)):
             await asyncio.to_thread(self.store.defer, job, 'draft-only execution', seconds=3600, failed=False)

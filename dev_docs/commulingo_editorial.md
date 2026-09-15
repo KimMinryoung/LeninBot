@@ -21,6 +21,9 @@ frontend 컨테이너의 DB 설정을 사용하며 공개 쓰기 endpoint를 추
 get_person은 동일 DB 스냅샷의 revision, 인물, 절 요약, 근거, 보강 상태를 반환한다.
 KG 참고 정보는 기존처럼 best effort로 붙인다. 기존 인물 수정은 fields.expectedRevision,
 section_save는 expected_revision이 필수다. 최신 버전의 자동 재대입으로 충돌을 우회하지 않는다.
+신규 인물 도구의 fields schema에는 expectedRevision·aliasEdits·careerEdits·sceneEdits를
+노출하지 않는다. 신규 등록은 aliases·career·scenes로 초기 목록을 작성하고, 수정 전용
+컬렉션 연산은 update 도구에서만 사용한다. 파이프라인 작성기도 같은 schema를 사용한다.
 
 모든 쓰기에 sources가 필요하다. 사실 필드 bio/moment/years/citizenship/nationalOrigin/body에는
 필드별 evidence가 필요하다: field, claim, source, locator(쪽수/절), optional excerpt/stance.
@@ -112,7 +115,7 @@ frontend test-commulingo-editorial-db.js는 근거·검토·롤백·상태 전�
 공통 Admin upsert CLI가 배치 전체를 한 트랜잭션으로 검증·반영한다.
 예전 --apply 단독은 거부된다. 실패 시 배치 앞부분의 쓰기도 롤백한다.
 
-## 자동 검토와 소유자 처리
+## 자동 검토·수정과 내부 보류
 
 `leninbot-commulingo-review.timer`가 15분마다 `scripts/commulingo_person_reviewer.py`를 실행한다.
 `agents/commulingo_reviewer.py`는 작성자 문맥을 물려받지 않는 전용 AgentSpec이다.
@@ -125,14 +128,17 @@ security_gateway/policy.py에 state로 등록하며 소유자와 commulingo_revi
 - 검토기는 checks[].citation_id(S1=source_refs[0])와 자신이 가져온 source_id 및 line_start/line_end로 원문 범위를 고른다. 실행기가 원문 인용을 추출하고 기존 citation/source/quote/finding 형식으로 저장한다. 긴 원문 행은 표시할 때만 240자 단위로 나누며 추출한 인용에는 번호나 추가 개행을 넣지 않는다. 원문은 현재 검토에서 직접 가져온 것만 인정하며 기존 정확한 문자열 형식도 지원한다. resolved_risks는 risks 식별자만 담고 설명은 reason/finding에 쓴다.
 - 승인: 새로 가져온 원문에 실제로 있는 인용, 모든 제안 출처의 확인, 검토 사유의 해소,
   위키백과 밖의 근거가 필요하다. 검색 요약·작성자가 적은 인용만으로 승인하지 않는다.
-- 반려: 확인한 근거로 오류/해로운 삭제임이 드러났을 때. 버전이 없거나 오래된 제안은
+- 수정 요청(`revise`): 검토기가 직접 확인한 근거로 고칠 수 있는 사실 오류·확정 과잉·한영 불일치를 특정하면 작성기로 되돌린다. 출처별 생몰연도 이설은 병기하고 옥사와 처형을 구분한다.
+- 반려: 유용하게 고칠 수 없는 부적절한 제안이나 해로운 삭제일 때. 버전이 없거나 오래된 제안은
   LLM 호출 없이 반려한다. 검토 도중 버전 충돌도 반려하며 새 버전을 자동 대입하지 않는다.
-- 판단 불가: 접근할 수 없는 자료, 해결되지 않은 동일인/상충 근거는 소유자에게 전달한다.
+- 판단 불가(`escalate`): 접근할 수 없는 자료나 해결되지 않은 동일인은 내부 보류한다. 사용자에게 판단을 요구하지 않는다.
   시스템이 인용의 원문 포함 여부를 검사해도 역사적 판단의 정확성을 보증하지는 않는다.
+인용 거절은 checks의 1부터 시작하는 항목 번호와 원인을 반환한다. 20자 미만 인용은
+범위를 넓히도록, 원문 불일치는 해당 source_id의 표시 행 범위를 선택하도록 안내한다.
 
 Migration 177의 `commulingo_person_review_jobs`가 작업 상태·근거·판단·오류를 보관한다.
 SKIP LOCKED와 20분 lease로 중복 실행을 막는다. 실행 제한은 650초, 조사 제한은 480초다.
-실패는 1시간 후 재시도하고 3회째 소유자에게 넘긴다. 저장된 판단은 장애 복구 시 재사용하며
+실패는 1시간 후 재시도하고 3회째 내부 보류한다. 저장된 판단은 장애 복구 시 재사용하며
 그때도 현재 버전과 제안 상태를 확인한다. 공통 승인의 트랜잭션으로 이중 반영을 막는다.
 
 소유자는 Telegram 개인 DM에서 다음 명령을 쓴다. 일반 사용자/그룹 채팅은 처리하지 않는다.
@@ -147,15 +153,24 @@ SKIP LOCKED와 20분 lease로 중복 실행을 막는다. 실행 제한은 650�
 
 show는 현재 원문·전체 변경안·출처·검토 근거를 JSON으로 첨부한다. 승인/반려는 사유가 필수다.
 재검토는 실패/판단 불가 상태만 다시 대기열에 넣으며 진행 중인 작업을 덮어쓰지 않는다.
-판단 불가 알림은 ALLOWED_USER_IDS에 지정된 단일 소유자에게만 보낸다. 전송 실패는
-다음 타이머 실행에서 재시도하고, 미처리 요청은 하루 뒤 재알림한다. 전송 성공 직후
-프로세스가 죽으면 알림이 중복될 수 있지만 승인 내용이 중복 반영되지는 않는다.
+자동 검토 요청·하루 뒤 재알림은 보내지 않는다. 기존 미처리 요청도 동일하다.
+`--notify-only`는 호환용으로 유지하며 `notifications_disabled`를 반환한다.
+수동 조회·승인·반려·재시도 명령은 필요할 때 직접 사용할 수 있다.
+
+기존 pending 제안에서 `revise`를 받으면 원 제안 ID당 하나의 파이프라인 수정 작업을
+영속 생성한다. 원 변경안과 검토 근거를 보존하고 원 제안은 pending으로 유지한다.
+수정 작업은 최신 원문으로 조사하고 새 초안을 독립 검토한다. 통과한 뒤에만 공통
+저장 서비스의 고정 idempotency key로 이전 제안을 반려하고 새 제안을 제출·승인한다.
+수동으로 승인·반려된 원 제안은 대체하지 않는다. 장애 후 재실행에도 같은 수정 작업을
+사용하며, 완료 작업을 새로 생성하지 않는다. 수정 작업은 일반 주제 묶음에서 제외한다.
+최초 수정 요청을 포함하여 최대 두 차례 자동 수정을 허용하고, 그래도 해결되지 않으면
+근거·오류를 내부 보류 상태에 보존한다. 승인 기준과 예산 제한은 그대로 적용된다.
 
 한 번에 최대 한 제안을 검토하며 기본 LLM 예산은 $0.20, 최대 12라운드다.
 CommuLingo 일일 합산 예산 제한은 해제되어 있다. systemd 원본과 운영 unit은
 COMMULINGO_DAILY_CAP_USD=0을 사용하며 budget guard의 기본값도 0이다.
 0 이하이면 비용 집계 없이 통과한다. 양수를 명시하면 일일 제한을 다시 적용하며,
-예산 소진 시 조사는 연기하지만 운영자 알림 확인은 계속한다. 회당 LLM 예산은 유지한다. 상태 보고에 review lane을 포함하며 빈 큐는 정상 idle로 집계한다.
+예산 소진 시 조사는 연기하며 검토 요청 알림은 보내지 않는다. 회당 LLM 예산은 유지한다. 상태 보고에 review lane을 포함하며 빈 큐는 정상 idle로 집계한다.
 
 배포 순서: 177 적용 → Python 코드와 systemd service/timer 설치 → daemon-reload →
 Telegram 재시작(명령 등록) → 검토 서비스 첫 실행 → 타이머 활성화.

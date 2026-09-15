@@ -95,8 +95,8 @@ developer MCP clients
 | `leninbot-kg-integrity.service` | `scripts/check_kg_integrity.py` | KG maintenance check |
 | `leninbot-kg-sync.service` | `python -m jobs.kg_sync --source commulingo,documents --limit 40` | nightly 04:00 KST — CommuLingo·발행 문서를 KG로 미러 (증분, 7일마다 전체) |
 | `leninbot-kg-report.service` | `scripts/kg_weekly_report.py --notify` | Mon 09:30 KST — KG 건강 리포트 (성장·중복·동기화 지연·검색 사용량) |
-| `leninbot-commulingo-review.service` | `scripts/commulingo_person_reviewer.py` | 15분마다 대기 인물 제안 독립 조사·승인/반려; 판단 불가만 소유자 DM과 `/commulingo_review`로 전달 |
-| `leninbot-commulingo-pipeline.service` | `scripts/commulingo_pipeline.py tick` | 영속 인물·용어 단계 실행; phase·시범 반영·일일 공용 예산은 `config/commulingo_pipeline.json` |
+| `leninbot-commulingo-review.service` | `scripts/commulingo_person_reviewer.py` | 15분마다 대기 제안 독립 조사·승인/반려·자동 수정; 해결 불가는 내부 보류하며 검토 요청·재알림 없음. `/commulingo_review`는 수동 조회·처리용 |
+| `leninbot-commulingo-pipeline.service` | `scripts/commulingo_pipeline.py tick` | 대상별 보강 묶음과 최대 12단계 연속 실행; live 반영(건수 제한 없음)·일일 공용 예산은 `config/commulingo_pipeline.json` |
 | `leninbot-commulingo-batch.service` | events + links units | 사건·연결 작성만 실행; 인물·용어는 새 파이프라인이 소유 |
 | `leninbot-commulingo-maintainer.service` | `scripts/commulingo_people_maintainer.py` | one sourced CommuLingo edit or pending review; shared frontend persistence, topic completion/revisit state and gateway-owned inference policy |
 | `leninbot-commulingo-new.service` | `scripts/commulingo_people_parallel.py --mode new` | independent new-person discovery/create lane |

@@ -7,7 +7,7 @@ from urllib.parse import urlsplit
 DECISION_TOOL = {"name": "commulingo_review_decision", "description": "Submit one independently researched review decision; does not directly write dictionary content.",
     "input_schema": {"type": "object", "additionalProperties": False,
         "properties": {
-            "decision": {"type": "string", "enum": ["approve", "reject", "escalate"]},
+            "decision": {"type": "string", "enum": ["approve", "revise", "reject", "escalate"]},
             "reason": {"type": "string", "minLength": 20},
             "resolved_risks": {"type": "array", "description": "Exact strings copied from suggestion.risks; put explanations in reason/findings, not in risk identifiers.", "items": {"type": "string"}},
             "checks": {"type": "array", "maxItems": 30, "items": {"type": "object", "additionalProperties": False,
@@ -85,7 +85,7 @@ def validate_decision(value, proposal, fetched):
     if not isinstance(value, dict) or set(value) != {"decision", "reason", "resolved_risks", "checks"}:
         raise ValueError("decision, reason, resolved_risks and checks required")
     decision = value["decision"]
-    if decision not in {"approve", "reject", "escalate"} or not isinstance(value["reason"], str) or len(value["reason"].strip()) < 20:
+    if decision not in {"approve", "revise", "reject", "escalate"} or not isinstance(value["reason"], str) or len(value["reason"].strip()) < 20:
         raise ValueError("valid decision and substantive reason required")
     risks = value["resolved_risks"]
     checks = value["checks"]
@@ -93,14 +93,18 @@ def validate_decision(value, proposal, fetched):
         raise ValueError("resolved_risks must list review risks")
     if not isinstance(checks, list) or len(checks) > 30:
         raise ValueError("checks must be an array of at most 30 items")
-    for check in checks:
+    for index, check in enumerate(checks, 1):
         if not isinstance(check, dict) or set(check) != {"citation", "source", "quote", "finding"} or any(not isinstance(v, str) or not v.strip() for v in check.values()):
             raise ValueError("each check needs citation, source, quote and finding")
         quote = normalize(check["quote"])
-        if not external_url(check["source"]) or len(quote) < 20 or quote not in normalize(fetched.get(check["source"], "")):
-            raise ValueError("quote must occur in source text fetched during this review")
-    if decision in {"approve", "reject"} and not checks:
-        raise ValueError("approve/reject requires retrieved evidence; otherwise escalate")
+        if not external_url(check["source"]):
+            raise ValueError(f"check {index}: select an external source fetched during this review")
+        if len(quote) < 20:
+            raise ValueError(f"check {index}: quote has {len(quote)} normalized characters; at least 20 required. Select a wider source range")
+        if quote not in normalize(fetched.get(check["source"], "")):
+            raise ValueError(f"check {index}: quote must occur in source text fetched during this review; select source_id and its displayed line range")
+    if decision in {"approve", "revise", "reject"} and not checks:
+        raise ValueError("approve/revise/reject requires retrieved evidence; otherwise escalate")
     if decision == "approve":
         if not set(proposal.get("source_refs") or []).issubset({c["citation"] for c in checks}):
             raise ValueError("approval must independently verify every cited reference; copy these missing source_refs verbatim into checks[].citation: " + json.dumps(sorted(set(proposal.get("source_refs") or []) - {c["citation"] for c in checks}), ensure_ascii=False))

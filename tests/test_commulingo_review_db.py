@@ -56,16 +56,14 @@ class ReviewDatabase(unittest.TestCase):
         self.assertEqual(rpc({'command':'read','id':self.id})['epithet']['ko'],'검토한 수정')
         asyncio.run(worker.process(jobs[0],{}))
         self.assertEqual(queue.suggestion(sid)['status'],'approved')
-    def test_escalation_notification_delivery_retry_and_owner_retry(self):
+    def test_internal_hold_never_sends_notifications_and_manual_retry_remains(self):
         sid=self.propose();job=queue.claim()
         with patch.object(worker,'research',new=AsyncMock(return_value=self.decide('escalate'))):asyncio.run(worker.process(job,{}))
         self.assertEqual(queue.suggestion(sid)['status'],'pending')
-        with patch.object(worker,'notify_owner',return_value=False):worker.deliver_notifications()
+        with patch.object(queue,'notifications') as notifications:
+            worker.deliver_notifications();worker.deliver_notifications()
+        notifications.assert_not_called()
         self.assertIsNone(queue.detail(sid)['review_job']['notified_at'])
-        queue.query("UPDATE commulingo_person_review_jobs SET notification_after=NOW() WHERE suggestion_id=%s",(sid,))
-        with patch.object(worker,'notify_owner',return_value=True) as send:
-            worker.deliver_notifications();worker.deliver_notifications();self.assertEqual(send.call_count,1)
-        self.assertIsNotNone(queue.detail(sid)['review_job']['notified_at'])
         self.assertTrue(queue.retry(sid))
         job=queue.claim();queue.finish(job,'escalated','test finished')
     def test_stale_proposal_rejected_without_llm_and_manual_race_preserved(self):
@@ -85,13 +83,13 @@ class ReviewDatabase(unittest.TestCase):
         self.assertEqual(queue.suggestion(sid)['status'],'rejected')
         self.assertEqual(queue.detail(sid)['review_job']['status'],'rejected')
         self.assertNotEqual(rpc({'command':'read','id':self.id})['epithet']['ko'],'검토한 수정')
-    def test_third_runtime_failure_escalates_and_notifies(self):
+    def test_third_runtime_failure_holds_without_notification(self):
         sid=self.propose()
         queue.query('UPDATE commulingo_person_review_jobs SET attempts=2 WHERE suggestion_id=%s',(sid,))
-        with patch.object(worker,'research',new=AsyncMock(side_effect=RuntimeError('test research outage'))),patch.object(worker,'notify_owner',return_value=True):
+        with patch.object(worker,'research',new=AsyncMock(side_effect=RuntimeError('test research outage'))):
             result=asyncio.run(worker.run(skip_budget=True))
         self.assertEqual(result['status'],'escalated')
-        self.assertIsNotNone(queue.detail(sid)['review_job']['notified_at'])
+        self.assertIsNone(queue.detail(sid)['review_job']['notified_at'])
     def test_expired_lease_recovered_and_exhaustion_escalates(self):
         sid=self.propose();old=queue.claim()
         queue.query("UPDATE commulingo_person_review_jobs SET lease_until=NOW()-INTERVAL '1 minute' WHERE suggestion_id=%s",(sid,))

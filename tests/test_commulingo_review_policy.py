@@ -58,6 +58,47 @@ class PolicyTests(unittest.IsolatedAsyncioTestCase):
     def test_uncertainty_can_escalate_without_inventing_evidence(self):
         value={**DECISION,'decision':'escalate','checks':[]}
         validate_decision(value,PROPOSAL,{})
+    def test_quote_errors_identify_the_check_and_repair(self):
+        for quote, message in [('Short title', 'check 2: quote has 11 normalized characters'),
+                               ('A fabricated quotation that does not occur.', 'check 2: quote must occur')]:
+            value = copy.deepcopy(DECISION)
+            value['checks'].append({**value['checks'][0], 'quote':quote})
+            with self.assertRaisesRegex(ValueError,message):
+                validate_decision(value,PROPOSAL,{SOURCE:QUOTE})
+    def test_revision_requires_independently_retrieved_evidence(self):
+        value={**DECISION,'decision':'revise'}
+        self.assertEqual(validate_decision(value,PROPOSAL,{SOURCE:QUOTE}),value)
+        for bad in ({}, {SOURCE:'unrelated text'}):
+            with self.assertRaises(ValueError):
+                validate_decision(value,PROPOSAL,bad)
+        with self.assertRaises(ValueError):
+            validate_decision({**value,'checks':[]},PROPOSAL,{SOURCE:QUOTE})
+
+    async def test_notifications_disabled_even_for_old_pending_requests(self):
+        with patch.object(worker.queue,'notifications') as pending, patch.object(worker.queue,'synchronize'):
+            self.assertEqual(worker.deliver_notifications(),0)
+            result=await worker.run(notify_only=True)
+        pending.assert_not_called()
+        self.assertEqual(result['status'],'notifications_disabled')
+
+    async def test_legacy_revision_persists_correction_without_approving_original(self):
+        row={'id':7,'status':'pending','target_type':'person','target_id':'fixture',
+             'action':'create','patch_json':{},'source_refs':[SOURCE]}
+        decision={**DECISION,'decision':'revise'}
+        job={'suggestion_id':7,'lease_token':'token'}
+        with patch.object(worker.queue,'suggestion',return_value=row), \
+             patch.object(worker.queue,'save_decision',return_value=True), \
+             patch.object(worker.queue,'owned',return_value=True), \
+             patch.object(worker.queue,'finish') as finish, \
+             patch.object(worker,'research',new=AsyncMock(return_value=(decision,{SOURCE:QUOTE}))), \
+             patch.object(worker,'call_person_service',return_value=None) as rpc, \
+             patch('commulingo_pipeline.store.Store.enqueue_review_repair',return_value=123) as enqueue:
+            await worker.process(job,{})
+        enqueue.assert_called_once_with(row,decision)
+        self.assertEqual(rpc.call_count,1)
+        self.assertEqual(rpc.call_args.args[0]['command'],'read')
+        self.assertIn('123',finish.call_args.args[2])
+
     async def test_fetch_wrapper_counts_body_not_failed_diagnostics_or_search(self):
         box,fetched={},{}
         handlers=worker.make_handlers({'fetch_url':AsyncMock(return_value='[fetch_url]\nError: '+QUOTE)},PROPOSAL,fetched,box)

@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import os
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 from types import SimpleNamespace
 from concurrent.futures import ThreadPoolExecutor
 
@@ -14,6 +14,17 @@ from commulingo_pipeline.store import Store, LostLease, BudgetUnavailable
 
 
 class EvidenceTests(unittest.TestCase):
+    def test_person_create_rejects_update_only_fields_in_tool_schema(self):
+        from jsonschema import Draft202012Validator
+        from runtime_tools.commulingo_people import COMMULINGO_PERSON_CREATE_TOOL, COMMULINGO_PERSON_UPDATE_TOOL
+        for field,value in [('aliasEdits',[]),('careerEdits',[]),('sceneEdits',[]),('expectedRevision','revision')]:
+            with self.subTest(field=field):
+                create = COMMULINGO_PERSON_CREATE_TOOL['input_schema']['properties']['fields']
+                update = COMMULINGO_PERSON_UPDATE_TOOL['input_schema']['properties']['fields']
+                errors = list(Draft202012Validator(create).iter_errors({field:value}))
+                self.assertTrue(any(e.validator=='additionalProperties' and field in e.message for e in errors))
+                self.assertIn(field,update['properties'])
+
     def test_source_nul_normalization_precedes_hash_and_ranges(self):
         source = snapshot('https://example.org/source','Historical\x00document with enough context.')
         self.assertNotIn('\x00',source['body'])
@@ -49,6 +60,163 @@ class EvidenceTests(unittest.TestCase):
         source['expires_at'] = datetime.now(timezone.utc)-timedelta(seconds=1)
         with self.assertRaises(ValueError):
             compile_evidence([claim],{source['id']:source},{'bio'})
+
+
+class PlannerSelectionTests(unittest.TestCase):
+    def candidates(self, ordinary, *, gaps=(), jobs=(), limit=40):
+        from commulingo_pipeline.planner import Planner
+        cur = Mock()
+        cur.fetchall.side_effect = [ordinary, gaps, jobs]
+        store = Mock()
+        @contextmanager
+        def transaction():
+            yield cur
+        store.transaction = transaction
+        return Planner(store).candidates(limit)
+
+    def row(self, target):
+        return dict(kind='person', action='update', target=target, topic='basics',
+                    priority=20, baseline='new', reason='Missing facts')
+
+    def test_active_jobs_with_changed_baselines_do_not_consume_limit(self):
+        for kind in ('person', 'term'):
+            for action in ('create', 'update'):
+                for status in ('ready', 'running', 'deferred', 'escalated'):
+                    with self.subTest(kind=kind, action=action, status=status):
+                        blocked = {**self.row('blocked'), 'kind':kind, 'action':action}
+                        jobs = [{**blocked, 'baseline':'old', 'status':status}]
+                        selected = self.candidates([blocked,self.row('next')],jobs=jobs,limit=1)
+                        self.assertEqual([r['target'] for r in selected], ['next'])
+
+    def test_completed_jobs_suppress_only_the_same_baseline_and_topic(self):
+        row = self.row('person')
+        complete = {**row, 'status':'complete'}
+        self.assertEqual(self.candidates([row], jobs=[complete]), [])
+        self.assertEqual(self.candidates([row], jobs=[{**complete,'baseline':'old'}])[0]['payload']['topics'], ['basics'])
+        self.assertEqual(self.candidates([row], jobs=[{**complete,'topic':'bio'}])[0]['payload']['topics'], ['basics'])
+
+    def test_explicit_gap_keeps_payload_without_duplicate_commission(self):
+        gap = {**self.row('person'), 'priority':10, 'baseline':'',
+               'gap_id':7, 'label_ko':'인물', 'label_en':'Person'}
+        selected = self.candidates([self.row('person'),self.row('next')],gaps=[gap],limit=2)
+        self.assertEqual([r['target'] for r in selected], ['person','next'])
+        self.assertEqual(selected[0]['payload']['gap_id'], 7)
+
+    def test_available_groups_still_alternate(self):
+        rows = [self.row('p1'),self.row('p2'),
+                {**self.row('t1'),'kind':'term'}, {**self.row('t2'),'kind':'term'}]
+        self.assertEqual([r['target'] for r in self.candidates(rows)], ['p1','t1','p2','t2'])
+
+    def test_topics_are_bundled_before_limit(self):
+        rows = [self.row('p1'), {**self.row('p1'),'topic':'bio'},
+                {**self.row('p1'),'topic':'sections'},self.row('p2')]
+        selected = self.candidates(rows,limit=2)
+        self.assertEqual([r['target'] for r in selected], ['p1','p2'])
+        self.assertEqual(selected[0]['topic'], 'enrichment')
+        self.assertEqual(selected[0]['payload']['topics'], ['basics','bio','sections'])
+
+    def test_active_bundle_blocks_new_topics_and_complete_bundle_covers_members(self):
+        row = self.row('p1')
+        bundle = {**row,'topic':'enrichment','status':'ready','payload':{'topics':['basics','bio']}}
+        self.assertEqual(self.candidates([row],jobs=[bundle]), [])
+        self.assertEqual(self.candidates([row],jobs=[{**bundle,'status':'complete'}]), [])
+
+
+class BatchTests(unittest.IsolatedAsyncioTestCase):
+    async def test_batch_follows_same_job_then_returns_to_scheduler(self):
+        engine = Engine(Mock(),{})
+        engine.run_one = AsyncMock(side_effect=[
+            {'status':'ready','job_id':7,'stage':'draft'},
+            {'status':'complete','job_id':7,'stage':'complete'},
+            {'status':'idle'}])
+        results = await engine.run_batch(limit=12,draft_only=False)
+        self.assertEqual(len(results),3)
+        self.assertEqual([c.kwargs['job_id'] for c in engine.run_one.call_args_list],[None,7,None])
+
+    async def test_batch_stops_at_budget_draft_and_lease_boundaries(self):
+        for status in ('budget_deferred','draft_ready','lease_lost'):
+            engine = Engine(Mock(),{})
+            engine.run_one = AsyncMock(return_value={'status':status,'job_id':7})
+            await engine.run_batch()
+            engine.run_one.assert_awaited_once()
+
+    async def test_batch_limits_and_explicit_job(self):
+        engine = Engine(Mock(),{})
+        engine.run_one = AsyncMock(return_value={'status':'ready','job_id':7})
+        self.assertEqual(len(await engine.run_batch(limit=2)),2)
+        engine.run_one.reset_mock()
+        self.assertEqual(await engine.run_batch(max_seconds=0),[])
+        engine.run_one.assert_not_awaited()
+        engine.run_one.return_value = {'status':'complete','job_id':7}
+        self.assertEqual(len(await engine.run_batch(job_id=7)),1)
+
+    async def test_batch_finishes_approved_submit_at_limit_only_in_publish_mode(self):
+        for draft_only in (True,False):
+            engine=Engine(Mock(),{})
+            engine.run_one=AsyncMock(side_effect=[{'status':'ready','stage':'submit','job_id':7},
+                                                {'status':'complete','stage':'complete','job_id':7}])
+            results=await engine.run_batch(limit=1,draft_only=draft_only)
+            self.assertEqual(len(results),1 if draft_only else 2)
+            if not draft_only:
+                self.assertEqual(engine.run_one.await_args_list[-1].kwargs,
+                                 {'job_id':7,'draft_only':False,'expected_stage':'submit'})
+        engine.run_one=AsyncMock(return_value={'status':'ready','stage':'research','job_id':7})
+        self.assertEqual(len(await engine.run_batch(limit=1,draft_only=False)),1)
+
+    async def test_final_submit_does_not_run_changed_stage(self):
+        store=Mock()
+        store.claim.return_value={'id':7,'stage':'research'}
+        research=AsyncMock()
+        result=await Engine(store,{'research':research}).run_one(
+            job_id=7,draft_only=False,expected_stage='submit')
+        self.assertEqual(result['status'],'stage_changed')
+        research.assert_not_awaited()
+        store.reserve.assert_not_called()
+        self.assertFalse(store.defer.call_args.kwargs['failed'])
+
+    async def test_bundle_judges_each_card_topic_then_advances_to_sections(self):
+        from commulingo_pipeline.stages import judge
+        from commulingo_pipeline.engine import Usage
+        from commulingo_pipeline.bundles import work_topics
+        job = {'id':7,'kind':'person','target':'p','topic':'enrichment',
+               'payload':{'topics':['basics','bio','sections']}}
+        research = {'current':{'revision':'r1'},'baseline':'r1','status':'complete',
+                    'reason':'All card facts already supported','inspected_sources':['source']}
+        with patch('commulingo_pipeline.stages.service.call') as rpc:
+            result = await judge(job,[{'stage':'research','value':research}],Usage(),.2)
+        self.assertEqual([c.args[0]['topic'] for c in rpc.call_args_list],['basics','bio'])
+        self.assertEqual({c.args[0]['expectedRevision'] for c in rpc.call_args_list},{'r1'})
+        self.assertEqual(result.next_stage,'research')
+        self.assertEqual(result.value['remaining_topics'],['sections'])
+        self.assertEqual(work_topics({**job,'payload':{**job['payload'],**result.value}}),['sections'])
+
+    async def test_bundle_unavailable_does_not_skip_topics(self):
+        from commulingo_pipeline.stages import judge
+        from commulingo_pipeline.engine import Usage
+        job = {'id':7,'kind':'person','target':'p','topic':'enrichment',
+               'payload':{'topics':['bio','sections']}}
+        with patch('commulingo_pipeline.stages.service.call'):
+            result = await judge(job,[{'stage':'research','value':{'status':'sources_unavailable'}}],Usage(),.2)
+        self.assertEqual(result.status,'deferred')
+        self.assertNotIn('remaining_topics',result.value)
+
+    async def test_approved_card_advances_without_reusing_its_draft(self):
+        from commulingo_pipeline.stages import submit, latest
+        from commulingo_pipeline.engine import Usage
+        job = {'id':7,'kind':'person','action':'update','target':'p','topic':'enrichment',
+               'payload':{'topics':['bio','sections']}}
+        artifacts = [{'stage':'draft','value':{'fields':{'bio':{'ko':'소개','en':'Bio'}},'sources':['source']}},
+                     {'stage':'review','value':{'decision':'approve','reason':'Verified','checks':[]}}]
+        with patch('commulingo_pipeline.config.load',return_value={'phase':'live'}), \
+             patch('commulingo_pipeline.stages.service.call',return_value={'status':'approved','suggestionId':9}), \
+             patch.object(Store,'publication_slot') as slot:
+            result = await submit(job,artifacts,Usage(),.2)
+        slot.assert_not_called()
+        self.assertEqual(result.next_stage,'research')
+        self.assertEqual(result.status,'ready')
+        self.assertEqual(result.value['remaining_topics'],['sections'])
+        artifacts.append({'stage':'submit','value':result.value})
+        self.assertEqual(latest(artifacts,'draft'),{})
 
 
 class EngineTests(unittest.IsolatedAsyncioTestCase):
@@ -121,6 +289,16 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
             schema = kwargs['tool']['input_schema']['properties']['fields']['properties']
             self.assertNotIn('expectedRevision',schema)
             self.assertNotIn('evidence',schema)
+            from tool_gateway.results import ToolRejection
+            call = AsyncMock(return_value='Registry entry')
+            lookup = kwargs['read_wrap']('commulingo_people',call)
+            with self.assertRaises(ToolRejection):
+                await lookup(action='list_terms')
+            for _ in range(3):
+                await lookup(action='get_term',term_id='fixture')
+            with self.assertRaises(ToolRejection):
+                await lookup(action='get_term',term_id='fixture')
+            self.assertEqual(call.await_count,3)
             await kwargs['handler']({'fields':{'definition':{'ko':'검증한 정의','en':'Verified definition'}}})
         with patch('commulingo_pipeline.stages.model_call',side_effect=model):
             result = await Draft(store)({'kind':'term','action':'update','topic':'definition'},
@@ -128,6 +306,145 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.value['fields']['expectedRevision'],'original-revision')
         self.assertEqual(result.value['fields']['evidence'][0]['excerpt'],source['body'])
         self.assertEqual(result.next_stage,'validate')
+
+    async def test_review_revisions_are_bounded_and_uncertainty_stays_internal(self):
+        from commulingo_pipeline.stages import Review
+        from commulingo_pipeline.engine import Usage
+        job={'id':9,'kind':'person','action':'create','target':'fixture','topic':'basics'}
+        artifacts=[{'stage':'research','value':{'baseline':''}},
+                   {'stage':'draft','value':{'fields':{},'sources':[]}}]
+        def handlers(reads,proposal,fetched,box):
+            async def decide(**value):
+                box.update(value)
+            return {'commulingo_review_decision':decide}
+        for decision,count,expected in [('revise',0,('research','ready')),
+                                        ('revise',1,('research','ready')),
+                                        ('revise',2,('complete','escalated')),
+                                        ('escalate',0,('complete','escalated')),
+                                        ('reject',0,('complete','complete')),
+                                        ('approve',0,('submit','ready'))]:
+            async def model(**kwargs):
+                await kwargs['handler']({'decision':decision,'reason':'Verified feedback','checks':[],'resolved_risks':[]})
+            previous=[{'stage':'review','value':{'decision':'revise'}} for _ in range(count)]
+            with patch('commulingo_pipeline.stages.service.call',return_value=None) as rpc, \
+                 patch('scripts.commulingo_person_reviewer.make_handlers',side_effect=handlers), \
+                 patch('commulingo_pipeline.stages.model_call',side_effect=model):
+                result=await Review()(job,artifacts+previous,Usage(),.2)
+            self.assertEqual((result.next_stage,result.status),expected)
+            self.assertEqual([c.args[0]['command'] for c in rpc.call_args_list],['read'])
+        # A legacy correction already consumed the first revision.
+        job['payload']={'review_revisions':1}
+        decision='revise'
+        with patch('commulingo_pipeline.stages.service.call',return_value=None), \
+             patch('scripts.commulingo_person_reviewer.make_handlers',side_effect=handlers), \
+             patch('commulingo_pipeline.stages.model_call',side_effect=model):
+            result=await Review()(job,artifacts+[{'stage':'review','value':{'decision':'revise'}}],Usage(),.2)
+        self.assertEqual(result.status,'escalated')
+
+    async def test_manually_resolved_original_is_not_replaced(self):
+        from commulingo_pipeline.stages import submit
+        from commulingo_pipeline.engine import Usage
+        job={'id':9,'kind':'person','action':'create','target':'fixture',
+             'payload':{'replaces_suggestion_id':7}}
+        artifacts=[{'stage':'draft','value':{'fields':{},'sources':[]}},
+                   {'stage':'review','value':{'decision':'approve','checks':[],'reason':'Verified'}}]
+        for status in ('approved','rejected'):
+            with patch('commulingo_pipeline.config.load',return_value={'phase':'live'}), \
+                 patch('runtime_tools.commulingo_review_queue.suggestion',return_value={'status':status,'review_note':'Manual decision'}), \
+                 patch('commulingo_pipeline.stages.service.call') as rpc:
+                result=await submit(job,artifacts,Usage(),.2)
+            rpc.assert_not_called()
+            self.assertEqual(result.status,'complete')
+
+    async def test_correction_replaces_only_after_approval_with_replayable_keys(self):
+        from commulingo_pipeline.stages import submit
+        from commulingo_pipeline.engine import Usage
+        job={'id':9,'kind':'person','action':'create','target':'fixture','topic':'review-repair:7',
+             'payload':{'replaces_suggestion_id':7}}
+        artifacts=[{'stage':'draft','value':{'fields':{},'sources':[]}},
+                   {'stage':'review','value':{'decision':'approve','checks':[],'reason':'Verified'}}]
+        original={'status':'pending','target_type':'person','review_note':''}
+        requests=[]
+        def rpc(request):
+            requests.append(request)
+            if request.get('suggestionId')==7:
+                original.update(status='rejected',review_note=request['note'])
+                return {'status':'rejected','suggestionId':7}
+            return {'status':'pending','suggestionId':8} if request['command']=='submit' else {'status':'approved','suggestionId':8}
+        with patch('commulingo_pipeline.config.load',return_value={'phase':'live'}), \
+             patch('runtime_tools.commulingo_review_queue.suggestion',side_effect=lambda _:dict(original)), \
+             patch('commulingo_pipeline.stages.service.call',side_effect=rpc):
+            first=await submit(job,artifacts,Usage(),.2)
+            second=await submit(job,artifacts,Usage(),.2)
+        self.assertEqual(first.value['status'],'approved')
+        self.assertEqual(second.value['status'],'approved')
+        self.assertEqual(requests[:3],requests[3:])
+        self.assertEqual([r['command'] for r in requests[:3]],['review','submit','review'])
+        self.assertFalse(requests[0]['approve'])
+        self.assertTrue(requests[2]['approve'])
+        with patch('commulingo_pipeline.config.load',return_value={'phase':'live'}), \
+             patch('commulingo_pipeline.stages.service.call') as write:
+            with self.assertRaisesRegex(ValueError,'approved independent review'):
+                await submit(job,artifacts[:-1]+[{'stage':'review','value':{'decision':'revise'}}],Usage(),.2)
+        write.assert_not_called()
+
+    async def test_research_rejects_topic_names_and_accepts_body_evidence(self):
+        from commulingo_pipeline.stages import Research
+        from commulingo_pipeline.engine import Usage
+        from jsonschema import Draft202012Validator
+        source=snapshot('https://example.org/history','A retrieved historical source with adequate context for the body.')
+        store=Mock()
+        store.job_sources.return_value={source['id']:source}
+        async def model(**kwargs):
+            value={'status':'ready','reason':'Verified history for the commissioned term.',
+                   'claims':[{'field':'history','claim':'Verified history','source_id':source['id'],'chunk':0}]}
+            schema=kwargs['tool']['input_schema']
+            self.assertTrue(list(Draft202012Validator(schema).iter_errors(value)))
+            value['claims'].append({**value['claims'][0],'field':'endYear'})
+            with self.assertRaisesRegex(ValueError,'not a commissioned topic'):
+                await kwargs['handler'](value)
+            value['claims'].pop()
+            value['claims'][0]['field']='body'
+            self.assertFalse(list(Draft202012Validator(schema).iter_errors(value)))
+            with self.assertRaisesRegex(ValueError,'missing evidence for endYear'):
+                await kwargs['handler'](value)
+            value['claims'].append({**value['claims'][0],'field':'endYear'})
+            await kwargs['handler'](value)
+        job={'id':30,'kind':'term','action':'update','target':'fixture','topic':'history'}
+        with patch('commulingo_pipeline.stages.service.call',return_value={'revision':'original'}), \
+             patch('commulingo_pipeline.stages.model_call',side_effect=model):
+            result=await Research(store)(job,[{'stage':'validate','value':{'error':'400: evidence required for endYear'}}],Usage(),.2)
+        self.assertEqual(result.next_stage,'draft')
+        self.assertEqual(result.value['claims'][0]['field'],'body')
+
+    async def test_person_draft_gets_real_group_ids_and_descriptions(self):
+        from commulingo_pipeline.stages import Draft
+        from commulingo_pipeline.engine import Usage
+        store=Mock()
+        store.sources.return_value={}
+        groups=[{'id':'foreign-statesmen','title_ko':'정치가들','blurb_ko':'분류의 실제 기준'}]
+        async def model(**kwargs):
+            props=kwargs['tool']['input_schema']['properties']['fields']['properties']
+            self.assertEqual(props['groupId']['enum'],['foreign-statesmen'])
+            self.assertEqual(props['role']['properties']['category']['enum'],['foreign-statesman'])
+            from jsonschema import Draft202012Validator
+            validator=Draft202012Validator(kwargs['tool']['input_schema'])
+            for collection,edits in (('aliases','aliasEdits'),('career','careerEdits'),('scenes','sceneEdits')):
+                errors=list(validator.iter_errors({'fields':{collection:[],edits:[]}}))
+                self.assertTrue(any(e.validator=='not' for e in errors))
+            self.assertIn('분류의 실제 기준',kwargs['prompt'])
+            self.assertIn('draft_target',kwargs['prompt'])
+            self.assertIn('720',kwargs['prompt'])
+            with self.assertRaises(ValueError):
+                await kwargs['handler']({'fields':{'groupId':'people'}})
+            await kwargs['handler']({'fields':{'groupId':'foreign-statesmen'}})
+        with patch('runtime_tools.commulingo_people._list_groups',return_value=groups), \
+             patch('runtime_tools.commulingo_people._list_categories',return_value=[{'id':'foreign-statesman'}]), \
+             patch('commulingo_pipeline.stages.model_call',side_effect=model):
+            result=await Draft(store)({'id':921,'kind':'person','action':'update','topic':'basics'},
+                [{'stage':'research','value':{'baseline':'original','claims':[]}}],Usage(),.2)
+        self.assertEqual(result.value['fields']['groupId'],'foreign-statesmen')
+        self.assertEqual(result.value['fields']['expectedRevision'],'original')
 
     async def test_submission_replay_uses_identical_receipt_keys(self):
         from commulingo_pipeline.stages import submit
@@ -207,6 +524,42 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.next_stage,'research')
         self.assertTrue(result.value['needs_research'])
 
+    async def test_term_missing_year_evidence_returns_to_research_with_bounded_retries(self):
+        from commulingo_pipeline.stages import validate
+        from commulingo_pipeline.engine import Usage
+        job = {'kind':'term','action':'update','target':'fixture'}
+        draft = {'stage':'draft','value':{'fields':{'startYear':1990},'sources':['source']}}
+        error = '400: evidence required for startYear'
+        with patch('commulingo_pipeline.stages.service.call',side_effect=ValueError(error)):
+            for previous in range(3):
+                artifacts = [draft, *[{'stage':'validate','value':{'error':error}} for _ in range(previous)]]
+                result = await validate(job,artifacts,Usage(),.2)
+                self.assertEqual(result.next_stage,'research')
+                self.assertEqual(result.status,'escalated' if previous==2 else 'ready')
+                self.assertTrue(result.value['needs_research'])
+
+    async def test_empty_sources_return_to_research_instead_of_rewriting(self):
+        from commulingo_pipeline.stages import validate
+        from commulingo_pipeline.engine import Usage
+        job={'kind':'person','action':'update','target':'fixture'}
+        artifacts=[{'stage':'draft','value':{'fields':{'bio':{'en':'A biography'}},'sources':[]}}]
+        with patch('commulingo_pipeline.stages.service.call',side_effect=ValueError(
+                '400: sources must be a non-empty list of references for this edit')):
+            result=await validate(job,artifacts,Usage(),.2)
+        self.assertEqual(result.next_stage,'research')
+        self.assertTrue(result.value['needs_research'])
+
+    async def test_evidence_failures_do_not_exhaust_format_repairs(self):
+        from commulingo_pipeline.stages import validate
+        from commulingo_pipeline.engine import Usage
+        job = {'kind':'term','action':'update','target':'fixture'}
+        artifacts = [{'stage':'draft','value':{'fields':{'definition':{'en':'Definition'}},'sources':[]}},
+                     *[{'stage':'validate','value':{'error':'400: evidence required for startYear'}} for _ in range(3)],
+                     {'stage':'validate','value':{'error':'revision_conflict'}}]
+        with patch('commulingo_pipeline.stages.service.call',side_effect=ValueError('definition too long')):
+            result = await validate(job,artifacts,Usage(),.2)
+        self.assertEqual((result.next_stage,result.status),('draft','ready'))
+
 
 @unittest.skipUnless(os.getenv('COMMULINGO_PIPELINE_TEST_PORT'), 'isolated PostgreSQL opt-in')
 class PostgresTests(unittest.TestCase):
@@ -226,12 +579,101 @@ class PostgresTests(unittest.TestCase):
         with cls.store.transaction() as cur:
             cur.execute(Path('commulingo_pipeline/schema.sql').read_text())
 
+    def test_review_repair_survives_replay_and_is_not_consolidated(self):
+        row={'id':77,'target_type':'person_section','target_id':'fixture','action':'create',
+             'patch_json':{'slug':'history'},'source_refs':['https://example.org']}
+        decision={'decision':'revise','reason':'Correct the date'}
+        with ThreadPoolExecutor(2) as pool:
+            ids=list(pool.map(lambda _:self.store.enqueue_review_repair(row,decision),range(2)))
+        self.assertEqual(ids[0],ids[1])
+        with self.store.transaction() as cur:
+            cur.execute('SELECT * FROM commulingo_pipeline_jobs WHERE id=%s',(ids[0],))
+            job=cur.fetchone()
+        self.assertEqual(job['action'],'update')
+        self.assertEqual(job['payload']['topics'],['sections'])
+        self.store.consolidate(apply=True)
+        with self.store.transaction() as cur:
+            cur.execute("UPDATE commulingo_pipeline_jobs SET status='complete' WHERE id=%s",(ids[0],))
+        self.assertEqual(self.store.enqueue_review_repair(row,decision),ids[0])
+
     def setUp(self):
         with self.store.transaction() as cur:
             cur.execute('TRUNCATE commulingo_pipeline_jobs,commulingo_pipeline_budget,commulingo_pipeline_artifacts,commulingo_pipeline_job_sources,commulingo_pipeline_publications RESTART IDENTITY')
 
     def add(self,target='test'):
         return self.store.enqueue(kind='person',action='update',target=target,topic='bio',reason='test')
+
+    def test_consolidate_preserves_progress_and_resumes_section_in_same_job(self):
+        self.add('bundle')
+        self.store.enqueue(kind='person',action='update',target='bundle',topic='sections',reason='More context')
+        progressing = self.add('progressing')
+        self.store.enqueue(kind='person',action='update',target='progressing',topic='basics',reason='Facts')
+        with self.store.transaction() as cur:
+            cur.execute("INSERT INTO commulingo_pipeline_artifacts(job_id,stage,value) VALUES (%s,'research','{}')",(progressing,))
+        preview = self.store.consolidate()
+        self.assertEqual((preview['jobs_before'],preview['bundles'],preview['merged_jobs']),(2,1,1))
+        self.assertEqual(len([j for j in self.store.list_jobs() if j['status']=='ready']),4)
+        self.store.consolidate(apply=True)
+        self.assertEqual(self.store.consolidate(apply=True)['jobs_before'],0)
+        jobs = self.store.list_jobs()
+        parent = next(j for j in jobs if j['target']=='bundle' and j['status']=='ready')
+        child = next(j for j in jobs if j['target']=='bundle' and j['status']=='cancelled')
+        self.assertEqual(child['payload']['bundled_into'],parent['id'])
+        self.assertEqual(parent['payload']['topics'],['bio','sections'])
+        self.assertEqual(len([j for j in jobs if j['target']=='progressing' and j['status']=='ready']),2)
+        job = self.store.claim(job_id=parent['id'])
+        self.store.finish_stage(job,{'remaining_topics':['sections']},next_stage='research')
+        resumed = self.store.claim(job_id=parent['id'])
+        self.assertEqual(resumed['payload']['remaining_topics'],['sections'])
+        self.assertEqual(resumed['payload']['topics'],['bio','sections'])
+
+    def test_consolidate_keeps_all_explicit_gap_links(self):
+        from commulingo_pipeline.bundles import gap_ids
+        for topic,gap in [('bio',11),('basics',12)]:
+            self.store.enqueue(kind='person',action='update',target='bundle',topic=topic,
+                               reason='Gap',payload={'gap_id':gap})
+        self.store.consolidate(apply=True)
+        parent = next(j for j in self.store.list_jobs() if j['status']=='ready')
+        self.assertEqual(set(gap_ids(parent['payload'])),{11,12})
+
+    def test_live_releases_only_canary_publication_waits(self):
+        for target,reason in [('canary','canary publication slots exhausted'),('budget','daily budget unavailable')]:
+            job_id = self.add(target)
+            with self.store.transaction() as cur:
+                cur.execute("UPDATE commulingo_pipeline_jobs SET status='deferred',stage='submit',last_error=%s WHERE id=%s",(reason,job_id))
+        self.assertEqual(self.store.release_publication_waits(),1)
+        self.assertEqual(self.store.release_publication_waits(),0)
+        states = {j['target']:j['status'] for j in self.store.list_jobs()}
+        self.assertEqual(states,{'canary':'ready','budget':'deferred'})
+
+    def test_handoff_approval_resumes_bundle_and_ignores_old_reviews(self):
+        from commulingo_pipeline.stages import latest
+        job_id = self.store.enqueue(kind='person',action='update',target='handoff',topic='enrichment',
+            reason='test',payload={'topics':['bio','sections']})
+        with self.store.transaction() as cur:
+            cur.execute("INSERT INTO commulingo_agent_suggestions(id,target_id,target_type,status) VALUES (98761,'handoff','person','approved'),(98762,'handoff','person_section','pending')")
+            cur.execute("INSERT INTO commulingo_pipeline_artifacts(job_id,stage,value) VALUES (%s,'review',%s)",
+                        (job_id,'{"suggestionId":98761}'))
+            cur.execute("UPDATE commulingo_pipeline_jobs SET status='escalated' WHERE id=%s",(job_id,))
+        self.assertEqual(self.store.reconcile_reviews(),1)
+        detail = self.store.detail(job_id)
+        self.assertEqual(detail['job']['status'],'ready')
+        self.assertEqual(detail['job']['payload']['remaining_topics'],['sections'])
+        self.assertEqual(latest(detail['artifacts'],'review'),{})
+        with self.store.transaction() as cur:
+            cur.execute("UPDATE commulingo_pipeline_jobs SET status='escalated' WHERE id=%s",(job_id,))
+        self.assertEqual(self.store.reconcile_reviews(),0)
+        with self.store.transaction() as cur:
+            cur.execute("INSERT INTO commulingo_pipeline_artifacts(job_id,stage,value) VALUES (%s,'review',%s)",
+                        (job_id,'{"suggestionId":98762}'))
+            cur.execute("UPDATE commulingo_pipeline_jobs SET status='escalated' WHERE id=%s",(job_id,))
+        self.assertEqual(self.store.reconcile_reviews(),0)
+        with self.store.transaction() as cur:
+            cur.execute("UPDATE commulingo_agent_suggestions SET status='approved' WHERE id=98762")
+        self.assertEqual(self.store.reconcile_reviews(),1)
+        self.assertEqual(self.store.detail(job_id)['job']['status'],'complete')
+        with self.store.transaction() as cur:
+            cur.execute('DELETE FROM commulingo_agent_suggestions WHERE id IN (98761,98762)')
 
     def test_concurrent_claim_and_expired_owner_cannot_commit(self):
         self.add()
@@ -315,6 +757,19 @@ class PostgresTests(unittest.TestCase):
         planner = Planner(self.store)
         plan = planner.plan()
         material = next(m for m in plan['materials'] if m['material_id']=='report:pipeline-fixture')
+        discovery_id = self.store.enqueue(kind='term',action='create',target='material-selection-fixture',
+            topic='discovery',reason='test',stage='discover',payload=material)
+        for status in ('ready','running','deferred','escalated'):
+            with self.store.transaction() as cur:
+                cur.execute('UPDATE commulingo_pipeline_jobs SET status=%s WHERE id=%s',(status,discovery_id))
+            self.assertNotIn(material['material_id'],[m['material_id'] for m in planner.materials()])
+        with self.store.transaction() as cur:
+            cur.execute("UPDATE research_documents SET markdown=markdown || ' Changed.' WHERE slug='pipeline-fixture'")
+        self.assertIn(material['material_id'],[m['material_id'] for m in planner.materials()])
+        with self.store.transaction() as cur:
+            cur.execute("UPDATE research_documents SET markdown='A concept appears in this public document.' WHERE slug='pipeline-fixture'")
+            cur.execute("UPDATE commulingo_pipeline_jobs SET status='complete' WHERE id=%s",(discovery_id,))
+        self.assertIn(material['material_id'],[m['material_id'] for m in planner.materials()])
         with self.store.transaction() as cur:
             cur.execute('''INSERT INTO commulingo_pipeline_materials(material_id,content_hash)
                 VALUES (%s,%s) ON CONFLICT(material_id) DO UPDATE SET content_hash=EXCLUDED.content_hash''',
