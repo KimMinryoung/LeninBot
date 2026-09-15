@@ -347,11 +347,10 @@ TOOLS = [
     {
         "name": "web_search",
         "description": (
-            "Search via Tavily/Brave for missing evidence only; reuse prior results. "
-            "Start with one focused query; add queries only for unresolved facts, not preemptive "
-            "paraphrases/translations. If the URL is known, use fetch_url. Snippets are leads: "
-            "fetch the page before citing figures/quotes. Use domain parameters, not site operators. "
-            "Prefer queries under 400 chars."
+            "Search missing facts; stop when claims have adequate evidence. Reuse sources for wording/save repairs. "
+            "New queries only for gaps, contradictions or plausible changes; no redundant paraphrases. "
+            "Known URL: fetch_url. Snippets are leads; fetch before citing figures/quotes. "
+            "Use domain parameters, not site operators; queries under 400 chars."
         ),
         "input_schema": {
             "type": "object",

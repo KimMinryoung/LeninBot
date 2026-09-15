@@ -228,6 +228,10 @@ Its five normal tool audit events use `agent_name=kg_verification`; usage report
 that caller so probes do not inflate organic use. There is no timer or notification for it.
 Coverage counts describe current pending source changes; hourly alerts use failed/incomplete
 runs and >48h successful-sync lag, rather than paging for normal edits waiting until tonight.
+The integrity CLI retains top-level `ok` for graph invariants and reports aggregate status
+as `healthcheck.ok` with explicit `healthcheck.failures`. Exit status uses that aggregate.
+Telegram alerts contain bounded failure reasons (including source-sync errors), rather
+than truncated diagnostic JSON; full metrics and search previews remain in the journal.
 
 Before graph writes, sync persists `phase=running` and the intended full/incremental
 mode without advancing the watermark. Thus process termination also preserves full-pass

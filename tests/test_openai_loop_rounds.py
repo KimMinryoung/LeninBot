@@ -14,9 +14,13 @@ Pins the loop's core contracts before retry/idle-guard hardening:
 Run from repo root:  venv/bin/python -m unittest discover tests -v
 """
 import asyncio
+import os
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
+
+# Fake token usage must never reach the production audit sink, even under unittest.
+os.environ["LENINBOT_LLM_AUDIT_DB"] = "0"
 
 import llm.openai_tool_loop as openai_tool_loop
 import llm.tool_loop_common as tool_loop_common

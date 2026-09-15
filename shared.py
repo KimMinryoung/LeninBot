@@ -66,19 +66,6 @@ def extract_text_content(content) -> str:
     return str(content)
 
 
-# ── TavilySearch Singleton ───────────────────────────────────────────
-_tavily_search = None
-
-
-def get_tavily_search():
-    """Lazy singleton for TavilySearch (max 3 results)."""
-    global _tavily_search
-    if _tavily_search is None:
-        from langchain_tavily import TavilySearch
-        _tavily_search = TavilySearch(max_results=3)
-    return _tavily_search
-
-
 # ── Knowledge Graph runtime compatibility re-exports ────────────────
 # Compatibility re-exports. New code should import from kg_runtime.service_runtime.
 from kg_runtime.service_runtime import (

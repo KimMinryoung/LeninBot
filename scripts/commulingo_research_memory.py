@@ -37,6 +37,11 @@ arguments to recover its complete text. Search only for a specific unresolved
 fact, not paraphrases of answered questions. Search snippets remain leads, not
 verified source text. Check current dictionary state before writing; saved
 research does not prove that a prior write succeeded.
+STOP SEARCHING when the commissioned claims have adequate source evidence and
+proceed to the edit/no-edit decision. Further research must recover missing
+evidence, resolve a contradiction or check plausible changes; it is not needed
+for wording, translation or save-format repairs. On a paid budget stop, reuse
+saved evidence/free sources and explicitly defer unsupported claims.
 An attempt_output is an unverified prior assistant draft, not source evidence.
 WRITE REPAIR: For schema/format/length/punctuation errors, retain the complete
 draft and citations and correct only the rejected fields. Do not restart the

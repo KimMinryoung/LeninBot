@@ -8,9 +8,13 @@ heuristic, and max-token length continuation.
 Run from repo root:  venv/bin/python -m unittest discover tests -v
 """
 import asyncio
+import os
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
+
+# Fake token usage must never reach the production audit sink, even under unittest.
+os.environ["LENINBOT_LLM_AUDIT_DB"] = "0"
 
 import llm.claude_loop as claude_loop
 import llm.openai_tool_loop as openai_tool_loop

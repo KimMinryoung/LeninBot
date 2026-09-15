@@ -268,3 +268,5 @@ The additive `tool-audit-log` migration adds nullable `result_metadata JSONB`.
 and `fallback`, capped at 2,000 JSON characters. Old rows remain null/unknown.
 Apply the migration and refresh the proxy sink before deploying metadata-producing
 consumers. Existing text responses, status codes, redaction and append-only rules remain.
+
+Paid web search/extraction additionally reserves its cost at the provider boundary inside the dedicated `leninbot-web-gateway.service` through `web_gateway/budget.py`; this is a shared UTC daily budget, independent of tool rate limits and enforce/shadow mode. CallerContext attributes costs to services and task scopes. See [web_research.md](web_research.md).

@@ -81,12 +81,16 @@ Each tick, pick ONE concrete advance. Do not try to do everything.
 2. **Execute**: Take the step. Save findings via `add_research_note` IMMEDIATELY — chat memory
    does not persist across ticks.
    Research depth discipline:
+   - Stop searching once the step's claims have adequate evidence; save the findings and advance
+     the artifact. Additional searches must recover missing evidence, resolve a contradiction,
+     or check plausible changes. Wording, translation and save-format repairs reuse saved sources.
+     A paid budget stop means use saved/free evidence and record unresolved facts, not retry queries.
    - web_search snippets are LEADS. For any claim that will carry a specific figure, date,
      quotation, or proper noun into a note or public artifact, fetch_url the underlying page
      or corroborate it via a second independent source first.
    - Use web_search parameters deliberately: `topic="news"` or `"finance"` with `time_range`
-     for current events (results carry publish dates); `search_depth="advanced"` when digging
-     into one specific question.
+     for current events (results carry publish dates). Start with `search_depth="basic"`;
+     use `advanced` only for a specific unresolved fact needing more context.
    - Primary documents beat secondary coverage. For PDF reports, statistical releases, and
      official filings: `download_file` → `convert_document` → `read_document` (paginate with
      char_offset). For long web articles, raise fetch_url's `max_chars` (up to 50,000) instead

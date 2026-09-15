@@ -4,8 +4,11 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import sys
+import tempfile
+from unittest.mock import patch
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -14,7 +17,7 @@ if str(ROOT) not in sys.path:
 
 
 async def _check_fallback_and_circuit() -> None:
-    import runtime_tools.web_search as search
+    import web_gateway.search as search
 
     calls: list[str] = []
 
@@ -58,7 +61,7 @@ async def _check_fallback_and_circuit() -> None:
 
 
 async def _check_empty_result_does_not_double_spend() -> None:
-    import runtime_tools.web_search as search
+    import web_gateway.search as search
 
     calls: list[str] = []
 
@@ -77,7 +80,7 @@ async def _check_empty_result_does_not_double_spend() -> None:
         search._PROVIDER_SEARCH.update(tavily=empty_tavily, brave=unexpected_brave)
         search._PROVIDER_UNAVAILABLE_UNTIL.clear()
         result = await search.execute_web_search("no match")
-        assert result == "No results for: no match"
+        assert result.startswith("No results for: no match\n")
         assert calls == ["tavily"]
     finally:
         search._PROVIDER_SEARCH.clear()
@@ -91,7 +94,7 @@ async def _check_empty_result_does_not_double_spend() -> None:
 
 async def _check_tavily_cost_controls() -> None:
     import tavily
-    import runtime_tools.web_search as search
+    import web_gateway.search as search
 
     captured: dict = {}
 
@@ -105,10 +108,10 @@ async def _check_tavily_cost_controls() -> None:
             return {"results": [], "usage": {"credits": 2}}
 
     original_client = tavily.AsyncTavilyClient
-    original_get_secret = search.get_secret
+    original_get_secret = search.credential
     try:
         tavily.AsyncTavilyClient = FakeClient
-        search.get_secret = lambda name, default="": "test-key" if name == "TAVILY_API_KEY" else default
+        search.credential = lambda name, default="": "test-key" if name == "TAVILY_API_KEY" else default
         await search._search_tavily(
             "focused question",
             max_results=5,
@@ -123,11 +126,11 @@ async def _check_tavily_cost_controls() -> None:
         assert captured["chunks_per_source"] == 2
     finally:
         tavily.AsyncTavilyClient = original_client
-        search.get_secret = original_get_secret
+        search.credential = original_get_secret
 
 
 def _check_brave_response_shapes() -> None:
-    import runtime_tools.web_search as search
+    import web_gateway.search as search
 
     news = search._brave_results(
         {"type": "news", "results": [{"title": "News result"}]},
@@ -144,7 +147,13 @@ def _check_brave_response_shapes() -> None:
 async def main() -> None:
     await _check_fallback_and_circuit()
     await _check_empty_result_does_not_double_spend()
-    await _check_tavily_cost_controls()
+    with tempfile.TemporaryDirectory() as tmp:
+        config = Path(tmp) / "policy.json"
+        config.write_text(json.dumps({"daily_budget_usd": 1, "tavily_credit_usd": 0.008, "brave_search_usd": 0.005}))
+        with patch("web_gateway.budget.STORE_PATH", Path(tmp) / "usage.sqlite3"), patch(
+            "web_gateway.budget.CONFIG_PATH", config
+        ):
+            await _check_tavily_cost_controls()
     _check_brave_response_shapes()
     print("web search provider smoke checks passed")
 

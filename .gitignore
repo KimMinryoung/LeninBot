@@ -85,3 +85,6 @@ local_graffiti/
 
 # 로컬 페르소나 비교 테스트와 생성 결과
 /experiments/roleplay_personas/
+
+# Host-specific systemd migration staging (credential paths, never key bytes).
+/systemd/.web-gateway-stage/

@@ -1,0 +1,34 @@
+[Unit]
+Description=LeninBot paid web gateway (sole search/extraction key and budget owner)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+DynamicUser=yes
+SupplementaryGroups=grass
+WorkingDirectory=/home/grass/leninbot
+EnvironmentFile=/home/grass/leninbot/.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=WEB_RESEARCH_USAGE_DB=/var/lib/leninbot-web-gateway/usage.sqlite3
+StateDirectory=leninbot-web-gateway
+StateDirectoryMode=0700
+ExecStart=/home/grass/leninbot/venv/bin/python -m uvicorn web_gateway.app:app --host 127.0.0.1 --port 8111 --no-proxy-headers
+ExecStartPost=/home/grass/leninbot/venv/bin/python /home/grass/leninbot/scripts/wait_web_gateway_ready.py
+Restart=always
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+LockPersonality=true
+UMask=0077
+# Key mounts are generated only when the encrypted blobs exist by the
+# credential tooling/deployment script; /health requires at least one key.
+
+[Install]
+WantedBy=multi-user.target

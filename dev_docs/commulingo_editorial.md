@@ -187,3 +187,5 @@ target_id, 대기 중인 신규 등록은 resolved_id 및 한영 이름/별칭�
 이어받는다. AgentSpec의 max_output_continuations=2를 실행기가 continue_on_length와
 max_length_continuations로 실제 도구 루프에 전달한다. 응답당 8,000토큰과 회당 예산,
 전체 조사 시간 제한은 유지하며 유효한 검토 판단 도구가 성공하면 즉시 종료한다.
+
+`ResearchMemory` 지침은 위임된 주장에 충분한 근거가 모이면 조사 종료 후 편집/no-edit 판단으로 진행하도록 한다. 기존 형식 오류 후 조사 재시작 차단은 유지하며 누락 근거·상충·변경 가능성은 재확인할 수 있다. 검색·Extract 비용은 runs의 LLM 비용과 별도로 [web 사용량 장부](web_research.md)에 기록된다.

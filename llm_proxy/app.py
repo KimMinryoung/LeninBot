@@ -313,7 +313,8 @@ def normalize_billing_response(provider: str, payload: dict, days: int) -> dict:
                 value = amount.get("value", 0) if isinstance(amount, dict) else 0
                 currency = str(amount.get("currency") or "USD") if isinstance(amount, dict) else "USD"
             else:
-                value = result.get("amount", 0)
+                # Anthropic reports fractional cents, unlike OpenAI's dollars.
+                value = float(result.get("amount") or 0) / 100
                 currency = str(result.get("currency") or "USD")
             amounts[currency.upper()] = amounts.get(currency.upper(), 0.0) + float(value or 0)
     return {

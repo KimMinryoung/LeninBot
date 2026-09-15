@@ -246,19 +246,21 @@ proxy unit의 `ExecStartPost=wait_llm_proxy_ready.py`가 200까지 기다리므�
 
 ### 잔액·비용 통합 조회
 
-`scripts/llm-balances [--days 1..30] [--json]`은 provider 공식 재무 정보와
-`llm_audit_log`의 로컬 비용 추정액을 한 표에 표시한다. DeepSeek
-`GET /user/balance`와 Kimi `GET /v1/users/me/balance`는 기본 inference key로 실시간
-잔액을 읽는다. OpenAI `/v1/organization/costs`와 Claude
-`/v1/organizations/cost_report`는 각각 선택적 `OPENAI_ADMIN_KEY`와
-`ANTHROPIC_ADMIN_KEY`가 있을 때만 공식 기간 비용을 읽고, 없으면 로컬 감사액만
-표시한다. Gemini는 일반 API key만으로 통합 가능한 잔액 API가 없어 로컬 감사액만
-표시하며 로컬 Qwen은 무과금이다.
+`scripts/llm-balances [--days 1..30] [--json]`과 owner 전용 Telegram 명령
+`/llm_balance [1~30]`의 기본 기간은 30일이다. OpenAI/Claude는 Admin 키로 조회한
+공식 사용 비용만 표시하며, 키 누락·조회 실패 때도 로컬 추정액으로 대체하지 않는다.
+DeepSeek/Kimi는 공식 잔액과 봇 기록의 기간별 사용 비용 추정을 함께 표시한다.
+Gemini/Local도 기존 로컬 추정 표시를 유지한다. 추정에는 기간·출처·호출 수를
+명시하고 DB 조회 실패를 0달러로 표시하지 않는다. SQL에서 OpenAI/Claude를 제외하며,
+이 두 provider의 JSON에는 `local_audit`를 넣지 않는다. 공식 값은 localhost
+LLM proxy의 고정 billing route에서, 나머지 provider 추정은 읽기 전용 DB에서 조회한다.
 
-같은 보고서는 owner 전용 Telegram 명령 `/llm_balance [1~30]`에서도 조회할 수 있다.
-기간 기본값은 30일이며 `/` 자동완성 메뉴와 `/help`에 노출된다. Telegram 서비스는
-자신의 읽기 전용 DB 연결로 로컬 감사액을 집계하고 공식 값은 localhost LLM proxy의
-고정 billing route를 통해 읽는다.
+Claude Cost API의 `amount`는 소수 센트 문자열이므로 프록시에서 100으로
+나눠 USD로 정규화한다. OpenAI의 `amount.value`는 USD 그대로 사용한다.
+근거: [Anthropic Usage and Cost API](https://platform.claude.com/docs/en/manage-claude/usage-cost-api#cost-api).
+
+OpenAI Costs API는 사용 비용이며 API credit balance를 반환하지 않는다.
+크레딧 잔액 자동 조회는 지원하지 않고 billing 대시보드로 안내한다.
 
 Admin credential은 범용 `/{provider}/{path}` map에 등록하지 않는다. 로컬 전용
 `/billing/{deepseek|kimi|openai|claude}`가 provider별 고정 GET 경로와 날짜 파라미터만
@@ -266,11 +268,12 @@ Admin credential은 범용 `/{provider}/{path}` map에 등록하지 않는다. �
 없다. Admin 키가 credstore에 없으면 구조화된 `credential_missing`을 반환하며
 `/health` readiness에는 영향을 주지 않는다.
 
-로컬 비용 집계는 `surface=proxy`의 비과금 transport 행과 과거
-`external_sdk` 기본 wrapper caller(`openai_client`, `deepseek_anthropic_direct` 등)를
-제외한다. 2026-08-29 이전 툴 루프가 같은 응답을 SDK와 loop 양쪽에 기록한 기간까지
-30일 합계에 포함하더라도 중복 과금하지 않기 위한 호환 필터다. feature 이름을 가진
-진짜 direct SDK 호출(예: `kg_graphiti`)은 계속 포함한다.
+2026-09-12 조회에서 9월 9~10일의 Claude 로컬 감사액에 fake-client 테스트
+기록이 섞인 것을 확인했다. 입력 10,000,000 / 출력 1,000,000 토큰인 예산 초과
+fixture 11행이 합계 $495를 만들었으며 실제 청구 근거로 사용할 수 없다.
+`tests/conftest.py`는 pytest 수집 전에 `LENINBOT_LLM_AUDIT_DB=0`을 설정하고,
+세 loop 테스트 모듈도 unittest 단독 실행 시 동일하게 sink를 비활성화한다.
+이 예방 변경은 기존 감사 행을 삭제하거나 보정하지 않는다.
 
 ## Enforcement — 키 제거 완료 (2026-08-05)
 
@@ -314,8 +317,7 @@ Razvedchik의 독자 `cloud_llm.py`는 2026-08-05 삭제했다. 댓글·관찰·
 cache-write/장문 티어·dated 모델 프리픽스·미지 모델 None), 정책
 (shadow/enforce/예산/fail-open), LoopState seam 전달. 루프 계약 회귀와 SDK 래퍼의
 단일 감사 소유권은 `test_*_loop_rounds.py`가 잡는다.
-`tests/test_llm_balances.py`는 Admin 키 고정 경로, provider 응답 정규화, 과거 중복
-wrapper 제외 SQL, query-db TSV 파싱과 CLI/Telegram 표시 계약을 검증한다.
+`tests/test_llm_balances.py`는 Admin 키 고정 경로, provider 응답 정규화, 공식 데이터 표시를 검증한다.
 
 ## 짧게 사는 프로세스의 감사 유실 (2026-08-06)
 

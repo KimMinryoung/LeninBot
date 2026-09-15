@@ -1,0 +1,116 @@
+{
+  "id": "robespierre-republican-morality-supreme-being-thermidor-1794",
+  "title": "로베스피에르 문헌집: 공화국의 도덕, 최고존재, 테르미도르 (1794년 5월–7월)",
+  "byline": "막시밀리앵 로베스피에르",
+  "bylineNote": "1794년 5월 7일·6월 8일·7월 26일 국민공회와 파리의 시민 앞에서 한 보고·연설",
+  "sourceLang": "fr",
+  "headnote": [],
+  "bibliography": [
+    "원제: « Sur les rapports des idées religieuses et morales avec les principes républicains, et sur les fêtes nationales » (Convention nationale, 18 floréal an II / 7 mai 1794); « Premier discours au peuple réuni pour la fête de l’Être suprême » 및 « Second discours du président de la Convention… » (20 prairial an II / 8 juin 1794); « Discours du 8 thermidor an II » (Convention nationale, 8 thermidor an II / 26 juillet 1794).",
+    "번역 저본: 《Œuvres de Robespierre》 전자본의 프랑스어 원문(위키문헌, 퍼블릭 도메인 전집 전사본)과 「Discours du 8 thermidor an II」 위키문헌 전사본. 2026-09-13에 고정한 로컬 스냅샷에서 번역."
+  ],
+  "output": "/home/grass/frontend/data/commulingo/docs/robespierre-republican-morality-supreme-being-thermidor-1794.html",
+  "glossary": {
+    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
+    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "exclude": [],
+    "extra": {
+      "Robespierre": "로베스피에르",
+      "Maximilien Robespierre": "막시밀리앵 로베스피에르",
+      "Convention nationale": "국민공회",
+      "Comité de salut public": "공안위원회",
+      "Comité de sûreté générale": "일반안전위원회",
+      "Être suprême": "최고존재",
+      "l’Être-Suprême": "최고존재",
+      "immortalité de l’âme": "영혼의 불멸",
+      "fêtes nationales": "국민 축제",
+      "République": "공화국",
+      "république": "공화국",
+      "vertu": "덕",
+      "Vertu": "덕",
+      "Thermidor": "테르미도르",
+      "Prairial": "프레리알",
+      "Floréal": "플로레알",
+      "Convention": "국민공회",
+      "Couthon": "쿠통",
+      "Saint-Just": "생쥐스트",
+      "Danton": "당통",
+      "Hébert": "에베르",
+      "Fouché": "푸셰",
+      "Billaud-Varenne": "비요바렌",
+      "Barère": "바레르",
+      "Cambon": "캉봉",
+      "Vadier": "바디에",
+      "Pitt": "피트"
+    }
+  },
+  "allowedCyrillic": [],
+  "postEdits": {},
+  "quotes": "curly",
+  "documents": [
+    {
+      "id": "religious-moral-ideas",
+      "titleKo": "종교·도덕 관념과 공화국 원리 및 국민 축제에 관한 보고 (1794년 5월 7일)",
+      "heading": true,
+      "band": 0,
+      "source": {
+        "format": "wikisource",
+        "path": "/home/grass/frontend/docs/robespierre-oeuvres-fr.html",
+        "sha256": "f032067f3902b9bdce598361dfe8900a673ca3bc9445c4857858bdd2cd623acf"
+      },
+      "blocks": [
+        724,
+        823
+      ],
+      "startsWith": "Citoyens, c’est dans la prospérité",
+      "endsWith": "Il sera célébré le 2 prairial prochain une fête en l’honneur de l’Être-Suprême.",
+      "register": "한다체. 국민공회에 제출한 정치·도덕 보고와 그에 딸린 법령안이다. 로베스피에르의 주장·비유·단정은 완화하거나 논평으로 바꾸지 말고, 문단과 조문 번호를 그대로 보존한다. «Être suprême»은 «최고존재», «immortalité de l’âme»은 «영혼의 불멸», «vertu»는 «덕», «fêtes nationales»은 «국민 축제»로 옮긴다. «Art. 1er.» 및 이어지는 조문 번호와 줄표는 원문 형식을 유지한다.",
+      "tagMap": {
+        "h3": "h2"
+      }
+    },
+    {
+      "id": "festival-of-the-supreme-being",
+      "titleKo": "최고존재 축제에서 시민에게 한 두 연설 (1794년 6월 8일)",
+      "heading": true,
+      "band": 1,
+      "source": {
+        "format": "wikisource",
+        "path": "/home/grass/frontend/docs/robespierre-oeuvres-fr.html",
+        "sha256": "f032067f3902b9bdce598361dfe8900a673ca3bc9445c4857858bdd2cd623acf"
+      },
+      "blocks": [
+        824,
+        835
+      ],
+      "startsWith": "Français républicains, il est enfin arrivé",
+      "endsWith": "voilà notre prière, voilà nos sacrifices, voilà le culte que nous t’offrons !",
+      "register": "한다체. 최고존재 축제의 현장에서 시민에게 한 두 연설이다. 호격과 수사적 반복을 살리고, 첫 연설과 둘째 연설의 표제를 구분한다. «Être suprême»은 «최고존재», «Sagesse»는 «지혜», «athéisme»은 «무신론», «vertu»는 «덕»으로 일관되게 옮긴다. «Français républicains»은 «공화국의 프랑스인들이여»로 옮긴다.",
+      "tagMap": {
+        "h3": "h2"
+      }
+    },
+    {
+      "id": "eighth-thermidor",
+      "titleKo": "테르미도르 8일 국민공회 연설 (1794년 7월 26일)",
+      "heading": true,
+      "band": 2,
+      "source": {
+        "format": "wikisource",
+        "path": "/home/grass/frontend/docs/robespierre-discours-8-thermidor-fr.html",
+        "sha256": "83e979886c97b6154312bec10816d6a10aa9a256b50eec60a322e3868cd83015"
+      },
+      "blocks": [
+        9,
+        46
+      ],
+      "startsWith": "Citoyens,",
+      "endsWith": "a liberté ne seront que des proscrits, tant que la horde des fripons dominera. »",
+      "register": "한다체. 국민공회에서 한 정치 연설이다. 비난·의혹·자기변호는 로베스피에르의 발화임을 유지하며 사실판정이나 해설을 덧붙이지 않는다. «dictature»는 «독재», «tyrannie»는 «폭정», «vertu publique»는 «공적 덕», «Comité de salut public»은 «공안위원회», «Convention nationale»은 «국민공회»로 옮긴다. 원문 안의 대괄호 결락 표시와 괄호는 보존한다.",
+      "tagMap": {
+        "h3": "h2"
+      }
+    }
+  ],
+  "frozen": "2026-09-13 발행 후 엮은이 주 제거·재조립 검증 완료."
+}

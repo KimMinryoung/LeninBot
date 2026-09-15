@@ -1,24 +1,18 @@
 #!/usr/bin/env python3
-"""Show provider balances/official costs beside deduplicated local LLM spend.
-
-DeepSeek and Kimi expose prepaid balance APIs.  OpenAI and Claude expose
-organization cost reports that require optional admin credentials held only by
-the local LLM proxy.  Providers without such an API still get the local
-llm_audit_log estimate.
-"""
+"""Show official balances/costs, with estimates only for providers without cost reports."""
 
 from __future__ import annotations
 
 import argparse
 import json
 import subprocess
-import sys
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 
 import httpx
 
 ROOT = Path(__file__).resolve().parents[1]
+ESTIMATED_PROVIDERS = {"deepseek", "kimi", "gemini", "local"}
 PROVIDERS = ("deepseek", "kimi", "openai", "claude", "gemini", "local")
 LABELS = {
     "deepseek": "DeepSeek",
@@ -56,6 +50,7 @@ SELECT CASE
        ROUND(COALESCE(SUM(cost_usd), 0)::numeric, 8) AS spend_usd
   FROM llm_audit_log
  WHERE ts >= now() - make_interval(days => {int(days)})
+   AND provider NOT IN ('claude', 'anthropic', 'openai')
    AND status = 'ok'
    AND cost_usd IS NOT NULL
    AND surface <> 'proxy'
@@ -161,10 +156,10 @@ def _money(items: list[dict], key: str) -> str:
 def official_summary(result: dict, days: int) -> str:
     status = result.get("status")
     if status == "ok" and result.get("kind") == "balance":
-        return "balance " + _money(result.get("balances", []), "available")
+        return "공식 잔액: " + _money(result.get("balances", []), "available")
     if status == "ok" and result.get("kind") == "cost":
-        suffix = " (partial)" if result.get("has_more") else ""
-        return f"cost {days}d " + _money(result.get("costs", []), "amount") + suffix
+        suffix = " (일부 결과)" if result.get("has_more") else ""
+        return f"공식 사용 비용 ({days}일): " + _money(result.get("costs", []), "amount") + suffix
     if status == "credential_missing":
         return f"admin key missing ({result.get('required_credential', '?')})"
     if status == "unsupported":
@@ -188,11 +183,22 @@ def collect(proxy_base: str, days: int) -> dict:
             {
                 "provider": provider,
                 "official": official[provider],
-                "local_audit": local.get(provider, {"calls": 0, "spend_usd": 0.0}),
+                **({"local_audit": local.get(provider, {"calls": 0, "spend_usd": 0.0})}
+                   if provider in ESTIMATED_PROVIDERS else {}),
             }
             for provider in PROVIDERS
         ],
     }
+
+
+def estimated_summary(row: dict, report: dict) -> str | None:
+    if row["provider"] not in ESTIMATED_PROVIDERS:
+        return None
+    if report.get("local_audit_error") or "local_audit" not in row:
+        return "사용 비용 추정: 조회 실패"
+    local = row["local_audit"]
+    return (f"사용 비용 추정 ({report['window_days']}일, 봇 기록): "
+            f"${float(local['spend_usd']):,.4f} / {int(local['calls']):,}회")
 
 
 def format_telegram_report(report: dict) -> str:
@@ -200,34 +206,36 @@ def format_telegram_report(report: dict) -> str:
     days = int(report["window_days"])
     lines = [
         f"💳 LLM 잔액·비용 (최근 {days}일)",
-        "공식 조회 / 중복 제거 로컬 감사 추정액",
+        "잔액은 남은 금액, 사용 비용은 조회 기간에 쓴 금액입니다.",
     ]
     for row in report["providers"]:
-        local = row["local_audit"]
         summary = official_summary(row["official"], days)
         lines.extend([
             "",
             f"{LABELS[row['provider']]} — {summary}",
-            f"  로컬: ${float(local['spend_usd']):,.4f} / {int(local['calls']):,}회",
         ])
-    if report.get("local_audit_error"):
-        lines.extend(["", f"⚠️ 로컬 감사 조회 실패: {report['local_audit_error']}"])
+        estimate = estimated_summary(row, report)
+        if estimate:
+            lines.append("  " + estimate)
+        if row["provider"] == "openai":
+            lines.extend([
+                "  크레딧 잔액: 대시보드에서 확인 (현재 자동 조회 미지원)",
+                "  https://platform.openai.com/settings/organization/billing/overview",
+            ])
     return "\n".join(lines)
 
 
 def print_table(report: dict) -> None:
     days = report["window_days"]
-    print(f"{'PROVIDER':<10} {'OFFICIAL':<45} {'LOCAL ' + str(days) + 'D':>14} {'CALLS':>9}")
-    print(f"{'-' * 10} {'-' * 45} {'-' * 14} {'-' * 9}")
+    print(f"{'PROVIDER':<10} OFFICIAL")
+    print(f"{'-' * 10} {'-' * 45}")
     for row in report["providers"]:
-        local = row["local_audit"]
-        print(
-            f"{LABELS[row['provider']]:<10} "
-            f"{official_summary(row['official'], days):<45} "
-            f"${local['spend_usd']:>12,.4f} {local['calls']:>9,}"
-        )
-    if report.get("local_audit_error"):
-        print(f"\nwarning: local audit unavailable: {report['local_audit_error']}", file=sys.stderr)
+        print(f"{LABELS[row['provider']]:<10} {official_summary(row['official'], days)}")
+        estimate = estimated_summary(row, report)
+        if estimate:
+            print("  " + estimate)
+    if any(row["provider"] == "openai" for row in report["providers"]):
+        print("\nOpenAI credit balance: check https://platform.openai.com/settings/organization/billing/overview (not fetched by this report).")
 
 
 def main(argv: list[str] | None = None) -> int:

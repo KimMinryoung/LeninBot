@@ -5,7 +5,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from runtime_tools import web_search as search
+from web_gateway import search
 from tool_gateway.results import ToolFailure
 
 

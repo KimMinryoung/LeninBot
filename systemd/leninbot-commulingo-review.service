@@ -11,7 +11,6 @@ EnvironmentFile=/home/grass/leninbot/.env
 Environment=PYTHONUNBUFFERED=1
 Environment=COMMULINGO_DAILY_CAP_USD=0
 LoadCredentialEncrypted=db_password:/etc/credstore.encrypted/db_password.cred
-LoadCredentialEncrypted=tavily_api_key:/etc/credstore.encrypted/tavily_api_key.cred
 LoadCredentialEncrypted=telegram_bot_token:/etc/credstore.encrypted/telegram_bot_token.cred
 # Budget check is inside the worker, after outstanding operator notifications.
 ExecStart=/home/grass/leninbot/venv/bin/python /home/grass/leninbot/scripts/commulingo_person_reviewer.py

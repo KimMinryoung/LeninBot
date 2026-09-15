@@ -1,0 +1,86 @@
+{
+  "id": "france-directoire-consulat-1795-1799",
+  "title": "프랑스 혁명 문헌집: 총재정부와 통령정부 헌법 (1795–1799)",
+  "byline": "프랑스 공화국",
+  "bylineNote": "혁명력 3년 헌법과 혁명력 8년 헌법",
+  "sourceLang": "fr",
+  "headnote": [
+    "1795년 혁명력 3년 헌법과 1799년 혁명력 8년 헌법의 한국어 전문 번역이다."
+  ],
+  "bibliography": [
+    "원제: Constitution de la République française du 5 fructidor an III (22 août 1795); Constitution du 22 frimaire an VIII (13 décembre 1799).",
+    "번역 저본: 프랑스 대통령실(Élysée) 「Les textes fondateurs」의 프랑스어 전문. 2026-09-13 고정 스냅샷."
+  ],
+  "output": "/home/grass/frontend/data/commulingo/docs/france-directoire-consulat-1795-1799.html",
+  "glossary": {
+    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
+    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "exclude": [],
+    "extra": {
+      "Directoire exécutif": "행정총재정부",
+      "Directoire": "총재정부",
+      "Corps législatif": "입법부",
+      "Conseil des Anciens": "원로원",
+      "Conseil des Cinq-Cents": "500인회",
+      "Sénat conservateur": "호헌원로원",
+      "Tribunat": "호민원",
+      "Premier consul": "제1통령",
+      "consul": "통령",
+      "Conseil d'État": "국사원",
+      "Bonaparte": "보나파르트",
+      "Cambacérès": "캉바세레스",
+      "Sieyès": "시에예스",
+      "Roger-Ducos": "로제뒤코",
+      "Lebrun": "르브룅"
+    }
+  },
+  "allowedCyrillic": [],
+  "postEdits": {},
+  "quotes": "curly",
+  "documents": [
+    {
+      "id": "constitution-year-iii",
+      "titleKo": "프랑스 공화국 헌법, 혁명력 3년 프뤽티도르 5일 (1795년 8월 22일)",
+      "heading": true,
+      "band": 0,
+      "source": {
+        "format": "html",
+        "selector": "main",
+        "path": "/home/grass/frontend/docs/france-constitution-an-iii-1795-fr.html",
+        "sha256": "b80e5c8113ab27febb5b1bcf97cc4d29b88882239a06077e0200080886a2c371"
+      },
+      "blocks": [
+        0,
+        52
+      ],
+      "startsWith": "Déclaration des droits et des devoirs de l'homme et du citoyen",
+      "endsWith": "t aux mères, à l'affection des jeunes citoyens, au courage de tous les Français.",
+      "register": "한다체. 헌법 전문이다. 권리·의무 선언, 편·조 제목, 조문 번호를 보존한다. Directoire는 총재정부, Conseil des Anciens는 원로원, Conseil des Cinq-Cents는 500인회로 일관되게 옮긴다.",
+      "tagMap": {
+        "h3": "h2"
+      }
+    },
+    {
+      "id": "constitution-year-viii",
+      "titleKo": "프랑스 공화국 헌법, 혁명력 8년 프리메르 22일 (1799년 12월 13일)",
+      "heading": true,
+      "band": 1,
+      "source": {
+        "format": "html",
+        "selector": "main",
+        "path": "/home/grass/frontend/docs/france-constitution-an-viii-1799-fr.html",
+        "sha256": "4716cbf95b0d98a6d03ca5527ed03ed3a8dc4f0b78ebf4d5bdc4212ff2d8dde5"
+      },
+      "blocks": [
+        0,
+        102
+      ],
+      "startsWith": "TITRE PREMIER - De l'exercice des droits de cité",
+      "endsWith": "La présente Constitution sera offerte de suite à l'acceptation du peuple français.",
+      "register": "한다체. 헌법 전문이다. 표제와 조문 번호를 보존한다. Sénat conservateur는 호헌원로원, Tribunat는 호민원, Corps législatif는 입법부, Premier consul은 제1통령으로 옮긴다. 헌법 본문 뒤의 1799년 12월 15일 통령 포고문은 번역 대상에서 제외한다.",
+      "tagMap": {
+        "h3": "h2"
+      }
+    }
+  ]
+}

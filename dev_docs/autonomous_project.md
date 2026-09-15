@@ -112,6 +112,13 @@ The agent prompt also carries a `report-quality` section (lead with the finding,
 
 ## Publishing Gates
 
+Staged `read_self` detail now exposes the exact editable body, excluding generated
+title/author/date headers; pagination and `edit_staged` anchors use that same body.
+Failed edits return `ToolFailure` with recovery guidance and apply no partial batch.
+Task/manual public writes additionally have the independent document-review gate
+described in `multi_agent_architecture.md`. Autonomous runs keep the cross-tick
+workflow below and do not run that additional task/manual review.
+
 `research_document` is the long-form markdown path. Public publication is gated through staged drafts and fact-check notes. `stage_public` writes an exact draft backup under `data/publication_drafts/research/` and stores the same document in `research_documents` with `status='staged'`; internal agents can retrieve it with `read_self(content_type="research_document", slug="<slug>")`. `stage_public`/`publish_public` strip an agent-supplied leading H1/author/date scaffold before composing the canonical document (mirroring `edit_public`) and preserve the original `작성일` across re-stagings — before 2026-07-11 the header was duplicated on every staged/published report (28 existing rows were cleaned via `scripts/dedupe_research_headers.py`; backup in `data/publication_drafts/research_header_dedupe_backup_20260711.json`).
 
 Two revision/publication paths avoid re-emitting long drafts (a ~23k-char draft does not fit the tick's 16,384-token completion cap): `edit_staged` applies exact find/replace `edits` to the stored staged body (each `find` must match exactly once; all-or-nothing; re-runs citation validation; records a `research_draft_staged` event and re-arms the cross-tick gate), and **slug-only `publish_public`** (content omitted, `fact_check_notes` still required) publishes the stored staged text as-is. In autonomous context, `stage_public` also records a `research_draft_staged` project event, and autonomous ticks surface that project's staged drafts before other recent staged drafts so later wakes can resume fact-checking or publication without relying only on the previous raw tool log.
@@ -235,3 +242,5 @@ context change. Experience recall now includes source and period metadata.
 `scripts/smoke_autonomous_publication_gates.py`다. 운영 DB에 tick을 실행하는 검증은 아니다.
 다음 승인된 timer 실행이 새 프로세스로 코드를 읽으므로 이 변경을 위해 Telegram
 서비스를 재시작할 필요는 없다.
+
+Research depth discipline starts with basic search and stops when the step has adequate evidence. Additional searches address missing support, contradictions or plausible changes; wording/save repairs reuse sources. Paid search and Extract share the [web daily budget](web_research.md), independently of tick/deep-dive LLM budgets.

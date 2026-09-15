@@ -15,9 +15,7 @@ from llm_proxy.app import (
 )
 from scripts.llm_balances import (
     format_telegram_report,
-    local_spend_sql,
     official_summary,
-    parse_query_db_tsv,
 )
 
 
@@ -79,8 +77,8 @@ class TestBillingProxy(unittest.TestCase):
 
         claude = normalize_billing_response("claude", {
             "data": [{"results": [
-                {"amount": "0.75", "currency": "USD"},
-                {"amount": "0.25", "currency": "USD"},
+                {"amount": "75.25", "currency": "USD"},
+                {"amount": "24.75", "currency": "USD"},
             ]}],
         }, 30)
         self.assertEqual(claude["costs"], [{"currency": "USD", "amount": 1.0}])
@@ -95,29 +93,25 @@ class TestBillingProxy(unittest.TestCase):
 
 
 class TestBalanceCli(unittest.TestCase):
-    def test_local_sql_excludes_historical_wrapper_duplicates(self):
-        sql = local_spend_sql(30)
-        self.assertNotIn("\n", sql)
-        self.assertIn("surface = 'external_sdk'", sql)
-        self.assertIn("openai_client", sql)
-        self.assertIn("deepseek_anthropic_direct", sql)
-        self.assertIn("make_interval(days => 30)", sql)
-
-    def test_query_db_parser_ignores_footer(self):
-        rows = parse_query_db_tsv(
-            "provider\tcalls\tspend_usd\n"
-            "deepseek\t42\t1.23450000\n"
-            "kimi\t0\t0.00000000\n"
-            "(2 rows)\n"
-        )
-        self.assertEqual(rows["deepseek"], {"calls": 42, "spend_usd": 1.2345})
+    def test_official_cost_providers_never_display_estimates(self):
+        for provider in ("claude", "openai"):
+            for status in ("ok", "credential_missing", "upstream_error"):
+                report = {"window_days": 30, "providers": [{
+                    "provider": provider,
+                    "official": {"status": status, "kind": "cost",
+                                 "costs": [{"currency": "USD", "amount": 30.2184}]},
+                    "local_audit": {"calls": 11, "spend_usd": 495.0},
+                }]}
+                rendered = format_telegram_report(report)
+                self.assertNotIn("추정", rendered)
+                self.assertNotIn("495", rendered)
 
     def test_summary_distinguishes_balance_cost_and_fallback(self):
-        self.assertIn("balance USD 12.2800", official_summary({
+        self.assertIn("공식 잔액: USD 12.2800", official_summary({
             "status": "ok", "kind": "balance",
             "balances": [{"currency": "USD", "available": 12.28}],
         }, 30))
-        self.assertIn("cost 30d USD 3.2500", official_summary({
+        self.assertIn("공식 사용 비용 (30일): USD 3.2500", official_summary({
             "status": "ok", "kind": "cost",
             "costs": [{"currency": "USD", "amount": 3.25}],
         }, 30))
@@ -125,7 +119,7 @@ class TestBalanceCli(unittest.TestCase):
             "status": "credential_missing", "required_credential": "OPENAI_ADMIN_KEY",
         }, 30))
 
-    def test_telegram_report_includes_official_and_local_values(self):
+    def test_telegram_report_keeps_deepseek_estimate(self):
         report = {
             "window_days": 7,
             "local_audit_error": None,
@@ -140,8 +134,9 @@ class TestBalanceCli(unittest.TestCase):
         }
         rendered = format_telegram_report(report)
         self.assertIn("최근 7일", rendered)
-        self.assertIn("balance USD 12.2800", rendered)
-        self.assertIn("$1.2345 / 42회", rendered)
+        self.assertIn("공식 잔액: USD 12.2800", rendered)
+        self.assertIn("사용 비용 추정", rendered)
+        self.assertIn("1.2345", rendered)
 
 
 if __name__ == "__main__":

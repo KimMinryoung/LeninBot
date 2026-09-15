@@ -65,9 +65,12 @@ _LLM_PROVIDER_KEYS = {
     "OPENAI_ADMIN_KEY", "OPENAI_API_KEY",
     "DEEPSEEK_API_KEY", "MOONSHOT_API_KEY", "GEMINI_API_KEY",
 }
-_FULL = set(TIER_A) - _LLM_PROVIDER_KEYS
+_SEARCH_PROVIDER_KEYS = {"TAVILY_API_KEY", "BRAVE_SEARCH_API_KEY"}
+_FULL = set(TIER_A) - _LLM_PROVIDER_KEYS - _SEARCH_PROVIDER_KEYS
 
 SERVICE_CREDS: dict[str, set[str]] = {
+    "leninbot-web-gateway": _SEARCH_PROVIDER_KEYS,
+
     # Base provider keys are declared in the static proxy unit. Optional admin
     # keys are emitted only after they exist in credstore and are consumed only
     # by the proxy's fixed read-only cost-report endpoints.
@@ -82,8 +85,6 @@ SERVICE_CREDS: dict[str, set[str]] = {
         "ADMIN_API_KEY",
         "WRITER_ACCESS_KEY",
         "DB_PASSWORD",
-        "BRAVE_SEARCH_API_KEY",
-        "TAVILY_API_KEY",
     },
 
     # Email API handles admin review, outbound approval, and optional resend.
@@ -105,8 +106,6 @@ SERVICE_CREDS: dict[str, set[str]] = {
     "leninbot-a2a-api": {
         "NEO4J_PASSWORD",
         "DB_PASSWORD",
-        "BRAVE_SEARCH_API_KEY",
-        "TAVILY_API_KEY",
         "GITHUB_TOKEN",
     },
 
@@ -122,8 +121,6 @@ SERVICE_CREDS: dict[str, set[str]] = {
         "DB_PASSWORD",
         "TELEGRAM_BOT_TOKEN",
         "MOLTBOOK_API_KEY",
-        "BRAVE_SEARCH_API_KEY",
-        "TAVILY_API_KEY",
         "GITHUB_TOKEN",
         "X_BEARER_TOKEN",
     },
@@ -148,16 +145,14 @@ SERVICE_CREDS: dict[str, set[str]] = {
     "leninbot-roleplay": {
         "DB_PASSWORD",
         "NEO4J_PASSWORD",
-        "TAVILY_API_KEY",
-        "BRAVE_SEARCH_API_KEY",
     },
 
-    # These services load DB/Tavily in the static unit; model traffic goes via
-    # the proxy. Optional Brave is emitted only after it exists in credstore.
-    "leninbot-commulingo-maintainer": {"BRAVE_SEARCH_API_KEY"},
-    "leninbot-commulingo-new": {"BRAVE_SEARCH_API_KEY"},
-    "leninbot-commulingo-enrich": {"BRAVE_SEARCH_API_KEY"},
-    "leninbot-commulingo-terms": {"BRAVE_SEARCH_API_KEY"},
+    # These services load DB in the static unit; paid web and model traffic
+    # go through their respective credential-owning gateways.
+    "leninbot-commulingo-maintainer": set(),
+    "leninbot-commulingo-new": set(),
+    "leninbot-commulingo-enrich": set(),
+    "leninbot-commulingo-terms": set(),
 }
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -204,10 +199,15 @@ def _which_creds_missing_in_credstore() -> set[str]:
 
 def emit_dropins(missing: set[str]) -> list[Path]:
     """Write per-service drop-in files. Returns list of written paths."""
+    sys.path.insert(0, str(PROJECT_ROOT))
+    from web_gateway.deployment import CONSUMERS
     DROPIN_DIR.mkdir(parents=True, exist_ok=True)
     written: list[Path] = []
     for svc, creds in SERVICE_CREDS.items():
-        lines = ["[Service]"]
+        lines = []
+        if svc in CONSUMERS:
+            lines.extend(["[Unit]", "Wants=leninbot-web-gateway.service", "After=leninbot-web-gateway.service", ""])
+        lines.append("[Service]")
         for cred in sorted(creds):
             if cred in missing:
                 continue

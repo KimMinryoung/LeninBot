@@ -195,7 +195,7 @@ _HELP_TEXT = """\
 /commulingo_review — 인물 검토 목록·근거·승인·반려
 /status — 시스템 대시보드
 /report <id> — 태스크 리포트 재전송
-/llm_balance \\[1~30] — LLM 공식 잔액/비용 및 로컬 감사액
+/llm_balance \\[1~30] — LLM 공식 잔액/비용
 
 *채널*
 /channel info — 브로드캐스트 대상/권한 확인
@@ -1379,7 +1379,7 @@ async def cmd_provider(message: Message):
 
 
 async def cmd_llm_balance(message: Message):
-    """Show official provider billing data and deduplicated local spend."""
+    """Show official provider billing data."""
     if not _ctx["is_allowed"](message.from_user.id):
         return
 

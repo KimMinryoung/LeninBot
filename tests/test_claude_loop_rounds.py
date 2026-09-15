@@ -12,9 +12,13 @@ These pin the loop's core contracts before any unification refactor:
 Run from repo root:  venv/bin/python -m unittest discover tests -v
 """
 import asyncio
+import os
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
+
+# Fake token usage must never reach the production audit sink, even under unittest.
+os.environ["LENINBOT_LLM_AUDIT_DB"] = "0"
 
 import llm.claude_loop as claude_loop
 from llm.claude_loop import chat_with_tools

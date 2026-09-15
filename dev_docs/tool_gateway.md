@@ -33,6 +33,12 @@ not cached. Calls without a stable task/session scope retain loop-local protecti
 
 ## Package Layout
 
+`research_document` staged-edit failures (invalid anchors, missing/non-staged targets,
+invalid edit payloads or citations) return `ToolFailure`, so the dispatcher records an
+error rather than `ok`. Independent research-publication review failures use the same
+typed result before public writes/broadcasts. See `multi_agent_architecture.md` for
+the pre-publication flow. Failed edit batches apply no partial changes.
+
 | Module | Role |
 |---|---|
 | `tool_gateway.profiles` | Named source-of-truth tool profiles for orchestrator, web persona, A2A, roleplay, and MCP surfaces |

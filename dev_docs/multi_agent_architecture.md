@@ -243,6 +243,27 @@ limits still apply.
 
 ### Post-Hoc Verification (Critic)
 
+Public research also has a **pre-publication** boundary in `runtime_tools/research.py`
+and `runtime_tools/research_review.py`. Outside autonomous context, public creation,
+public edits, republishing and private-to-public publication run a fresh-context
+independent review of the exact normalized document before public DB writes, cache
+purges or broadcasts. The reviewer uses the task provider's low tier, a $0.15 budget,
+10 rounds and a 180-second deadline. Its only tools are `fetch_url`, `read_self`,
+`read_file`, `search_files`, and `list_directory`. It checks sources, attribution,
+quotations and material reasoning; stylistic preferences and clearly attributed
+self-statements do not require blocking corrections.
+
+Verdicts are `PASS`, `REVISE`, or `UNVERIFIED`. Malformed responses, interrupted
+reviews, no supporting source read, and unavailable reviewers cannot authorize
+publication. Problems return `ToolFailure` and actionable corrections for the author
+to repair and retry; no human approval is introduced. Each attempt stores the exact
+candidate, SHA-256, verdict, evidence references/hashes and bounded source excerpts
+under ignored `data/publication_drafts/research_reviews/`. PASS applies only to the
+document subsequently written, never a cached verdict for a slug. The nested loop
+runs in an isolated asyncio context so its provenance does not replace the author's.
+Autonomous publication retains its cross-tick and Stasova workflow. The post-hoc
+check below still verifies task completion and publication reachability separately.
+
 Every completed task passes through `_run_verification()` (`telegram/tasks.py`), an independent LLM critic that re-checks the executor's report with its own tools before the orchestrator relays it. Rollout follows the standard shadow→enforce pattern via the `task_verification_mode` config key (`off | shadow | enforce`, default `shadow`, flips live without restart):
 
 - **Policy.** A delegation may carry an explicit `verification` object (`checks`/`urls`/`log_service`/`log_grep`/`retry_limit`/`required`) on `delegate`/`multi_delegate`; without one, a per-agent default applies — programmer gets `task_report` + `server_logs`, analyst/scout/diplomat get `task_report`, all other agents skip (`_DEFAULT_VERIFICATION_POLICIES`). `verification: {required: false}` opts a task out. Skipped tasks are marked `passed` so `verification_status` never rots at `pending`.
@@ -276,6 +297,26 @@ Smoke test: `scripts/smoke_task_verification.py` (hermetic — stubbed LLM + cap
 Before a substantial analyst/scout report (≥1500 chars) is persisted, `_maybe_reflexion_revise_report()` runs one Reflexion pass generalized from the writer subsystem (`llm/reflexion.py`): the cheap verifier-tier model diagnoses the report (numbered quote-anchored notes on 사실성/논리/완결성/명료성, or exactly `PASS`), and on notes the executor model revises **as the author** in a single text-only turn — no tool surface, so revision can never re-run side-effectful calls; where a note challenges an unverifiable fact the author qualifies the claim instead. A revision shorter than half the original is discarded (commentary-style replies must not replace reports). The revised report is what gets persisted and what the post-hoc verifier judges. Toggle: `reflexion_task_reports` config key (default on). Smoke test: `scripts/smoke_reflexion.py`.
 
 ## Context Assembly
+
+The shared loop tracker separates `final_response` from `progress_text`. Task
+persistence and task-summary Reflexion consume only the final answer; tool-round
+commentary is retained in a labelled execution-log section. Length-continuation
+chunks remain in the final answer, and terminal tools supply their success receipt.
+The legacy combined chat return remains compatible. Providers without these tracker
+fields retain their existing result. Public-document review uses the actual candidate
+at the pre-publication boundary, not the text-only task summary.
+
+Analytical delegations distinguish user requirements from the orchestrator's hypotheses;
+the analyst may reject unsupported premises. Not mentioning a concept is not evidence
+that its author rejects it. Staged `read_self(content_type="research_document", slug=...)`
+returns the exact editable body, excluding generated title/author/date headers, with
+pagination offsets relative to that body. Failed `edit_staged` batches are atomic and
+return `ToolFailure` with body/anchor recovery guidance. Header normalization recognizes
+`작성:` and removes repeated leading separators. Staging/publishing inherits the source
+task ID from the caller when no explicit ID is supplied.
+
+Regression checks: `tests/test_research_publication_review.py`,
+`tests/test_task_final_response.py`, and the existing loop/reflexion/verification tests.
 
 Agent tasks receive structured context rather than a passive chat dump:
 

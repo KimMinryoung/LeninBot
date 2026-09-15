@@ -1,15 +1,28 @@
 """Provider request contracts; no network or credentials required."""
 
 import unittest
+import json
+import tempfile
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import httpx
 import tavily
 
-from runtime_tools import web_search as search
+from web_gateway import search
 
 
 class QueryTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        config = Path(self.tmp.name) / "policy.json"
+        config.write_text(json.dumps({"daily_budget_usd": 1, "tavily_credit_usd": 0.008, "brave_search_usd": 0.005}))
+        for mock in (patch("web_gateway.budget.STORE_PATH", Path(self.tmp.name) / "usage.sqlite3"),
+                     patch("web_gateway.budget.CONFIG_PATH", config)):
+            mock.start()
+            self.addCleanup(mock.stop)
+
     def test_search_guidance_survives_provider_compaction(self):
         from runtime_tools.registry import TOOLS
         from tool_gateway.dispatcher import compact_tool_definitions
@@ -65,7 +78,7 @@ class QueryTests(unittest.IsolatedAsyncioTestCase):
     async def test_tavily_receives_native_domain_parameters(self):
         client = AsyncMock()
         client.search.return_value = {"results": []}
-        with patch.object(tavily, "AsyncTavilyClient", return_value=client), patch.object(search, "get_secret", return_value="test"):
+        with patch.object(tavily, "AsyncTavilyClient", return_value=client), patch.object(search, "credential", return_value="test"):
             await search._search_tavily(
                 "Python 3.12 timeout", max_results=5, search_depth="basic", topic="general",
                 time_range=None, include_domains=("docs.python.org",), exclude_domains=("old.python.org",),
@@ -80,7 +93,7 @@ class QueryTests(unittest.IsolatedAsyncioTestCase):
         for topic, url in (("general", search._BRAVE_WEB_URL), ("news", search._BRAVE_NEWS_URL)):
             client = AsyncMock()
             client.get.return_value = httpx.Response(200, json={}, request=httpx.Request("GET", url))
-            with patch.object(search.httpx, "AsyncClient") as factory, patch.object(search, "get_secret", return_value="test"):
+            with patch.object(search.httpx, "AsyncClient") as factory, patch.object(search, "credential", return_value="test"):
                 factory.return_value.__aenter__.return_value = client
                 await search._search_brave(
                     "elections", max_results=5, search_depth="basic", topic=topic,

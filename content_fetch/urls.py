@@ -7,7 +7,6 @@ import socket
 from typing import Optional as _Optional
 from urllib.parse import urlparse as _urlparse
 
-from secrets_loader import get_secret
 from content_fetch.url_security import (
     UnsafeUrlError,
     safe_requests_get,
@@ -174,7 +173,7 @@ def diagnose_url_fetch_failure(url: str, observed_errors: list[str] | None = Non
 
 
 def _fetch_url_fallbacks(url: str, max_chars: int = 10000) -> _Optional[str]:
-    """SSRF-safe fallback chain after Playwright: Tavily → requests+BeautifulSoup.
+    """SSRF-safe fallback chain after Playwright: requests+BeautifulSoup → Tavily.
 
     Crawl4AI is deliberately not used here because its internal redirect and
     subresource fetches cannot share the common destination validator.
@@ -191,33 +190,9 @@ def _fetch_url_fallbacks(url: str, max_chars: int = 10000) -> _Optional[str]:
 
     url = validate_public_http_url(url)
 
-    # 1) Tavily Extract (remote extraction; skip if key/quota unavailable)
     best_fallback = None
-    tavily_key = get_secret("TAVILY_API_KEY", "") or ""
-    if tavily_key:
-        try:
-            from langchain_tavily import TavilyExtract
-            extractor = TavilyExtract(tavily_api_key=tavily_key)
-            result = extractor.invoke({"urls": [url]})
-            if isinstance(result, dict) and result.get("error"):
-                raise ValueError(result["error"])
-            items = []
-            if isinstance(result, dict) and result.get("results"):
-                items = result["results"]
-            elif isinstance(result, list):
-                items = result
-            if items:
-                item = items[0] if isinstance(items[0], dict) else {"content": str(items[0])}
-                content = item.get("raw_content", "") or item.get("content", "")
-                if content and len(content) > 50:
-                    cleaned = _clean_text(content)[:max_chars]
-                    if not _is_low_quality(cleaned):
-                        return cleaned
-                    best_fallback = cleaned
-        except Exception as e:
-            logger.info("[URL] Tavily Extract 실패 (%s): %s", url[:60], e)
 
-    # 2) requests + BeautifulSoup
+    # 1) requests + BeautifulSoup (no paid API)
     try:
         import requests as _req
         headers = {
@@ -268,6 +243,22 @@ def _fetch_url_fallbacks(url: str, max_chars: int = 10000) -> _Optional[str]:
                 best_fallback = text[:max_chars]
     except Exception as e:
         logger.warning("[URL] requests fallback도 실패 (%s): %s", url[:60], e)
+
+    # 2) Paid extraction through the gateway. No local provider key or SDK.
+    try:
+        from web_gateway.client import extract
+
+        result = extract(url)
+        for item in result.get("results") or []:
+            content = item.get("raw_content") or item.get("content") or ""
+            if len(content) > 50:
+                cleaned = _clean_text(content)[:max_chars]
+                if not _is_low_quality(cleaned):
+                    return cleaned
+                if best_fallback is None or len(cleaned) > len(best_fallback):
+                    best_fallback = cleaned
+    except Exception as e:
+        logger.info("[URL] gateway extraction failed (%s): %s", url[:60], type(e).__name__)
 
     # Return best fallback result even if low-quality (better than nothing)
     return best_fallback
@@ -350,4 +341,3 @@ def fetch_urls_as_documents(urls: list[str], logs: list | None = None) -> list:
                 }
             results.append(doc)
     return results
-

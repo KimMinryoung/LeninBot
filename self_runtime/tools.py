@@ -580,6 +580,8 @@ SELF_TOOLS = [
             "not a general delegation target. When routing is unclear, call route_task or "
             "list_agent_tools first. Always pass `context` and prefer explicit "
             "success_criteria/target_identifiers so the worker does not infer the wrong content type. "
+            "For analysis, distinguish user requirements from your hypotheses: commission questions "
+            "and evidence checks, and allow the analyst to reject unsupported premises or conclusions. "
             "Completed tasks are independently verified by default (programmer/analyst/scout/diplomat); "
             "pass `verification` to tune checks or opt out."
         ),
@@ -1315,6 +1317,14 @@ async def _exec_read_research(
         if not row:
             return f"No research document found for slug/filename: {slug}"
         markdown = row.get("markdown") or ""
+        editable_note = ""
+        if row.get("status") == "staged":
+            from runtime_tools.research import _strip_leading_research_scaffold
+            markdown = _strip_leading_research_scaffold(markdown)
+            editable_note = (
+                "view=editable_body; generated title/author/date header excluded. "
+                "edit_staged find/replace matches this exact body; offsets refer to this body.\n"
+            )
         body, start, end, truncated = _slice_text(markdown, max_chars=max_chars, offset=offset)
         next_hint = (
             f"\nnext: read_self(content_type='research_document', slug='{row.get('slug') or bare_slug}', offset={end}, max_chars={max_chars})"
@@ -1327,6 +1337,7 @@ async def _exec_read_research(
             f"title: {row.get('title') or ''}\n"
             f"published={_to_kst(row.get('published_at'))} updated={_to_kst(row.get('updated_at'))}\n"
             f"has_translation={row.get('has_translation')}\n"
+            f"{editable_note}"
             f"body_chars={len(markdown)} returned_chars={start}:{end} truncated={truncated}{next_hint}\n"
             f"summary: {(row.get('summary') or '')[:800]}\n\n"
             f"-- markdown {start}:{end}/{len(markdown)} --\n{body}"

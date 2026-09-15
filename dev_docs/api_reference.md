@@ -30,6 +30,10 @@ Inbound A2A is served by `leninbot-a2a-api.service` and controlled by non-secret
 | Frontend admin shell | frontend Express container | `3000` internally | `/home/grass/frontend/routes/admin.js`, `views/admin/private-reports.ejs` | UI shell; uses `/api/proxy/private-reports` for JSON |
 
 
+## Local Paid Web Gateway
+
+`leninbot-web-gateway.service` serves only loopback on `127.0.0.1:8111`, separately from the main API. `GET /health`, `POST /search`, `POST /extract`, and `GET /usage` are internal endpoints, never frontend/Nginx routes. Request schemas, the local trust boundary, key custody and the $10/UTC-day budget are documented in [web_research.md](web_research.md).
+
 ## Public Endpoints
 
 | Method | Path | Description |

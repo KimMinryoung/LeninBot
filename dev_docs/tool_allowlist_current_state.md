@@ -22,13 +22,19 @@ Tool visibility is intentionally split by execution surface. There is no single 
 `runtime_tools/registry.py` starts with core tools such as `vector_search`, `knowledge_graph_search`, and `web_search`, then appends focused tool families:
 
 `web_search` keeps one stable tool name and schema across every allow-listed
-surface, while `runtime_tools/web_search.py` owns the provider chain. The default
+surface. `runtime_tools/web_search.py` is a keyless client; `web_gateway/search.py` owns the provider chain in `leninbot-web-gateway.service` (127.0.0.1:8111). The default
 order is Tavily then Brave (`WEB_SEARCH_PROVIDERS=tavily,brave`); a provider
 error opens a short process-local circuit and the next configured provider is
 tried once. Empty successful results do not fan out to another billed provider.
 Tavily calls explicitly disable automatic depth promotion, omit answer/raw-page
 payloads, report credit usage to logs, and use two focused chunks per source
 only for explicitly requested advanced searches.
+
+Paid searches and URL extraction share the pre-call daily budget in
+`web_gateway/budget.py` (`config/web_research.json`, currently $10/UTC day).
+A budget refusal stops the chain without provider fallback. Free body extraction
+precedes Tavily Extract. See [web_research.md](web_research.md) for accounting,
+service/task reports, failure reservations and restart requirements.
 
 Identical effective requests (normalized query, result count, depth, topic,
 time range, normalized include/exclude domain lists, provider order, TTL) reuse a bounded process-local LRU cache
@@ -40,8 +46,8 @@ one waiter does not cancel the shared paid request. `use_cache=false` bypasses
 both reuse and coalescing for an explicitly fresh lookup; setting the TTL to 0
 disables both globally. Cache hits retain the external-source wrapper and log
 `cache=hit`; new/shared requests log `cache=miss`/`cache=coalesced`. No query or
-result is persisted by this cache. It does not share results between services
-or survive process restarts, and it is not a monthly spending cap.
+result is persisted by this cache. It is shared by all clients of the single gateway
+process but does not survive gateway restarts. The budget ledger is durable and separate.
 
 Cost basis: [Tavily pricing](https://docs.tavily.com/documentation/api-credits)
 charges basic search 1 credit and advanced 2 per request; reducing result count

@@ -1339,6 +1339,9 @@ async def _run_task_llm(
         finalization_tools=finalization_tools,
         terminal_tools=terminal_tools,
     )
+    # Tool-round commentary is progress evidence, not the completed report.
+    # Providers without this channel (e.g. Codex) retain their existing result.
+    report = budget_tracker.get("final_response", report)
     return report, budget_tracker
 
 
@@ -1357,8 +1360,11 @@ async def _persist_task_success(
     # Save tool execution log for agent context isolation
     tool_details = budget_tracker.get("tool_work_details", [])
     tool_log_text = ""
-    if tool_details:
+    progress_text = budget_tracker.get("progress_text", "")
+    if tool_details or progress_text:
         tool_log_text = "\n".join(str(d)[:500] for d in tool_details)[:20000]
+        if progress_text:
+            tool_log_text += "\n\n--- execution commentary (not final report) ---\n" + progress_text[:8000]
         try:
             await asyncio.to_thread(
                 _execute,

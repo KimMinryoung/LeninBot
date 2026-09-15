@@ -23,6 +23,11 @@ page is not a glossary concept. Return no candidates when nothing useful is miss
 Each candidate must include its exact mention and a concrete reason readers need the entry.''',
     'research': '''Investigate identity and the commissioned topic using original retrieved text.
 Search snippets are leads only. Seek reliable references beyond Wikipedia and expose conflicts.
+Reuse the supplied evidence first. Stop searching once the commissioned claims have adequate
+support and return the research artifact. Additional searches must address a specific missing
+fact, contradiction or plausible change, not paraphrases of answered questions. Formatting,
+translation and save errors must be repaired from saved research, not a new investigation.
+If the paid budget is exhausted, use saved/free sources and defer unsupported claims explicitly.
 Collect claims keyed to the fields a later author should change: bio/years/citizenship/
 nationalOrigin/moment for a person, body for a person section, definition/body/period/
 startYear/endYear for a term. Other supported fields may carry their own claims.

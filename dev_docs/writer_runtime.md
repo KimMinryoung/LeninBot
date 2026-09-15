@@ -33,3 +33,5 @@ Kimi Writer (`kimi_k3`) uses Moonshot's Anthropic-compatible protocol through th
 공유 CRUD는 `/writer/documents[/{id}]`에서 사용자가 관리한다. 정확한 범위의 수정·삭제는 `project_id IS NOT DISTINCT FROM %s`로 제한한다. 부분 unique index `writer_documents_shared_title_key`가 공유 제목 upsert를 보장한다.
 
 DeepSeek 모델 카탈로그는 `deepseek_flash` 항목 하나만 제공하며 모델 ID·표시 이름·시간대별 요율을 공통 provider registry에서 읽는다. 옛 `deepseek_pro` 요청과 저장값은 Writer 입력 경계에서 `deepseek_flash`로 정규화한다.
+
+Writer 조사기는 basic 검색부터 시작하고 근거가 충분하면 중단한다. 기존 출처가 있는 brief는 문장·저장 오류 때문에 다시 조사하지 않는다. 검색 API 비용은 LLM sub-run 비용과 별도로 [공용 web 예산](web_research.md)에 집계된다.

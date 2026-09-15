@@ -187,6 +187,8 @@ async def run_tool_loop(
     tool_call_log: list[str] = []
     tool_work_details: list[str] = []
     accumulated_text_parts: list[str] = []  # text collected from tool rounds
+    final_continuation_parts: list[str] = []
+    progress_text_parts: list[str] = []
     budget_warning_sent = False
     length_continuations = 0
     round_num = 0
@@ -202,7 +204,7 @@ async def run_tool_loop(
 
     def _tracked(parts, *, finish_reason="stop", truncated=False,
                  limit_reason=None, was_still_working=False, interrupted=False,
-                 response_obj=None):
+                 response_obj=None, final_parts=None):
         adapter.update_tracker(
             budget_tracker,
             rounds_used=round_num,
@@ -210,6 +212,14 @@ async def run_tool_loop(
             tool_work_details=tool_work_details,
             response=response_obj,
         )
+        if budget_tracker is not None:
+            # Preserve the legacy combined return for chat consumers while
+            # giving task/report reviewers the actual final answer separately.
+            budget_tracker["final_response"] = "\n".join(
+                p for p in (parts if final_parts is None else final_parts) if p
+            ).strip()
+            budget_tracker["progress_text"] = "\n".join(progress_text_parts)
+            budget_tracker["final_response_truncated"] = truncated
         return adapter.make_result(
             parts,
             finish_reason=finish_reason,
@@ -267,6 +277,7 @@ async def run_tool_loop(
                             )
                             if partial_text:
                                 accumulated_text_parts.append(partial_text)
+                                final_continuation_parts.append(partial_text)
                             continue
                 if turn.truncated_by_length:
                     await adapter.on_truncated_final()
@@ -275,6 +286,7 @@ async def run_tool_loop(
                     finish_reason=turn.finish_reason,
                     truncated=turn.truncated_by_length,
                     response_obj=response,
+                    final_parts=final_continuation_parts + turn.text_parts,
                 )
 
             # ── Tool round ──
@@ -292,6 +304,7 @@ async def run_tool_loop(
                 # Accumulate substantial round text for the final result.
                 if stripped and len(stripped) > 20:
                     accumulated_text_parts.append(stripped)
+                    progress_text_parts.append(stripped)
                 if stripped:
                     await emit_progress(on_progress, "thinking", f"[{round_num}] {stripped}")
 
@@ -353,6 +366,7 @@ async def run_tool_loop(
                         [p for p in accumulated_text_parts + [terminal_report] if p],
                         finish_reason="terminal_tool",
                         response_obj=response,
+                        final_parts=[terminal_report],
                     )
 
             # Budget break AFTER tool results are properly appended.
@@ -453,6 +467,7 @@ async def run_tool_loop(
             was_still_working=was_still_working,
             interrupted=was_still_working,
             response_obj=tracker_response,
+            final_parts=final_continuation_parts + text_parts,
         )
     except LoopEarlyReturn as early:
         return _tracked(

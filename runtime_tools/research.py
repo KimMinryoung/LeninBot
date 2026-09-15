@@ -43,6 +43,7 @@ from jobs.autonomous_publication_controls import (
 )
 import research_store
 from tool_gateway.results import ToolFailure
+from runtime_tools.research_review import review_research_document
 
 logger = logging.getLogger(__name__)
 
@@ -138,7 +139,7 @@ _PUBLISH_DATE_RE = re.compile(
 )
 _H1_RE = re.compile(r"^\s*#\s+(.+?)\s*$")
 _LEADING_SCAFFOLD_META_RE = re.compile(
-    r"^\s*(?:\*\*)?(?:작성자|작성일|Author|Date)(?::)?(?:\*\*)?\s*:?.*$",
+    r"^\s*(?:\*\*)?(?:작성자|작성일|작성|Author|Date)(?:\*\*)?\s*:(?:\*\*)?.*$",
     re.IGNORECASE,
 )
 _HR_RE = re.compile(r"^\s*[-*_]{3,}\s*$")
@@ -187,6 +188,10 @@ def _strip_leading_research_scaffold(markdown: str) -> str:
                 idx += 1
 
         if meta_count and idx < len(lines) and _HR_RE.match(lines[idx].strip()):
+            idx += 1
+            continue
+
+        if idx < len(lines) and _HR_RE.match(lines[idx].strip()):
             idx += 1
             continue
 
@@ -601,6 +606,27 @@ def _format_invalidation_note(
 
 # ── Public research document publication ───────────────────────────────
 
+async def _review_before_public_write(document: str, notes: str | None) -> str:
+    """Task/manual research gets an independent body review before side effects.
+
+    Autonomous publications retain their existing cross-tick review contract.
+    """
+    if is_autonomous_publication_context():
+        return ""
+    receipt = await review_research_document(document=document, notes=notes or "")
+    expected = hashlib.sha256(document.encode()).hexdigest()
+    if receipt.get("verdict") != "PASS" or receipt.get("document_sha256") != expected:
+        issues = "\n".join(f"- {item}" for item in receipt.get("issues", []))
+        return ToolFailure(
+            "Publication blocked by independent document review; no public write or broadcast occurred.\n"
+            f"Verdict: {receipt.get('verdict', 'UNVERIFIED')}\n{receipt.get('reason', '')}\n{issues}\n"
+            f"Review receipt: {receipt.get('receipt_path', '(unavailable)')}\n"
+            "Correct the saved staged body with edit_staged, or revise the submitted content, "
+            "then retry publication. Do not treat your own fact_check_notes as a review PASS."
+        )
+    return f"Independent document review: PASS sha256={expected}; receipt={receipt['receipt_path']}"
+
+
 async def _exec_research_document_publish_public(
     title: str,
     content: str,
@@ -610,6 +636,11 @@ async def _exec_research_document_publish_public(
     source_task_id: int | None = None,
     broadcast: bool = True,
 ) -> str:
+    if source_task_id is None:
+        from security_gateway.context import get_caller
+        caller_task = get_caller().task_id
+        if caller_task and str(caller_task).isdigit():
+            source_task_id = int(caller_task)
     if (not content or not content.strip()) and fact_check_passed and filename:
         # Slug-only publish: publish the stored staged draft as-is, without
         # requiring the model to re-emit the full document (long drafts do not
@@ -842,6 +873,11 @@ async def _exec_research_document_publish_public(
     else:
         review_note = review_result
 
+    independent_note = await _review_before_public_write(document, fact_check_notes)
+    if isinstance(independent_note, ToolFailure):
+        return independent_note
+    review_note = "\n".join(note for note in (review_note, independent_note) if note)
+
     existing_before = await asyncio.to_thread(
         research_store.get_document, fname, include_private=True
     )
@@ -925,18 +961,18 @@ async def _exec_research_document_edit_staged(
     """Revise a staged draft with exact find/replace edits, so long drafts can
     be corrected without re-emitting the whole document in one completion."""
     if not filename:
-        return "Error: slug is required for edit_staged."
+        return ToolFailure("Error: slug is required for edit_staged.")
     try:
         fname = _validate_filename(filename)
     except ValueError as e:
         return ToolFailure(f"Error: {e}.")
     if not edits:
-        return "Error: edits is required — a list of {find, replace} objects."
+        return ToolFailure("Error: edits is required — a list of {find, replace} objects.")
     doc = await asyncio.to_thread(research_store.get_document, fname, include_private=True)
     if not doc:
-        return f"Error: no research document found for slug '{fname}'."
+        return ToolFailure(f"Error: no research document found for slug '{fname}'.")
     if doc.get("status") != "staged":
-        return (
+        return ToolFailure(
             f"Error: '{fname}' has status '{doc.get('status')}', not 'staged'. "
             "edit_staged only revises staged drafts; use edit_public for public documents."
         )
@@ -948,19 +984,22 @@ async def _exec_research_document_edit_staged(
         find = (edit or {}).get("find") or ""
         replace = (edit or {}).get("replace")
         if not find or not isinstance(replace, str):
-            return f"Error: edit #{i} must have non-empty 'find' and a string 'replace'."
+            return ToolFailure(f"Error: edit #{i} must have non-empty 'find' and a string 'replace'.")
         count = body.count(find)
         if count != 1:
-            return (
+            return ToolFailure(
                 f"Error: edit #{i} 'find' text matches {count} time(s) in the draft body "
-                "(must match exactly once). No edits were applied. Use a longer, more "
-                f"specific find text: {find[:120]!r}"
+                "(must match exactly once). No edits were applied. "
+                "Matching excludes the generated title/author/date header. "
+                f"Read the editable body with read_self(content_type='research_document', slug='{fname}'), "
+                "then copy a unique exact anchor from that body; do not escape its newlines.\n"
+                f"Editable body preview (first 1200 chars):\n{_strip_leading_research_scaffold(markdown)[:1200]}"
             )
         body = body.replace(find, replace)
         applied += 1
     citation_error = _validate_public_citation_format(body)
     if citation_error:
-        return f"Error: {citation_error}"
+        return ToolFailure(f"Error: {citation_error}")
     body, spelling_note = await _normalize_standard_spellings(body)
     new_title = (title or "").strip() or doc.get("title") or ""
     document = _build_document(
@@ -1005,7 +1044,7 @@ async def _exec_research_document_edit_staged(
         f"Staged draft revised in place: {applied} edit(s) applied.\n"
         f"Draft backup: {draft_path}\n"
         f"Storage: research_documents id={row['id']} status=staged sha256={row['content_sha256'][:12]}\n"
-        "Publication remains cross-tick: on a later wake, publish with slug-only "
+        "Publish using slug-only "
         "publish_public (omit content) plus fact_check_passed=true and fact_check_notes."
         f"{spelling_note}"
     )
@@ -1111,6 +1150,10 @@ async def _exec_research_document_edit_public(
                 content=body,
                 public_url=_public_url(fname),
             )
+        independent_note = await _review_before_public_write(document, fact_check_notes)
+        if isinstance(independent_note, ToolFailure):
+            return independent_note
+        review_note = "\n".join(note for note in (review_note, independent_note) if note)
         try:
             row, _ = await asyncio.to_thread(
                 research_store.upsert_document,
@@ -1143,66 +1186,16 @@ async def _exec_research_document_edit_public(
             return f"Error: cannot publish legacy fallback file '{fname}' because no DB row exists. Import it into research_documents first."
         if existing_doc.get("status") == "public":
             return f"Already public: {fname}\nPublic URL: {_public_url(fname)}"
-        if is_autonomous_publication_context():
-            body = _strip_leading_research_scaffold(existing_doc.get("markdown") or "")
-            title_for_gate = existing_doc.get("title") or research_store.extract_title(existing_doc.get("markdown") or "", "")
-            return await _exec_research_document_publish_public(
-                title=title_for_gate or "",
-                content=body,
-                filename=fname,
-                fact_check_passed=True,
-                fact_check_notes=fact_check_notes,
-                source_task_id=existing_doc.get("source_task_id"),
-                broadcast=broadcast,
-            )
-        try:
-            row = await asyncio.to_thread(research_store.set_status, fname, "public")
-            if not row:
-                return f"Error: no private research document named '{fname}' in DB."
-        except Exception as e:
-            logger.error("research_document republish_public DB error for %s: %s", fname, e)
-            return ToolFailure(f"Error: failed to mark {fname} public: {type(e).__name__}: {e}")
-
-        cache = await asyncio.to_thread(_invalidate_cache_sync, fname)
-        cloudflare = await asyncio.to_thread(_purge_cloudflare_sync, fname)
-        public_url = _public_url(fname)
-        broadcast_note = ""
-        if broadcast:
-            try:
-                br = await maybe_broadcast_autonomous_publication(
-                    title=row["title"],
-                    url=public_url,
-                    body=row.get("markdown") or "",
-                    source="cyber-lenin.com research visibility change",
-                )
-                if br.ok:
-                    broadcast_note = f"\nTelegram channel broadcast: sent ({br.sent_count})"
-                    if getattr(br, "message_ids", None):
-                        try:
-                            from publication_records import record_publication_broadcast_sync
-
-                            await asyncio.to_thread(
-                                record_publication_broadcast_sync,
-                                slug=row["slug"],
-                                public_url=public_url,
-                                channel_message_ids=br.message_ids,
-                                source="research_document_republish_public",
-                            )
-                            broadcast_note += f"; tracked {len(br.message_ids or [])} message id(s)"
-                        except Exception as e:
-                            logger.warning("publication broadcast record failed for %s: %s", fname, e)
-                            broadcast_note += f"; message-id tracking failed ({e})"
-                else:
-                    broadcast_note = f"\nTelegram channel broadcast skipped/failed: {br.message}"
-            except Exception as e:
-                logger.warning("research publish channel broadcast failed for %s: %s", fname, e)
-                broadcast_note = f"\nTelegram channel broadcast failed: {e}"
-        return (
-            f"Published existing private research document: {fname}\n"
-            f"Storage: research_documents id={row['id']} sha256={row['content_sha256'][:12]}\n"
-            f"Public URL: {public_url}\n"
-            f"{_format_invalidation_note(cache, cloudflare, fname)}"
-            f"{broadcast_note}"
+        body = _strip_leading_research_scaffold(existing_doc.get("markdown") or "")
+        title_for_gate = existing_doc.get("title") or research_store.extract_title(existing_doc.get("markdown") or "", "")
+        return await _exec_research_document_publish_public(
+            title=title_for_gate or "",
+            content=body,
+            filename=fname,
+            fact_check_passed=True,
+            fact_check_notes=fact_check_notes,
+            source_task_id=existing_doc.get("source_task_id"),
+            broadcast=broadcast,
         )
 
     # operation == "unpublish"
@@ -1264,7 +1257,9 @@ RESEARCH_DOCUMENT_TOOL = {
         "private documents are simply unpublished research documents. The public "
         "publishing flow is two-step: action='stage_public' saves an exact draft and "
         "does not publish; action='publish_public' requires fact_check_notes and publishes "
-        "the checked version. To publish an EXISTING staged draft, call publish_public with "
+        "the checked version. Task/manual public writes run an independent read-only document "
+        "review before publication; repair any returned material issues and retry. "
+        "To publish an EXISTING staged draft, call publish_public with "
         "the slug and fact_check_notes and OMIT content — the stored staged text is published "
         "as-is (do not re-emit long drafts). To revise a staged draft, use action='edit_staged' "
         "with the slug and `edits` (exact find/replace pairs) instead of restaging the full "
@@ -1307,7 +1302,7 @@ RESEARCH_DOCUMENT_TOOL = {
                 "items": {
                     "type": "object",
                     "properties": {
-                        "find": {"type": "string", "description": "Exact text currently in the staged draft body; must match exactly once."},
+                        "find": {"type": "string", "description": "Exact text from the editable body returned by read_self for this staged draft; must match exactly once. Generated title/author/date headers are excluded."},
                         "replace": {"type": "string", "description": "Replacement text."},
                     },
                     "required": ["find", "replace"],
@@ -1317,10 +1312,10 @@ RESEARCH_DOCUMENT_TOOL = {
             "id": {"type": "integer", "description": "Optional private research document id for compatibility reads/edits."},
             "markdown_body": {"type": "string", "description": "Markdown body for action='save_private'."},
             "body": {"type": "string", "description": "Optional replacement Markdown body for action='publish_private'."},
-            "source_task_id": {"type": "integer", "description": "Optional originating task id for private saves."},
+            "source_task_id": {"type": "integer", "description": "Optional originating task id. Public staging/publishing defaults to the current caller's task id."},
             "fact_check_notes": {
                 "type": "string",
-                "description": "Required for autonomous public-bound actions: publish_public, edit_public, republish_public, and publish_private. Summarize checked claims, sources, and corrections.",
+                "description": "Required for publish_public, republish_public, publish_private, and autonomous edit_public. Summarize checked claims, sources, and corrections. Task/manual public writes additionally run an independent body review; these notes do not substitute for its verdict.",
             },
             "broadcast": {
                 "type": "boolean",
@@ -1413,36 +1408,28 @@ async def _exec_research_document(
     if op == "publish_private":
         if not slug:
             return "Error: action='publish_private' requires slug."
-        if is_autonomous_publication_context():
-            from runtime_tools.private_reports import get_private_report_sync
+        from runtime_tools.private_reports import get_private_report_sync
 
-            clean_slug = slug[:-3] if slug.endswith(".md") else slug
-            try:
-                private = await asyncio.to_thread(get_private_report_sync, slug=clean_slug)
-            except Exception as e:
-                return ToolFailure(f"Error: failed to read private research document before autonomous publication: {type(e).__name__}: {e}")
-            if not private:
-                return f"Error: no private research document found for slug={clean_slug!r}."
-            markdown_source = body if body is not None and body.strip() else (content if content is not None and content.strip() else private.get("markdown") or "")
-            public_title = (title or "").strip() or research_store.extract_title(markdown_source, private.get("title") or "")
-            public_body = _strip_leading_research_scaffold(markdown_source)
-            return await _exec_research_document_publish_public(
-                title=public_title or "",
-                content=public_body,
-                filename=f"{clean_slug}.md",
-                fact_check_passed=True,
-                fact_check_notes=fact_check_notes,
-                source_task_id=private.get("source_task_id"),
-                broadcast=broadcast,
-            )
-        from runtime_tools.private_reports import _exec_publish_private_report
-
-        return await _exec_publish_private_report(
-            slug=slug,
-            body=body if body is not None else content,
-            title=title,
+        clean_slug = slug[:-3] if slug.endswith(".md") else slug
+        try:
+            private = await asyncio.to_thread(get_private_report_sync, slug=clean_slug)
+        except Exception as e:
+            return ToolFailure(f"Error: failed to read private research document before publication: {type(e).__name__}: {e}")
+        if not private:
+            return f"Error: no private research document found for slug={clean_slug!r}."
+        markdown_source = body if body is not None and body.strip() else (content if content is not None and content.strip() else private.get("markdown") or "")
+        public_title = (title or "").strip() or research_store.extract_title(markdown_source, private.get("title") or "")
+        public_body = _strip_leading_research_scaffold(markdown_source)
+        return await _exec_research_document_publish_public(
+            title=public_title or "",
+            content=public_body,
+            filename=f"{clean_slug}.md",
+            fact_check_passed=True,
+            fact_check_notes=fact_check_notes,
+            source_task_id=private.get("source_task_id"),
             broadcast=broadcast,
         )
+
     return (
         "Error: action must be one of stage_public, edit_staged, publish_public, edit_public, "
         "unpublish_public, republish_public, save_private, publish_private."

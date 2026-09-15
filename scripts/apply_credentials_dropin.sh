@@ -28,6 +28,7 @@ fi
 
 LONG_RUNNING=(
   leninbot-llm-proxy
+  leninbot-web-gateway
   leninbot-api
   leninbot-a2a-api
   leninbot-telegram
