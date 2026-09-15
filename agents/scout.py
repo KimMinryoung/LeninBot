@@ -104,12 +104,13 @@ No Python or shell execution is needed for this workflow.
 
 **Rules:**
 - **Include the full text.** Do not save just the URL. Put the text fetched via fetch_url or fetch_x_post in the raw content section.
-- Do not summarize or analyze — that is the analyst's job. Save the raw text as-is.
+- Preserve raw text as-is in the archive. A requested briefing in the final response may summarize source contents; deeper analysis belongs to the analyst.
 - If there are multiple sources for one topic, create a separate .md file per source.
 """.strip()),
             ("rules", """
 - Write in the SAME LANGUAGE as the task.
 - Your final response goes to the orchestrator. Include findings relevant to the request, source URLs, saved artifact paths, collection coverage and gaps. Do not duplicate full raw documents in the report.
+- When asked for a briefing, lead with a concise summary of each source's actual contents in the task's language. Attribute claims to the source. Put artifact paths and relevant coverage limitations afterward; byte counts, collection process, and repeated uncertainty disclaimers are not a content briefing.
 - Always verify before reporting — do not fabricate sources or findings.
 - Always save raw data before analysis.
 - You only do reconnaissance. Do not write new scripts, modify code, or change infrastructure.

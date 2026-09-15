@@ -224,6 +224,8 @@ blocked -> pending  (synthesis task after all subtasks terminal;
 
 `delegate` creates one pending task linked to the current mission. The task content includes the orchestrator instruction plus recent conversation context. The worker runs `process_task()`, saves result/tool log, and triggers an orchestrator callback unless the agent/spec path suppresses it.
 
+The callback includes the full agent report up to 24,000 characters (`telegram/task_reporting.py`). Longer reports carry an exact `read_self(content_type='task_report', id=..., offset=24000, max_chars=12000)` continuation. The orchestrator must retrieve needed omitted contents in the same turn before summarizing them; reading saved results does not require re-delegation. Callback guidance puts substantive findings first and limits caveats to relevant gaps. Scout preserves raw archives but supplies source-attributed content summaries when a briefing is requested.
+
 ### Parallel Delegation & Dependency DAGs
 
 `multi_delegate` creates N subtasks (max 8) sharing a `plan_id` plus one blocked synthesis task. When subtasks finish, the synthesis task receives a `<subtask-results>` block and produces a combined report.

@@ -42,6 +42,7 @@ from bot_config import (
 )
 from llm.runtime_profile import resolve_runtime_profile
 from telegram.schema import hydrate_summary_state
+from telegram.task_reporting import report_for_callback, RESULT_RELAY_GUIDANCE
 from telegram._send_utils import make_progress_callback, split_message
 from ops.logs import log_event
 from llm.json_utils import extract_json_object
@@ -2210,12 +2211,13 @@ async def bot_main():
                 prompt = (
                     f"[TASK REPORT] Task #{task_id} [{agent_type}] execution ended{' (interrupted)' if was_interrupted else ''}; goal completion is not implied\n\n"
                     f"Original request:\n{_truncate_for_prompt(task.get('content', ''), 1000)}\n\n"
-                    f"Agent's report (claims, not independent verification):\n{_truncate_for_prompt(report, 3000)}"
+                    f"Agent's report (claims, not independent verification):\n{report_for_callback(task_id, report)}"
                     f"{tool_log_section}"
                     f"{verification_section}"
                     f"{interrupted_note}\n\n"
                     f"## Your role\n"
                     f"1. Relay the results to the user concisely, covering only key points. Do not use markdown formatting.\n"
+                    f"   {RESULT_RELAY_GUIDANCE}\n"
                     f"2. Re-delegation judgment: Only delegate follow-up work when ALL of these conditions are met:\n"
                     f"   - The agent could not finish due to budget/turn limits\n"
                     f"   - Additional work can yield meaningful improvement\n"
@@ -2242,7 +2244,8 @@ async def bot_main():
                 "content": (
                     "Relay the runtime-supplied task outcome to the user concisely, without markdown. "
                     "Distinguish recorded task status from the agent's claims and goal completion. "
-                    "Only delegate follow-up when the agent was interrupted by budget/turn limits, "
+                    + RESULT_RELAY_GUIDANCE + " "
+                    + "Only delegate follow-up when the agent was interrupted by budget/turn limits, "
                     "further work can improve the result, and the cause is not an external blocker "
                     "such as permissions, CAPTCHA or API failure. Otherwise relay the outcome."
                     + mission_close_hint
