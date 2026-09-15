@@ -12,6 +12,8 @@ def main():
     commands.add_parser('list')
     commands.add_parser('costs')
     commands.add_parser('metrics')
+    efficiency = commands.add_parser('efficiency')
+    efficiency.add_argument('--since',default='today',help='UTC today or -Nh')
     plan = commands.add_parser('plan')
     plan.add_argument('--apply',action='store_true')
     consolidate = commands.add_parser('consolidate',help='bundle untouched enrichment jobs')
@@ -46,6 +48,17 @@ def main():
         result = store.consolidate(apply=args.apply)
     elif args.command == 'costs':
         result = store.costs()
+    elif args.command == 'efficiency':
+        from datetime import datetime, timezone, timedelta
+        import re
+        now = datetime.now(timezone.utc)
+        if args.since=='today':
+            since = now.replace(hour=0,minute=0,second=0,microsecond=0)
+        elif re.fullmatch(r'-[1-9][0-9]*h',args.since):
+            since = now-timedelta(hours=int(args.since[1:-1]))
+        else:
+            parser.error('--since must be today or -Nh')
+        result = store.efficiency(since)
     elif args.command == 'metrics':
         result = store.metrics()
     elif args.command == 'show':
@@ -75,6 +88,8 @@ def main():
                 from .planner import Planner
                 if config['phase']=='live':
                     await asyncio.to_thread(store.release_publication_waits)
+                await asyncio.to_thread(store.release_budget_waits,cap=config['daily_cap_usd'],
+                    amount=config['stage_budget_usd'],review_fraction=config['review_fraction'])
                 await asyncio.to_thread(store.reconcile_reviews)
                 await asyncio.to_thread(store.consolidate,apply=True)
                 await asyncio.to_thread(Planner(store).plan,apply=True)

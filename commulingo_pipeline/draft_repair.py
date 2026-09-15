@@ -29,15 +29,18 @@ class DraftRepair:
 
     def prepare(self, value):
         try:
-            return prepare_write(self.name,value,self.draft,schema=self.canonical)
+            prepared = prepare_write(self.name,value,self.draft,schema=self.canonical)
+            self.draft = {'tool':self.name, 'args':deepcopy(prepared)}
+            return prepared
         except ToolRejection as exc:
             candidate = getattr(exc,'canonical_args',None)
             if candidate is not None:
                 self.draft = {'tool':self.name,'args':deepcopy(candidate)}
-            message = str(exc)
-            if self.draft:
-                message += (f'\nSaved draft_id={draft_id(self.draft)}. Call the same tool with only draft_id and '
-                    'repairs, e.g. [{"op":"set","path":"/fields/bio/en","value":"shorter text"}]. '
-                    'Replace only the rejected fields; do not resend unchanged content. '
-                    'Cut an optional clause or sentence and leave margin below the hard limit.')
-            raise ValueError(message) from exc
+            raise ValueError(self.feedback(str(exc))) from exc
+
+    def feedback(self, message):
+        if self.draft and 'Saved draft_id=' not in message:
+            message += (f'\nSaved draft_id={draft_id(self.draft)}. Use this current ID and repairs only. '
+                'Replace rejected fields using JSON pointers; unchanged fields remain saved. '
+                'A stale ID was not applied. Retain supported claims and obey final field limits.')
+        return message

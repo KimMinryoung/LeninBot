@@ -27,6 +27,8 @@ def resolve_claim_chunks(claims, sources):
             value.update(start=group[0]*SOURCE_CHUNK_CHARS,
                          end=min(len(source['body']), (group[-1]+1)*SOURCE_CHUNK_CHARS))
             resolved.append(value)
+    if len(resolved) > 50:
+        raise ValueError(f'Expanded evidence has {len(resolved)} claims; at most 50 allowed. Select fewer contiguous ranges while retaining support for every required field.')
     return resolved
 
 
@@ -66,3 +68,28 @@ def compile_evidence(claims, sources, changed_fields):
             'source': source['url'], 'locator': f'characters {start}:{end}; sha256 {source["content_hash"]}',
             'excerpt': body[start:end], 'stance': stance})
     return result
+
+
+class SourceHandles:
+    """Attempt-local short names; persisted artifacts always use content IDs."""
+    def __init__(self, sources):
+        self.ids = {}
+        for source_id in sorted(sources):
+            self.handle(source_id)
+
+    def handle(self, source_id):
+        if source_id not in self.ids.values():
+            self.ids[f'S{len(self.ids)+1}'] = source_id
+        return next(k for k,v in self.ids.items() if v == source_id)
+
+    def resolve(self, claims, sources):
+        result = []
+        for claim in claims:
+            source_id = self.ids.get(claim.get('source_id'), claim.get('source_id'))
+            source = sources.get(source_id)
+            if not source or not source.get('body'):
+                available = ', '.join(f'{self.handle(k)}: chunks 0..{(len(v["body"])-1)//SOURCE_CHUNK_CHARS}'
+                    for k,v in sources.items() if v.get('body'))
+                raise ValueError('unknown source_id; retrieve or use an available source: ' + available)
+            result.append({**claim, 'source_id':source_id})
+        return result

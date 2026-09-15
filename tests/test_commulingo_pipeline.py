@@ -134,7 +134,7 @@ class BatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([c.kwargs['job_id'] for c in engine.run_one.call_args_list],[None,7,None])
 
     async def test_batch_stops_at_budget_draft_and_lease_boundaries(self):
-        for status in ('budget_deferred','draft_ready','lease_lost'):
+        for status in ('draft_ready','lease_lost'):
             engine = Engine(Mock(),{})
             engine.run_one = AsyncMock(return_value={'status':status,'job_id':7})
             await engine.run_batch()
@@ -300,8 +300,8 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
                 await lookup(action='get_term',term_id='fixture')
             self.assertEqual(call.await_count,3)
             await kwargs['handler']({'fields':{'definition':{'ko':'검증한 정의','en':'Verified definition'}}})
-        with patch('commulingo_pipeline.stages.model_call',side_effect=model):
-            result = await Draft(store)({'kind':'term','action':'update','topic':'definition'},
+        with patch('commulingo_pipeline.stages.model_call',side_effect=model), patch('commulingo_pipeline.stages.service.call',return_value={}):
+            result = await Draft(store)({'kind':'term','action':'update','topic':'definition','target':'fixture'},
                 [{'stage':'research','value':{'claims':[claim],'baseline':'original-revision'}}],Usage(),.2)
         self.assertEqual(result.value['fields']['expectedRevision'],'original-revision')
         self.assertEqual(result.value['fields']['evidence'][0]['excerpt'],source['body'])
@@ -440,8 +440,8 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
             await kwargs['handler']({'fields':{'groupId':'foreign-statesmen'}})
         with patch('runtime_tools.commulingo_people._list_groups',return_value=groups), \
              patch('runtime_tools.commulingo_people._list_categories',return_value=[{'id':'foreign-statesman'}]), \
-             patch('commulingo_pipeline.stages.model_call',side_effect=model):
-            result=await Draft(store)({'id':921,'kind':'person','action':'update','topic':'basics'},
+             patch('commulingo_pipeline.stages.model_call',side_effect=model), patch('commulingo_pipeline.stages.service.call',return_value={}):
+            result=await Draft(store)({'id':921,'kind':'person','action':'update','topic':'basics','target':'fixture'},
                 [{'stage':'research','value':{'baseline':'original','claims':[]}}],Usage(),.2)
         self.assertEqual(result.value['fields']['groupId'],'foreign-statesmen')
         self.assertEqual(result.value['fields']['expectedRevision'],'original')
@@ -598,7 +598,7 @@ class PostgresTests(unittest.TestCase):
 
     def setUp(self):
         with self.store.transaction() as cur:
-            cur.execute('TRUNCATE commulingo_pipeline_jobs,commulingo_pipeline_budget,commulingo_pipeline_artifacts,commulingo_pipeline_job_sources,commulingo_pipeline_publications RESTART IDENTITY')
+            cur.execute('TRUNCATE commulingo_pipeline_attempts,commulingo_pipeline_jobs,commulingo_pipeline_budget,commulingo_pipeline_artifacts,commulingo_pipeline_job_sources,commulingo_pipeline_publications RESTART IDENTITY')
 
     def add(self,target='test'):
         return self.store.enqueue(kind='person',action='update',target=target,topic='bio',reason='test')
@@ -651,7 +651,7 @@ class PostgresTests(unittest.TestCase):
         job_id = self.store.enqueue(kind='person',action='update',target='handoff',topic='enrichment',
             reason='test',payload={'topics':['bio','sections']})
         with self.store.transaction() as cur:
-            cur.execute("INSERT INTO commulingo_agent_suggestions(id,target_id,target_type,status) VALUES (98761,'handoff','person','approved'),(98762,'handoff','person_section','pending')")
+            cur.execute("INSERT INTO commulingo_agent_suggestions(id,target_id,target_type,status,action) VALUES (98761,'handoff','person','approved','update'),(98762,'handoff','person_section','pending','update')")
             cur.execute("INSERT INTO commulingo_pipeline_artifacts(job_id,stage,value) VALUES (%s,'review',%s)",
                         (job_id,'{"suggestionId":98761}'))
             cur.execute("UPDATE commulingo_pipeline_jobs SET status='escalated' WHERE id=%s",(job_id,))
@@ -752,29 +752,66 @@ class PostgresTests(unittest.TestCase):
         # No source data copied from production; only a minimal public-document fixture.
         with self.store.transaction() as cur:
             cur.execute('''CREATE TABLE IF NOT EXISTS research_documents
-                (slug text PRIMARY KEY,title text,markdown text,status text)''')
-            cur.execute("INSERT INTO research_documents VALUES ('pipeline-fixture','Fixture','A concept appears in this public document.','public') ON CONFLICT DO NOTHING")
+                (slug text PRIMARY KEY,filename text,title text,markdown text,status text,content_sha256 text)''')
+            cur.execute("DELETE FROM commulingo_pipeline_materials WHERE material_id='report:pipeline-fixture'")
+            cur.execute("INSERT INTO research_documents(slug,filename,title,markdown,status,content_sha256) VALUES ('pipeline-fixture','pipeline-fixture.md','Fixture','A concept appears in this public document.','public','fixture-sha') ON CONFLICT DO NOTHING")
         planner = Planner(self.store)
-        plan = planner.plan()
-        material = next(m for m in plan['materials'] if m['material_id']=='report:pipeline-fixture')
+        planner.plan()
+        material = next(m for m in planner.materials(limit=10000) if m['material_id']=='report:pipeline-fixture')
         discovery_id = self.store.enqueue(kind='term',action='create',target='material-selection-fixture',
             topic='discovery',reason='test',stage='discover',payload=material)
         for status in ('ready','running','deferred','escalated'):
             with self.store.transaction() as cur:
                 cur.execute('UPDATE commulingo_pipeline_jobs SET status=%s WHERE id=%s',(status,discovery_id))
-            self.assertNotIn(material['material_id'],[m['material_id'] for m in planner.materials()])
+            self.assertNotIn(material['material_id'],[m['material_id'] for m in planner.materials(limit=10000)])
         with self.store.transaction() as cur:
             cur.execute("UPDATE research_documents SET markdown=markdown || ' Changed.' WHERE slug='pipeline-fixture'")
-        self.assertIn(material['material_id'],[m['material_id'] for m in planner.materials()])
+        self.assertIn(material['material_id'],[m['material_id'] for m in planner.materials(limit=10000)])
         with self.store.transaction() as cur:
             cur.execute("UPDATE research_documents SET markdown='A concept appears in this public document.' WHERE slug='pipeline-fixture'")
             cur.execute("UPDATE commulingo_pipeline_jobs SET status='complete' WHERE id=%s",(discovery_id,))
-        self.assertIn(material['material_id'],[m['material_id'] for m in planner.materials()])
+        self.assertIn(material['material_id'],[m['material_id'] for m in planner.materials(limit=10000)])
         with self.store.transaction() as cur:
             cur.execute('''INSERT INTO commulingo_pipeline_materials(material_id,content_hash)
                 VALUES (%s,%s) ON CONFLICT(material_id) DO UPDATE SET content_hash=EXCLUDED.content_hash''',
                 (material['material_id'],material['content_hash']))
-        self.assertNotIn(material['material_id'],[m['material_id'] for m in planner.materials()])
+        self.assertNotIn(material['material_id'],[m['material_id'] for m in planner.materials(limit=10000)])
         with self.store.transaction() as cur:
             cur.execute("DELETE FROM research_documents WHERE slug='pipeline-fixture'")
             cur.execute("DELETE FROM commulingo_pipeline_materials WHERE material_id='report:pipeline-fixture'")
+
+    def test_budget_release_and_drain_preserve_error_waits(self):
+        author = self.add('budget-author')
+        review = self.add('budget-review')
+        failure = self.add('failed')
+        with self.store.transaction() as cur:
+            cur.execute("UPDATE commulingo_pipeline_jobs SET status='deferred',available_at=now()+interval '1 hour',last_error='daily budget reserved or spent' WHERE id=ANY(%s)",([author,review],))
+            cur.execute("UPDATE commulingo_pipeline_jobs SET stage='review' WHERE id=%s",(review,))
+            cur.execute("UPDATE commulingo_pipeline_jobs SET status='deferred',last_error='source failed',available_at=now()+interval '1 hour' WHERE id=%s",(failure,))
+        reservation=self.store.reserve('.69',lane='person',cap='1',review_fraction='.3')
+        self.store.settle(reservation,'.69')
+        self.assertEqual(self.store.release_budget_waits(cap='1',amount='.2',review_fraction='.3'),1)
+        self.assertEqual(self.store.claim(stages=['review','submit'])['id'],review)
+        self.assertEqual(self.store.detail(author)['job']['status'],'deferred')
+        self.assertEqual(self.store.release_budget_waits(cap='10',amount='.2',review_fraction='.3'),1)
+        self.assertEqual(self.store.detail(author)['job']['status'],'ready')
+        self.assertEqual(self.store.detail(failure)['job']['status'],'deferred')
+
+    def test_attempt_metrics_do_not_double_count_cost_or_hide_unknown(self):
+        job_id=self.add()
+        job=self.store.claim(job_id=job_id)
+        attempt=self.store.start_attempt(job)
+        reservation=self.store.reserve('.2',lane='person',job_id=job_id)
+        self.store.link_attempt_budget(attempt,reservation)
+        self.store.finish_attempt(attempt,'error',None,'provider timeout',12,{'rounds_used':3})
+        since=datetime.now(timezone.utc)-timedelta(hours=1)
+        rows=self.store.efficiency(since)
+        row=next(r for r in rows if r['kind']=='person' and r['action']=='update')
+        self.assertEqual(row['attempts'],1)
+        self.assertEqual(row['unsettled'],1)
+        self.assertIsNone(row['actual'])
+        self.store.settle(reservation,'.07')
+        row=next(r for r in self.store.efficiency(since) if r['kind']=='person')
+        self.assertAlmostEqual(row['actual'],.07)
+        self.assertEqual(row['unsettled'],0)
+        self.assertEqual(row['seconds'],12)

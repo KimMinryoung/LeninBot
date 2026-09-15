@@ -1,0 +1,76 @@
+"""Read-only window throughput; budget ledger is the sole cost authority."""
+
+
+def query(boundary):
+    # boundary is a trusted SQL timestamp expression or a bound placeholder.
+    return f"""WITH bounds AS (SELECT {boundary} AS cutoff),
+    groups AS (SELECT kind,action FROM commulingo_pipeline_jobs GROUP BY 1,2),
+    publications AS (
+        SELECT j.kind,j.action,count(DISTINCT a.job_id) AS applied,
+            count(DISTINCT a.job_id) FILTER (WHERE EXISTS (
+                SELECT 1 FROM commulingo_pipeline_attempts t WHERE t.job_id=a.job_id
+                    AND t.started_at>(SELECT cutoff FROM bounds) AND t.started_at<=a.created_at)) AS measured_applied
+        FROM commulingo_pipeline_artifacts a JOIN commulingo_pipeline_jobs j ON j.id=a.job_id
+        WHERE a.stage='submit' AND a.value->>'status'='approved'
+          AND a.created_at>(SELECT cutoff FROM bounds) GROUP BY 1,2),
+    costs AS (
+        SELECT j.kind,j.action,sum(b.actual) AS actual,
+            coalesce(sum(b.reserved) FILTER (WHERE b.actual IS NULL),0) AS reserved,
+            count(*) FILTER (WHERE b.actual IS NULL) AS unsettled
+        FROM commulingo_pipeline_budget b JOIN commulingo_pipeline_jobs j ON j.id=b.job_id
+        WHERE b.created_at>(SELECT cutoff FROM bounds) GROUP BY 1,2),
+    attempts AS (
+        SELECT j.kind,j.action,count(*) AS attempts,
+            count(*) FILTER (WHERE a.finished_at IS NULL) AS unfinished,
+            sum(coalesce(a.duration_seconds,extract(epoch FROM now()-a.started_at))) AS seconds,
+            sum(coalesce((a.metrics->>'rounds_used')::integer,0)) AS rounds,
+            count(*) FILTER (WHERE a.stage='research') AS research,
+            count(*) FILTER (WHERE a.next_stage='research' AND a.stage IN ('draft','validate','review')) AS rework
+        FROM commulingo_pipeline_attempts a JOIN commulingo_pipeline_jobs j ON j.id=a.job_id
+        WHERE a.started_at>(SELECT cutoff FROM bounds) GROUP BY 1,2),
+    first_checks AS (
+        SELECT DISTINCT ON (job_id) job_id,started_at,metrics
+        FROM commulingo_pipeline_attempts WHERE stage='draft'
+            AND (metrics ? 'preflight_passed' OR metrics ? 'preflight_failures' OR coalesce((metrics->>'terminal_calls')::integer,0)>0)
+        ORDER BY job_id,started_at,id),
+    validation AS (
+        SELECT j.kind,j.action,count(*) AS checked,
+            count(*) FILTER (WHERE f.metrics->>'preflight_passed'='true'
+                AND coalesce((f.metrics->>'preflight_failures')::integer,0)=0
+                AND coalesce((f.metrics->>'terminal_calls')::integer,0)<=1) AS first_pass
+        FROM first_checks f JOIN commulingo_pipeline_jobs j ON j.id=f.job_id
+        WHERE f.started_at>(SELECT cutoff FROM bounds) GROUP BY 1,2),
+    dispositions AS (
+        SELECT j.kind,j.action,
+            count(*) FILTER (WHERE a.stage='discover') AS discoveries,
+            count(*) FILTER (WHERE a.stage='judge') AS judgments
+        FROM commulingo_pipeline_artifacts a JOIN commulingo_pipeline_jobs j ON j.id=a.job_id
+        WHERE a.created_at>(SELECT cutoff FROM bounds) GROUP BY 1,2)
+    SELECT coalesce(json_agg(row_to_json(r)),'[]'::json) FROM (
+        SELECT g.kind,g.action,coalesce(p.applied,0) AS applied,coalesce(p.measured_applied,0) AS measured_applied,
+            c.actual,coalesce(c.reserved,0) AS reserved,coalesce(c.unsettled,0) AS unsettled,
+            coalesce(a.attempts,0) AS attempts,coalesce(a.unfinished,0) AS unfinished,
+            a.seconds,a.rounds,a.research,a.rework,v.checked,v.first_pass,
+            d.discoveries,d.judgments
+        FROM groups g LEFT JOIN publications p USING(kind,action)
+        LEFT JOIN costs c USING(kind,action) LEFT JOIN attempts a USING(kind,action)
+        LEFT JOIN validation v USING(kind,action) LEFT JOIN dispositions d USING(kind,action)
+        ORDER BY g.kind,g.action) r"""
+
+
+def render(rows):
+    lines = ['생산율 (기간 비용/반영; 신규 시도 계측 시작 전 실행시간은 포함하지 않음):']
+    for r in rows:
+        cost = r['actual']
+        rate = f"${cost/r['applied']:.4f}/반영" if cost is not None and r['applied'] else '반영당 비용 산출 불가'
+        if r['unsettled']:
+            rate += f" (미정산 {r['unsettled']}건, 예약 ${r['reserved']:.4f}; 비용 미완결)"
+        lines.append(f"  {r['kind']}/{r['action']}: 반영 {r['applied']} · {rate}")
+        if r['seconds'] and not r['unfinished']:
+            lines.append(f"    계측 범위 {r['measured_applied']*3600/float(r['seconds']):.2f} 반영/실행시간 · 재조사 {r['rework'] or 0}/{r['attempts']} 시도")
+        lines.append(f"    계측 시도 {r['attempts']} · 미종료 {r['unfinished']} · "
+                     f"실행 {float(r['seconds'] or 0):.0f}초 · 재조사 전환 {r['rework'] or 0}")
+        if r['checked']:
+            lines.append(f"    첫 저장 검증 {r['first_pass']}/{r['checked']} · "
+                         f"후보 발견 {r['discoveries'] or 0} · 무편집 판단 {r['judgments'] or 0}")
+    return lines

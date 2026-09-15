@@ -67,7 +67,7 @@ class Store:
                  'Correct independently reviewed proposal',Json(payload)))
             return cur.fetchone()['id']
 
-    def claim(self, *, lease_seconds=120, group=None, job_id=None):
+    def claim(self, *, lease_seconds=120, group=None, job_id=None, stages=None):
         token = str(uuid.uuid4())
         with self.transaction() as cur:
             cur.execute('SELECT cursor FROM commulingo_pipeline_scheduler WHERE id=1 FOR UPDATE')
@@ -78,6 +78,7 @@ class Store:
                     OR (status='running' AND lease_until < now()))
                   AND (%s::text IS NULL OR kind || ':' || action = %s)
                   AND (%s::bigint IS NULL OR id = %s)
+                  AND (%s::text[] IS NULL OR stage=ANY(%s::text[]))
                 ORDER BY CASE WHEN stage IN ('review','submit') THEN 0 WHEN priority<20 THEN 1 ELSE 2 END,
                          mod(CASE kind || ':' || action
                             WHEN 'person:create' THEN 0 WHEN 'person:update' THEN 1
@@ -88,7 +89,7 @@ class Store:
                     lease_token=%s, lease_until=now()+%s*interval '1 second',
                     attempts=attempts+1, updated_at=now()
                 FROM candidate c WHERE j.id=c.id RETURNING j.*''',
-                (group, group, job_id, job_id, cursor, token, lease_seconds))
+                (group, group, job_id, job_id, stages, stages, cursor, token, lease_seconds))
             job = cur.fetchone()
             if job:
                 groups = ['person:create','person:update','term:create','term:update']
@@ -147,6 +148,49 @@ class Store:
             cur.execute('''UPDATE commulingo_pipeline_jobs SET status='ready',available_at=now(),
                 last_error='',updated_at=now() WHERE status='deferred' AND stage='submit'
                 AND last_error='canary publication slots exhausted' RETURNING id''')
+            return len(cur.fetchall())
+
+    def start_attempt(self, job):
+        attempt = str(uuid.uuid4())
+        with self.transaction() as cur:
+            cur.execute("INSERT INTO commulingo_pipeline_attempts(id,job_id,stage) VALUES (%s,%s,%s)",
+                        (attempt,job['id'],job['stage']))
+        return attempt
+
+    def link_attempt_budget(self, attempt, reservation):
+        with self.transaction() as cur:
+            cur.execute('UPDATE commulingo_pipeline_attempts SET budget_id=%s WHERE id=%s',
+                        (reservation,attempt))
+
+    def finish_attempt(self, attempt, outcome, next_stage, error, duration, metrics):
+        # Do not duplicate tool transcripts/source text or ledger cost in metrics.
+        terminal_calls = sum(isinstance(line,str) and '] commulingo_pipeline_result(' in line
+                             for line in metrics.get('tool_work_details',[]))
+        metrics = {k:v for k,v in metrics.items() if k in {
+            'rounds_used','input_tokens','output_tokens','model_calls','pipeline_cache_hits',
+            'preflight_checks','preflight_failures','preflight_passed','rejections'}}
+        metrics['terminal_calls'] = terminal_calls
+        if 'rejections' in metrics:
+            metrics['rejections'] = metrics['rejections'][-12:]
+        with self.transaction() as cur:
+            cur.execute("""UPDATE commulingo_pipeline_attempts SET finished_at=now(),
+                duration_seconds=%s,outcome=%s,next_stage=%s,error=%s,metrics=%s WHERE id=%s""",
+                (duration,outcome,next_stage,str(error)[:2000],Json(metrics),attempt))
+
+    def release_budget_waits(self, *, cap, amount, review_fraction):
+        """Reconsider only known budget waits, never error or evidence holds."""
+        cap, amount, fraction = map(lambda x: Decimal(str(x)), (cap,amount,review_fraction))
+        with self.transaction() as cur:
+            cur.execute("SELECT pg_advisory_xact_lock(hashtext('commulingo-pipeline-budget'))")
+            cur.execute("""WITH spent AS (
+                SELECT coalesce(sum(coalesce(actual,reserved)),0) AS total,
+                    coalesce(sum(coalesce(actual,reserved)) FILTER (WHERE lane!='review'),0) AS author
+                FROM commulingo_pipeline_budget WHERE day=(now() AT TIME ZONE 'UTC')::date)
+                UPDATE commulingo_pipeline_jobs SET status='ready',available_at=now(),last_error='',updated_at=now()
+                FROM spent WHERE status='deferred' AND last_error='daily budget reserved or spent'
+                AND (stage IN ('validate','judge','submit') OR
+                    (spent.total+%s<=%s AND (stage='review' OR spent.author+%s<=%s*(1-%s))))
+                RETURNING id""",(amount,cap,amount,cap,fraction))
             return len(cur.fetchall())
 
     def heartbeat(self, job, *, lease_seconds=120):
@@ -233,6 +277,12 @@ class Store:
             cur.execute('''SELECT * FROM commulingo_pipeline_jobs
                 ORDER BY priority,created_at,id LIMIT %s''', (limit,))
             return cur.fetchall()
+
+    def efficiency(self, since):
+        from .efficiency import query
+        with self.transaction() as cur:
+            cur.execute(query('%s::timestamptz'),(since,))
+            return next(iter(cur.fetchone().values()))
 
     def metrics(self):
         with self.transaction() as cur:

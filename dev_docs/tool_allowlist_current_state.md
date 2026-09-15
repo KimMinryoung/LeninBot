@@ -251,3 +251,11 @@ commulingo_review_decision뿐이다. 판단 도구는 검증된 결과를 메모
 ## Mail briefing state
 
 `mail_runtime/` persists raw mail, per-task body coverage and per-audience Telegram delivery receipts. `check_inbox` defaults to unbriefed mail in delegated tasks; scout can stage exact per-mail summaries with the write tool `prepare_mail_briefing`. Successful task callbacks send these summaries and record each accepted message, bypassing model rewriting. See [mail_briefing.md](mail_briefing.md) for tool semantics, migration and failure behavior.
+
+### CommuLingo 영속 파이프라인의 작성 단계
+
+`commulingo_pipeline.stages.Draft`는 runner-local 결과 제출 도구와 세 번 이내의 개별 사전 조회만 사용한다.
+사전 도구의 action enum은 get_person/get_term/get_office/get_event/get_sections로 제한한다.
+공통 전역 도구 정의를 수정하지 않고 해당 호출의 schema만 좁힌다. 결과 제출 handler가 비저장 RPC validate를
+수행하여 같은 호출에서 초안을 고치지만 공개 저장 권한은 부여하지 않는다. 공개 반영에는 기존 독립 검토와
+submit 단계가 필요하다. 명시적 gap 발견의 고정 kind/label/mention은 실행기가 부착하며 다른 값 입력은 거절한다.

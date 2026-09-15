@@ -34,7 +34,7 @@ class LaneHealth(unittest.TestCase):
                'pipeline_cost':.2,'today_actual':.8,'today_reserved':0,
                'publications':[{'job_id':8,'kind':'person','action':'update','target':'example',
                                 'label':'인물','topic':'basics'}]}
-        with patch.object(health.subprocess,'run',return_value=SimpleNamespace(stdout=json.dumps(value))):
+        with patch.object(health.subprocess,'run',return_value=SimpleNamespace(stdout=json.dumps(value))), patch.object(health,'query_json',return_value=[]):
             lines,alerts,cost=health.pipeline_health('-24h')
         self.assertIn('기간 내 반영 1건',lines[0])
         self.assertTrue(any('반영 #8' in line for line in lines))
@@ -43,7 +43,7 @@ class LaneHealth(unittest.TestCase):
     def test_pipeline_cost_does_not_add_shared_legacy_spend_twice(self):
         value={'applied':2,'escalated':0,'retrying':0,'running':1,'expired_leases':0,
                'pipeline_cost':.2,'today_actual':.8,'today_reserved':.2}
-        with patch.object(health.subprocess,'run',return_value=SimpleNamespace(stdout=json.dumps(value))):
+        with patch.object(health.subprocess,'run',return_value=SimpleNamespace(stdout=json.dumps(value))), patch.object(health,'query_json',return_value=[]):
             lines,alerts,cost=health.pipeline_health('-24h')
         self.assertEqual(cost,.2)
         self.assertEqual(alerts,[])

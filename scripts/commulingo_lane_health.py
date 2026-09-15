@@ -468,6 +468,11 @@ def pipeline_health(since):
         lines.append('기간 내 공용 LLM 원장 (위 총액과 별도 합산하지 않음):')
         for row in value['cost_by_lane']:
             lines.append(f"  {row['lane']}: ${row['actual']:.4f} · 미정산 예약 ${row['unsettled']:.4f} · {row['calls']}개 예약")
+    from commulingo_pipeline.efficiency import query as efficiency_query, render as render_efficiency
+    try:
+        lines.extend(render_efficiency(query_json(efficiency_query(boundary))))
+    except (subprocess.SubprocessError,ValueError,StopIteration):
+        lines.append('시도별 생산율 조회 불가: migration과 계측 상태를 확인하세요.')
     alerts = ([f"pipeline: {value['expired_leases']} leases expired over ten minutes ago"]
               if value['expired_leases'] else [])
     if value['retrying']:

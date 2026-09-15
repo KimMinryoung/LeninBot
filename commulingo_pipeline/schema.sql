@@ -86,3 +86,19 @@ CREATE TABLE IF NOT EXISTS commulingo_pipeline_publications (
     day date NOT NULL DEFAULT (now() AT TIME ZONE 'UTC')::date,
     kind text NOT NULL, action text NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS commulingo_pipeline_attempts (
+    id uuid PRIMARY KEY,
+    job_id bigint NOT NULL REFERENCES commulingo_pipeline_jobs(id),
+    stage text NOT NULL,
+    started_at timestamptz NOT NULL DEFAULT now(),
+    finished_at timestamptz,
+    duration_seconds double precision,
+    outcome text NOT NULL DEFAULT 'running',
+    next_stage text,
+    error text NOT NULL DEFAULT '',
+    budget_id uuid REFERENCES commulingo_pipeline_budget(id),
+    metrics jsonb NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS commulingo_pipeline_attempts_started
+ON commulingo_pipeline_attempts(started_at,job_id);
