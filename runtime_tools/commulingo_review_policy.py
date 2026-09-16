@@ -9,6 +9,7 @@ DECISION_TOOL = {"name": "commulingo_review_decision", "description": "Submit on
         "properties": {
             "decision": {"type": "string", "enum": ["approve", "revise", "reject", "escalate"]},
             "reason": {"type": "string", "minLength": 20},
+            "needs_research": {"type": "boolean", "description": "For revise: false for corrections supported by retained research, true only if new source support is needed. Explain the missing fact in reason."},
             "resolved_risks": {"type": "array", "description": "Exact strings copied from suggestion.risks; put explanations in reason/findings, not in risk identifiers.", "items": {"type": "string"}},
             "checks": {"type": "array", "items": {"type": "object", "additionalProperties": False,
                 "properties": {
@@ -82,8 +83,11 @@ def external_url(url):
 
 
 def validate_decision(value, proposal, fetched):
-    if not isinstance(value, dict) or set(value) != {"decision", "reason", "resolved_risks", "checks"}:
+    required = {"decision", "reason", "resolved_risks", "checks"}
+    if not isinstance(value, dict) or not required.issubset(value) or set(value) - required - {"needs_research"}:
         raise ValueError("decision, reason, resolved_risks and checks required")
+    if "needs_research" in value and type(value["needs_research"]) is not bool:
+        raise ValueError("needs_research must be a boolean")
     decision = value["decision"]
     if decision not in {"approve", "revise", "reject", "escalate"} or not isinstance(value["reason"], str) or len(value["reason"].strip()) < 20:
         raise ValueError("valid decision and substantive reason required")

@@ -10,6 +10,14 @@ from scripts.commulingo_write_session import draft_id
 
 
 class EvidenceContracts(TestCase):
+    def test_uncertain_fate_has_a_supported_schema_value(self):
+        from runtime_tools.commulingo_people import COMMULINGO_PERSON_CREATE_TOOL
+        from jsonschema import validate as schema_validate, ValidationError
+        schema=COMMULINGO_PERSON_CREATE_TOOL['input_schema']['properties']['fields']['properties']['fate']
+        schema_validate({'kind':'','label':{'ko':'사망 경위 미확정','en':'Circumstances unconfirmed'}},schema)
+        with self.assertRaises(ValidationError):
+            schema_validate({'kind':'unknown','label':{'ko':'미확정','en':'Unknown'}},schema)
+
     def test_short_and_legacy_ids_roundtrip_and_unknown_has_ranges(self):
         source=snapshot('https://example.org/archive','Documented fact. '*80)
         sources={source['id']:source}

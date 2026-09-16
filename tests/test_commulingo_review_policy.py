@@ -49,6 +49,13 @@ class PolicyTests(unittest.IsolatedAsyncioTestCase):
         for change in ({'resolved_risks':[]},{'checks':[]}):
             with self.assertRaises(ValueError):validate_decision({**DECISION,**change},PROPOSAL,{SOURCE:QUOTE})
         with self.assertRaises(ValueError):validate_decision(DECISION,{**PROPOSAL,'source_refs':['another citation']},{SOURCE:QUOTE})
+    def test_research_routing_hint_requires_boolean(self):
+        for needed in (True,False):
+            value={**DECISION,'decision':'revise','needs_research':needed}
+            self.assertEqual(validate_decision(value,PROPOSAL,{SOURCE:QUOTE}),value)
+        with self.assertRaisesRegex(ValueError,'boolean'):
+            validate_decision({**DECISION,'needs_research':'false'},PROPOSAL,{SOURCE:QUOTE})
+
     def test_many_checks_are_valid_but_every_quote_is_still_verified(self):
         checks=[dict(DECISION['checks'][0]) for _ in range(63)]
         value={**DECISION,'checks':checks}

@@ -76,6 +76,7 @@ _HISTORY_RELATION_KINDS = ("leader", "participant", "executor", "target", "oppon
 _ACTIONS = ("create", "update", "delete")
 
 _FATE_KINDS = (
+    "",  # Unknown/unclassified; preserve the supported uncertainty in label.
     "executed", "assassinated", "murdered", "killed", "suicide",
     "deposed", "exile", "natural",
 )
@@ -3375,7 +3376,8 @@ _COMMULINGO_FIELD_SCHEMA = {
             "properties": {
                 # Enumerated here so the closed vocabulary is readable up front;
                 # it was only discoverable by tripping the write-boundary check.
-                "kind": {"type": "string", "enum": list(_FATE_KINDS)},
+                "kind": {"type": "string", "enum": list(_FATE_KINDS),
+                         "description": "Use the empty string when the fate is unconfirmed; explain uncertainty in label. Imprisonment is not exile or execution. Never invent unknown/unconfirmed enum values."},
                 "label": _FATE_LABEL_SCHEMA,
             },
             "required": ["kind", "label"],

@@ -319,7 +319,7 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
             return {'commulingo_review_decision':decide}
         for decision,count,expected in [('revise',0,('research','ready')),
                                         ('revise',1,('research','ready')),
-                                        ('revise',2,('complete','escalated')),
+                                        ('revise',2,('research','ready')),
                                         ('escalate',0,('complete','escalated')),
                                         ('reject',0,('complete','complete')),
                                         ('approve',0,('submit','ready'))]:
@@ -332,14 +332,30 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
                 result=await Review()(job,artifacts+previous,Usage(),.2)
             self.assertEqual((result.next_stage,result.status),expected)
             self.assertEqual([c.args[0]['command'] for c in rpc.call_args_list],['read'])
-        # A legacy correction already consumed the first revision.
-        job['payload']={'review_revisions':1}
+        # Old lifetime counters do not reject a corrected draft.
+        job['payload']={'review_revisions':20}
         decision='revise'
+        async def model(**kwargs):
+            await kwargs['handler']({'decision':'revise','reason':'Correct classification from existing sources',
+                'checks':[],'resolved_risks':[],'needs_research':False})
         with patch('commulingo_pipeline.stages.service.call',return_value=None), \
              patch('scripts.commulingo_person_reviewer.make_handlers',side_effect=handlers), \
              patch('commulingo_pipeline.stages.model_call',side_effect=model):
-            result=await Review()(job,artifacts+[{'stage':'review','value':{'decision':'revise'}}],Usage(),.2)
-        self.assertEqual(result.status,'escalated')
+            first=await Review()(job,artifacts,Usage(),.2)
+            self.assertEqual(first.next_stage,'draft')
+            history=artifacts+[{'stage':'review','value':first.value}]
+            second=await Review()(job,history,Usage(),.2)
+            self.assertEqual(second.next_stage,'draft')
+            history.append({'stage':'review','value':second.value})
+            stalled=await Review()(job,history,Usage(),.2)
+            self.assertEqual(stalled.status,'escalated')
+            # Fetching more evidence cannot disguise an unchanged patch.
+            history.append({'stage':'draft','value':{'fields':{'evidence':[{}]},'sources':[]}})
+            self.assertEqual((await Review()(job,history,Usage(),.2)).status,'escalated')
+            history.append({'stage':'draft','value':{'fields':{'fate':{'kind':'','label':{'ko':'미확정','en':'Unconfirmed'}}},'sources':[]}})
+            corrected=await Review()(job,history,Usage(),.2)
+            self.assertEqual(corrected.next_stage,'draft')
+            self.assertNotEqual(corrected.value['reviewed_content_hash'],first.value['reviewed_content_hash'])
 
     async def test_manually_resolved_original_is_not_replaced(self):
         from commulingo_pipeline.stages import submit

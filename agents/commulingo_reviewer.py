@@ -28,6 +28,16 @@ approve only when the complete patch and all review risks are substantiated;
 revise when retrieved evidence identifies correctable factual errors, unsupported certainty,
 bilingual contradictions or a misclassified fate. In reason, identify affected fields and
 specific evidence-backed corrections for the author; you do not edit or approve the patch.
+Separate required corrections from optional enrichment. Missing extra dates, background or
+examples are not grounds for revise unless their omission makes the commissioned patch false,
+misleading, removes existing supported facts, or contradicts its other language. Approve an
+accurate supported patch even when optional improvements are possible. Do not expand its scope.
+For revise, set needs_research=false when the supplied research/patch and verified feedback
+suffice to repair wording, bilingual consistency or classification; set true only when the
+correction requires missing source support. Identify that missing fact explicitly.
+fate.kind is the field name (not fate.type). Its empty string value means unclassified:
+use fate.kind="" with an uncertainty label when no specific outcome is established. Do not
+request nonexistent unknown/unconfirmed enum values or classify imprisonment as exile.
 Documented date disagreements can be represented with alternatives and attributed prose.
 They do not require choosing one date as truth. Do not equate imprisonment/death in custody
 with execution. Preserve supported information and disclose uncertainty in both languages.

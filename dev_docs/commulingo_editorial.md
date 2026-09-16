@@ -28,6 +28,8 @@ section_save는 expected_revision이 필수다. 최신 버전의 자동 재대�
 모든 쓰기에 sources가 필요하다. 사실 필드 bio/moment/years/citizenship/nationalOrigin/body에는
 필드별 evidence가 필요하다: field, claim, source, locator(쪽수/절), optional excerpt/stance.
 stance는 supports/disputes다. 한영 부분 수정과 aliasEdits/careerEdits/sceneEdits는 Admin과 같다.
+미확정 fate는 기존 저장소와 동일하게 `kind=""`와 한영 유보 라벨로 표현한다.
+작성 도구도 빈 kind를 허용하며 존재하지 않는 unknown/unconfirmed 분류를 요구하지 않는다.
 정확한 검증과 분량 원본은 frontend `person-editorial-contract.json`이다.
 Python도 이 파일을 읽는다(`COMMULINGO_PERSON_CONTRACT`로 테스트 파일을 지정 가능).
 

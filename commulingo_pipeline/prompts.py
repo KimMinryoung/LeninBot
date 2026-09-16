@@ -14,7 +14,9 @@ For an original_proposal correction, keep its target and section slug; correct i
 Review feedback identifies claims to recheck, not authoritative facts. Verify corrections against sources.
 Represent documented birth/death alternatives explicitly and attribute them in both languages.
 Do not force disputed dates into an exact year, invent precise dates or classify death in custody
-as execution without evidence. Omit unsupported proposed fields without deleting supported history.
+as execution without evidence. For an unconfirmed fate use fate.kind="" and explain the
+uncertainty in both label languages. Never substitute exile for imprisonment or invent an enum.
+Omit unsupported proposed fields without deleting supported history.
 Historical significance and supported missing information matter; length is never a quota.
 Only the commissioned target and current_topics are in scope. Research related topics together
 and combine supported card changes into one patch. The runner owns persistence and budgets.

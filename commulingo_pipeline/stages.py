@@ -3,6 +3,7 @@ import asyncio
 from copy import deepcopy
 from dataclasses import replace
 import json
+import hashlib
 import re
 from datetime import datetime, timezone
 
@@ -11,7 +12,7 @@ from .evidence import snapshot, compile_evidence, resolve_claim_chunks, SOURCE_C
 from . import service
 from .bundles import work_topics, advance
 
-MAX_REVIEW_REVISIONS = 2
+MAX_UNCHANGED_REVIEW_REVISIONS = 2
 
 READS = {'wiki_search','wiki_get','web_search','fetch_url','commulingo_people'}
 
@@ -511,12 +512,23 @@ class Review:
             tool=DECISION_TOOL,handler=finish,reads=READS,usage=usage,budget=budget,
             read_wrap=lambda name,call:handlers[name],scope_id=f'commulingo_pipeline:{job["id"]}:review')
         if box['decision']=='revise':
-            revisions = int((job.get('payload') or {}).get('review_revisions',0)) + sum(
-                a['stage']=='review' and a['value'].get('decision')=='revise'
-                for a in current_artifacts(artifacts))
-            if revisions < MAX_REVIEW_REVISIONS:
-                return Result(box,'research')
-            return Result({**box,'hold_reason':'automatic revision limit reached'},'complete','escalated')
+            # Count unchanged content, not lifetime requests or newly added source handles.
+            content = {k:v for k,v in draft['fields'].items()
+                       if k not in {'evidence','sources','expectedRevision','reviewFlags'}}
+            fingerprint = hashlib.sha256(json.dumps(content,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
+            unchanged = 0
+            for artifact in reversed(current_artifacts(artifacts)):
+                if artifact['stage'] != 'review':
+                    continue
+                previous = artifact['value']
+                if previous.get('decision') != 'revise' or previous.get('reviewed_content_hash') != fingerprint:
+                    break
+                unchanged += 1
+            box['reviewed_content_hash'] = fingerprint
+            if unchanged >= MAX_UNCHANGED_REVIEW_REVISIONS:
+                return Result({**box,'hold_reason':'same draft remained unchanged after two correction attempts'},'complete','escalated')
+            # Legacy decisions without a routing hint retain the conservative research path.
+            return Result(box,'research' if box.get('needs_research',True) else 'draft')
         # Unresolved material stays in the internal artifact store, without a human handoff.
         return Result(box,'submit' if box['decision']=='approve' else 'complete',
                       'ready' if box['decision']=='approve' else 'escalated' if box['decision']=='escalate' else 'complete')
