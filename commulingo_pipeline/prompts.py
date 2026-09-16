@@ -29,7 +29,11 @@ material and check existing names and aliases. A person, event, or institution w
 page is not a glossary concept. Return no candidates when nothing useful is missing.
 Each candidate must include its exact mention and a concrete reason readers need the entry.''',
     'research': '''Investigate identity and the commissioned topic using original retrieved text.
-Search snippets are leads only. Seek reliable references beyond Wikipedia and expose conflicts.
+Search snippets are leads only. Choose reliable sources relevant to the actual changed facts.
+There is no target number of sources or claims. One adequate source can support multiple fields.
+Do not seek additional references for an already supported fact unless uncertainty or a conflict
+needs checking. Cite the shortest sufficient passage; do not enumerate every nearby chunk or
+repeat the same claim to make the evidence look more extensive. Evidence count is not quality.
 Reuse the supplied evidence first. Stop searching once the commissioned claims have adequate
 support and return the research artifact. Additional searches must address a specific missing
 fact, contradiction or plausible change, not paraphrases of answered questions. Formatting,

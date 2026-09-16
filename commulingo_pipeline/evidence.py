@@ -27,8 +27,6 @@ def resolve_claim_chunks(claims, sources):
             value.update(start=group[0]*SOURCE_CHUNK_CHARS,
                          end=min(len(source['body']), (group[-1]+1)*SOURCE_CHUNK_CHARS))
             resolved.append(value)
-    if len(resolved) > 50:
-        raise ValueError(f'Expanded evidence has {len(resolved)} claims; at most 50 allowed. Select fewer contiguous ranges while retaining support for every required field.')
     return resolved
 
 

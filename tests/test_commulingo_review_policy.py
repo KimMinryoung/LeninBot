@@ -49,6 +49,14 @@ class PolicyTests(unittest.IsolatedAsyncioTestCase):
         for change in ({'resolved_risks':[]},{'checks':[]}):
             with self.assertRaises(ValueError):validate_decision({**DECISION,**change},PROPOSAL,{SOURCE:QUOTE})
         with self.assertRaises(ValueError):validate_decision(DECISION,{**PROPOSAL,'source_refs':['another citation']},{SOURCE:QUOTE})
+    def test_many_checks_are_valid_but_every_quote_is_still_verified(self):
+        checks=[dict(DECISION['checks'][0]) for _ in range(63)]
+        value={**DECISION,'checks':checks}
+        self.assertEqual(validate_decision(value,PROPOSAL,{SOURCE:QUOTE}),value)
+        checks[-1]['quote']='An invented quotation that never appeared in this source.'
+        with self.assertRaises(ValueError):
+            validate_decision(value,PROPOSAL,{SOURCE:QUOTE})
+
     def test_failed_coverage_reports_exact_missing_identifiers(self):
         with self.assertRaisesRegex(ValueError, 'original citation with annotation'):
             validate_decision(DECISION, {**PROPOSAL, 'source_refs': ['original citation with annotation']}, {SOURCE: QUOTE})

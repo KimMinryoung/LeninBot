@@ -10,7 +10,7 @@ DECISION_TOOL = {"name": "commulingo_review_decision", "description": "Submit on
             "decision": {"type": "string", "enum": ["approve", "revise", "reject", "escalate"]},
             "reason": {"type": "string", "minLength": 20},
             "resolved_risks": {"type": "array", "description": "Exact strings copied from suggestion.risks; put explanations in reason/findings, not in risk identifiers.", "items": {"type": "string"}},
-            "checks": {"type": "array", "maxItems": 30, "items": {"type": "object", "additionalProperties": False,
+            "checks": {"type": "array", "items": {"type": "object", "additionalProperties": False,
                 "properties": {
                     "citation": {"type": "string", "description": "Copy one COMPLETE suggestion.source_refs entry verbatim, including its URL and any annotation. Never shorten or rename it."},
                     "source": {"type": "string", "description": "URL whose text you actually retrieved during this review."},
@@ -91,8 +91,8 @@ def validate_decision(value, proposal, fetched):
     checks = value["checks"]
     if not isinstance(risks, list) or any(not isinstance(r, str) for r in risks):
         raise ValueError("resolved_risks must list review risks")
-    if not isinstance(checks, list) or len(checks) > 30:
-        raise ValueError("checks must be an array of at most 30 items")
+    if not isinstance(checks, list):
+        raise ValueError("checks must be an array")
     for index, check in enumerate(checks, 1):
         if not isinstance(check, dict) or set(check) != {"citation", "source", "quote", "finding"} or any(not isinstance(v, str) or not v.strip() for v in check.values()):
             raise ValueError("each check needs citation, source, quote and finding")

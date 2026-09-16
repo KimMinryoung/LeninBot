@@ -30,7 +30,7 @@ def current_artifacts(artifacts):
 def missing_evidence(error):
     return any(message in str(error) for message in (
         'evidence must identify', 'evidence required for',
-        'sources must be a non-empty list of references', 'evidence must be an array of at most 50 claims'))
+        'sources must be a non-empty list of references'))
 
 
 def write_request(job, draft):
@@ -171,7 +171,7 @@ class Research:
         schema = {'type':'object','additionalProperties':False,'properties':{
             'status':{'type':'string','enum':['ready','complete','not_applicable','sources_unavailable']},
             'reason':{'type':'string','minLength':20},
-            'claims':{'type':'array','maxItems':50,'items':{'type':'object','additionalProperties':False,
+            'claims':{'type':'array','items':{'type':'object','additionalProperties':False,
                 'properties':{'field':{'type':'string','enum':sorted(fields)},'claim':{'type':'string'},'source_id':{'type':'string'},
                     'chunks':{'type':'array','minItems':1,'maxItems':25,
                               'items':{'type':'integer','minimum':0}},
@@ -322,9 +322,6 @@ class Draft:
         from runtime_tools.commulingo_people import COMMULINGO_PERSON_CREATE_TOOL, COMMULINGO_PERSON_UPDATE_TOOL, COMMULINGO_TERM_CREATE_TOOL, COMMULINGO_TERM_UPDATE_TOOL, COMMULINGO_SECTION_SAVE_TOOL
         research = latest(artifacts,'research')
         claims = research.get('claims',[])
-        if len(claims)>50:
-            usage.tracker['preflight_failures'] = 1
-            return Result({'preflight_error':'evidence must be an array of at most 50 claims; consolidate retained research without dropping field support'},'validate')
         source_ids = {c['source_id'] for c in claims}
         sources = await asyncio.to_thread(self.store.sources,source_ids)
         if set(sources)!=source_ids or any(not s.get('body') or s['expires_at']<=datetime.now(timezone.utc) for s in sources.values()):

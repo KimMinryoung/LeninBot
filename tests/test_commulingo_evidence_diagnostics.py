@@ -35,6 +35,12 @@ class EvidenceDiagnostics(unittest.TestCase):
         self.assertEqual(diagnose(fields, [citation]), [])
         self.assertEqual(json.dumps(fields), before)
 
+    def test_large_evidence_array_checks_every_entry(self):
+        entries=[{'field':'bio','claim':'Fact','source':'Archive','locator':f'p. {i}'} for i in range(63)]
+        self.assertEqual(diagnose({'bio':{},'evidence':entries},['Archive']),[])
+        entries[-1]['source']='Uncited'
+        self.assertIn('evidence[62].source',diagnose({'bio':{},'evidence':entries},['Archive'])[0])
+
     def test_old_career_evidence_and_blank_locator_are_specific(self):
         errors = diagnose({"evidence": [{"field": "career", "claim": "Post",
                             "source": "Archive", "locator": " "}]}, ["Archive"])

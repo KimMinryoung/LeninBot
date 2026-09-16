@@ -23,12 +23,12 @@ class EvidenceContracts(TestCase):
         self.assertEqual(handles.handle('another-id'),'S2')
         self.assertEqual(handles.handle(source['id']),'S1')
 
-    def test_expanded_ranges_enforce_final_claim_limit(self):
+    def test_expanded_ranges_preserve_all_evidence_above_old_limit(self):
         source=snapshot('https://example.org/archive','Documented fact. '*100)
         claim={'field':'body','claim':'fact','source_id':source['id'],'chunks':[0,2]}
-        self.assertEqual(len(resolve_claim_chunks([claim]*25,{source['id']:source})),50)
-        with self.assertRaisesRegex(ValueError,'Expanded evidence has 52'):
-            resolve_claim_chunks([claim]*26,{source['id']:source})
+        result=resolve_claim_chunks([claim]*32,{source['id']:source})
+        self.assertEqual(len(result),64)
+        self.assertEqual({(c['start'],c['end']) for c in result},{(0,240),(480,720)})
 
     def test_valid_draft_survives_downstream_error_and_stale_id_is_not_applied(self):
         repair=DraftRepair({'name':'draft','input_schema':{'type':'object','properties':{
@@ -139,14 +139,16 @@ class BudgetDrainRegression(IsolatedAsyncioTestCase):
         await engine.run_batch(draft_only=False)
         self.assertIsNone(engine.run_one.await_args_list[2].kwargs['job_id'])
 
-    async def test_legacy_overflow_returns_to_research_without_paid_draft(self):
-        store=Mock()
-        with patch('commulingo_pipeline.stages.model_call',new_callable=AsyncMock) as model:
-            result=await Draft(store)({'kind':'term','action':'update'},
-                [{'stage':'research','value':{'claims':[{}]*51}}],Usage(),.2)
-        model.assert_not_called()
-        next_result=await validate({'kind':'term','action':'update'},[{'stage':'draft','value':result.value}],Usage(),.2)
-        self.assertEqual(next_result.next_stage,'research')
+    async def test_large_saved_research_reaches_draft_without_research_retry(self):
+        store,job,artifacts=DraftContracts().fixture()
+        artifacts[0]['value']['claims'] *= 63
+        async def model(**kw):
+            await kw['handler']({'fields':{'definition':{'ko':'정의','en':'Definition'}}})
+        with patch('commulingo_pipeline.stages.model_call',side_effect=model) as call, patch('commulingo_pipeline.stages.service.call',return_value={}):
+            result=await Draft(store)(job,artifacts,Usage(),.2)
+        call.assert_called_once()
+        self.assertEqual(result.next_stage,'validate')
+        self.assertEqual(len(result.value['fields']['evidence']),63)
 
 
 import os

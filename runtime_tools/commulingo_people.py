@@ -3697,7 +3697,7 @@ async def _exec_commulingo_write(
 
 
 _EVIDENCE_SCHEMA = {
-    "type": "array", "maxItems": 50,
+    "type": "array",
     "items": {"type": "object", "additionalProperties": False,
         "properties": {**{key: {"type": "string"} for key in
             ("field", "claim", "source", "locator", "excerpt")},
@@ -3763,8 +3763,8 @@ _CITATIONS_SCHEMA = {
 def _person_evidence_errors(fields: dict, sources: list[str]) -> list[str]:
     """Batch actionable evidence diagnostics before RPC; the store still validates."""
     evidence = fields.get("evidence", [])
-    if not isinstance(evidence, list) or len(evidence) > 50:
-        return ["evidence must be an array of at most 50 claims"]
+    if not isinstance(evidence, list):
+        return ["evidence must be an array"]
     errors = []
     covered = set()
     for index, item in enumerate(evidence):
