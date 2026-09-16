@@ -79,6 +79,8 @@ submit 단계인지 확인하며, 다른 단계로 바뀌었으면 새 조사를
 작성 모델에는 evidence/revision을 수정하는 인자가 없다. 인물 상세 절도 같은 경로를 사용한다.
 작성 단계의 사전 조회는 get_person/get_term/get_office/get_event/get_sections만 도구 schema에 노출하며
 최대 세 번으로 제한한다. 목록 탐색이나 검색 action을 먼저 보여준 뒤 거절하지 않는다.
+검색 전용 q/group_id/status/limit 인자와 설명도 작성 schema에서 제외하고, 각 get action에
+해당 ID를 필수로 요구한다. 관련 ID를 모르면 검색을 반복하지 않고 그 관계의 추가를 생략한다.
 인물 작성에는 현재 분류 ID·제목·설명을 미리 제공하고 group/groupId를 실제 ID의
 enum으로 제한한다. 역할 category/categoryId도 현재 역할 분류 ID·라벨을 제공하고 enum으로 제한한다. 분류명 추측으로 저장 단계의 외래키 오류를 반복하지 않는다.
 목록 전체 교체와 부분 수정(aliases/aliasEdits, career/careerEdits, scenes/sceneEdits)은

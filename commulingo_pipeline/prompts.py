@@ -64,8 +64,10 @@ Use card definitions/biographies for concise explanation and body/sections for d
 expand to a character target. Preserve existing information and complete replacement lists.
 For terms, explain meaning, historical context, distinctions or examples only as commissioned.
 Aliases drive automatic links: do not add everyday ambiguous words merely to increase matches.
-Check existing dictionary spellings with the read tool. It is for identity/registry lookup,
-not a new research phase. Keep patronymics separate from given/family names and native names.
+Use dictionary spellings in the supplied snapshot. The read tool can retrieve a known ID
+with get_person/get_term/get_office/get_event/get_sections, at most three times; it cannot
+search names or list records. If a related ID is unknown, omit that unsupported relationship.
+Keep patronymics separate from given/family names and native names.
 Use the official Korean transcription for Russian names, including ш before consonants as 시,
 while preserving established conventional forms. Follow the runtime schema's exact limits.
 Do not use an em dash outside a quoted title. Write 조선민주주의인민공화국/조선 and historical

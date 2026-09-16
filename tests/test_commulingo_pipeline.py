@@ -289,6 +289,16 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
             schema = kwargs['tool']['input_schema']['properties']['fields']['properties']
             self.assertNotIn('expectedRevision',schema)
             self.assertNotIn('evidence',schema)
+            from jsonschema import Draft7Validator
+            lookup_schema = kwargs['read_tools']['commulingo_people']['input_schema']
+            validator = Draft7Validator(lookup_schema)
+            self.assertNotIn('search_people',str(lookup_schema))
+            for action,key in [('get_person','person_id'),('get_sections','person_id'),
+                               ('get_term','term_id'),('get_office','office_id'),('get_event','event_id')]:
+                self.assertTrue(validator.is_valid({'action':action,key:'fixture'}))
+                self.assertFalse(validator.is_valid({'action':action}))
+                self.assertFalse(validator.is_valid({'action':action,'q':'fixture'}))
+            self.assertFalse(validator.is_valid({'action':'search','q':'fixture'}))
             from tool_gateway.results import ToolRejection
             call = AsyncMock(return_value='Registry entry')
             lookup = kwargs['read_wrap']('commulingo_people',call)

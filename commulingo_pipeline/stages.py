@@ -421,6 +421,15 @@ class Draft:
         lookup_actions = ['get_person','get_term','get_office','get_event','get_sections']
         lookup_tool['description'] = 'Targeted lookup of one known dictionary record. At most three calls; current snapshot and catalogs are already supplied.'
         lookup_tool['input_schema']['properties']['action']['enum'] = lookup_actions
+        lookup_schema = lookup_tool['input_schema']
+        lookup_schema['properties'] = {key:value for key,value in lookup_schema['properties'].items()
+            if key in {'action','person_id','term_id','office_id','event_id'}}
+        lookup_schema['additionalProperties'] = False
+        lookup_schema['oneOf'] = [
+            {'properties':{'action':{'const':action}},'required':[identifier]}
+            for action,identifier in (
+                ('get_person','person_id'),('get_sections','person_id'),
+                ('get_term','term_id'),('get_office','office_id'),('get_event','event_id'))]
         lookup_count = 0
         def wrap_lookup(name, call):
             async def bounded(**kwargs):
@@ -437,6 +446,8 @@ class Draft:
             'For people, choose group/groupId from person_groups using their descriptions, not title alone. '
             'Choose role.category from role_categories; do not invent category or office IDs. '
             'Use the supplied current snapshot. At most three targeted dictionary lookups are available; '
+            'Look up only a known ID with get_person/get_sections (person_id), get_term (term_id), '
+            'get_office (office_id), or get_event (event_id). Search actions and q are unavailable. '
             'do not browse lists or investigate unchanged relationships. Submit the first draft early to leave rounds for repair. '
             'Use prose_budgets draft targets to leave room below hard limits; no length quota is implied. '
             'If length is rejected, remove a whole optional clause or sentence and retain the key supported claims. '
