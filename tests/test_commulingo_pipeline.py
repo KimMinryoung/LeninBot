@@ -280,16 +280,26 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
         async def model(**kwargs):
             schema = kwargs['tool']['input_schema']
             validate({'candidates':[candidate]},schema)
-            for candidates in ([candidate,candidate],[{**candidate,'kind':'person'}],
-                               [{**candidate,'mention':'주변'}], [{**candidate,'label':'다른 항목'}]):
-                with self.assertRaises(ValidationError):
-                    validate({'candidates':candidates},schema)
+            with self.assertRaises(ValidationError):
+                validate({'candidates':[candidate,candidate]},schema)
             self.assertIn('zero or one', kwargs['prompt'])
             self.assertNotIn('up to four', kwargs['prompt'])
-            await kwargs['handler']({'candidates':[candidate]})
+            # The runner owns kind, label and mention: a decorated label or a
+            # paraphrased mention is corrected, not rejected (2026-09-17).
+            decorated = {**candidate,'label':'독립 (Independence)','mention':'본문 표현: 독립','kind':'person'}
+            validate({'candidates':[decorated]},schema)
+            await kwargs['handler']({'candidates':[decorated]})
         with patch('commulingo_pipeline.stages.model_call',side_effect=model), patch('db.query_one',return_value=None):
             result = await Discover()({'id':1,'payload':payload},[],Usage(),.2)
         self.assertEqual(result.value['candidates'],[candidate])
+        # Declining a requested entry needs a visible reason.
+        async def decline(**kwargs):
+            with self.assertRaises(ValueError):
+                await kwargs['handler']({'candidates':[]})
+            await kwargs['handler']({'candidates':[],'reason':'The entry already exists as another term.'})
+        with patch('commulingo_pipeline.stages.model_call',side_effect=decline), patch('db.query_one',return_value=None):
+            result = await Discover()({'id':1,'payload':payload},[],Usage(),.2)
+        self.assertEqual(result.value, {'candidates':[], 'skip_reason':'The entry already exists as another term.'})
 
     async def test_canary_wait_is_not_reported_as_daily_budget_failure(self):
         store = Mock()

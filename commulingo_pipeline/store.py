@@ -156,7 +156,8 @@ class Store:
         with self.transaction() as cur:
             cur.execute('''UPDATE commulingo_pipeline_jobs SET status='cancelled', updated_at=now(),
                 last_error='discovery disabled in config/commulingo_pipeline.json'
-                WHERE stage='discover' AND status IN ('ready','deferred','escalated')''')
+                WHERE stage='discover' AND status IN ('ready','deferred','escalated')
+                  AND payload->>'material_id' NOT LIKE 'gap:%%' ''')
             return cur.rowcount
 
     def enqueue_review_repair(self, proposal, decision):
@@ -362,6 +363,18 @@ class Store:
                     VALUES (%s,%s) ON CONFLICT(material_id) DO UPDATE
                     SET content_hash=EXCLUDED.content_hash,processed_at=now()''',
                     (job['payload']['material_id'],job['payload']['content_hash']))
+                if job['payload']['material_id'].startswith('gap:') and not value.get('candidates'):
+                    # A requested entry the model declined stays visible as skipped,
+                    # never as a pending request nothing will pick up again.
+                    cur.execute('''UPDATE commulingo_curation_gaps SET status='skipped',
+                        resolution=%s,updated_at=now() WHERE id=%s AND status='pending' ''',
+                        ('Pipeline discovery declined: ' + (value.get('skip_reason') or 'no reason recorded'),
+                         int(job['payload']['material_id'].split(':')[1])))
+            if (job['stage']=='research' and status=='complete' and job['action']=='create'
+                    and value.get('reason')=='target already exists' and gap_ids(job['payload'])):
+                cur.execute('''UPDATE commulingo_curation_gaps SET status='done',resolved_id=%s,
+                    resolution='Entry already existed when the pipeline researched it',updated_at=now()
+                    WHERE id=ANY(%s) AND status='pending' ''',(job['target'],gap_ids(job['payload'])))
             if job['stage']=='submit' and value.get('status')=='approved' and gap_ids(job['payload']):
                 cur.execute('''UPDATE commulingo_curation_gaps SET status='done',resolved_id=%s,
                     resolution='Approved through durable pipeline',updated_at=now()

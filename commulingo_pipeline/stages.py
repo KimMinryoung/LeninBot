@@ -272,26 +272,30 @@ class Discover:
         overlap_allow = load()['term_event_overlap_allow']
         explicit_gap = job['payload']['material_id'].startswith('gap:')
         if explicit_gap:
+            # The runner already knows kind, label and mention for a requested
+            # entry. They stay optional free strings and are overwritten below:
+            # enum-exact copies were rejected five times per run and the model
+            # then gave up with an empty result, stranding 31 requests (2026-09-17).
             schema['properties']['candidates']['maxItems'] = 1
             props = schema['properties']['candidates']['items']['properties']
-            props['kind'] = {'type':'string','enum':[job['payload']['requested_kind']]}
+            for key in ('kind', 'label', 'mention'):
+                props[key] = {'type':'string'}
             required = schema['properties']['candidates']['items']['required']
             schema['properties']['candidates']['items']['required'] = [k for k in required if k not in {'kind','label','mention'}]
-            for key in ('label', 'mention'):
-                props[key] = {'type':'string','enum':[job['payload']['label']]}
+            schema['properties']['reason'] = {'type':'string','minLength':20,
+                'description':'Required when candidates is empty: why the requested entry should not be registered.'}
         async def finish(value):
             accepted = []
-            if job['payload']['material_id'].startswith('gap:') and len(value['candidates'])>1:
+            if explicit_gap and len(value['candidates'])>1:
                 raise ValueError('an explicit gap commissions only one requested entry')
+            if explicit_gap and not value['candidates']:
+                if len((value.get('reason') or '').strip()) < 20:
+                    raise ValueError('an empty result for a requested entry needs a reason of at least 20 characters')
+                box['skip_reason'] = value['reason'].strip()
             for candidate in value['candidates']:
                 if explicit_gap:
-                    fixed = {'kind':job['payload']['requested_kind'], 'label':job['payload']['label'], 'mention':job['payload']['label']}
-                    if any(k in candidate and candidate[k]!=v for k,v in fixed.items()):
-                        raise ValueError('explicit gap must match its requested kind and label exactly')
-                    candidate = {**candidate, **fixed}
-                if job['payload'].get('requested_kind'):
-                    if candidate['kind']!=job['payload']['requested_kind'] or candidate['mention']!=job['payload']['label']:
-                        raise ValueError('explicit gap must match its requested kind and label exactly')
+                    candidate = {**candidate, 'kind':job['payload']['requested_kind'],
+                                 'label':job['payload']['label'], 'mention':job['payload']['label']}
                 if candidate['mention'] not in job['payload']['body']:
                     raise ValueError('candidate mention must occur exactly in this material')
                 table,aliases,foreign,label = ('commulingo_people','commulingo_person_aliases','person_id','name') if candidate['kind']=='person' else ('commulingo_terms','commulingo_term_aliases','term_id','term')
@@ -313,6 +317,8 @@ class Discover:
             f'kind={job["payload"]["requested_kind"]!r}, label and mention={job["payload"]["label"]!r}. '
             'The target is a lowercase hyphenated dictionary slug, never a gap ID. '
             'The runner supplies kind, label and mention; submit target and reason only. Do not propose neighboring names or concepts. '
+            'If the entry should not be registered (already present under another name, not a dictionary subject), '
+            'return empty candidates with a top-level reason. '
             if explicit_gap else 'DISCOVERY ONLY: identify up to four historically useful missing people or concept terms ')
         prompt = (commission +
             'explicitly mentioned in this public material. Check current dictionary aliases. '

@@ -21,6 +21,7 @@ def load():
             raise ValueError(f'{name} must be boolean')
     # Discovery mines public material for new entries. Off by operator decision
     # (2026-09-17): the queue was 2,630 material jobs, mostly single person cards.
+    # Explicitly requested entries (curation gaps) are not affected by this switch.
     value.setdefault('discovery', True)
     if type(value['discovery']) is not bool:
         raise ValueError('discovery must be boolean')

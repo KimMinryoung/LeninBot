@@ -170,7 +170,10 @@ class Planner:
         from .config import load
         discovery = load()['discovery']
         candidates = self.candidates(limit)
-        materials = self.materials(min(limit,10)) if discovery else []
+        # discovery=false stops mining public material; explicitly requested
+        # entries (gap: materials) are registrations, not discovery, and continue.
+        materials = [m for m in self.materials(min(limit,10))
+                     if discovery or m['material_id'].startswith('gap:')]
         if apply:
             for candidate in candidates:
                 self.store.enqueue(**candidate)

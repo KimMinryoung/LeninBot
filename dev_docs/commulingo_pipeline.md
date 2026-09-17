@@ -44,9 +44,13 @@ ko 2,000자 또는 en 4,500자 이상인 용어(용어 본문에는 schema 상�
 사건 서술을 옮긴 것에 불과해 더 보강하지 않을 기존 용어는 `term_enrichment_exclude`에 명시한다(현재 비어 있음;
 2026-09-17 운영자 지시로 doctors-plot, kronstadt-rebellion-1921, leningrad-affair, volga-famine은 사전에서 삭제했다). 계획 단계가 미착수 ready 묶음의 priority를
 갱신하고 자격을 잃은 묶음은 cancelled로 정리한다.
-발견(discover) 작업은 `config/commulingo_pipeline.json`의 `discovery=false`로 완전히 중단했다(운영자 결정
-2026-09-17). 꺼져 있으면 새 자료 작업을 만들지 않고, 대기 중이던 발견 작업은 계획 단계에서 cancelled로
-정리한다. 대상 ID가 있는 명시적 gap은 발견이 아니라 일반 선정 경로이므로 계속 처리된다. frontend의 유효한 완료 주제와 대기 제안을 존중한다.
+발견(discover) 작업은 `config/commulingo_pipeline.json`의 `discovery=false`로 중단했다(운영자 결정
+2026-09-17). 꺼져 있으면 공개 자료(보고서·사건·인물 카드)에서 새 항목을 캐는 작업을 만들지 않고, 대기 중이던
+자료 작업은 계획 단계에서 cancelled로 정리한다. 명시적 요청(curation gap)은 발견이 아니라 등록이므로 이 스위치와
+무관하게 계속 처리된다: 대상 ID가 있으면 일반 선정 경로, 없으면 `gap:` 자료로 slug를 정하는 단일 후보 discover 단계를 거친다.
+명시 gap의 kind·label·mention은 실행기가 덮어쓰며 모델의 표기 차이로 거절하지 않는다(과거에는 다섯 번 거절 뒤
+빈 결과로 끝나 요청 31건이 pending인 채 방치됐다). 빈 결과에는 20자 이상의 reason이 필요하고 gap은 그 사유와 함께
+`skipped`가 된다. 조사 단계가 "대상이 이미 존재"로 끝나면 gap을 resolved_id와 함께 done으로 닫는다. frontend의 유효한 완료 주제와 대기 제안을 존중한다.
 
 보강 후보는 계획 한도를 적용하기 전에 kind·target 기준으로 묶고 `topic=enrichment`,
 `payload.topics`에 원래 주제를 보존한다. 활성 작업이 있는 대상은 제외한다.
