@@ -42,13 +42,18 @@ class PolicyTests(unittest.IsolatedAsyncioTestCase):
         threaded.start()
         self.addCleanup(threaded.stop)
 
-    def test_only_retrieved_quotes_covering_sources_and_risks_can_approve(self):
+    def test_only_retrieved_quotes_resolving_risks_can_approve(self):
         self.assertEqual(validate_decision(DECISION,PROPOSAL,{SOURCE:QUOTE}),DECISION)
         for fetched in ({},{SOURCE:'search result snippet'}):
             with self.assertRaises(ValueError):validate_decision(DECISION,PROPOSAL,fetched)
         for change in ({'resolved_risks':[]},{'checks':[]}):
             with self.assertRaises(ValueError):validate_decision({**DECISION,**change},PROPOSAL,{SOURCE:QUOTE})
-        with self.assertRaises(ValueError):validate_decision(DECISION,{**PROPOSAL,'source_refs':['another citation']},{SOURCE:QUOTE})
+        # Relaxed 2026-09-17: approval no longer needs a check per cited reference
+        # or a source outside Wikipedia, only verified quotes and resolved risks.
+        self.assertEqual(validate_decision(DECISION,{**PROPOSAL,'source_refs':['another citation',SOURCE]},{SOURCE:QUOTE}),DECISION)
+        wiki='https://en.wikipedia.org/wiki/Entry'
+        wiki_only={**DECISION,'checks':[{**DECISION['checks'][0],'source':wiki}]}
+        self.assertEqual(validate_decision(wiki_only,PROPOSAL,{wiki:QUOTE}),wiki_only)
     def test_research_routing_hint_requires_boolean(self):
         for needed in (True,False):
             value={**DECISION,'decision':'revise','needs_research':needed}
@@ -65,8 +70,6 @@ class PolicyTests(unittest.IsolatedAsyncioTestCase):
             validate_decision(value,PROPOSAL,{SOURCE:QUOTE})
 
     def test_failed_coverage_reports_exact_missing_identifiers(self):
-        with self.assertRaisesRegex(ValueError, 'original citation with annotation'):
-            validate_decision(DECISION, {**PROPOSAL, 'source_refs': ['original citation with annotation']}, {SOURCE: QUOTE})
         with self.assertRaisesRegex(ValueError, 'identity_uncertain'):
             validate_decision({**DECISION, 'resolved_risks': ['identity_uncertain: explanation']}, PROPOSAL, {SOURCE: QUOTE})
 

@@ -113,10 +113,10 @@ def validate_decision(value, proposal, fetched):
     if decision in {"approve", "revise", "reject"} and not checks:
         raise ValueError("approve/revise/reject requires retrieved evidence; otherwise escalate")
     if decision == "approve":
-        if not set(proposal.get("source_refs") or []).issubset({c["citation"] for c in checks}):
-            raise ValueError("approval must independently verify every cited reference; copy these missing source_refs verbatim into checks[].citation: " + json.dumps(sorted(set(proposal.get("source_refs") or []) - {c["citation"] for c in checks}), ensure_ascii=False))
-        if not any(not (urlsplit(c["source"]).hostname or "").endswith("wikipedia.org") for c in checks):
-            raise ValueError("approval requires an independent source outside Wikipedia")
+        # Approval needs verified quotes and every named risk resolved. It does
+        # not need a check per cited reference or a non-Wikipedia source: those
+        # requirements forced extra fetches and lost otherwise sound reviews at
+        # the round limit (operator relaxed them 2026-09-17).
         if not set(proposal.get("risks") or []).issubset(set(risks)):
             raise ValueError("approval must resolve every review risk; resolved_risks must include these exact identifiers (explanations belong in reason/findings): " + json.dumps(sorted(set(proposal.get("risks") or []) - set(risks)), ensure_ascii=False))
     return value
