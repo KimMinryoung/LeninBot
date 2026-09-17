@@ -41,8 +41,8 @@ research artifact에 고정한다. 계획의 baseline은 변경 감지용 타임
 ko 2,000자 또는 en 4,500자 이상인 용어(용어 본문에는 schema 상한이 없어 절대값)는 통째 재작성을 피하기 위해 제외,
 사건 중복 검사는 **신규 등록에만** 적용한다: gap·발견 후보의 이름이 역사 사건 제목과 같으면 등록하지 않는다
 (`term_event_overlap_allow`의 id는 예외, 현재 battle-of-lake-khasan). 기존 용어는 이 규칙으로 빠지지 않는다.
-사건 서술을 옮긴 것에 불과해 더 보강하지 않을 기존 용어는 `term_enrichment_exclude`에 명시한다(운영자 판단 2026-09-17:
-doctors-plot, kronstadt-rebellion-1921, leningrad-affair, volga-famine). 계획 단계가 미착수 ready 묶음의 priority를
+사건 서술을 옮긴 것에 불과해 더 보강하지 않을 기존 용어는 `term_enrichment_exclude`에 명시한다(현재 비어 있음;
+2026-09-17 운영자 지시로 doctors-plot, kronstadt-rebellion-1921, leningrad-affair, volga-famine은 사전에서 삭제했다). 계획 단계가 미착수 ready 묶음의 priority를
 갱신하고 자격을 잃은 묶음은 cancelled로 정리한다.
 발견(discover) 작업은 `config/commulingo_pipeline.json`의 `discovery=false`로 완전히 중단했다(운영자 결정
 2026-09-17). 꺼져 있으면 새 자료 작업을 만들지 않고, 대기 중이던 발견 작업은 계획 단계에서 cancelled로

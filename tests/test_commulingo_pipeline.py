@@ -102,7 +102,7 @@ class PlannerSelectionTests(unittest.TestCase):
         self.assertIn("length(t.body_ko) >= %(body_ko)s", sql)
         self.assertIn("t.id <> ALL(%(term_exclude)s::text[])", sql)
         self.assertEqual((params['term_grace'], params['body_ko'], params['body_en']), (90, 2000, 4500))
-        self.assertEqual(params['term_exclude'], ['doctors-plot', 'kronstadt-rebellion-1921', 'leningrad-affair', 'volga-famine'])
+        self.assertEqual(params['term_exclude'], [])
         # New registrations, not existing entries, are checked against event titles.
         gap_sql, gap_params = cur.execute.call_args_list[1].args
         self.assertIn("lower(ev.title_ko)=lower(g.label_ko)", gap_sql)
