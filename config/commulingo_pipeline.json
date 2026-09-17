@@ -6,5 +6,8 @@
   "canary_per_group_per_day": 1,
   "legacy_shared_budget": true,
   "term_editorial_service": true,
-  "discovery": false
+  "discovery": false,
+  "term_event_overlap_allow": [
+    "battle-of-lake-khasan"
+  ]
 }

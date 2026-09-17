@@ -35,6 +35,12 @@ research artifact에 고정한다. 계획의 baseline은 변경 감지용 타임
 반영 후 재보강 유예: 파이프라인이 승인·반영한 편집(submit artifact status=approved)이 있는 인물은 연결 사건
 6건 이상이면 14일, 나머지는 90일 동안 새 보강 후보에서 제외된다(`store.PERSON_IN_GRACE_SQL`, 운영자 결정 2026-09-17).
 계획 단계는 유예 중인 인물의 미착수 ready 묶음도 cancelled로 정리하며, 유예가 끝나면 다시 선정된다.
+용어 보강(운영자 결정 2026-09-17): 순서는 본문(ko 또는 en)이 빈 용어가 먼저, 그 안에서는 공개 연구 문서가
+그 용어를 링크한 수(frontend 렌더 캐시 `data/cache/report-renders.json`의 실제 링크, `commulingo_pipeline/mentions.py`)가
+많은 순이다(`store.term_priority`). 파이프라인이 승인·반영한 편집이 있는 용어는 90일 유예, 본문이 이미
+ko 2,000자 또는 en 4,500자 이상인 용어(용어 본문에는 schema 상한이 없어 절대값)는 통째 재작성을 피하기 위해 제외,
+id·제목·별칭이 역사 사건과 일치하는 용어는 사건 레인 몫이므로 제외한다(`term_event_overlap_allow`로 예외 지정,
+현재 battle-of-lake-khasan). 계획 단계가 미착수 ready 묶음의 priority를 갱신하고 자격을 잃은 묶음은 cancelled로 정리한다.
 발견(discover) 작업은 `config/commulingo_pipeline.json`의 `discovery=false`로 완전히 중단했다(운영자 결정
 2026-09-17). 꺼져 있으면 새 자료 작업을 만들지 않고, 대기 중이던 발견 작업은 계획 단계에서 cancelled로
 정리한다. 대상 ID가 있는 명시적 gap은 발견이 아니라 일반 선정 경로이므로 계속 처리된다. frontend의 유효한 완료 주제와 대기 제안을 존중한다.

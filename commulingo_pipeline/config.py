@@ -24,6 +24,12 @@ def load():
     value.setdefault('discovery', True)
     if type(value['discovery']) is not bool:
         raise ValueError('discovery must be boolean')
+    # Terms that coincide with a history event leave the term queue; these
+    # stay because the event registry only holds a larger encompassing event.
+    value.setdefault('term_event_overlap_allow', [])
+    if not isinstance(value['term_event_overlap_allow'], list) or any(
+            type(v) is not str for v in value['term_event_overlap_allow']):
+        raise ValueError('term_event_overlap_allow must be a list of term ids')
     return value
 
 

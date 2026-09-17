@@ -2,12 +2,18 @@
 import hashlib
 from collections import deque
 from .bundles import bundle_candidates
-from .store import SECTION_CAP_SQL, PERSON_EVENTS_SQL, PERSON_IN_GRACE_SQL, GRACE_PARAMS
+from .store import (SECTION_CAP_SQL, PERSON_EVENTS_SQL, PERSON_IN_GRACE_SQL, GRACE_PARAMS,
+                    TERM_IN_GRACE_SQL, TERM_BODY_ENOUGH_SQL, TERM_EVENT_OVERLAP_SQL, term_params, term_priority)
+from .mentions import report_mentions_by_term
 
 
 class Planner:
-    def __init__(self, store):
+    def __init__(self, store, overlap_allow=None):
         self.store = store
+        if overlap_allow is None:
+            from .config import load
+            overlap_allow = load()['term_event_overlap_allow']
+        self.overlap_allow = list(overlap_allow)
 
     def candidates(self, limit=40):
         with self.store.transaction() as cur:
@@ -19,7 +25,7 @@ class Planner:
                 topic.name AS topic,
                 100 - LEAST((SELECT count(DISTINCT e.event_id) FROM commulingo_history_event_people e
                              WHERE e.person_id=p.id),79) AS priority,
-                'Commissioned missing information or evidence: ' || topic.name AS reason,
+                'Commissioned missing information or evidence: ' || topic.name AS reason, NULL::boolean AS body_empty,
                 concat_ws(':',p.updated_at::text,
                     (SELECT max(e.created_at)::text FROM commulingo_person_evidence e WHERE e.person_id=p.id),
                     (SELECT max(s.updated_at)::text FROM commulingo_person_sections s WHERE s.person_id=p.id)) AS baseline
@@ -45,7 +51,8 @@ class Planner:
                 AND NOT ''' + PERSON_IN_GRACE_SQL.format(person='p.id') + '''
                 UNION ALL
                 SELECT 'term','update',t.id,topic.name,topic.priority,
-                    'Commissioned glossary explanation: ' || topic.name,t.updated_at::text
+                    'Commissioned glossary explanation: ' || topic.name,t.updated_at::text,
+                    (t.body_ko='' OR t.body_en='') AS body_empty
                 FROM commulingo_terms t CROSS JOIN LATERAL (VALUES
                     ('definition',30,t.definition_ko='' OR t.definition_en='' OR NOT EXISTS
                         (SELECT 1 FROM commulingo_term_evidence e WHERE e.term_id=t.id AND e.field='definition')),
@@ -59,8 +66,19 @@ class Planner:
                     WHERE e.term_id=t.id AND e.topic=topic.name AND e.status!='open' AND e.review_after>now())
                 AND NOT EXISTS (SELECT 1 FROM commulingo_agent_suggestions s
                     WHERE s.target_id=t.id AND s.target_type='term' AND s.status='pending')
-                ORDER BY priority,target''', GRACE_PARAMS)
+                AND NOT ''' + TERM_IN_GRACE_SQL.format(term='t.id') + '''
+                AND NOT ''' + TERM_BODY_ENOUGH_SQL.format(t='t') + '''
+                AND NOT ''' + TERM_EVENT_OVERLAP_SQL.format(t='t') + '''
+                ORDER BY priority,target''', {**GRACE_PARAMS, **term_params(self.overlap_allow)})
             candidates = [dict(row) for row in cur.fetchall()]
+            # Term order is decided here, not in SQL: body-less first, then by
+            # the number of public reports that link the term (operator
+            # decision 2026-09-17). Bundling below keeps the first row's priority.
+            mentions = report_mentions_by_term()
+            for row in candidates:
+                body_empty = row.pop('body_empty', None)
+                if row['kind']=='term' and row['action']=='update':
+                    row['priority'] = term_priority(body_empty, mentions.get(row['target'],0))
             cur.execute('''SELECT kind,CASE WHEN
                     (kind='person' AND EXISTS (SELECT 1 FROM commulingo_people p WHERE p.id=COALESCE(NULLIF(g.target_id,''),NULLIF(g.resolved_id,'')))) OR
                     (kind='term' AND EXISTS (SELECT 1 FROM commulingo_terms t WHERE t.id=COALESCE(NULLIF(g.target_id,''),NULLIF(g.resolved_id,''))))
@@ -151,6 +169,9 @@ class Planner:
                 self.store.enqueue(**candidate)
             self.store.reprioritize_people()
             self.store.retire_people_in_grace()
+            self.store.reprioritize_terms({c['target']:c['priority'] for c in candidates
+                                           if c['kind']=='term' and c['action']=='update'})
+            self.store.retire_unqualified_terms(self.overlap_allow)
             if not discovery:
                 self.store.cancel_discovery()
             for material in materials:

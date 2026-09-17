@@ -72,7 +72,8 @@ class PlannerSelectionTests(unittest.TestCase):
         def transaction():
             yield cur
         store.transaction = transaction
-        return Planner(store).candidates(limit)
+        with patch('commulingo_pipeline.planner.report_mentions_by_term', return_value={}):
+            return Planner(store, overlap_allow=[]).candidates(limit)
 
     def row(self, target):
         return dict(kind='person', action='update', target=target, topic='basics',
@@ -88,13 +89,39 @@ class PlannerSelectionTests(unittest.TestCase):
         def transaction():
             yield cur
         store.transaction = transaction
-        Planner(store).candidates(5)
+        with patch('commulingo_pipeline.planner.report_mentions_by_term', return_value={}):
+            Planner(store).candidates(5)
         sql, params = cur.execute.call_args_list[0].args
         self.assertIn("100 - LEAST((SELECT count(DISTINCT e.event_id)", sql)  # importance ordering
         self.assertIn("CASE WHEN (SELECT count(DISTINCT e.event_id) FROM commulingo_history_event_people e WHERE e.person_id=p.id)>=6 THEN 12", sql)
         self.assertIn("a.stage='submit' AND a.value->>'status'='approved'", sql)  # grace after applied edits
-        self.assertEqual(params, GRACE_PARAMS)
+        self.assertEqual({k:params[k] for k in GRACE_PARAMS}, GRACE_PARAMS)
         self.assertEqual((params['grace_important'], params['grace_other']), (14, 90))
+        # Terms: grace after applied edits, substantial bodies and event twins stay out.
+        self.assertIn("g.kind='term' AND g.target=t.id AND a.stage='submit'", sql)
+        self.assertIn("length(t.body_ko) >= %(body_ko)s", sql)
+        self.assertIn("t.id <> ALL(%(overlap_allow)s::text[])", sql)
+        self.assertEqual((params['term_grace'], params['body_ko'], params['body_en']), (90, 2000, 4500))
+        self.assertEqual(params['overlap_allow'], ['battle-of-lake-khasan'])
+
+    def test_term_candidates_are_ordered_by_body_and_report_mentions(self):
+        from commulingo_pipeline.planner import Planner
+        cur = Mock()
+        rows = [dict(kind='term', action='update', target=t, topic='history', priority=40, baseline='b',
+                     reason='r', body_empty=empty) for t, empty in
+                (('quiet', True), ('popular', True), ('written', False), ('written-popular', False))]
+        cur.fetchall.side_effect = [rows, [], []]
+        store = Mock()
+        @contextmanager
+        def transaction():
+            yield cur
+        store.transaction = transaction
+        with patch('commulingo_pipeline.planner.report_mentions_by_term',
+                   return_value={'popular': 18, 'written-popular': 40}):
+            selected = Planner(store, overlap_allow=[]).candidates(10)
+        self.assertEqual([r['target'] for r in selected], ['popular', 'quiet', 'written-popular', 'written'])
+        self.assertEqual([r['priority'] for r in selected], [32, 50, 51, 80])
+        self.assertNotIn('body_empty', selected[0])
 
     def test_active_jobs_with_changed_baselines_do_not_consume_limit(self):
         for kind in ('person', 'term'):
