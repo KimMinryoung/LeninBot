@@ -10,8 +10,14 @@ class Planner:
 
     def candidates(self, limit=40):
         with self.store.transaction() as cur:
+            # People are ordered by importance, measured for now as the number
+            # of linked history events (operator decision 2026-09-17), not by
+            # topic or alphabetical enqueue order. 100 - events keeps every
+            # value in the non-urgent range (>=20) used by the scheduler.
             cur.execute('''SELECT 'person' AS kind,'update' AS action,p.id AS target,
-                topic.name AS topic,topic.priority,
+                topic.name AS topic,
+                100 - LEAST((SELECT count(DISTINCT e.event_id) FROM commulingo_history_event_people e
+                             WHERE e.person_id=p.id),79) AS priority,
                 'Commissioned missing information or evidence: ' || topic.name AS reason,
                 concat_ws(':',p.updated_at::text,
                     (SELECT max(e.created_at)::text FROM commulingo_person_evidence e WHERE e.person_id=p.id),
@@ -133,11 +139,16 @@ class Planner:
         return rows
 
     def plan(self, *, apply=False, limit=40):
+        from .config import load
+        discovery = load()['discovery']
         candidates = self.candidates(limit)
-        materials = self.materials(min(limit,10))
+        materials = self.materials(min(limit,10)) if discovery else []
         if apply:
             for candidate in candidates:
                 self.store.enqueue(**candidate)
+            self.store.reprioritize_people()
+            if not discovery:
+                self.store.cancel_discovery()
             for material in materials:
                 target = 'material-'+hashlib.sha256((material['material_id']+material['content_hash']).encode()).hexdigest()[:32]
                 self.store.enqueue(kind='term',action='create',target=target,topic='discovery',

@@ -19,6 +19,11 @@ def load():
     for name in ('legacy_shared_budget','term_editorial_service'):
         if type(value[name]) is not bool:
             raise ValueError(f'{name} must be boolean')
+    # Discovery mines public material for new entries. Off by operator decision
+    # (2026-09-17): the queue was 2,630 material jobs, mostly single person cards.
+    value.setdefault('discovery', True)
+    if type(value['discovery']) is not bool:
+        raise ValueError('discovery must be boolean')
     return value
 
 

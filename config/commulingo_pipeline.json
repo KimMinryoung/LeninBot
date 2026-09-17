@@ -5,5 +5,6 @@
   "stage_budget_usd": 0.2,
   "canary_per_group_per_day": 1,
   "legacy_shared_budget": true,
-  "term_editorial_service": true
+  "term_editorial_service": true,
+  "discovery": false
 }

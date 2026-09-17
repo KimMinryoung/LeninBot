@@ -41,6 +41,26 @@ class Store:
             row = cur.fetchone()
             return row['id'] if row else None
 
+    def reprioritize_people(self):
+        """Refresh untouched person enrichment priorities from current event links."""
+        with self.transaction() as cur:
+            cur.execute('''UPDATE commulingo_pipeline_jobs j SET priority=x.priority, updated_at=now()
+                FROM (SELECT p.id, 100 - LEAST((SELECT count(DISTINCT e.event_id)
+                        FROM commulingo_history_event_people e WHERE e.person_id=p.id),79) AS priority
+                      FROM commulingo_people p) x
+                WHERE j.kind='person' AND j.action='update' AND j.topic='enrichment'
+                  AND j.status='ready' AND j.attempts=0 AND j.priority>=20
+                  AND j.target=x.id AND j.priority!=x.priority''')
+            return cur.rowcount
+
+    def cancel_discovery(self):
+        """Discovery is switched off: retire queued material jobs without deleting history."""
+        with self.transaction() as cur:
+            cur.execute('''UPDATE commulingo_pipeline_jobs SET status='cancelled', updated_at=now(),
+                last_error='discovery disabled in config/commulingo_pipeline.json'
+                WHERE stage='discover' AND status IN ('ready','deferred','escalated')''')
+            return cur.rowcount
+
     def enqueue_review_repair(self, proposal, decision):
         """One durable correction per original proposal, even after completion/replay."""
         if proposal['action'] not in {'create','update'}:
