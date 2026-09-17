@@ -64,7 +64,8 @@ class Store:
                         FROM commulingo_history_event_people e WHERE e.person_id=p.id),79) AS priority
                       FROM commulingo_people p) x
                 WHERE j.kind='person' AND j.action='update' AND j.topic='enrichment'
-                  AND j.status='ready' AND j.attempts=0 AND j.priority>=20
+                  AND j.status='ready' AND j.priority>=20
+                  AND NOT EXISTS (SELECT 1 FROM commulingo_pipeline_artifacts a WHERE a.job_id=j.id)
                   AND j.target=x.id AND j.priority!=x.priority''')
             return cur.rowcount
 
@@ -74,7 +75,8 @@ class Store:
             cur.execute("""UPDATE commulingo_pipeline_jobs j SET status='cancelled', updated_at=now(),
                 last_error='re-enrichment grace after an applied edit'
                 WHERE j.kind='person' AND j.action='update' AND j.topic='enrichment'
-                  AND j.status='ready' AND j.attempts=0 AND j.priority>=20
+                  AND j.status='ready' AND j.stage='research' AND j.priority>=20
+                  AND NOT EXISTS (SELECT 1 FROM commulingo_pipeline_artifacts a WHERE a.job_id=j.id)
                   AND """ + PERSON_IN_GRACE_SQL.format(person='j.target'), GRACE_PARAMS)
             return cur.rowcount
 

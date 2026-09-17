@@ -358,6 +358,19 @@ class Draft:
                 props = schema['properties'].get('role',{}).get('properties',{})
                 if field in props:
                     props[field]['enum'] = role_ids
+            # An existing classification is not up for revision in an enrichment
+            # pass: the card pass rewrote Stalin's office role (party leadership)
+            # into a bloc-leader category on 2026-09-17. Only a person who has no
+            # role or no group may receive one here.
+            current = research.get('current') or {}
+            if job['action']=='update':
+                role = current.get('role') or {}
+                if role.get('officeId') or role.get('category') or role.get('categoryId'):
+                    schema['properties'].pop('role',None)
+                if current.get('groupId') or current.get('group'):
+                    for field in ('group','groupId'):
+                        schema['properties'].pop(field,None)
+                schema['required'] = [f for f in schema.get('required',[]) if f in schema['properties']]
         for collection,edits in (('aliases','aliasEdits'),('career','careerEdits'),('scenes','sceneEdits')):
             if collection in schema['properties'] and edits in schema['properties']:
                 schema.setdefault('allOf',[]).append({'not':{'required':[collection,edits]}})

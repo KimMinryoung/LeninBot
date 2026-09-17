@@ -523,6 +523,29 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.value['fields']['groupId'],'foreign-statesmen')
         self.assertEqual(result.value['fields']['expectedRevision'],'original')
 
+    async def test_enrichment_draft_cannot_reclassify_an_existing_person(self):
+        from commulingo_pipeline.stages import Draft
+        from commulingo_pipeline.engine import Usage
+        store=Mock()
+        store.sources.return_value={}
+        groups=[{'id':'bolshevik','title_ko':'볼셰비키','blurb_ko':'설명'}]
+        seen={}
+        async def model(**kwargs):
+            seen['props']=set(kwargs['tool']['input_schema']['properties']['fields']['properties'])
+            await kwargs['handler']({'fields':{'epithet':{'ko':'수정','en':'fixed'}}})
+        current={'revision':'v1','group':'bolshevik','groupId':'bolshevik',
+                 'role':{'officeId':'party-leadership','category':''}}
+        with patch('runtime_tools.commulingo_people._list_groups',return_value=groups), \
+             patch('runtime_tools.commulingo_people._list_categories',return_value=[{'id':'socialist-bloc-leader'}]), \
+             patch('commulingo_pipeline.stages.model_call',side_effect=model), patch('commulingo_pipeline.stages.service.call',return_value={}):
+            await Draft(store)({'id':1,'kind':'person','action':'update','topic':'basics','target':'stalin'},
+                [{'stage':'research','value':{'baseline':'v1','claims':[],'current':current}}],Usage(),.2)
+            self.assertFalse({'role','group','groupId'} & seen['props'])
+            # A person without any classification still receives one.
+            await Draft(store)({'id':2,'kind':'person','action':'update','topic':'basics','target':'new'},
+                [{'stage':'research','value':{'baseline':'v1','claims':[],'current':{'revision':'v1','role':{}}}}],Usage(),.2)
+            self.assertTrue({'role','groupId'} <= seen['props'])
+
     async def test_submission_replay_uses_identical_receipt_keys(self):
         from commulingo_pipeline.stages import submit
         from commulingo_pipeline.engine import Usage
