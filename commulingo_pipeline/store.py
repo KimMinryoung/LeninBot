@@ -106,18 +106,20 @@ class Store:
                   AND """ + PERSON_IN_GRACE_SQL.format(person='j.target'), GRACE_PARAMS)
             return cur.rowcount
 
-    def reprioritize_terms(self, priorities):
-        """Refresh untouched term enrichment priorities (target -> priority)."""
-        if not priorities:
-            return 0
+    def reprioritize_terms(self, mentions):
+        """Refresh untouched term enrichment priorities from body state and report mentions."""
+        ids = list(mentions or {})
         with self.transaction() as cur:
             cur.execute('''UPDATE commulingo_pipeline_jobs j SET priority=x.priority, updated_at=now()
-                FROM unnest(%s::text[], %s::int[]) AS x(target, priority)
+                FROM (SELECT t.id, (CASE WHEN t.body_ko='' OR t.body_en='' THEN 21 ELSE 51 END)
+                             + GREATEST(0, 29 - LEAST(COALESCE(m.mentions,0), 29)) AS priority
+                      FROM commulingo_terms t
+                      LEFT JOIN unnest(%s::text[], %s::int[]) AS m(id, mentions) ON m.id=t.id) x
                 WHERE j.kind='term' AND j.action='update' AND j.topic='enrichment'
                   AND j.status='ready' AND j.stage='research' AND j.priority>=20
                   AND NOT EXISTS (SELECT 1 FROM commulingo_pipeline_artifacts a WHERE a.job_id=j.id)
-                  AND j.target=x.target AND j.priority!=x.priority''',
-                (list(priorities), [int(v) for v in priorities.values()]))
+                  AND j.target=x.id AND j.priority!=x.priority''',
+                (ids, [int(mentions[i]) for i in ids]))
             return cur.rowcount
 
     def retire_unqualified_terms(self, overlap_allow):

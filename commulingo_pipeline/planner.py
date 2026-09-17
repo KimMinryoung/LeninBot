@@ -25,10 +25,11 @@ class Planner:
                 topic.name AS topic,
                 100 - LEAST((SELECT count(DISTINCT e.event_id) FROM commulingo_history_event_people e
                              WHERE e.person_id=p.id),79) AS priority,
-                'Commissioned missing information or evidence: ' || topic.name AS reason, NULL::boolean AS body_empty,
+                'Commissioned missing information or evidence: ' || topic.name AS reason,
                 concat_ws(':',p.updated_at::text,
                     (SELECT max(e.created_at)::text FROM commulingo_person_evidence e WHERE e.person_id=p.id),
-                    (SELECT max(s.updated_at)::text FROM commulingo_person_sections s WHERE s.person_id=p.id)) AS baseline
+                    (SELECT max(s.updated_at)::text FROM commulingo_person_sections s WHERE s.person_id=p.id)) AS baseline,
+                NULL::boolean AS body_empty
                 FROM commulingo_people p CROSS JOIN LATERAL (VALUES
                     ('basics',20,p.years_label='' OR p.epithet_ko='' OR p.epithet_en=''
                         OR NOT EXISTS (SELECT 1 FROM commulingo_person_roles r WHERE r.person_id=p.id)
@@ -169,8 +170,7 @@ class Planner:
                 self.store.enqueue(**candidate)
             self.store.reprioritize_people()
             self.store.retire_people_in_grace()
-            self.store.reprioritize_terms({c['target']:c['priority'] for c in candidates
-                                           if c['kind']=='term' and c['action']=='update'})
+            self.store.reprioritize_terms(report_mentions_by_term())
             self.store.retire_unqualified_terms(self.overlap_allow)
             if not discovery:
                 self.store.cancel_discovery()
