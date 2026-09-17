@@ -17,6 +17,21 @@ class BudgetUnavailable(RuntimeError):
     pass
 
 
+# Importance tier (operator decision 2026-09-17): people linked to at least this
+# many history events get the deep section budget and the short re-enrichment grace.
+IMPORTANT_EVENTS = 6
+GRACE_DAYS_IMPORTANT, GRACE_DAYS_OTHER = 14, 90
+# Linked events -> maximum number of detail sections commissioned.
+SECTION_CAP_SQL = 'CASE WHEN {events}>=6 THEN 12 WHEN {events}>=3 THEN 5 WHEN {events}>=1 THEN 3 ELSE 2 END'
+PERSON_EVENTS_SQL = '(SELECT count(DISTINCT e.event_id) FROM commulingo_history_event_people e WHERE e.person_id={person})'
+# True while a person's last pipeline-applied edit is younger than their grace window.
+PERSON_IN_GRACE_SQL = ('EXISTS (SELECT 1 FROM commulingo_pipeline_artifacts a JOIN commulingo_pipeline_jobs g ON g.id=a.job_id '
+    "WHERE g.kind='person' AND g.target={person} AND a.stage='submit' AND a.value->>'status'='approved' "
+    'AND a.created_at > now() - (CASE WHEN ' + PERSON_EVENTS_SQL + ' >= %(important)s '
+    "THEN %(grace_important)s ELSE %(grace_other)s END) * interval '1 day')")
+GRACE_PARAMS = {'important':IMPORTANT_EVENTS,'grace_important':GRACE_DAYS_IMPORTANT,'grace_other':GRACE_DAYS_OTHER}
+
+
 class Store:
     def __init__(self, connect=None):
         if connect is None:
@@ -51,6 +66,16 @@ class Store:
                 WHERE j.kind='person' AND j.action='update' AND j.topic='enrichment'
                   AND j.status='ready' AND j.attempts=0 AND j.priority>=20
                   AND j.target=x.id AND j.priority!=x.priority''')
+            return cur.rowcount
+
+    def retire_people_in_grace(self):
+        """Untouched enrichment bundles for recently edited people wait out their grace window."""
+        with self.transaction() as cur:
+            cur.execute("""UPDATE commulingo_pipeline_jobs j SET status='cancelled', updated_at=now(),
+                last_error='re-enrichment grace after an applied edit'
+                WHERE j.kind='person' AND j.action='update' AND j.topic='enrichment'
+                  AND j.status='ready' AND j.attempts=0 AND j.priority>=20
+                  AND """ + PERSON_IN_GRACE_SQL.format(person='j.target'), GRACE_PARAMS)
             return cur.rowcount
 
     def cancel_discovery(self):

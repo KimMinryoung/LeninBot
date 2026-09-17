@@ -2,6 +2,7 @@
 import hashlib
 from collections import deque
 from .bundles import bundle_candidates
+from .store import SECTION_CAP_SQL, PERSON_EVENTS_SQL, PERSON_IN_GRACE_SQL, GRACE_PARAMS
 
 
 class Planner:
@@ -34,12 +35,14 @@ class Planner:
                         OR NOT EXISTS (SELECT 1 FROM commulingo_person_evidence e WHERE e.person_id=p.id AND e.field IN ('nationalOrigin','origin'))),
                     ('moment',40,p.moment_ko='' OR p.moment_en='' OR NOT EXISTS
                         (SELECT 1 FROM commulingo_person_evidence e WHERE e.person_id=p.id AND e.field='moment')),
-                    ('sections',50,(SELECT count(*) FROM commulingo_person_sections s WHERE s.person_id=p.id)<12)
+                    ('sections',50,(SELECT count(*) FROM commulingo_person_sections s WHERE s.person_id=p.id)
+                        < ''' + SECTION_CAP_SQL.format(events=PERSON_EVENTS_SQL.format(person='p.id')) + ''')
                 ) AS topic(name,priority,needed)
                 WHERE topic.needed AND NOT EXISTS (SELECT 1 FROM commulingo_person_enrichment e
                     WHERE e.person_id=p.id AND e.topic=topic.name AND e.status!='open' AND e.review_after>now())
                 AND NOT EXISTS (SELECT 1 FROM commulingo_agent_suggestions s
                     WHERE s.target_id=p.id AND s.target_type IN ('person','person_section') AND s.status='pending')
+                AND NOT ''' + PERSON_IN_GRACE_SQL.format(person='p.id') + '''
                 UNION ALL
                 SELECT 'term','update',t.id,topic.name,topic.priority,
                     'Commissioned glossary explanation: ' || topic.name,t.updated_at::text
@@ -56,7 +59,7 @@ class Planner:
                     WHERE e.term_id=t.id AND e.topic=topic.name AND e.status!='open' AND e.review_after>now())
                 AND NOT EXISTS (SELECT 1 FROM commulingo_agent_suggestions s
                     WHERE s.target_id=t.id AND s.target_type='term' AND s.status='pending')
-                ORDER BY priority,target''')
+                ORDER BY priority,target''', GRACE_PARAMS)
             candidates = [dict(row) for row in cur.fetchall()]
             cur.execute('''SELECT kind,CASE WHEN
                     (kind='person' AND EXISTS (SELECT 1 FROM commulingo_people p WHERE p.id=COALESCE(NULLIF(g.target_id,''),NULLIF(g.resolved_id,'')))) OR
@@ -147,6 +150,7 @@ class Planner:
             for candidate in candidates:
                 self.store.enqueue(**candidate)
             self.store.reprioritize_people()
+            self.store.retire_people_in_grace()
             if not discovery:
                 self.store.cancel_discovery()
             for material in materials:

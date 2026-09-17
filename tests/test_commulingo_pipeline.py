@@ -78,6 +78,24 @@ class PlannerSelectionTests(unittest.TestCase):
         return dict(kind='person', action='update', target=target, topic='basics',
                     priority=20, baseline='new', reason='Missing facts')
 
+    def test_person_commissions_use_importance_cap_and_grace(self):
+        from commulingo_pipeline.planner import Planner
+        from commulingo_pipeline.store import GRACE_PARAMS
+        cur = Mock()
+        cur.fetchall.side_effect = [[], [], []]
+        store = Mock()
+        @contextmanager
+        def transaction():
+            yield cur
+        store.transaction = transaction
+        Planner(store).candidates(5)
+        sql, params = cur.execute.call_args_list[0].args
+        self.assertIn("100 - LEAST((SELECT count(DISTINCT e.event_id)", sql)  # importance ordering
+        self.assertIn("CASE WHEN (SELECT count(DISTINCT e.event_id) FROM commulingo_history_event_people e WHERE e.person_id=p.id)>=6 THEN 12", sql)
+        self.assertIn("a.stage='submit' AND a.value->>'status'='approved'", sql)  # grace after applied edits
+        self.assertEqual(params, GRACE_PARAMS)
+        self.assertEqual((params['grace_important'], params['grace_other']), (14, 90))
+
     def test_active_jobs_with_changed_baselines_do_not_consume_limit(self):
         for kind in ('person', 'term'):
             for action in ('create', 'update'):
