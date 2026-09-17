@@ -9,5 +9,11 @@
   "discovery": false,
   "term_event_overlap_allow": [
     "battle-of-lake-khasan"
+  ],
+  "term_enrichment_exclude": [
+    "doctors-plot",
+    "kronstadt-rebellion-1921",
+    "leningrad-affair",
+    "volga-famine"
   ]
 }

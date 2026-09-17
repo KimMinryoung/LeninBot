@@ -73,7 +73,7 @@ class PlannerSelectionTests(unittest.TestCase):
             yield cur
         store.transaction = transaction
         with patch('commulingo_pipeline.planner.report_mentions_by_term', return_value={}):
-            return Planner(store, overlap_allow=[]).candidates(limit)
+            return Planner(store, overlap_allow=[], exclude=[]).candidates(limit)
 
     def row(self, target):
         return dict(kind='person', action='update', target=target, topic='basics',
@@ -100,9 +100,13 @@ class PlannerSelectionTests(unittest.TestCase):
         # Terms: grace after applied edits, substantial bodies and event twins stay out.
         self.assertIn("g.kind='term' AND g.target=t.id AND a.stage='submit'", sql)
         self.assertIn("length(t.body_ko) >= %(body_ko)s", sql)
-        self.assertIn("t.id <> ALL(%(overlap_allow)s::text[])", sql)
+        self.assertIn("t.id <> ALL(%(term_exclude)s::text[])", sql)
         self.assertEqual((params['term_grace'], params['body_ko'], params['body_en']), (90, 2000, 4500))
-        self.assertEqual(params['overlap_allow'], ['battle-of-lake-khasan'])
+        self.assertEqual(params['term_exclude'], ['doctors-plot', 'kronstadt-rebellion-1921', 'leningrad-affair', 'volga-famine'])
+        # New registrations, not existing entries, are checked against event titles.
+        gap_sql, gap_params = cur.execute.call_args_list[1].args
+        self.assertIn("lower(ev.title_ko)=lower(g.label_ko)", gap_sql)
+        self.assertEqual(gap_params[0], ['battle-of-lake-khasan'])
 
     def test_term_candidates_are_ordered_by_body_and_report_mentions(self):
         from commulingo_pipeline.planner import Planner
@@ -118,7 +122,7 @@ class PlannerSelectionTests(unittest.TestCase):
         store.transaction = transaction
         with patch('commulingo_pipeline.planner.report_mentions_by_term',
                    return_value={'popular': 18, 'written-popular': 40}):
-            selected = Planner(store, overlap_allow=[]).candidates(10)
+            selected = Planner(store, overlap_allow=[], exclude=[]).candidates(10)
         self.assertEqual([r['target'] for r in selected], ['popular', 'quiet', 'written-popular', 'written'])
         self.assertEqual([r['priority'] for r in selected], [32, 50, 51, 80])
         self.assertNotIn('body_empty', selected[0])

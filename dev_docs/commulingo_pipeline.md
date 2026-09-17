@@ -39,8 +39,11 @@ research artifact에 고정한다. 계획의 baseline은 변경 감지용 타임
 그 용어를 링크한 수(frontend 렌더 캐시 `data/cache/report-renders.json`의 실제 링크, `commulingo_pipeline/mentions.py`)가
 많은 순이다(`store.term_priority`). 파이프라인이 승인·반영한 편집이 있는 용어는 90일 유예, 본문이 이미
 ko 2,000자 또는 en 4,500자 이상인 용어(용어 본문에는 schema 상한이 없어 절대값)는 통째 재작성을 피하기 위해 제외,
-id·제목·별칭이 역사 사건과 일치하는 용어는 사건 레인 몫이므로 제외한다(`term_event_overlap_allow`로 예외 지정,
-현재 battle-of-lake-khasan). 계획 단계가 미착수 ready 묶음의 priority를 갱신하고 자격을 잃은 묶음은 cancelled로 정리한다.
+사건 중복 검사는 **신규 등록에만** 적용한다: gap·발견 후보의 이름이 역사 사건 제목과 같으면 등록하지 않는다
+(`term_event_overlap_allow`의 id는 예외, 현재 battle-of-lake-khasan). 기존 용어는 이 규칙으로 빠지지 않는다.
+사건 서술을 옮긴 것에 불과해 더 보강하지 않을 기존 용어는 `term_enrichment_exclude`에 명시한다(운영자 판단 2026-09-17:
+doctors-plot, kronstadt-rebellion-1921, leningrad-affair, volga-famine). 계획 단계가 미착수 ready 묶음의 priority를
+갱신하고 자격을 잃은 묶음은 cancelled로 정리한다.
 발견(discover) 작업은 `config/commulingo_pipeline.json`의 `discovery=false`로 완전히 중단했다(운영자 결정
 2026-09-17). 꺼져 있으면 새 자료 작업을 만들지 않고, 대기 중이던 발견 작업은 계획 단계에서 cancelled로
 정리한다. 대상 ID가 있는 명시적 gap은 발견이 아니라 일반 선정 경로이므로 계속 처리된다. frontend의 유효한 완료 주제와 대기 제안을 존중한다.

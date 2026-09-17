@@ -268,6 +268,8 @@ class Discover:
                     'reason':{'type':'string','minLength':20}},
                 'required':['kind','target','label','mention','reason']}}},'required':['candidates']}
         box = {}
+        from .config import load
+        overlap_allow = load()['term_event_overlap_allow']
         explicit_gap = job['payload']['material_id'].startswith('gap:')
         if explicit_gap:
             schema['properties']['candidates']['maxItems'] = 1
@@ -297,6 +299,12 @@ class Discover:
                     WHERE id=%(id)s OR lower({label}_ko)=lower(%(label)s) OR lower({label}_en)=lower(%(label)s)
                     UNION SELECT {foreign} FROM {aliases} WHERE lower(alias)=lower(%(label)s) LIMIT 1''',
                     {'id':candidate['target'],'label':candidate['label']})
+                if candidate['kind']=='term' and candidate['target'] not in overlap_allow:
+                    from .store import EVENT_TITLE_MATCH_SQL
+                    event = await asyncio.to_thread(query_one, 'SELECT 1 AS hit WHERE ' + EVENT_TITLE_MATCH_SQL.format(
+                        label_ko='%(label)s', label_en='%(label)s'), {'label':candidate['label']})
+                    if event:
+                        continue  # the events lane owns this name; not a glossary entry
                 if not existing:
                     accepted.append(candidate)
             box['candidates'] = accepted

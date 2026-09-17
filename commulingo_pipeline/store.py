@@ -41,15 +41,15 @@ TERM_IN_GRACE_SQL = ('EXISTS (SELECT 1 FROM commulingo_pipeline_artifacts a JOIN
     "WHERE g.kind='term' AND g.target={term} AND a.stage='submit' AND a.value->>'status'='approved' "
     "AND a.created_at > now() - %(term_grace)s * interval '1 day')")
 TERM_BODY_ENOUGH_SQL = '(length({t}.body_ko) >= %(body_ko)s OR length({t}.body_en) >= %(body_en)s)'
-TERM_EVENT_OVERLAP_SQL = ('({t}.id <> ALL(%(overlap_allow)s::text[]) AND EXISTS (SELECT 1 FROM commulingo_history_events ev '
-    'WHERE ev.id={t}.id OR lower(ev.title_ko)=lower({t}.term_ko) '
-    "OR ({t}.term_en<>'' AND lower(ev.title_en)=lower({t}.term_en)) "
-    'OR EXISTS (SELECT 1 FROM commulingo_term_aliases al WHERE al.term_id={t}.id AND lower(al.alias)=lower(ev.title_ko))))')
+# A gap or discovery label that names an existing history event is not a new
+# glossary entry (operator decision 2026-09-17); ids in the allowlist still are.
+EVENT_TITLE_MATCH_SQL = ('EXISTS (SELECT 1 FROM commulingo_history_events ev WHERE lower(ev.title_ko)=lower({label_ko}) '
+    "OR ({label_en}<>'' AND lower(ev.title_en)=lower({label_en})))")
 
 
-def term_params(overlap_allow):
+def term_params(exclude):
     return {'term_grace':TERM_GRACE_DAYS,'body_ko':TERM_BODY_ENOUGH_KO,'body_en':TERM_BODY_ENOUGH_EN,
-            'overlap_allow':list(overlap_allow or [])}
+            'term_exclude':list(exclude or [])}
 
 
 def term_priority(body_empty, mentions):
@@ -122,9 +122,9 @@ class Store:
                 (ids, [int(mentions[i]) for i in ids]))
             return cur.rowcount
 
-    def retire_unqualified_terms(self, overlap_allow):
+    def retire_unqualified_terms(self, exclude):
         """Untouched term bundles that no longer qualify wait or leave the queue."""
-        params = term_params(overlap_allow)
+        params = term_params(exclude)
         untouched = '''j.kind='term' AND j.action='update' AND j.topic='enrichment'
                   AND j.status='ready' AND j.stage='research' AND j.priority>=20
                   AND NOT EXISTS (SELECT 1 FROM commulingo_pipeline_artifacts a WHERE a.job_id=j.id)'''
@@ -134,12 +134,22 @@ class Store:
                     ('re-enrichment grace after an applied edit', TERM_IN_GRACE_SQL.format(term='j.target')),
                     ('body already substantial', 'EXISTS (SELECT 1 FROM commulingo_terms t WHERE t.id=j.target AND '
                         + TERM_BODY_ENOUGH_SQL.format(t='t') + ')'),
-                    ('term coincides with a history event', 'EXISTS (SELECT 1 FROM commulingo_terms t WHERE t.id=j.target AND '
-                        + TERM_EVENT_OVERLAP_SQL.format(t='t') + ')')):
+                    ('excluded from enrichment by operator', 'j.target = ANY(%(term_exclude)s::text[])')):
                 cur.execute(f'''UPDATE commulingo_pipeline_jobs j SET status='cancelled', updated_at=now(), last_error=%(reason)s
                     WHERE {untouched} AND {predicate}''', {**params, 'reason':reason})
                 retired[reason] = cur.rowcount
         return retired
+
+    def restore_terms(self, targets, reasons):
+        """Reopen untouched bundles cancelled for a reason that no longer applies."""
+        with self.transaction() as cur:
+            cur.execute('''UPDATE commulingo_pipeline_jobs j SET status='ready', last_error='', updated_at=now()
+                WHERE j.kind='term' AND j.action='update' AND j.topic='enrichment' AND j.status='cancelled'
+                  AND j.last_error = ANY(%s::text[]) AND j.target = ANY(%s::text[])
+                  AND NOT EXISTS (SELECT 1 FROM commulingo_pipeline_jobs o WHERE o.kind=j.kind AND o.target=j.target
+                      AND o.id<>j.id AND o.status IN ('ready','running','deferred','escalated'))''',
+                (list(reasons), list(targets)))
+            return cur.rowcount
 
     def cancel_discovery(self):
         """Discovery is switched off: retire queued material jobs without deleting history."""

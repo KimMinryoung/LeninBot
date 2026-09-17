@@ -3,17 +3,20 @@ import hashlib
 from collections import deque
 from .bundles import bundle_candidates
 from .store import (SECTION_CAP_SQL, PERSON_EVENTS_SQL, PERSON_IN_GRACE_SQL, GRACE_PARAMS,
-                    TERM_IN_GRACE_SQL, TERM_BODY_ENOUGH_SQL, TERM_EVENT_OVERLAP_SQL, term_params, term_priority)
+                    TERM_IN_GRACE_SQL, TERM_BODY_ENOUGH_SQL, EVENT_TITLE_MATCH_SQL, term_params, term_priority)
 from .mentions import report_mentions_by_term
 
 
 class Planner:
-    def __init__(self, store, overlap_allow=None):
+    def __init__(self, store, overlap_allow=None, exclude=None):
         self.store = store
-        if overlap_allow is None:
+        if overlap_allow is None or exclude is None:
             from .config import load
-            overlap_allow = load()['term_event_overlap_allow']
+            config = load()
+            overlap_allow = config['term_event_overlap_allow'] if overlap_allow is None else overlap_allow
+            exclude = config['term_enrichment_exclude'] if exclude is None else exclude
         self.overlap_allow = list(overlap_allow)
+        self.exclude = list(exclude)
 
     def candidates(self, limit=40):
         with self.store.transaction() as cur:
@@ -69,8 +72,8 @@ class Planner:
                     WHERE s.target_id=t.id AND s.target_type='term' AND s.status='pending')
                 AND NOT ''' + TERM_IN_GRACE_SQL.format(term='t.id') + '''
                 AND NOT ''' + TERM_BODY_ENOUGH_SQL.format(t='t') + '''
-                AND NOT ''' + TERM_EVENT_OVERLAP_SQL.format(t='t') + '''
-                ORDER BY priority,target''', {**GRACE_PARAMS, **term_params(self.overlap_allow)})
+                AND t.id <> ALL(%(term_exclude)s::text[])
+                ORDER BY priority,target''', {**GRACE_PARAMS, **term_params(self.exclude)})
             candidates = [dict(row) for row in cur.fetchall()]
             # Term order is decided here, not in SQL: body-less first, then by
             # the number of public reports that link the term (operator
@@ -88,7 +91,10 @@ class Planner:
                     'Explicit gap: ' || label_ko AS reason,10 AS priority,'' AS baseline,
                     id AS gap_id,label_ko,label_en FROM commulingo_curation_gaps g
                 WHERE status='pending' AND kind IN ('person','term')
-                ORDER BY priority DESC,id LIMIT %s''',(limit,))
+                  AND NOT (kind='term' AND COALESCE(NULLIF(target_id,''),NULLIF(resolved_id,'')) <> ALL(%s::text[])
+                       AND NOT EXISTS (SELECT 1 FROM commulingo_terms t WHERE t.id=COALESCE(NULLIF(g.target_id,''),NULLIF(g.resolved_id,'')))
+                       AND ''' + EVENT_TITLE_MATCH_SQL.format(label_ko='g.label_ko', label_en="COALESCE(g.label_en,'')") + ''')
+                ORDER BY priority DESC,id LIMIT %s''',(self.overlap_allow, limit))
             for row in cur.fetchall():
                 row = dict(row)
                 if row['target']:
@@ -171,7 +177,7 @@ class Planner:
             self.store.reprioritize_people()
             self.store.retire_people_in_grace()
             self.store.reprioritize_terms(report_mentions_by_term())
-            self.store.retire_unqualified_terms(self.overlap_allow)
+            self.store.retire_unqualified_terms(self.exclude)
             if not discovery:
                 self.store.cancel_discovery()
             for material in materials:
