@@ -88,3 +88,129 @@ CommuLingo DB와 자료 원문은 이번 작업에서 수정하지 않는다.
 시대·관계가 달라졌을 때의 차이, 반례, 여러 생성 결과를 함께 봐야 한다. 웃음·굴복 여부
 하나로 역사적 정확성이나 모델의 ‘자체 인격’을 판정하지 않는다. 기존 대화 이력은 보존되므로
 새 명세만의 효과를 비교하려면 별도의 빈 이력 실험과 실제 대화를 구분한다.
+
+## 지속 메모·상태표·반복 억제
+
+`runtime_tools/roleplay_memory.py`는 `output/roleplay_memory.sqlite3`에 사용자별 메모와
+인물 상태를 저장한다. Cyber-Lenin 기억이나 공개 웹 역할극과 공유하지 않는다. 이 파일은
+운영 백업에 별도로 포함해야 하며 PostgreSQL 백업에 들어가지 않는다.
+`roleplay_memory`는 list/save/delete, 주제 key별 교체, 최대 30개·각 800자를 지원한다.
+`roleplay_state`는 read/history/update/time/reset을 지원한다. 허기·피로·통증·긴장은 0–100 수치,
+몸 상태·기분·장면은 각 300자 이내이며 변경 이유도 저장한다. 초기 수치는 null(미설정)이다.
+변경 이유와 전후 값은 이력으로 보존한다. 현실 시간에 따른 자동 감소·증가는 없다.
+지속 효과는 장면 경과 시간과 활동·부상 조건으로 계산한다. 아래 시간 계산 계약을 따른다.
+
+매 턴 모든 메모와 상태표를 runtime context의 참고 자료로 주입한다. 메모는 실행 지시가 아니며,
+사용자의 현재 정정이 우선한다. `/new`는 최근 대화만 초기화하고 메모·상태는 유지한다.
+삭제·상태 초기화는 대화로 요청한다. `/status`는 모델 호출 없이 저장된 상태를 보여준다.
+평소 답변에는 상태표를 붙이지 않는다. 상태값은 인물의 신념·동의나 실제 사용자의 건강 판정이 아니다.
+
+최근 assistant 답변 8개 중 3개 이상에서 반복되는 4–8어절(12자 이상)을 최대 8개 추려
+`recent_repeated_phrases`로 전달한다. 지침은 반복 비유·몸짓·도입·종결을 점검하고 장면을
+진전시키도록 요구하되 고유명사·필수 용어·입장을 억지로 바꾸지 않는다. 결과물을 잘라내거나
+재생성하지 않는 보조 장치이며, 짧은 상투어·의미만 같은 반복을 모두 감지하지는 않는다.
+
+검증: `venv/bin/python -m unittest discover -s tests -p 'test_roleplay*.py'` 및
+`venv/bin/python scripts/smoke_tool_allowlists.py`. Python/tool 변경은
+`leninbot-roleplay.service` 재시작 후 적용된다. 실제 인물 연기의 개선 정도는 대화 평가가 필요하다.
+
+### 장면·목적과 인물별 기록
+
+`roleplay_state`는 period/location/participants/last_event/unresolved와 goal/avoid/next_action도
+부분 갱신한다. 텍스트 필드는 각 300자, participants는 등록된 고정 인물 ID 최대 12개다.
+빈 문자열·빈 배열로 해소된 항목을 지운다. 기존 상태 JSON에 새 필드가 없어도 기본값으로 읽는다.
+reset은 신체·정신 상태뿐 아니라 장면·목적도 비우며, 인물 기록과 영구 메모는 보존한다.
+`/status`는 핵심 항목을, `/status 상세`는 다음 시도·회피 목적까지 표시한다. 계획(next_action)과 완료 사건(last_event)은 구분한다.
+
+`roleplay_person`은 같은 SQLite의 people 테이블에 사용자별 최대 30명을 저장한다.
+list/read/save/delete를 지원하며 save는 필드 단위 교체다. person_id는 고정 식별자,
+name/aliases는 이름·별칭, identity는 인물 구별 정보와 적용 시기, relationship은 예조프와의 관계다.
+observed/reported/inferred로 직접 관찰·출처 있는 전언·추측을 나누되 그 분류의 정확성은 모델 판단이다.
+별칭 조회는 유니코드·대소문자·공백을 정규화한 정확 일치다. 중복 별칭은 모든 후보와 ambiguous=true를
+반환하며 자동 병합하지 않는다. 인물 삭제는 현재 participants의 해당 ID도 같은 트랜잭션에서 제거한다.
+
+매 턴 people.index에 전체 식별 목록, people.present에 현장 인물의 상세 기록을 전달한다.
+현장에 없는 인물의 상세는 도구로 조회한다. 인물·메모·상태 도구 진행 로그는 Telegram에 숨긴다.
+시간대·장면이 다른 관계나 미래 사건의 오용 방지는 지침으로 제어하며 별도의 세계선 데이터베이스는 아니다.
+
+### 장면 시간에 따른 상태 계산
+
+`runtime_tools/roleplay_dynamics.py`는 고정 게임 규칙을 적용한다. 모델은 장면에서 지난 시간과
+활동·부상 조건을 해석하지만, 지속 효과의 수치 연산은 코드가 한다. 현실 시계나 메시지 수는 사용하지 않는다.
+기존 저장 상태는 보존하고 그 시점을 상대 시간 0분으로 삼는다. 과거의 밤샘을 소급 계산하지 않는다.
+
+- `scene_minute` / `last_calculated_minute`: 장면의 누적 분 / 이미 반영한 분.
+- `activity`: rest/light/moderate/strenuous/sleep. `sleep_quality`: poor/normal/good.
+- `threat`: safe/uncertain/threatening/immediate.
+- `injuries`: 최대 8개. 고정 id, 설명, severity(1–3), trend(stable/worsening/recovering), treated.
+- `conditions_initialized`: 모델이 위 네 조건을 함께 설정해야 true. 기존 body 서술에서 조건을 확인해야
+  하며, 등록이 없다는 이유로 부상이 없다고 간주해 계산하지 않는다.
+
+| 항목 | 시간당 게임 규칙 |
+|---|---|
+| 허기 | +3, 식사 직후 감소는 별도의 즉시 사건 |
+| 피로 | 휴식 −2, 가벼운 활동 +2, 보통 +5, 격한 활동 +10, 수면 −8 × 수면의 질(0.25/1/1.25) |
+| 통증 | 부상별 severity × (경과 계수 + 활동 계수)의 합. stable=0, worsening=미처치 0.5/처치 0.25, recovering=−0.5. 활동 계수는 휴식·수면 0, 가벼움 0.1, 보통 0.5, 격함 1.5 |
+| 긴장 | 위협 단계의 목표값 10/40/75/90 쪽으로 시간당 최대 6씩 접근. 과잉 상승은 없음 |
+
+이 수치는 의학적 추정이 아닌 조정 가능한 연기용 규칙이다. 미처치만으로 악화 추세를 선택하지 않는다.
+값은 0–100으로 제한하고 내부에는 소수 넷째 자리까지 유지한다. 미설정(null) 값은 자동 생성하지 않는다.
+`/status`는 소수 첫째 자리까지(정수의 .0은 생략)와 현재 활동을 표시한다.
+시간 근거·수면·위협·부상별 조건은 `/status 상세`에서 확인한다.
+
+`roleplay_state(time)`가 해석된 시간 입력을 받아 마지막 계산 이후 구간만 적용한다.
+아래 날짜·시각 계약의 temporal.operation=advance/until이 수치 계산을 실행한다.
+기존 도구의 최상위 action=advance는 폐지했다. 역행·24시간 초과 단일 구간은 거절한다.
+활동이 바뀌면 이전 구간을 먼저 계산하고 새 조건을 update한다. 식사·부상 같은 즉시 효과는
+`update`의 `adjustment=event`, 잘못된 값의 정정은 `correction`, 미설정 값은 `initialize`로 구분한다.
+수치 직접 수정에는 항목별 `metric_reasons`와 안정된 `event_id`가 필요하며 최근 100개 ID를 중복 차단한다.
+모델이 같은 사건에 새 ID를 발급하거나 시간 근거를 잘못 해석하는 것까지 코드가 판별하지는 못한다.
+
+변경은 `expected_revision`을 요구해 오래된 상태에서의 덮어쓰기를 차단한다. 오류 후 read로 최신값을
+확인한다. reset은 상대 시간·조건·이벤트 목록을 초기화하며 revision은 계속 증가한다.
+변경 전후와 이유는 같은 SQLite 트랜잭션으로 state_history에 저장한다(사용자별 최근 1000건).
+`history`는 최근 20건의 요약을 반환한다. 인물 삭제에 따른 participants 정리는 revision을 올리지만
+이 수치 계산 이력에 추가하지 않는다. 저장 시점 UTC를 장면 시간으로 해석하지 않는다.
+
+검증은 `tests/test_roleplay_dynamics.py`에서 휴식·활동·수면, 부상 추세·처치, 긴장 적응, 시간 분할,
+값 범위·미설정 보존, 중복 구간·중복 사건, 버전 충돌, 이력·사용자 분리와 초기화를 확인한다.
+
+
+### 날짜·시각과 시간 표현의 해석
+
+`runtime_tools/roleplay_clock.py`는 `clock`에 date/year/time/daypart, 상대 일자,
+certainty, 미계산 시간 공백, 마지막 시간 해석을 관리한다. 초기값은 미상이다.
+모델은 별도 추출 호출 없이 본래 도구 루프에서 temporal을 제출한다. 필수 필드는
+source_quote/interpretation/relation(current,past,plan)/certainty(explicit,estimated,unknown)/operation.
+인용의 원문 일치와 시간 의미의 정확성은 자동 검증하지 않는다. 대화 메시지 식별자는 이력에 저장한다.
+
+- anchor: 알려진 현재 시각 설정·보충. 기존 날짜·시각과 다른 값을 조용히 덮어쓰지 않는다.
+- correct: 사용자의 시간 정정. 시계만 변경하고 기존 신체 상태 연산은 소급 취소하지 않는다.
+- advance: elapsed_minutes(1–1440)의 완료 구간. 누적 분과 시계를 코드가 계산한다.
+- until: 현재와 목표 date/time이 알려졌을 때 경과 분을 코드가 계산한다. 역행은 거절한다.
+- next_day: 날짜와 상대 일자를 하루 진행, 시각은 미상으로 두고 daypart만 설정.
+  경과 분을 모르는 구간이므로 상태 수치는 유지하고 elapsed_complete=false와 공백 수를 기록한다.
+- reference: 해석만 기록. relation=past/plan이면 어떤 operation이어도 시계와 수치를 진행시키지 않는다.
+
+명시적인 30분과 추정한 30분은 다르게 기록한다. 예상 계획은 완료 사건이 아니다.
+정확한 시작 시각이 없으면 분 단위 진행의 자정 통과를 확정할 수 없어 날짜·시간대는 미상으로
+내리고 연도 맥락만 보존한다. next_day는 상대 날짜 전환을 명시하므로 알려진 날짜의 월말·윤년·연말을
+코드로 처리한다. next_day 후 미계산 공백은 자동 보간하지 않으며 /status에도 표시한다.
+시간 이벤트도 stable event_id/expected_revision으로 중복·동시 갱신을 차단한다.
+수치 직접 변경 사건에는 event_type과 당시 장면 시각을 event_timestamps(최근 50건)에 기록한다.
+초기화·보정 사건도 포함하므로 사건 종류와 이유를 구별해 읽는다. /status는 날짜·시각과 추정 여부, 미계산 구간이 있을 때 그 공백을 보여준다.
+최근 시간 해석의 근거와 확실성 세부는 `/status 상세`에 표시한다. 코드의 달력 연산은 Gregorian 기준이다.
+
+검증: `tests/test_roleplay_clock.py`의 자정·연말·윤일, 부분 날짜, 회상·계획, 추정 표시,
+불명확한 다음 날, 역행·충돌·시각 정정과 기존 상태 트랜잭션 테스트.
+
+
+### 상태표 표시와 중복 정보
+
+기본 `/status`는 4개 수치를 한 줄로 묶고, 시각·장소·등장인물·몸 상태·기분·활동·직전 사건·목적·
+미해결을 표시한다. 비어 있는 선택 항목은 생략한다. `/status 상세`(또는 `/status detail`)는
+회피 목적·다음 시도·계산 시점·시간 해석 근거·수면의 질·위협·부상별 정보·변경 이유를 추가한다.
+legacy scene/period는 어느 화면에서도 반복 표시하지 않는다. 기존 저장값은 보존한다.
+새 기록에서는 clock을 날짜·시각의 기준으로, location을 장소 기준으로 삼는다. scene은 선택적인
+상황 설명만 맡으며 날짜·장소·몸 상태를 복제하지 않도록 지시한다. 자유서술의 의미상 중복을
+정규식으로 삭제하지는 않는다. 상태표 조회는 저장된 객체를 복사해서 포맷하며 DB를 수정하지 않는다.

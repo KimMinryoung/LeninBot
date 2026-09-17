@@ -2,7 +2,7 @@
 
 A lightweight second Telegram bot for free-form character roleplay. It deliberately
 reuses only the verified low-level building blocks — DB pool, secret loading, the
-DeepSeek client, the OpenAI-compatible tool loop, and a curated subset of read-only
+DeepSeek client, the Anthropic-compatible tool loop, private notes, and read-only
 knowledge tools — without dragging in Cyber-Lenin's agent stack (tasks, missions,
 autonomous loop, KG writes, identity prompt).
 
@@ -17,6 +17,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
+from collections import Counter
 from pathlib import Path
 
 from aiogram import BaseMiddleware, Bot, Dispatcher, F, Router
@@ -29,6 +31,7 @@ from db import query as _query, execute as _execute
 from bot_config import _deepseek_anthropic_client, _resolve_deepseek_model
 from llm.claude_loop import chat_with_tools
 from llm.tool_loop_common import EMPTY_RESPONSE_FALLBACK
+from runtime_tools.roleplay_memory import load_notes, load_state, people_context
 from runtime_tools.registry import TOOLS, TOOL_HANDLERS
 from tool_gateway.profiles import ROLEPLAY_TELEGRAM_TOOLS
 from tool_gateway.security import caller_scope, new_run_context
@@ -66,7 +69,7 @@ ROLEPLAY_MAX_ROUNDS = int(os.getenv("ROLEPLAY_MAX_ROUNDS", "8"))
 ROLEPLAY_BUDGET_USD = float(os.getenv("ROLEPLAY_BUDGET_USD", "0.50"))
 HISTORY_CAP = int(os.getenv("ROLEPLAY_HISTORY_CAP", "40"))  # messages kept in context
 
-# Curated read-only toolset (no task execution, no KG writes). The profile
+# Curated retrieval and private notes (no task execution, no KG writes). The profile
 # value lives in tool_gateway.profiles so all surface allow-lists are visible in
 # one place.
 _TOOL_NAMES = ROLEPLAY_TELEGRAM_TOOLS
@@ -138,6 +141,23 @@ def build_system_prompt() -> str:
     return persona + "\n\n" + EXTERNAL_SOURCE_RULE
 
 
+
+def repeated_phrases(history: list[dict]) -> list[str]:
+    """Find phrases reused across recent replies, not repetitions within one reply."""
+    replies = [m["content"] for m in history if m.get("role") == "assistant"][-8:]
+    counts = Counter()
+    for reply in replies:
+        words = re.findall(r"[\w가-힣]+", reply)
+        phrases = {" ".join(words[i:i+n]) for n in range(4, 9) for i in range(len(words)-n+1)}
+        counts.update(p for p in phrases if len(p) >= 12)
+    selected = []
+    for phrase in sorted((p for p, count in counts.items() if count >= 3), key=lambda p: (-len(p), p)):
+        if not any(phrase in longer for longer in selected):
+            selected.append(phrase)
+        if len(selected) == 8:
+            break
+    return selected
+
 # ── Telegram plumbing ────────────────────────────────────────────────
 def _is_allowed(user_id: int | None) -> bool:
     return user_id is not None and user_id in ALLOWED_USER_IDS
@@ -163,7 +183,16 @@ def _make_progress_callback(bot: Bot, chat_id: int):
     # the loop — streaming it here would duplicate it. Budget ("💰") is
     # mechanics noise. So a plain chat turn sends no progress at all (just
     # the reply); a tool turn shows the 🔧 steps, then the clean answer.
-    return make_progress_callback(lambda: bot, chat_id, events=("tool_call", "tool_result"))
+    progress = make_progress_callback(lambda: bot, chat_id, events=("tool_call", "tool_result"))
+
+    async def visible_progress(event, detail):
+        # Private bookkeeping must not expose the hidden state table via tool logs.
+        if event in {"tool_call", "tool_result"} and re.search(r"(?:🔧 |[✓❌] )roleplay_(?:memory|state|person)(?:\(|:)", detail):
+            return
+        await progress(event, detail)
+
+    visible_progress.flush = progress.flush
+    return visible_progress
 
 
 router = Router()
@@ -182,7 +211,8 @@ async def cmd_help(message: Message) -> None:
     await message.answer(
         "이 봇은 캐릭터와 1:1 역할극을 하는 독립 봇이야 (Cyber-Lenin과 별개).\n"
         "• 그냥 메시지를 보내면 캐릭터가 답해.\n"
-        "• /new — 현재 대화 맥락을 끊고 새 세션 시작\n"
+        "• /new — 최근 대화 초기화 (메모·상태표 유지)\n"
+        "• /status — 핵심 상태, /status 상세 — 계산 근거·세부 상태. 수정·초기화는 대화로 요청해.\n"
         "• 캐릭터 설정은 identity/roleplay_persona.md 파일에서 편집 (재시작 불필요)\n"
         f"• 모델: {ROLEPLAY_MODEL} (thinking on, 추론은 답변에 미포함)"
     )
@@ -191,7 +221,70 @@ async def cmd_help(message: Message) -> None:
 @router.message(Command("new"))
 async def cmd_new(message: Message) -> None:
     await asyncio.to_thread(reset_session, message.from_user.id)
-    await message.answer("새 대화를 시작할게. (이전 맥락은 잊었어)")
+    await message.answer("새 대화를 시작할게. (최근 대화는 초기화했어. 저장한 메모와 상태표는 유지돼)")
+
+
+@router.message(Command("status"))
+async def cmd_status(message: Message) -> None:
+    state = dict(await asyncio.to_thread(load_state, message.from_user.id))
+    detailed = (getattr(message, "text", "") or "").split()[1:] in (["상세"], ["detail"])
+    people = await asyncio.to_thread(people_context, message.from_user.id, state.get("participants", []))
+    names = {p["person_id"]: p["name"] for p in people.get("index", [])}
+    state["participants"] = ", ".join(names.get(pid, pid) for pid in state.get("participants", [])) or "없음"
+    activities = {"rest": "휴식", "light": "가벼운 활동", "moderate": "보통 활동", "strenuous": "격한 활동", "sleep": "수면"}
+    threats = {"safe": "안전", "uncertain": "불확실", "threatening": "위협 지속", "immediate": "즉각적 위협"}
+    state["activity"] = activities.get(state.get("activity"), "미설정")
+    state["threat"] = threats.get(state.get("threat"), "미설정")
+    state["sleep_quality"] = {"poor": "나쁨", "normal": "보통", "good": "좋음"}.get(state.get("sleep_quality"), "미설정")
+    trends = {"stable": "유지", "worsening": "악화 중", "recovering": "회복 중"}
+    state["injuries"] = "; ".join(f"{i['description']} ({trends[i['trend']]}, {'처치함' if i['treated'] else '미처치'})" for i in state.get("injuries", [])) or "등록 없음"
+    if not state.get("conditions_initialized"):
+        state["injuries"] += " — 시간 계산 조건 미확인"
+    for key in ("hunger", "fatigue", "pain", "tension"):
+        if isinstance(state.get(key), (int, float)):
+            state[key] = round(state[key], 1)
+    from runtime_tools.roleplay_clock import clock_defaults
+    clock = clock_defaults(state.get("clock"))
+    dayparts = {"unknown": "시간대 미상", "dawn": "새벽", "morning": "아침", "afternoon": "오후", "evening": "저녁", "night": "밤"}
+    day = clock["date"] or (f"{clock['year']}년 날짜 미상" if clock["year"] else "날짜 미상")
+    state["calendar_display"] = f"{day} / {clock['time'] or dayparts[clock['daypart']]}"
+    if clock["certainty"] == "estimated":
+        state["calendar_display"] += " (추정)"
+    state["relative_day"] = clock["relative_day"]
+    state["time_certainty"] = {"explicit": "명시된 범위", "estimated": "추정 포함", "unknown": "미상"}[clock["certainty"]]
+    interpretation = clock["last_interpretation"]
+    state["time_evidence"] = f"{interpretation['source_quote']} → {interpretation['interpretation']}" if interpretation else "아직 없음"
+    state["time_gaps"] = f"{clock['unquantified_gaps']}개 구간의 경과 분량 미상 (상태 미반영)" if not clock["elapsed_complete"] else "없음"
+    metrics = {"hunger": "허기", "fatigue": "피로", "pain": "통증", "tension": "긴장"}
+    def display(value):
+        if value is None or value == "":
+            return "미설정"
+        if isinstance(value, (int, float)):
+            return f"{value:g}"
+        return str(value)
+
+    lines = ["인물 상태 (0–100)", " · ".join(f"{label}: {display(state.get(key))}" for key, label in metrics.items())]
+    labels = {"calendar_display": "시각", "location": "장소", "participants": "등장인물",
+              "body": "몸 상태", "mood": "기분", "activity": "활동",
+              "last_event": "직전 사건", "goal": "목적", "unresolved": "미해결"}
+    if not state.get("conditions_initialized"):
+        state["activity"] = "미확인"
+    if not clock["elapsed_complete"]:
+        labels["time_gaps"] = "시간 계산 공백"
+    if detailed:
+        labels.update({"avoid": "피하려는 결과", "next_action": "다음 시도",
+                       "time_certainty": "시간 확실성", "relative_day": "상대 일자",
+                       "time_evidence": "최근 시간 해석", "scene_minute": "계산된 경과(분)",
+                       "last_calculated_minute": "마지막 계산(분)", "time_basis": "시간 근거",
+                       "sleep_quality": "수면의 질", "threat": "위협 상태",
+                       "injuries": "세부 부상", "reason": "최근 변경 이유"})
+    lines.extend(f"{label}: {display(state.get(key))}" for key, label in labels.items()
+                 if key in {"calendar_display", "location", "participants"} or state.get(key) not in (None, "", "미설정"))
+    if not detailed:
+        lines.append("계산 근거·세부 부상: /status 상세")
+
+    for chunk in split_message("\n".join(lines)):
+        await message.answer(chunk)
 
 
 @router.message(F.text)
@@ -205,9 +298,22 @@ async def handle_message(message: Message) -> None:
     history = await asyncio.to_thread(load_history, user_id)
     from datetime import datetime, timezone
     from llm.execution_context import attach_context, context_record
+    state = None
+    people = None
+    try:
+        state = await asyncio.to_thread(load_state, user_id)
+        notes = await asyncio.to_thread(load_notes, user_id)
+        people = await asyncio.to_thread(people_context, user_id, state.get("participants", []))
+    except Exception:
+        logger.exception("roleplay memory load failed")
+        notes = []
     history = attach_context(history, [context_record(
         "runtime_state", "telegram_roleplay_runtime", {
             "model": ROLEPLAY_MODEL, "channel": "telegram_roleplay",
+            "private_notes": notes,
+            "character_state": state,
+            "people": people,
+            "recent_repeated_phrases": repeated_phrases(history),
             "persona_time": "fictional; infer from the roleplay, not the server clock",
         }, scope=f"telegram-roleplay:{message.chat.id}",
         observed_at=datetime.now(timezone.utc), temporal_scope="current turn",
@@ -282,6 +388,7 @@ async def bot_main() -> None:
     await bot.set_my_commands([
         BotCommand(command="new", description="새 대화 시작 (맥락 초기화)"),
         BotCommand(command="help", description="사용법"),
+        BotCommand(command="status", description="인물 상태표"),
     ])
 
     me = await bot.get_me()

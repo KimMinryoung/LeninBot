@@ -13,7 +13,7 @@ Tool visibility is intentionally split by execution surface. There is no single 
 | Specialist agents | `agents/*.py` | `AgentSpec.tools` per agent |
 | Agent runtime overlay | `config/agent_runtime.json` | provider/model/budget/finalization/terminal overrides, not normal tools |
 | Public web chat | `services/web_chat.py` | persona-specific allowed tools plus web-only `WEB_READ_SELF_TOOL` / `WEB_PERSONA_CONTEXT_TOOL` |
-| Roleplay bot | `telegram/roleplay_bot.py` | `_TOOL_NAMES` — its own narrow read-only set, independent of the orchestrator |
+| Roleplay bot | `telegram/roleplay_bot.py` | `_TOOL_NAMES` — retrieval plus private memory/state, independent of the orchestrator |
 | Inbound MCP gateway | `mcp_gateway/policy.py` | profile-based allow-lists for developer/operator MCP clients |
 | Runtime tool gateway | `tool_gateway/` | named surface profiles, shared visibility filtering, batch dispatch, and security/audit integration |
 
@@ -197,7 +197,7 @@ execution time even if profile selection or provider output is misconfigured.
 
 ## Roleplay Bot
 
-`leninbot-roleplay.service` (`telegram/roleplay_bot.py`) is a separate identity, not the Cyber-Lenin orchestrator. Its allow-list is the inline `_TOOL_NAMES` list and is intentionally minimal and read-only: `vector_search`, `knowledge_graph_search`, `web_search`, `fetch_url`. These are selected from the global registry (`TOOLS` / `TOOL_HANDLERS`) at import time. No task execution, KG writes, filesystem, code, email/A2A, or publishing tools are exposed. Adding tools here is deliberate — keep this surface to safe read-only knowledge lookups.
+`leninbot-roleplay.service` (`telegram/roleplay_bot.py`) is a separate identity. `_TOOL_NAMES` aliases `tool_gateway.profiles.ROLEPLAY_TELEGRAM_TOOLS`: `vector_search`, `knowledge_graph_search`, `web_search`, `fetch_url`, `commulingo_people`, `roleplay_memory`, `roleplay_state`, and `roleplay_person`. The latter three persist only the current roleplay owner's private notes, character state, and person records; their handlers require the Telegram roleplay owner context even outside gateway enforcement. No task execution, KG writes, general filesystem/code, email/A2A, or publication tools are exposed. Memory/state storage and reset semantics are documented in `roleplay_persona_design.md`.
 
 ## Inbound MCP Gateway
 

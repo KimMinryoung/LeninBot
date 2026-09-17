@@ -79,6 +79,9 @@ TOOL_RISK_CLASS: dict[str, str] = {
     "check_wallet": "wallet_read",
     # Writes / publication
     "save_self_analysis": "write",
+    "roleplay_memory": "write",
+    "roleplay_state": "write",
+    "roleplay_person": "write",
     "append_to_manuscript": "write",
     "replace_in_manuscript": "write",
     "save_document": "write",

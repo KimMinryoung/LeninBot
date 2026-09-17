@@ -22,6 +22,9 @@ The standalone roleplay bot separately reads `identity/roleplay_persona.md` on e
 turn in `telegram.roleplay_bot.build_system_prompt()`, then appends `EXTERNAL_SOURCE_RULE`.
 Persona edits therefore apply on the next turn without a restart. Existing conversation
 history is retained and can still influence style; changing the persona does not clear it.
+Private notes, character/scene/goal state, person records, `/status`, and recent repeated-phrase hints are Python-owned
+features, including the fictional-time calculator in `runtime_tools/roleplay_dynamics.py` and calendar interpretation in `runtime_tools/roleplay_clock.py`
+(see `roleplay_persona_design.md`) and require a roleplay service restart when changed.
 
 The roleplay identity distinguishes historical background, a behavioral interpretation,
 and user-established canon. Its current interpretation expresses organizational judgment

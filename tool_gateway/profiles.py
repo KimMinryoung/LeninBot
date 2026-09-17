@@ -67,8 +67,8 @@ TELEGRAM_ORCHESTRATOR_TOOLS = frozenset({
 ROLEPLAY_TELEGRAM_PROFILE = "telegram.roleplay"
 # Read-only CommuLingo dictionary lookup, matching web.roleplay: the personas
 # are Yezhov-era figures and the dictionary is the natural reference for them.
-# The data is already public at /commulingo, and every write tool stays off.
-ROLEPLAY_TELEGRAM_TOOLS = READ_SEARCH_TOOLS | frozenset({"commulingo_people"})
+# Dictionary data is public; writes are limited to private roleplay memory/state.
+ROLEPLAY_TELEGRAM_TOOLS = READ_SEARCH_TOOLS | frozenset({"commulingo_people", "roleplay_memory", "roleplay_state", "roleplay_person"})
 
 # -- Writer workspace profile ---------------------------------------------
 
@@ -210,7 +210,7 @@ TOOL_PROFILES: dict[str, ToolProfile] = {
         id=ROLEPLAY_TELEGRAM_PROFILE,
         tool_names=ROLEPLAY_TELEGRAM_TOOLS,
         surface="telegram",
-        description="Standalone roleplay bot read-only retrieval tools.",
+        description="Standalone roleplay retrieval and private memory tools.",
     ),
     WRITER_PROFILE: ToolProfile(
         id=WRITER_PROFILE,
