@@ -1313,6 +1313,9 @@ class _OpenAIProtocolAdapter:
             extra={"tc_list": tc_list, "message_obj": message_obj},
         )
 
+    def append_assistant_text(self, msgs, text):
+        msgs.append({"role": "assistant", "content": text})
+
     def append_assistant(self, msgs, turn):
         content_text = turn.text_parts[0] if turn.text_parts else ""
         assistant_msg = {
@@ -1637,6 +1640,7 @@ async def chat_with_tools(
     preserve_reasoning_content: bool = False,
     continue_on_length: bool = False,
     max_length_continuations: int = 1,
+    terminal_required: bool = False,
     return_metadata: bool = False,
     provider_idle_timeout_sec: float | None = None,
 ) -> str | dict:
@@ -1692,4 +1696,5 @@ async def chat_with_tools(
         terminal_tools=terminal_tools,
         continue_on_length=continue_on_length,
         max_length_continuations=max_length_continuations,
+        terminal_required=terminal_required,
     )

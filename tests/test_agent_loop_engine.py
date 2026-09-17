@@ -17,6 +17,7 @@ from unittest.mock import patch
 os.environ["LENINBOT_LLM_AUDIT_DB"] = "0"
 
 import llm.claude_loop as claude_loop
+from llm.agent_loop import FINALIZATION_RETRIES
 import llm.openai_tool_loop as openai_tool_loop
 
 
@@ -129,7 +130,7 @@ EXPENSIVE = _usage(inp=10_000_000, out=1_000_000)
 
 
 class TestClaudeFinalizationTools(unittest.TestCase):
-    def test_forced_final_exposes_only_finalization_tools_then_followup(self):
+    def test_forced_final_keeps_cached_tool_list_then_followup(self):
         client = FakeAnthropicClient([
             # Round 1: tool call whose cost blows the budget.
             _response([_tool_use_block("t1", "echo")], stop_reason="tool_use",
@@ -150,13 +151,149 @@ class TestClaudeFinalizationTools(unittest.TestCase):
                 budget_usd=0.01, finalization_tools=["save_diary"],
             ))
         self.assertEqual(len(client.calls), 3)
-        # Forced-final call exposes exactly the finalization tool.
-        final_tools = client.calls[1].get("tools")
-        self.assertEqual([t["name"] for t in final_tools], ["save_diary"])
+        # Forced-final call re-sends the same tool list so the cached prefix
+        # (tools → system → messages) survives; the whitelist is enforced by
+        # parse_final, not by the request payload.
+        self.assertEqual(client.calls[1]["tools"], client.calls[0]["tools"])
+        self.assertIn("save_diary", str(client.calls[1]["messages"][-1]))
         # Followup is tool-less and output-capped.
         self.assertNotIn("tools", client.calls[2])
         self.assertEqual(client.calls[2]["max_tokens"], 2048)
         self.assertIn("일기 저장을 마쳤다", result)
+
+    def test_rejected_finalization_call_is_retried_with_cache_warm_context(self):
+        attempts = []
+
+        async def fake_batch(tool_uses, tool_handlers, **kwargs):
+            out = []
+            for tid, name, inp in tool_uses:
+                attempts.append(inp)
+                if name == "save_diary" and not inp.get("fixed"):
+                    out.append((tid, name, inp, "rejected: title required", True))
+                else:
+                    out.append((tid, name, inp, "saved", False))
+            return out
+
+        client = FakeAnthropicClient([
+            _response([_tool_use_block("t1", "echo")], stop_reason="tool_use",
+                      usage=EXPENSIVE),
+            # First forced-final attempt: validator rejects the call.
+            _response([_tool_use_block("t2", "save_diary", {"fixed": False})],
+                      stop_reason="tool_use"),
+            # Retry after the [SYSTEM] retry message: accepted.
+            _response([_text_block("고쳐서 저장했다"), _tool_use_block("t3", "save_diary", {"fixed": True})],
+                      stop_reason="tool_use"),
+        ])
+        with patch.object(claude_loop, "execute_tools_batch", fake_batch):
+            result = asyncio.run(claude_loop.chat_with_tools(
+                [{"role": "user", "content": "q"}],
+                client=client, model="claude-sonnet-5",
+                tools=TOOLS, tool_handlers=HANDLERS, system_prompt="s",
+                budget_usd=0.01, finalization_tools=["save_diary"],
+                terminal_tools=["save_diary"],
+            ))
+        self.assertEqual([a.get("fixed") for a in attempts if "fixed" in a], [False, True])
+        # Retry message sits between the rejected result and the retry call.
+        retry_prompt = str(client.calls[2]["messages"][-1])
+        self.assertIn("마감 도구 호출이 위 오류로 거부되었다", retry_prompt)
+        self.assertIn("남은 기회: 2회", retry_prompt)
+        # Terminal success on the way out returns the tool result, no followup.
+        self.assertEqual(result, "saved")
+        self.assertEqual(len(client.calls), 3)
+
+    def test_finalization_retries_are_bounded(self):
+        async def always_reject(tool_uses, tool_handlers, **kwargs):
+            return [(tid, name, inp, "rejected", True) for tid, name, inp in tool_uses]
+
+        responses = [_response([_tool_use_block("t1", "echo")], stop_reason="tool_use",
+                               usage=EXPENSIVE)]
+        responses += [_response([_tool_use_block(f"f{i}", "save_diary")], stop_reason="tool_use")
+                      for i in range(1 + FINALIZATION_RETRIES)]
+        client = FakeAnthropicClient(responses)
+        with patch.object(claude_loop, "execute_tools_batch", always_reject):
+            result = asyncio.run(claude_loop.chat_with_tools(
+                [{"role": "user", "content": "q"}],
+                client=client, model="claude-sonnet-5",
+                tools=TOOLS, tool_handlers=HANDLERS, system_prompt="s",
+                budget_usd=0.01, finalization_tools=["save_diary"],
+                terminal_tools=["save_diary"],
+            ))
+        # 1 round + initial forced-final + FINALIZATION_RETRIES retries, and no
+        # closing-text followup because the caller declared terminal tools.
+        self.assertEqual(len(client.calls), 2 + FINALIZATION_RETRIES)
+        self.assertEqual(result, claude_loop.EMPTY_RESPONSE_FALLBACK)
+
+    def test_non_finalization_tool_in_forced_final_gets_error_and_retry(self):
+        executed = []
+
+        async def fake_batch(tool_uses, tool_handlers, **kwargs):
+            executed.extend(name for _tid, name, _inp in tool_uses)
+            return [(tid, name, inp, "saved", False) for tid, name, inp in tool_uses]
+
+        client = FakeAnthropicClient([
+            _response([_tool_use_block("t1", "echo")], stop_reason="tool_use",
+                      usage=EXPENSIVE),
+            # Model ignores the whitelist and calls echo again.
+            _response([_tool_use_block("t2", "echo")], stop_reason="tool_use"),
+            _response([_tool_use_block("t3", "save_diary")], stop_reason="tool_use"),
+        ])
+        with patch.object(claude_loop, "execute_tools_batch", fake_batch):
+            result = asyncio.run(claude_loop.chat_with_tools(
+                [{"role": "user", "content": "q"}],
+                client=client, model="claude-sonnet-5",
+                tools=TOOLS, tool_handlers=HANDLERS, system_prompt="s",
+                budget_usd=0.01, finalization_tools=["save_diary"],
+                terminal_tools=["save_diary"],
+            ))
+        self.assertEqual(executed, ["echo", "save_diary"])  # echo blocked in the final phase
+        blocked_result = client.calls[2]["messages"][-1]["content"][0]
+        self.assertTrue(blocked_result["is_error"])
+        self.assertIn("call only save_diary", blocked_result["content"])
+        self.assertEqual(result, "saved")
+
+    def test_terminal_required_reminds_once_on_text_answer(self):
+        client = FakeAnthropicClient([
+            _response([_text_block("판단: 승인해도 된다")]),  # prose instead of the tool
+            _response([_tool_use_block("t1", "save_diary")], stop_reason="tool_use"),
+        ])
+        with patch.object(claude_loop, "execute_tools_batch",
+                          _fake_batch_factory({"save_diary": ("recorded", False)})):
+            result = asyncio.run(claude_loop.chat_with_tools(
+                [{"role": "user", "content": "q"}],
+                client=client, model="claude-sonnet-5",
+                tools=TOOLS, tool_handlers=HANDLERS, system_prompt="s",
+                budget_usd=5.0, terminal_tools=["save_diary"], terminal_required=True,
+            ))
+        self.assertEqual(result, "recorded")
+        msgs = client.calls[1]["messages"]
+        self.assertEqual(msgs[-2]["role"], "assistant")
+        self.assertIn("판단: 승인해도 된다", str(msgs[-2]["content"]))
+        self.assertIn("save_diary 호출로만 기록된다", str(msgs[-1]))
+
+    def test_terminal_required_accepts_second_text_answer(self):
+        client = FakeAnthropicClient([
+            _response([_text_block("첫 답")]),
+            _response([_text_block("둘째 답")]),
+        ])
+        result = asyncio.run(claude_loop.chat_with_tools(
+            [{"role": "user", "content": "q"}],
+            client=client, model="claude-sonnet-5",
+            tools=TOOLS, tool_handlers=HANDLERS, system_prompt="s",
+            budget_usd=5.0, terminal_tools=["save_diary"], terminal_required=True,
+        ))
+        self.assertEqual(len(client.calls), 2)
+        self.assertIn("둘째 답", result)
+
+    def test_text_answer_without_terminal_required_is_final(self):
+        client = FakeAnthropicClient([_response([_text_block("완료")])])
+        result = asyncio.run(claude_loop.chat_with_tools(
+            [{"role": "user", "content": "q"}],
+            client=client, model="claude-sonnet-5",
+            tools=TOOLS, tool_handlers=HANDLERS, system_prompt="s",
+            budget_usd=5.0, terminal_tools=["save_diary"],
+        ))
+        self.assertEqual(result, "완료")
+        self.assertEqual(len(client.calls), 1)
 
     def test_followup_skipped_when_pretool_text_substantive(self):
         long_text = "충분히 긴 마무리 자기평가 텍스트다. " * 20  # ≥200 chars

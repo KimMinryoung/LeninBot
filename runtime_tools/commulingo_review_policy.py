@@ -66,7 +66,10 @@ def resolve_review_checks(value, proposal, snapshots):
             start, end = check.pop("line_start", None), check.pop("line_end", None)
             if (not snapshot or type(start) is not int or type(end) is not int
                     or not 1 <= start <= end <= len(snapshot["lines"])):
-                raise ValueError("select an existing review source_id and valid inclusive line_start/line_end")
+                available = "; ".join(f"{sid} lines 1..{len(snap['lines'])} ({snap['url']})"
+                                      for sid, snap in snapshots.items()) or "none fetched yet"
+                raise ValueError("select an existing review source_id and valid inclusive line_start/line_end. "
+                                 f"Available review sources: {available}")
             if "source" in check or "quote" in check:
                 raise ValueError("use a source range or literal source/quote, not both")
             check["source"] = snapshot["url"]

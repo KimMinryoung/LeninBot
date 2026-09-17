@@ -58,8 +58,10 @@ import logging
 from llm.gateway import check_llm_call, record_llm_call
 from llm.tool_loop_common import (
     build_budget_warning,
+    build_finalization_retry_message,
     build_limit_message,
     build_round_warning,
+    build_terminal_reminder,
     check_cancelled,
     emit_progress,
     save_redis_progress,
@@ -73,6 +75,12 @@ logger = logging.getLogger(__name__)
 # this much closing text alongside its finalization tool calls (see the
 # followup-skip rationale in the engine body).
 FOLLOWUP_SKIP_MIN_CHARS = 200
+
+# Extra forced-final calls allowed when every finalization tool call was
+# rejected. The conversation prefix is already cached, so each retry costs a
+# fraction of the run it rescues (CommuLingo review/research stages lost ~20%
+# of attempts at exactly this point, 2026-09-17).
+FINALIZATION_RETRIES = 2
 
 
 class LoopEarlyReturn(Exception):
@@ -165,8 +173,14 @@ async def run_tool_loop(
     terminal_tools: list[str] | None = None,
     continue_on_length: bool = False,
     max_length_continuations: int = 1,
+    terminal_required: bool = False,
 ):
-    """Drive the tool-use loop for one agent turn through a protocol adapter."""
+    """Drive the tool-use loop for one agent turn through a protocol adapter.
+
+    terminal_required: the caller consumes only a terminal tool result, so a
+    plain-text answer is a lost run. The first text-only turn gets one
+    reminder to call the terminal tool before the loop accepts the text.
+    """
     budget_usd = validate_budget(budget_usd)
 
     # LLM-gateway policy gate: one check per agent turn (kill switch,
@@ -190,6 +204,7 @@ async def run_tool_loop(
     final_continuation_parts: list[str] = []
     progress_text_parts: list[str] = []
     budget_warning_sent = False
+    terminal_reminded = False
     length_continuations = 0
     round_num = 0
     response = None
@@ -281,6 +296,20 @@ async def run_tool_loop(
                             continue
                 if turn.truncated_by_length:
                     await adapter.on_truncated_final()
+                if (terminal_required and terminal_tools and not terminal_reminded
+                        and not turn.truncated_by_length and round_num < total_round_limit):
+                    # The stage result only exists once the terminal tool
+                    # validates it; prose is discarded. Remind once, with the
+                    # cached prefix intact, instead of failing the attempt.
+                    terminal_reminded = True
+                    text = "\n".join(t for t in turn.text_parts if t).strip()
+                    adapter.append_assistant_text(working_msgs, text or "(no content)")
+                    adapter.append_user_text(working_msgs, build_terminal_reminder(terminal_tools))
+                    logger.info(
+                        "Round %d ended in text without %s; reminding once",
+                        round_num, ", ".join(terminal_tools),
+                    )
+                    continue
                 return _tracked(
                     accumulated_text_parts + turn.text_parts,
                     finish_reason=turn.finish_reason,
@@ -402,13 +431,18 @@ async def run_tool_loop(
 
         tracker_response = None
         try:
-            final_response = await adapter.call_final(working_msgs, final_tools, limit_reason)
-            adapter.track_cost(final_response, "Forced-final")
-            tracker_response = final_response
-            final_turn = adapter.parse_final(final_response, final_tool_names)
-            text_parts = list(final_turn.text_parts)
+            text_parts: list[str] = []
+            final_attempt = 0
+            while True:
+                final_attempt += 1
+                final_response = await adapter.call_final(working_msgs, final_tools, limit_reason)
+                adapter.track_cost(final_response, "Forced-final")
+                tracker_response = final_response
+                final_turn = adapter.parse_final(final_response, final_tool_names)
+                text_parts = list(final_turn.text_parts)
 
-            if final_turn.has_protocol:
+                if not final_turn.has_protocol:
+                    break
                 adapter.append_final_assistant(working_msgs, final_turn)
                 final_exec = []
                 if final_turn.batch:
@@ -416,39 +450,85 @@ async def run_tool_loop(
                         "Forced-final: executing %d finalization tool call(s)",
                         len(final_turn.batch),
                     )
-                    final_exec = await adapter.run_batch(final_turn.batch, round_num + 1)
+                    final_exec = await adapter.run_batch(final_turn.batch, round_num + final_attempt)
                     for tid, tname, tinput, result, is_error in final_exec:
                         input_summary = json.dumps(tinput, ensure_ascii=False)
                         tool_call_log.append(f"  [final] {tname}({input_summary})")
                         tool_work_details.append(f"  [final] {tname}({input_summary}) → {result}")
                         save_redis_progress(
-                            task_id, round_num + 1, tname, input_summary, result, is_error,
+                            task_id, round_num + final_attempt, tname, input_summary, result, is_error,
                         )
                 adapter.append_final_results(working_msgs, final_turn, final_exec)
 
-                # Skip the followup roundtrip when the forced-final already
-                # produced substantive closing text. The finalization tool ran
-                # (durable persistence) and the pre-tool text typically already
-                # contains the self-critique the agent was prompted for —
-                # re-sending the whole conversation just to collect a "done"
-                # line at full input pricing is the dominant cost in
-                # autonomous_project ticks.
-                pre_tool_text = "\n".join(p for p in final_turn.text_parts if p).strip()
-                if final_turn.batch and len(pre_tool_text) >= FOLLOWUP_SKIP_MIN_CHARS:
-                    tool_summary = ", ".join(
-                        f"{tname}{'(error)' if is_error else ''}"
-                        for _tid, tname, _ti, _r, is_error in final_exec
+                # A terminal tool that succeeds on the way out ends the run
+                # exactly as it would in a normal round: its return value is
+                # the report, and no closing-text roundtrip is needed.
+                if terminal_tools:
+                    terminal_hit = next(
+                        (
+                            (tname, result)
+                            for _tid, tname, _tinput, result, is_error in final_exec
+                            if tname in terminal_tools and not is_error
+                        ),
+                        None,
                     )
-                    logger.info(
-                        "Forced-final: skipping followup (pre-tool text %d chars; tools=%s)",
-                        len(pre_tool_text), tool_summary,
-                    )
-                    text_parts = [pre_tool_text]
-                else:
-                    followup = await adapter.call_followup(working_msgs)
-                    adapter.track_cost(followup, "Forced-final followup")
-                    tracker_response = followup
-                    text_parts = text_parts + adapter.extract_text_parts(followup)
+                    if terminal_hit:
+                        _tname, _tresult = terminal_hit
+                        terminal_report = str(_tresult).strip() or f"{_tname} completed"
+                        return _tracked(
+                            [p for p in accumulated_text_parts + [terminal_report] if p],
+                            finish_reason="terminal_tool",
+                            limit_reason=limit_reason,
+                            was_still_working=was_still_working,
+                            interrupted=was_still_working,
+                            response_obj=final_response,
+                            final_parts=[terminal_report],
+                        )
+
+                persisted = any(not is_error for _tid, _tn, _ti, _r, is_error in final_exec)
+                if persisted or final_attempt > FINALIZATION_RETRIES:
+                    # Skip the followup roundtrip when the forced-final already
+                    # produced substantive closing text. The finalization tool ran
+                    # (durable persistence) and the pre-tool text typically already
+                    # contains the self-critique the agent was prompted for —
+                    # re-sending the whole conversation just to collect a "done"
+                    # line at full input pricing is the dominant cost in
+                    # autonomous_project ticks. Callers that declared terminal
+                    # tools consume the tool result, never closing prose.
+                    pre_tool_text = "\n".join(p for p in final_turn.text_parts if p).strip()
+                    if terminal_tools or (
+                        final_turn.batch and len(pre_tool_text) >= FOLLOWUP_SKIP_MIN_CHARS
+                    ):
+                        tool_summary = ", ".join(
+                            f"{tname}{'(error)' if is_error else ''}"
+                            for _tid, tname, _ti, _r, is_error in final_exec
+                        )
+                        logger.info(
+                            "Forced-final: skipping followup (pre-tool text %d chars; tools=%s)",
+                            len(pre_tool_text), tool_summary,
+                        )
+                        text_parts = [pre_tool_text] if pre_tool_text else []
+                    else:
+                        followup = await adapter.call_followup(working_msgs)
+                        adapter.track_cost(followup, "Forced-final followup")
+                        tracker_response = followup
+                        text_parts = text_parts + adapter.extract_text_parts(followup)
+                    break
+
+                # Every finalization call was rejected (validation error or a
+                # tool outside the whitelist). The work is already in context,
+                # so one more cache-warm call is far cheaper than losing the run.
+                logger.warning(
+                    "Forced-final: finalization rejected (attempt %d/%d); retrying",
+                    final_attempt, FINALIZATION_RETRIES + 1,
+                )
+                adapter.append_user_text(
+                    working_msgs,
+                    build_finalization_retry_message(
+                        final_tool_names or [],
+                        FINALIZATION_RETRIES + 1 - final_attempt,
+                    ),
+                )
         except LoopEarlyReturn:
             raise
         except Exception as final_err:

@@ -274,6 +274,25 @@ def build_limit_message(
     )
 
 
+def build_finalization_retry_message(finalization_tools: list[str], remaining: int) -> str:
+    """Build the [SYSTEM] message injected after every forced-final finalization call was rejected."""
+    names = ", ".join(finalization_tools) or "마감 도구"
+    return (
+        f"[SYSTEM] 마감 도구 호출이 위 오류로 거부되었다. 다른 도구는 사용할 수 없다. "
+        f"오류에서 지적한 부분만 고쳐 {names}를 지금 다시 호출하라. "
+        f"남은 기회: {remaining}회."
+    )
+
+
+def build_terminal_reminder(terminal_tools: list[str]) -> str:
+    """Build the [SYSTEM] message injected when a terminal-required run ends in prose."""
+    names = ", ".join(terminal_tools)
+    return (
+        f"[SYSTEM] 이 작업의 결과는 {names} 호출로만 기록된다. 텍스트 답변은 저장되지 않는다. "
+        "지금까지의 판단을 그 도구로 지금 제출하라."
+    )
+
+
 def build_budget_warning(total_cost: float, budget_usd: float) -> str:
     """Build the 80% budget warning message."""
     return (

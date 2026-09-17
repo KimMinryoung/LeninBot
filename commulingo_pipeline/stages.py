@@ -13,6 +13,7 @@ from . import service
 from .bundles import work_topics, advance
 
 MAX_UNCHANGED_REVIEW_REVISIONS = 2
+DRAFT_ROUNDS = 8
 
 READS = {'wiki_search','wiki_get','web_search','fetch_url','commulingo_people'}
 
@@ -54,7 +55,7 @@ def stage_evidence(payload):
     )])
 
 
-async def model_call(*, spec, prompt, tool, handler, reads, usage, budget, read_wrap=None, scope_id=None, read_tools=None):
+async def model_call(*, spec, prompt, tool, handler, reads, usage, budget, read_wrap=None, scope_id=None, read_tools=None, max_rounds=12):
     from bot_config import resolve_agent_tool_loop
     from runtime_tools.registry import TOOLS, TOOL_HANDLERS
     from tool_gateway.inference import resolve_agent_inference_policy
@@ -101,10 +102,10 @@ async def model_call(*, spec, prompt, tool, handler, reads, usage, budget, read_
         await binding.chat(messages,
             client=binding.client,model=binding.model,tools=[*tools,tool],tool_handlers=handlers,
             system_prompt=spec.render_prompt(provider=binding.render_provider),
-            max_rounds=min(policy.max_rounds,12),max_tokens=policy.max_output_tokens,
+            max_rounds=min(policy.max_rounds,max_rounds),max_tokens=policy.max_output_tokens,
             max_input_tokens=policy.max_input_tokens,budget_usd=budget,budget_tracker=usage.tracker,
             agent_name=spec.name,finalization_tools=[tool['name']],terminal_tools=[tool['name']],
-            **binding.reasoning)
+            terminal_required=True,**binding.reasoning)
     usage.complete = True
     if not completed:
         detail = '; '.join(dict.fromkeys(rejections[-3:]))
@@ -460,10 +461,26 @@ class Draft:
                  'role_categories':role_categories,'prose_budgets':prose_budgets,
                  'review_feedback':latest(artifacts,'review') or (job.get('payload') or {}).get('review_feedback'),
                  'original_proposal':(job.get('payload') or {}).get('original_proposal')}))
+        # One draft plus a few whole-field repairs; the forced-final retries add
+        # up to three more terminal attempts, so 8 rounds cover the successful
+        # distribution without funding twelve rounds of sentence shaving.
         await model_call(spec=spec,prompt=prompt,tool=tool,handler=finish,reads={'commulingo_people'},usage=usage,budget=budget,
                          read_wrap=wrap_lookup,read_tools={'commulingo_people':lookup_tool},
-                         scope_id=f'commulingo_pipeline:{job.get("id")}:draft')
+                         scope_id=f'commulingo_pipeline:{job.get("id")}:draft',max_rounds=DRAFT_ROUNDS)
         return Result(box,'validate')
+
+
+def prior_reviews(artifacts):
+    """Earlier revise verdicts of the current bundle, trimmed to what a re-review must confirm."""
+    reviews = []
+    for artifact in current_artifacts(artifacts):
+        value = artifact['value']
+        if artifact['stage']!='review' or value.get('decision')!='revise':
+            continue
+        reviews.append({'reason':value.get('reason',''),
+                        'needs_research':value.get('needs_research'),
+                        'findings':[c.get('finding','') for c in value.get('checks',[]) if isinstance(c,dict)]})
+    return reviews
 
 
 def prose_problem(fields):
@@ -513,13 +530,22 @@ class Review:
         proposal = {'target_type':draft.get('target',job['kind']),'action':draft.get('action',job['action']),'target_id':job['target'],
                     'patch_json':draft['fields'],'source_refs':draft['sources']}
         proposal['risks'] = review_risks(proposal,current)
+        previous_reviews = prior_reviews(artifacts)
         fetched, box = {}, {}
         handlers = make_handlers({k:TOOL_HANDLERS[k] for k in READS},proposal,fetched,box)
         async def finish(value):
             return await handlers[DECISION_TOOL['name']](**value)
+        convergence = ('' if not previous_reviews else
+            f'This is review #{len(previous_reviews)+1} of the same job: the author revised the draft after the '
+            'previous_reviews below. First verify that each correction those reviews demanded was made. '
+            'Approve when the demanded corrections are made and no remaining claim is false, unsupported '
+            'or contradicted between languages. A new revise must name a factual error or unsupported '
+            'certainty, not a wording, emphasis or attribution preference about text the earlier review '
+            'already read without objecting. ')
         await model_call(spec=spec,prompt='Independently verify every changed claim, bilingual equivalence, '
-            'identity and source support. Do not approve merely because quotations occur in a source.\n'
-            +stage_evidence({'suggestion':proposal,'current_person':current}),
+            'identity and source support. Do not approve merely because quotations occur in a source. '
+            + convergence + '\n'
+            +stage_evidence({'suggestion':proposal,'current_person':current,'previous_reviews':previous_reviews}),
             tool=DECISION_TOOL,handler=finish,reads=READS,usage=usage,budget=budget,
             read_wrap=lambda name,call:handlers[name],scope_id=f'commulingo_pipeline:{job["id"]}:review')
         if box['decision']=='revise':

@@ -66,7 +66,9 @@ class EfficiencyTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError): resolve_review_checks(decision, proposal, {})
         with self.assertRaises(ValueError): validate_decision(resolved, proposal, {})
         invalid = deepcopy(decision); invalid['checks'][0]['line_end']=100
-        with self.assertRaises(ValueError): resolve_review_checks(invalid, proposal, snapshots)
+        with self.assertRaises(ValueError) as rejected: resolve_review_checks(invalid, proposal, snapshots)
+        # The rejection names the usable sources so the next attempt needs no re-fetch.
+        self.assertIn(f'{source_id} lines 1..2 ({url})', str(rejected.exception))
         # Numbering and chunk boundaries do not become source evidence.
         _, _ = review_source(url, 'x'*500, snapshots)
 
@@ -202,3 +204,24 @@ class EfficiencyTests(unittest.IsolatedAsyncioTestCase):
 
 
 if __name__ == '__main__': unittest.main()
+
+
+class DraftLengthGuidanceTests(unittest.TestCase):
+    def test_overlength_rejection_lists_paragraph_sizes_and_counts_repeats(self):
+        from commulingo_pipeline.draft_repair import DraftRepair
+        tool = {'name':'commulingo_pipeline_result','input_schema':{'type':'object','additionalProperties':False,
+            'properties':{'fields':{'type':'object','properties':{'body':{'type':'object',
+                'properties':{'en':{'type':'string','maxLength':20}}}}}},'required':['fields']}}
+        repairs = DraftRepair(tool)
+        messages = []
+        for text in ('first para here\n\nsecond paragraph is long', 'first para here\n\nsecond paragraph', 'first para here\n\nsecond para'):
+            with self.assertRaises(ValueError) as rejected:
+                repairs.prepare({'fields':{'body':{'en':text}}})
+            messages.append(str(rejected.exception))
+        self.assertIn('fields.body.en: remove at least 21 characters in ONE repair. Paragraph sizes: P1 15, P2 24', messages[0])
+        self.assertNotIn('rejection #', messages[0])
+        self.assertIn('over-length rejection #3', messages[2])
+        # A schema error without a length excess adds no length guidance.
+        with self.assertRaises(ValueError) as rejected:
+            repairs.prepare({'fields':{'body':{'en':5}}})
+        self.assertNotIn('Paragraph sizes', str(rejected.exception))

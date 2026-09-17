@@ -620,6 +620,9 @@ class _ClaudeProtocolAdapter:
         # server_tool_use/web_search_tool_result.
         msgs.append({"role": "assistant", "content": turn.extra["assistant_content"]})
 
+    def append_assistant_text(self, msgs, text):
+        msgs.append({"role": "assistant", "content": [{"type": "text", "text": text}]})
+
     async def run_batch(self, batch, round_num):
         # Consecutive read-only tools run in parallel via execute_tools_batch;
         # everything else stays sequential. Resolved by bare name so test
@@ -733,15 +736,13 @@ class _ClaudeProtocolAdapter:
         final_tool_names = [t["name"] for t in self.cached_tools if t.get("name") in allowed]
         if not final_tool_names:
             return [], None
-        final_tools = [dict(t) for t in self.cached_tools if t.get("name") in set(final_tool_names)]
-        # Preserve prompt caching semantics on the filtered list. Must
-        # use the same 1h TTL as cached_system — Anthropic processes
-        # `tools` before `system`, and a longer TTL cannot follow a
-        # shorter one, so mixing 5m (default ephemeral) here with a 1h
-        # system block raises a 400 (the diary task forced-final path
-        # hit this).
-        final_tools[-1] = {**final_tools[-1], "cache_control": _CACHE_CONTROL_1H}
-        return final_tool_names, final_tools
+        # Send the unchanged tool list: tools are the first block of the
+        # cached prefix, and a filtered list re-tokenizes the entire
+        # conversation at full price (measured 2026-09-17: forced-final
+        # calls read ~5k cached tokens against ~55k in ordinary rounds).
+        # parse_final enforces the whitelist; anything else gets an error
+        # tool_result and a retry.
+        return final_tool_names, self.cached_tools
 
     def append_user_text(self, msgs, text):
         _append_user_text_message(msgs, text)
@@ -795,8 +796,16 @@ class _ClaudeProtocolAdapter:
                             tid, tname,
                             "Tool execution blocked: tool input must be an object",
                         ))
-                else:
-                    logger.warning("Forced-final: ignoring non-finalization tool_use name=%s", tname)
+                elif tid and tname:
+                    final_assistant_content.append({
+                        "type": "tool_use", "id": tid, "name": tname, "input": tinput,
+                    })
+                    malformed.append((
+                        tid, tname,
+                        "Tool unavailable after the limit; call only "
+                        + ", ".join(sorted(allowed)),
+                    ))
+                    logger.warning("Forced-final: rejecting non-finalization tool_use name=%s", tname)
 
         return FinalTurn(
             text_parts=text_parts,
@@ -886,6 +895,7 @@ async def chat_with_tools(
     terminal_tools: list[str] | None = None,
     continue_on_length: bool = False,
     max_length_continuations: int = 1,
+    terminal_required: bool = False,
     thinking: dict | None = None,
     output_config: dict | None = None,
     provider_idle_timeout_sec: float | None = None,
@@ -947,4 +957,5 @@ async def chat_with_tools(
         terminal_tools=terminal_tools,
         continue_on_length=continue_on_length,
         max_length_continuations=max_length_continuations,
+        terminal_required=terminal_required,
     )

@@ -367,6 +367,39 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(corrected.next_stage,'draft')
             self.assertNotEqual(corrected.value['reviewed_content_hash'],first.value['reviewed_content_hash'])
 
+    async def test_rereview_receives_earlier_verdicts_of_the_current_bundle(self):
+        from commulingo_pipeline.stages import Review
+        from commulingo_pipeline.engine import Usage
+        job={'id':9,'kind':'person','action':'create','target':'fixture','topic':'basics'}
+        stale={'stage':'review','value':{'decision':'revise','reason':'Earlier section verdict','checks':[]}}
+        boundary={'stage':'submit','value':{'remaining_topics':['sections']}}
+        artifacts=[stale,boundary,{'stage':'research','value':{'baseline':''}},
+                   {'stage':'draft','value':{'fields':{},'sources':[]}},
+                   {'stage':'review','value':{'decision':'revise','reason':'Fix the patronymic','needs_research':False,
+                       'checks':[{'citation':'c','source':'s','quote':'q'*20,'finding':'부칭 표기 오류'}]}},
+                   {'stage':'draft','value':{'fields':{'bio':{'ko':'수정','en':'fixed'}},'sources':[]}}]
+        def handlers(reads,proposal,fetched,box):
+            async def decide(**value):
+                box.update(value)
+            return {'commulingo_review_decision':decide}
+        prompts=[]
+        async def model(**kwargs):
+            prompts.append(kwargs['prompt'])
+            await kwargs['handler']({'decision':'approve','reason':'Corrections were made','checks':[],'resolved_risks':[]})
+        with patch('commulingo_pipeline.stages.service.call',return_value=None), \
+             patch('scripts.commulingo_person_reviewer.make_handlers',side_effect=handlers), \
+             patch('commulingo_pipeline.stages.model_call',side_effect=model):
+            result=await Review()(job,artifacts,Usage(),.2)
+            self.assertEqual(result.next_stage,'submit')
+            first=await Review()(job,artifacts[2:4],Usage(),.2)
+            self.assertEqual(first.next_stage,'submit')
+        self.assertIn('This is review #2 of the same job',prompts[0])
+        self.assertIn('Fix the patronymic',prompts[0])
+        self.assertIn('부칭 표기 오류',prompts[0])
+        self.assertNotIn('Earlier section verdict',prompts[0])  # previous bundle stays out
+        self.assertNotIn('"q'+'q'*19,prompts[0])  # quotes are not replayed, only findings
+        self.assertNotIn('This is review #',prompts[1])
+
     async def test_manually_resolved_original_is_not_replaced(self):
         from commulingo_pipeline.stages import submit
         from commulingo_pipeline.engine import Usage
