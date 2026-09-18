@@ -32,9 +32,49 @@ class DynamicsTests(unittest.TestCase):
         injury['treated'] = True
         self.assertEqual(advance(self.initial(injuries=[injury]), 120, '두 시간')['pain'], 41)
         injury['trend'] = 'recovering'
-        self.assertEqual(advance(self.initial(injuries=[injury]), 120, '두 시간')['pain'], 38)
+        self.assertEqual(advance(self.initial(injuries=[injury]), 120, '두 시간')['pain'], 39)
         self.assertEqual(advance(self.initial(threat='safe'), 120, '두 시간')['tension'], 38)
         self.assertEqual(advance(self.initial(threat='threatening'), 120, '두 시간')['tension'], 62)
+
+    def test_pain_floor_and_healing_timeline(self):
+        from runtime_tools.roleplay_dynamics import injury_pain_floor, progress_injuries, carry_injury_progress
+        burn = {'id': 'burn', 'description': '화상', 'severity': 3, 'trend': 'recovering', 'treated': True}
+        cut = {'id': 'cut', 'description': '열상', 'severity': 2, 'trend': 'stable', 'treated': False}
+        self.assertEqual(injury_pain_floor([burn, cut]), 17.66)  # 10.5 and 8, noisy-or
+        self.assertEqual(injury_pain_floor([]), 0)
+        # Recovery drifts down but stops at the floor the wounds imply.
+        long_rest = advance(self.initial(pain=30, injuries=[burn, cut]), 1440, '하루 휴식')
+        self.assertEqual(long_rest['pain'], 17.66)
+        # After an event left pain below the floor, it climbs back at the approach rate.
+        after_event = advance(self.initial(pain=5, injuries=[burn, cut]), 120, '두 시간')
+        self.assertEqual(after_event['pain'], 11)
+        self.assertEqual(advance(self.initial(pain=5, injuries=[burn, cut]), 600, '열 시간')['pain'], 17.66)
+        # Severe pain halves what rest and sleep recover.
+        self.assertEqual(advance(self.initial(pain=60, activity='rest'), 60, '아픈 휴식')['fatigue'], 59)
+        self.assertEqual(advance(self.initial(pain=60, activity='sleep'), 60, '아픈 수면')['fatigue'], 56)
+        self.assertEqual(advance(self.initial(pain=40, activity='sleep'), 60, '수면')['fatigue'], 52)
+        # Healing clock: a treated recovering wound loses a severity step per 24h and disappears at 0.
+        day = advance(self.initial(injuries=[burn, cut]), 1440, '하루')
+        self.assertEqual([(i['id'], i['severity']) for i in day['injuries']], [('burn', 2), ('cut', 2)])
+        self.assertEqual(day['last_calculation']['injury_changes'], [{'id': 'burn', 'from': 3, 'to': 2}])
+        self.assertEqual(day['injuries'][1]['progress_minutes'], 0)
+        state = day
+        for _ in range(2):
+            state = advance(state, state['scene_minute'] + 1440, '하루 더')
+        self.assertEqual([i['id'] for i in state['injuries']], ['cut'])
+        self.assertEqual(state['last_calculation']['healed'], ['burn'])
+        # Untreated worsening gains a step per 24h and stops at 3; untreated recovery takes 48h a step.
+        wound = {'id': 'w', 'description': '상처', 'severity': 1, 'trend': 'worsening', 'treated': False, 'progress_minutes': 1439}
+        worse, changes = progress_injuries([wound], 1)
+        self.assertEqual((worse[0]['severity'], worse[0]['progress_minutes'], changes), (2, 0, [{'id': 'w', 'from': 1, 'to': 2}]))
+        capped, _ = progress_injuries([{**wound, 'severity': 3}], 5000)
+        self.assertEqual((capped[0]['severity'], capped[0]['progress_minutes']), (3, 1440))
+        slow, _ = progress_injuries([{**wound, 'trend': 'recovering', 'progress_minutes': 0}], 2879)
+        self.assertEqual(slow[0]['severity'], 1)
+        # A model-sent list keeps the server clock for unchanged trends and restarts it on a change.
+        carried = carry_injury_progress([{**burn, 'progress_minutes': 700}, {**cut, 'progress_minutes': 300}],
+                                        [dict(burn), {**cut, 'trend': 'recovering'}, {'id': 'new', 'description': '새 상처', 'severity': 1, 'trend': 'stable', 'treated': False}])
+        self.assertEqual([i['progress_minutes'] for i in carried], [700, 0, 0])
 
     def test_mental_axes_drift(self):
         mental = dict(resolve=50, clarity=50, humiliation=50)
@@ -183,6 +223,25 @@ class StateTransactionTests(unittest.TestCase):
         result = json.loads(memory.roleplay_state('update', {'last_event': '검토한 사건'}, '사건', expected_revision=5,
                                                   person_updates=[], person_review='로도스는 말없이 서 있었음'))
         self.assertNotIn('people_reminder', result)
+
+    def test_injury_clock_survives_model_resend(self):
+        burn = {'id': 'burn', 'description': '화상', 'severity': 2, 'trend': 'recovering', 'treated': True}
+        memory.roleplay_state('update', {'injuries': [burn]}, '처치', expected_revision=1)
+        temporal = {'relation': 'current', 'certainty': 'explicit', 'operation': 'advance', 'elapsed_minutes': 720,
+                    'source_quote': '반나절', 'interpretation': '반나절 휴식'}
+        memory.roleplay_state('time', reason='반나절', expected_revision=2, event_id='half', temporal=temporal,
+                              interval_conditions={'activity': 'rest'}, person_updates=[], person_review='없음')
+        self.assertEqual(memory.load_state(1)['injuries'][0]['progress_minutes'], 720)
+        # The model resends the list without the server clock; the clock is kept.
+        result = json.loads(memory.roleplay_state('time', {'injuries': [{**burn, 'description': '화상, 딱지 앉음'}]}, '반나절 더',
+                            expected_revision=3, event_id='half2', temporal=temporal,
+                            interval_conditions={'activity': 'rest', 'injuries': [burn]}, person_updates=[], person_review='없음'))
+        state = memory.load_state(1)
+        self.assertEqual(state['injuries'][0]['severity'], 1)
+        self.assertEqual(state['injuries'][0]['description'], '화상, 딱지 앉음')
+        self.assertEqual(state['injuries'][0]['progress_minutes'], 0)
+        self.assertEqual(result['last_calculation']['injury_changes'], [{'id': 'burn', 'from': 2, 'to': 1}])
+        self.assertEqual(result['pain_floor'], 3)
 
     def test_one_call_interval_then_changes(self):
         memory.roleplay_person('save', 'rodos', changes={'name': '로도스', 'aliases': ['보리스']})

@@ -151,11 +151,33 @@ observed/reported/inferred로 직접 관찰·출처 있는 전언·추측을 나
 |---|---|
 | 허기 | +3, 식사 직후 감소는 별도의 즉시 사건 |
 | 피로 | 휴식 −2, 가벼운 활동 +2, 보통 +5, 격한 활동 +10, 수면 −8 × 수면의 질(0.25/1/1.25) |
-| 통증 | 부상별 severity × (경과 계수 + 활동 계수)의 합. stable=0, worsening=미처치 0.5/처치 0.25, recovering=−0.5. 활동 계수는 휴식·수면 0, 가벼움 0.1, 보통 0.5, 격함 1.5 |
+| 통증 | 부상별 severity × (경과 계수 + 활동 계수)의 합. stable=0, worsening=미처치 0.5/처치 0.25, recovering=처치 −0.25/미처치 −0.15. 활동 계수는 휴식·수면 0, 가벼움 0.1, 보통 0.5, 격함 1.5. 부상 기저값(아래) 아래로는 내려가지 않고, 기저값 아래에 있으면 시간당 3씩 기저값으로 복귀 |
+| 피로(통증 영향) | 통증 ≥ 50이면 휴식·수면의 회복률 절반 |
 | 긴장 | 위협 단계의 목표값 10/40/75/90 쪽으로 시간당 최대 6씩 접근. 과잉 상승은 없음 |
 | 의지 resolve (100=굳건) | 위협별 safe +2 / uncertain +0.5 / threatening −1.5 / immediate −3; 피로>70 −1, 통증>60 −1; 수면(poor 제외) +1 |
 | 명료함 clarity (100=또렷) | 수면 +6 × 수면의 질; 깨어 있을 때 피로>60 −1(>80 −2), 통증>60 −1, immediate −1; 피로≤60 휴식 +1 |
 | 굴욕 humiliation (100=극심) | safe −0.5, 그 외 0. 사건(event)으로만 상승 |
+
+#### 부상 회복 모델
+
+2026-09-18까지는 부상이 통증 변화율에만 관여했다. `treated`는 worsening의 속도만 줄였고 severity는 변하지
+않았으며 부상은 사라지지 않았다. recovering −0.5×severity/h가 밤새 누적되어 부상 6개(전기고문 화상 sev3 포함)에
+통증 13이 나오는 등 상처와 통증이 분리됐다. 다음 규칙을 추가했다(`roleplay_dynamics`).
+
+- 기저 통증 `injury_pain_floor`: severity별 4/8/14, 처치됨 ×0.75, noisy-or 합산(100 − Π(100 − f)). 구간 시작
+  시점의 목록으로 계산하며 결과 뷰의 `pain_floor`로 노출한다. 드리프트는 기저값에서 멈추고, event로 기저값 아래로
+  내려간 통증은 시간당 3씩(부상 변화율이 더 크면 그 값) 기저값으로 돌아온다.
+- 회복 시계 `progress_minutes`(부상별, 서버 유지): recovering은 처치 1440분/미처치 2880분마다 severity −1,
+  0이면 목록에서 제거하고 `last_calculation.healed`에 기록. worsening은 미처치 1440분/처치 2880분마다 +1(최대 3).
+  추세가 바뀌면 시계를 0으로 되돌린다. severity 변화는 `last_calculation.injury_changes`에 남긴다.
+- 모델이 보낸 목록과의 조정: `update`·`interval_conditions`의 목록은 같은 id·같은 추세면 서버 시계를 이어받는다
+  (`carry_injury_progress`). `time` 호출의 `changes.injuries`는 구간 계산 뒤에 적용되므로, 구간 전 값을 그대로
+  되풀이한 항목(severity·trend가 구간 전과 동일)은 서버가 진행시킨 severity를 유지하고, 치유되어 사라진 상처의
+  되풀이는 버린다. severity나 trend를 바꾼 항목은 모델의 값을 따른다(`reconcile_injuries`). 설명(description)은
+  항상 모델의 값이다.
+- `/status 상세`에 severity와 기저 통증을 표시한다.
+
+검증: `tests/test_roleplay_dynamics.py`의 기저값·복귀·휴식 방해·회복 단계·악화 상한·되풀이 조정 테스트.
 
 정신 3축은 2026-09-18에 추가했다. 조건 판정은 구간 시작 시점의 피로·통증·위협을 쓴다(구간 중 변화는
 분할 구간으로 처리). 기존 저장 상태와 legacy JSON에는 없는 키이며 null(미설정)로 읽고 자동 생성하지 않는다.

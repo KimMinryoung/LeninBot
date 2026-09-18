@@ -12,7 +12,8 @@ from pathlib import Path
 
 from tool_gateway.security import get_caller
 from runtime_tools.roleplay_clock import TEMPORAL_SCHEMA, interpret_clock, validate_temporal
-from runtime_tools.roleplay_dynamics import (METRICS, CONDITION_SCHEMA, with_defaults, validate_conditions, advance)
+from runtime_tools.roleplay_dynamics import (METRICS, CONDITION_SCHEMA, with_defaults, validate_conditions, advance,
+                                             carry_injury_progress, injury_pain_floor, reconcile_injuries)
 
 MEMORY_PATH = Path(__file__).resolve().parents[1] / "output" / "roleplay_memory.sqlite3"
 MAX_NOTES = 30
@@ -270,9 +271,10 @@ def state_view(state: dict) -> dict:
     interpretation = clock.get("last_interpretation")
     if interpretation:
         view["clock"]["last_interpretation"] = {k: interpretation.get(k) for k in ("relation", "operation", "source_quote", "interpretation")}
+    view["pain_floor"] = injury_pain_floor(state.get("injuries") or [])
     calculation = state.get("last_calculation")
     if calculation:
-        view["last_calculation"] = {k: calculation.get(k) for k in ("from_minute", "to_minute", "basis", "before", "after")}
+        view["last_calculation"] = {k: calculation.get(k) for k in ("from_minute", "to_minute", "basis", "before", "after", "injury_changes", "healed") if calculation.get(k) not in (None, [])}
     unset = [key for key in METRICS if state.get(key) is None]
     if unset:
         # A null among numbers is easy to skim past; name the gap and what closes it.
@@ -494,17 +496,23 @@ def roleplay_state(action: str, changes: dict | None = None, reason: str = "", *
         if injury_upserts:
             _merge_injury_upserts(before["injuries"], changes, injury_upserts, warnings)
             validate_conditions({"injuries": changes["injuries"]})
+        if interval_conditions and "injuries" in interval_conditions:
+            interval_conditions["injuries"] = carry_injury_progress(before["injuries"], interval_conditions["injuries"])
         if action == "time":
             interval_state = {**before, **(interval_conditions or {})}
             if interval_conditions and all(k in interval_conditions for k in CONDITION_SCHEMA):
                 interval_state["conditions_initialized"] = True
             base = interpret_clock(interval_state, temporal, advance)
             base["recent_events"] = (before["recent_events"] + [event_id])[-100:]
+            if "injuries" in changes:
+                changes["injuries"] = reconcile_injuries(interval_state["injuries"], base["injuries"], changes["injuries"])
         elif action == "reset":
             base = with_defaults(dict(STATE_DEFAULTS))
             base["revision"] = before["revision"]
         else:
             base = before
+            if "injuries" in changes:
+                changes["injuries"] = carry_injury_progress(before["injuries"], changes["injuries"])
         state, adjustment, metric_reasons = _apply_changes(
             base, changes, adjustment=adjustment, metric_reasons=metric_reasons, reason=reason,
             event_id=event_id, event_type=event_type, warnings=warnings)

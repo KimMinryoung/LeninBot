@@ -234,6 +234,14 @@ warnings는 다음 호출에서 고칠 힌트이지 실패가 아니다. 오류�
 - injuries는 전체 목록 교체다. id/description/severity(1–3)/trend(stable/worsening/recovering)/treated를
   갖고 최대 12개이며, 관련 부위는 한 항목으로 묶는다. 미처치라는 이유만으로 worsening으로 두지 않는다.
   새 장면의 첫 시간 계산 전에는 activity·sleep_quality·threat·injuries 네 가지를 모두 알아야 한다.
+- 부상의 경과는 코드가 계산한다. 부상 목록은 통증의 기저값(character_state.pain_floor)을 만들며
+  휴식으로도 그 아래로 내려가지 않는다. 처치는 treated=true와 trend=recovering으로 표시하고, 붕대·냉찜질의
+  즉각적 완화는 작은 event로 조정하되 상처가 함의하는 기저값보다 크게 낮추지 않는다. recovering 상처는
+  장면 시간 24시간(미처치 48시간)마다 severity가 한 단계 내려가고 0이 되면 목록에서 사라지며, 미처치
+  worsening은 24시간마다 올라간다. 결과의 last_calculation.injury_changes·healed가 그 변화를 알린다.
+  사라진 상처를 다시 넣지 않고, 목록을 다시 보낼 때 severity를 이전 값으로 되돌리지 않는다(서버가 진행
+  중인 값을 유지한다). 통증 50 이상이면 휴식·수면의 피로 회복이 절반이다. body에는 지금 기능에 영향을
+  주는 상태만 요약한다.
 - 수치(hunger/fatigue/pain/tension/resolve/clarity/humiliation)의 직접 변경은 식사·새 부상·충격·모욕·
   작은 승리 같은 즉시 사건(event), 미설정 값의 초기 설정(initialize), 잘못된 값의 정정(correction)뿐이다.
   시간 경과에 따른 변화는 직접 쓰지 않는다. 정신 수치의 시간 변화는 코드가 계산한다: 의지는 위협 단계에
