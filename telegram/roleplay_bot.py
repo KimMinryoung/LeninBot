@@ -69,7 +69,13 @@ ROLEPLAY_MAX_TOKENS = int(os.getenv("ROLEPLAY_MAX_TOKENS", "16384"))
 # left no room for a single malformed call plus its retry.
 ROLEPLAY_MAX_ROUNDS = int(os.getenv("ROLEPLAY_MAX_ROUNDS", "12"))
 ROLEPLAY_BUDGET_USD = float(os.getenv("ROLEPLAY_BUDGET_USD", "0.50"))
-HISTORY_CAP = int(os.getenv("ROLEPLAY_HISTORY_CAP", "40"))  # messages kept in context
+HISTORY_CAP = int(os.getenv("ROLEPLAY_HISTORY_CAP", "40"))  # messages kept in context at minimum
+# The window's oldest message only changes every HISTORY_STEP messages. A window
+# that slid by one turn each time made the history prefix differ on every call,
+# so the provider's prefix cache never covered it (25 turns at exactly the
+# system+tools size). Between steps the window grows to CAP+STEP-1 messages,
+# but that growth is read from cache at a fraction of the price.
+HISTORY_STEP = int(os.getenv("ROLEPLAY_HISTORY_STEP", "20"))
 
 # Curated retrieval and private notes (no task execution, no KG writes). The profile
 # value lives in tool_gateway.profiles so all surface allow-lists are visible in
@@ -107,17 +113,26 @@ def save_message(user_id: int, role: str, content: str) -> None:
     )
 
 
+def history_window_offset(total: int, cap: int = HISTORY_CAP, step: int = HISTORY_STEP) -> int:
+    """How many of the oldest messages to skip: advances only in whole steps."""
+    if total <= cap:
+        return 0
+    return (total - cap) // max(1, step) * max(1, step)
+
+
 def load_history(user_id: int) -> list[dict]:
-    """Recent turns after the last /new marker, oldest-first, capped at HISTORY_CAP."""
+    """Turns after the last /new marker, oldest-first, at least HISTORY_CAP of them
+    with a window start that is stable across turns (see HISTORY_STEP)."""
     min_id = _clear_after_id(user_id)
+    condition = ("FROM roleplay_chat_history WHERE user_id = %s AND id > %s "
+                 "AND NOT (role = 'assistant' AND content = %s)")
+    params = (user_id, min_id, EMPTY_RESPONSE_FALLBACK)
+    total = int(_query(f"SELECT COUNT(*) AS n {condition}", params)[0]["n"])
     rows = _query(
-        "SELECT role, content FROM roleplay_chat_history "
-        "WHERE user_id = %s AND id > %s "
-        "AND NOT (role = 'assistant' AND content = %s) "
-        "ORDER BY id DESC LIMIT %s",
-        (user_id, min_id, EMPTY_RESPONSE_FALLBACK, HISTORY_CAP),
+        f"SELECT role, content {condition} ORDER BY id ASC OFFSET %s",
+        (*params, history_window_offset(total)),
     )
-    return [{"role": r["role"], "content": r["content"]} for r in reversed(rows)]
+    return [{"role": r["role"], "content": r["content"]} for r in rows]
 
 
 def reset_session(user_id: int) -> None:

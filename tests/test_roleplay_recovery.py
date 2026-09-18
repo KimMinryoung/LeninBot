@@ -69,3 +69,20 @@ class TestReplyPersistence(unittest.IsolatedAsyncioTestCase):
         with patch.object(bot.asyncio, "to_thread", new=AsyncMock(return_value={**STATE_DEFAULTS, "resolve": 42.26, "humiliation": 70})):
             await bot.cmd_status(message)
         self.assertIn("의지: 42.3 · 명료함: 미설정 · 굴욕: 70", message.answer.call_args.args[0])
+
+
+class HistoryWindowTests(unittest.TestCase):
+    def test_window_start_moves_in_steps(self):
+        offsets = [bot.history_window_offset(n, cap=40, step=20) for n in range(0, 121)]
+        self.assertEqual(offsets[:41], [0] * 41)
+        self.assertEqual(offsets[41], 0)
+        self.assertEqual(offsets[59], 0)
+        self.assertEqual(offsets[60], 20)
+        self.assertEqual(offsets[79], 20)
+        self.assertEqual(offsets[80], 40)
+        self.assertEqual(offsets[120], 80)
+        # The window never drops below the cap and grows by at most step-1.
+        for n, offset in enumerate(offsets):
+            self.assertLessEqual(offset, max(0, n - 40))
+            self.assertLess(n - offset, 60)
+
