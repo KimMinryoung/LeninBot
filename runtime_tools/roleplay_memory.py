@@ -273,6 +273,11 @@ def state_view(state: dict) -> dict:
     calculation = state.get("last_calculation")
     if calculation:
         view["last_calculation"] = {k: calculation.get(k) for k in ("from_minute", "to_minute", "basis", "before", "after")}
+    unset = [key for key in METRICS if state.get(key) is None]
+    if unset:
+        # A null among numbers is easy to skim past; name the gap and what closes it.
+        view["unset_metrics"] = unset
+        view["unset_metrics_note"] = "미설정 수치는 시간 계산에서 제외됨. 장면 근거로 changes에 값을 넣어 initialize"
     return view
 
 

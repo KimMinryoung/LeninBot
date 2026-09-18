@@ -174,6 +174,7 @@ class RoleplayMemoryTests(unittest.TestCase):
         self.assertNotIn('last_scope_id', view)
         self.assertNotIn('period', view)
         self.assertEqual(view['clock']['daypart'], 'unknown')
+        self.assertEqual(view['unset_metrics'], ['fatigue', 'pain', 'tension', 'resolve', 'clarity', 'humiliation'])
         self.assertEqual(memory.load_state(1)['hunger'], 33.333)
 
     def test_dictionary_link_validation_and_removal(self):
