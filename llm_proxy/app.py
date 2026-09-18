@@ -534,11 +534,16 @@ async def proxy(provider: str, path: str, request: Request):
         record_llm_call(
             surface="proxy", caller=request.headers.get("x-llm-caller"),
             provider=policy_provider, model=model, label=audit_label,
-            status="error", error_excerpt=str(e),
+            status="error", error_excerpt=f"{e.__class__.__name__}: {e}",
             latency_ms=int((time.monotonic() - started) * 1000),
             estimate_cost=False,
         )
-        logger.warning("proxy %s/%s upstream error: %s", provider, path, e)
+        # httpx timeouts often str() to "" — keep the class name so the
+        # journal and audit row say what actually happened.
+        logger.warning(
+            "proxy %s/%s upstream error: %s: %s",
+            provider, path, e.__class__.__name__, e,
+        )
         return JSONResponse(
             {"error": f"upstream unreachable: {e.__class__.__name__}"}, status_code=502,
         )
