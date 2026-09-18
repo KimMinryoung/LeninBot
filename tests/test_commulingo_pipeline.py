@@ -610,6 +610,45 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.next_stage,'draft')
         self.assertEqual(result.value['claims'][0]['field'],'body')
 
+    async def test_validate_bounce_runs_targeted_research_and_carries_claims(self):
+        from commulingo_pipeline.stages import Research, TARGETED_RESEARCH_ROUNDS
+        from commulingo_pipeline.engine import Usage
+        source=snapshot('https://example.org/history','A retrieved historical source with adequate context for the body and the years.')
+        store=Mock()
+        store.job_sources.return_value={source['id']:source}
+        previous={'field':'body','claim':'Verified body','source_id':source['id'],'start':0,'end':40}
+        seen={}
+        async def model(**kwargs):
+            seen.update(kwargs)
+            self.assertTrue(kwargs['prompt'].startswith('TARGETED FOLLOW-UP RESEARCH ONLY'))
+            self.assertIn('ONLY for: endYear',kwargs['prompt'])
+            with self.assertRaisesRegex(ValueError,'missing evidence for endYear'):
+                await kwargs['handler']({'status':'ready','reason':'Nothing new found for the term.','claims':[]})
+            await kwargs['handler']({'status':'ready','reason':'The source dates the end of the period.',
+                'claims':[{'field':'endYear','claim':'Ended in 1991','source_id':source['id'],'chunk':0}]})
+        job={'id':31,'kind':'term','action':'update','target':'fixture','topic':'history'}
+        artifacts=[{'stage':'research','value':{'claims':[previous]}},
+                   {'stage':'draft','value':{'rejected_draft':{}}},
+                   {'stage':'validate','value':{'error':'400: evidence required for endYear'}}]
+        usage=Usage()
+        with patch('commulingo_pipeline.stages.service.call',return_value={'revision':'original'}), \
+             patch('commulingo_pipeline.stages.model_call',side_effect=model):
+            result=await Research(store)(job,artifacts,usage,.2)
+        self.assertEqual(seen['max_rounds'],TARGETED_RESEARCH_ROUNDS)
+        self.assertEqual(usage.tracker['targeted_research'],['endYear'])
+        self.assertEqual([(c['field'],c['claim']) for c in result.value['claims']],
+                         [('body','Verified body'),('endYear','Ended in 1991')])
+        # A previous claim whose source expired forces a full pass instead.
+        expired={**source,'expires_at':datetime.now(timezone.utc)-timedelta(hours=1)}
+        store.job_sources.return_value={source['id']:expired}
+        async def full(**kwargs):
+            self.assertTrue(kwargs['prompt'].startswith('This is RESEARCH ONLY'))
+            self.assertEqual(kwargs['max_rounds'],12)
+            raise RuntimeError('stop')
+        with patch('commulingo_pipeline.stages.service.call',return_value={'revision':'original'}), \
+             patch('commulingo_pipeline.stages.model_call',side_effect=full), self.assertRaisesRegex(RuntimeError,'stop'):
+            await Research(store)(job,artifacts,Usage(),.2)
+
     async def test_person_draft_gets_real_group_ids_and_descriptions(self):
         from commulingo_pipeline.stages import Draft
         from commulingo_pipeline.engine import Usage

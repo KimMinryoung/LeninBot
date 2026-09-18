@@ -287,7 +287,8 @@ class Store:
                              for line in metrics.get('tool_work_details',[]))
         metrics = {k:v for k,v in metrics.items() if k in {
             'rounds_used','input_tokens','output_tokens','model_calls','pipeline_cache_hits',
-            'preflight_checks','preflight_failures','preflight_passed','rejections','provider_fallback'}}
+            'preflight_checks','preflight_failures','preflight_passed','rejections','provider_fallback',
+            'targeted_research'}}
         metrics['terminal_calls'] = terminal_calls
         if 'rejections' in metrics:
             metrics['rejections'] = metrics['rejections'][-12:]

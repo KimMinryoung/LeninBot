@@ -75,6 +75,32 @@ def drop_unchanged_term_facts(fields, current, action):
             del fields[field]
 
 
+TARGETED_RESEARCH_ROUNDS = 6
+
+
+def carried_claims(claims, sources, fields):
+    """Earlier research claims that can still be compiled: writable field, live source.
+
+    Returns None when any claim has lost its source, because the draft would
+    bounce on "research source expired" anyway and a full pass is cheaper than
+    two short ones.
+    """
+    now = datetime.now(timezone.utc)
+    kept = []
+    for claim in claims:
+        source = sources.get(claim.get('source_id'))
+        if not source or not source.get('body') or source['expires_at'] <= now:
+            return None
+        if claim.get('field') in fields and type(claim.get('start')) is int and type(claim.get('end')) is int:
+            kept.append(claim)
+    return kept
+
+
+def merge_claims(carried, fresh):
+    seen = {(c['field'],c['source_id'],c['start'],c['end']) for c in carried}
+    return list(carried) + [c for c in fresh if (c['field'],c['source_id'],c['start'],c['end']) not in seen]
+
+
 def result_tool(schema):
     return {'name':'commulingo_pipeline_result',
             'description':'Save this stage result. This does not publish dictionary content.',
@@ -240,6 +266,13 @@ class Research:
         previous_error = latest(artifacts,'validate').get('error','')
         required_support = set(re.findall(r'(?:evidence required for |supporting )([A-Za-z][A-Za-z0-9]*)',
                                           previous_error)) & fields if missing_evidence(previous_error) else set()
+        # A validate bounce used to restart the whole investigation (12 rounds,
+        # ~$0.03) to add one field's claim. When the earlier claims still rest
+        # on live sources, carry them over and research only the missing fields.
+        carried = carried_claims(latest(artifacts,'research').get('claims',[]),sources,fields) if required_support else None
+        targeted = bool(carried)
+        if targeted:
+            usage.tracker['targeted_research'] = sorted(required_support)
         async def finish(value):
             missing = required_support - {c.get('field') for c in value.get('claims',[])}
             if value.get('status')=='ready' and missing:
@@ -248,7 +281,10 @@ class Research:
             invalid = {c.get('field') for c in value.get('claims',[])} - fields
             if invalid:
                 raise ValueError('claims.field must name a writable field, not a commissioned topic: ' + ', '.join(sorted(str(f) for f in invalid)))
-            value = {**value, 'claims': resolve_claim_chunks(handles.resolve(value['claims'], sources), sources)}
+            claims = resolve_claim_chunks(handles.resolve(value['claims'], sources), sources)
+            if targeted:
+                claims = merge_claims(carried,claims)
+            value = {**value, 'claims': claims}
             compile_evidence(value['claims'],sources,{c['field'] for c in value['claims']})
             if value['status']=='ready' and not value['claims']:
                 raise ValueError('ready research requires retrieved supporting claims')
@@ -257,9 +293,15 @@ class Research:
         reusable = [{k:str(v) if k in {'fetched_at','expires_at'} else v for k,v in s.items() if k!='body'}
                     for s in sources.values() if s.get('body') and s['expires_at']>datetime.now(timezone.utc)]
         sections_only = job['kind']=='person' and work_topics(job)==['sections']
-        prompt = ('This is RESEARCH ONLY. Do not write a dictionary patch. Investigate all current commissioned topics together, '
-            'identity and missing facts. Collect supporting AND conflicting sources. Finish through '
-            'commulingo_pipeline_result with source_id and displayed chunk IDs in chunks (e.g. chunks: [2,3]). '
+        prompt = (('TARGETED FOLLOW-UP RESEARCH ONLY. The previous_claims below are kept and carried over '
+            'automatically; do not resubmit them. Find field-specific support ONLY for: '
+            + ', '.join(sorted(required_support)) + '. Start from the dated sources below (fetch_url returns '
+            'their cached text and chunk IDs) and search further only if they do not settle it. Return ready with '
+            'claims for those fields, or sources_unavailable when no source supports a value. Finish through '
+            if targeted else
+            'This is RESEARCH ONLY. Do not write a dictionary patch. Investigate all current commissioned topics together, '
+            'identity and missing facts. Collect supporting AND conflicting sources. Finish through ')
+            + 'commulingo_pipeline_result with source_id and displayed chunk IDs in chunks (e.g. chunks: [2,3]). '
             'The runner computes exact character ranges. Facts need field-specific claims. '
             'Reuse the dated sources below: fetch_url retrieves their cached text and chunk IDs. '
             'A no-edit status applies to ALL current topics; use it only when that judgement holds for all of them. '
@@ -278,7 +320,8 @@ class Research:
                 'original_proposal':(job.get('payload') or {}).get('original_proposal')}))
         await model_call(spec=spec,prompt=prompt,tool=result_tool(schema),handler=finish,
                          reads=READS,usage=usage,budget=budget,read_wrap=wrap,
-                         scope_id=f'commulingo_pipeline:{job["id"]}:research',job=job)
+                         scope_id=f'commulingo_pipeline:{job["id"]}:research',job=job,
+                         max_rounds=TARGETED_RESEARCH_ROUNDS if targeted else 12)
         box['current'] = current
         box['baseline'] = (current or {}).get('revision','')
         box['inspected_sources'] = sorted({s['url'] for s in sources.values()})
