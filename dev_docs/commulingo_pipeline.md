@@ -87,7 +87,7 @@ ready/research·attempts=0이며 artifact·수집 원문 연결·비용 이력�
 submit 단계인지 확인하며, 다른 단계로 바뀌었으면 새 조사를 시작하지 않고 반환한다. 소유권을 잃으면 실행을 취소하며 예전 lease의 결과 저장을 거부한다.
 실패는 1시간 뒤 해당 단계부터 재시도하고 같은 단계의 3회 실패는 escalated로 남긴다.
 DeepSeek가 입력 검열(`Content Exists Risk`, HTTP 400)로 거부하면 같은 소스로는 재시도해도 같으므로
-`model_call`이 그 단계를 GPT(`provider_fallback=openai`)로 한 번 다시 돌리고, 성공하면 job payload에
+`model_call`이 그 단계를 GPT-5.6 Terra(`provider_fallback=openai`, `gpt56terra`)로 한 번 다시 돌리고, 성공하면 job payload에
 `provider_fallback`을 남겨 이후 단계(draft·validate·review)는 처음부터 GPT로 실행한다. attempt·artifact
 metrics의 `provider_fallback`으로 식별한다. 다른 오류는 그대로 escalation 규칙을 따른다.
 

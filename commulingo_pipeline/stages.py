@@ -23,6 +23,8 @@ DRAFT_ROUNDS = 8
 # same way, so the stage reruns once on GPT and the job stays on GPT afterwards.
 CONTENT_RISK = 'Content Exists Risk'
 FALLBACK_PROVIDER = 'openai'
+# Terra, not Luna: the stage has to read the refused sources and judge them.
+FALLBACK_MODEL = 'gpt56terra'
 
 READS = {'wiki_search','wiki_get','web_search','fetch_url','commulingo_people'}
 
@@ -76,7 +78,7 @@ async def model_call(*, spec, prompt, tool, handler, reads, usage, budget, read_
     from tool_gateway.results import ToolRejection
     fallback = ((job or {}).get('payload') or {}).get('provider_fallback')
     if fallback:
-        spec = replace(spec,provider=fallback,model=None)
+        spec = replace(spec,provider=fallback,model=FALLBACK_MODEL)
         usage.tracker['provider_fallback'] = fallback
     policy = resolve_agent_inference_policy(spec)
     tools = [deepcopy((read_tools or {}).get(t['name'],t)) for t in TOOLS if t['name'] in reads]
@@ -135,7 +137,7 @@ async def model_call(*, spec, prompt, tool, handler, reads, usage, budget, read_
                        scope_id, spec.effective_provider(), CONTENT_RISK, FALLBACK_PROVIDER)
         usage.tracker['provider_fallback'] = FALLBACK_PROVIDER
         usage.tracker['model_calls'] = usage.tracker.get('model_calls',0) + 1
-        await run(replace(spec,provider=FALLBACK_PROVIDER,model=None))
+        await run(replace(spec,provider=FALLBACK_PROVIDER,model=FALLBACK_MODEL))
     usage.complete = True
     if not completed:
         detail = '; '.join(dict.fromkeys(rejections[-3:]))

@@ -354,6 +354,8 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
             await kwargs['tool_handlers'][tool['name']](reason='sourced')
         def resolve(agent_spec,policy):
             seen.append(agent_spec.provider)
+            if agent_spec.provider=='openai':
+                self.assertEqual(agent_spec.model,'gpt56terra')
             return SimpleNamespace(chat=refuse if agent_spec.provider=='deepseek' else accept,
                                    client=None,model='fixture',render_provider=agent_spec.provider,reasoning={})
         usage = Usage()
