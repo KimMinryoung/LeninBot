@@ -31,7 +31,7 @@ from db import query as _query, execute as _execute
 from bot_config import _deepseek_anthropic_client, _resolve_deepseek_model
 from llm.claude_loop import chat_with_tools
 from llm.tool_loop_common import EMPTY_RESPONSE_FALLBACK
-from runtime_tools.roleplay_memory import load_notes, load_state, people_context
+from runtime_tools.roleplay_memory import load_notes, load_state, load_people, people_context, state_view
 from runtime_tools.registry import TOOLS, TOOL_HANDLERS
 from tool_gateway.profiles import ROLEPLAY_TELEGRAM_TOOLS
 from tool_gateway.security import caller_scope, new_run_context
@@ -65,7 +65,9 @@ PERSONA_PATH = Path(__file__).resolve().parent.parent / "identity" / "roleplay_p
 ROLEPLAY_MODEL = _resolve_deepseek_model("deepseek_flash")  # "deepseek-v4-flash"
 # Thinking and visible prose share the output allowance.
 ROLEPLAY_MAX_TOKENS = int(os.getenv("ROLEPLAY_MAX_TOKENS", "16384"))
-ROLEPLAY_MAX_ROUNDS = int(os.getenv("ROLEPLAY_MAX_ROUNDS", "8"))
+# A scene beat is usually 2–4 bookkeeping calls (time, memory, person); 8 rounds
+# left no room for a single malformed call plus its retry.
+ROLEPLAY_MAX_ROUNDS = int(os.getenv("ROLEPLAY_MAX_ROUNDS", "12"))
 ROLEPLAY_BUDGET_USD = float(os.getenv("ROLEPLAY_BUDGET_USD", "0.50"))
 HISTORY_CAP = int(os.getenv("ROLEPLAY_HISTORY_CAP", "40"))  # messages kept in context
 
@@ -213,6 +215,7 @@ async def cmd_help(message: Message) -> None:
         "• 그냥 메시지를 보내면 캐릭터가 답해.\n"
         "• /new — 최근 대화 초기화 (메모·상태표 유지)\n"
         "• /status — 핵심 상태, /status 상세 — 계산 근거·세부 상태. 수정·초기화는 대화로 요청해.\n"
+        "• /people — 저장된 인물 목록, /people 이름 — 인물 기록 확인\n"
         "• 캐릭터 설정은 identity/roleplay_persona.md 파일에서 편집 (재시작 불필요)\n"
         f"• 모델: {ROLEPLAY_MODEL} (thinking on, 추론은 답변에 미포함)"
     )
@@ -230,7 +233,8 @@ async def cmd_status(message: Message) -> None:
     detailed = (getattr(message, "text", "") or "").split()[1:] in (["상세"], ["detail"])
     people = await asyncio.to_thread(people_context, message.from_user.id, state.get("participants", []))
     names = {p["person_id"]: p["name"] for p in people.get("index", [])}
-    state["participants"] = ", ".join(names.get(pid, pid) for pid in state.get("participants", [])) or "없음"
+    state["participants"] = ", ".join(names.get(pid, pid) for pid in state.get("participants", [])) or "아직 지정되지 않음"
+    state["saved_people"] = f"{len(names)}명 — /people로 확인"
     activities = {"rest": "휴식", "light": "가벼운 활동", "moderate": "보통 활동", "strenuous": "격한 활동", "sleep": "수면"}
     threats = {"safe": "안전", "uncertain": "불확실", "threatening": "위협 지속", "immediate": "즉각적 위협"}
     state["activity"] = activities.get(state.get("activity"), "미설정")
@@ -264,7 +268,7 @@ async def cmd_status(message: Message) -> None:
         return str(value)
 
     lines = ["인물 상태 (0–100)", " · ".join(f"{label}: {display(state.get(key))}" for key, label in metrics.items())]
-    labels = {"calendar_display": "시각", "location": "장소", "participants": "등장인물",
+    labels = {"calendar_display": "시각", "location": "장소", "participants": "현재 장면 인물", "saved_people": "저장된 인물",
               "body": "몸 상태", "mood": "기분", "activity": "활동",
               "last_event": "직전 사건", "goal": "목적", "unresolved": "미해결"}
     if not state.get("conditions_initialized"):
@@ -284,6 +288,43 @@ async def cmd_status(message: Message) -> None:
         lines.append("계산 근거·세부 부상: /status 상세")
 
     for chunk in split_message("\n".join(lines)):
+        await message.answer(chunk)
+
+
+@router.message(Command("people"))
+async def cmd_people(message: Message) -> None:
+    people = await asyncio.to_thread(load_people, message.from_user.id)
+    args = (message.text or "").split(maxsplit=1)
+    query = args[1].strip().casefold() if len(args) > 1 else ""
+    if query:
+        matches = [p for p in people if query in {
+            p["person_id"].casefold(), p["name"].casefold(),
+            *(alias.casefold() for alias in p.get("aliases", [])),
+        }]
+        lines = []
+        if len(matches) > 1:
+            lines.append("같은 이름·별칭의 기록이 여러 개 있어. 아래 식별 정보로 구분해 줘.")
+        fields = {"identity": "식별 정보", "relationship": "예조프와의 관계",
+                  "observed": "관찰 기록", "reported": "전해 들은 내용", "inferred": "미확정 추측"}
+        for person in matches:
+            lines.append(f"{person['name']} ({person['person_id']})")
+            if person.get("commulingo_url"):
+                lines.append("CommuLingo: " + person["commulingo_url"])
+            if person.get("aliases"):
+                lines.append("별칭: " + ", ".join(person["aliases"]))
+            lines.extend(f"{label}: {person[key]}" for key, label in fields.items() if person.get(key))
+            lines.append("")
+        if not matches:
+            lines = ["일치하는 인물 기록이 없어. /people에서 이름을 확인해 줘."]
+    else:
+        lines = [f"저장된 인물 기록: {len(people)}명"]
+        for person in people:
+            lines.append(f"• {person['name']} ({person['person_id']})")
+            if person.get("commulingo_url"):
+                lines.append(person["commulingo_url"])
+        lines.append("상세 기록: /people 이름 또는 /people 식별자")
+        lines.append("이 목록은 현재 장면에 없는 인물도 포함해.")
+    for chunk in split_message("\n".join(lines).strip()):
         await message.answer(chunk)
 
 
@@ -311,7 +352,9 @@ async def handle_message(message: Message) -> None:
         "runtime_state", "telegram_roleplay_runtime", {
             "model": ROLEPLAY_MODEL, "channel": "telegram_roleplay",
             "private_notes": notes,
-            "character_state": state,
+            # The compact view: replay bookkeeping (event IDs, timestamps) is
+            # server state the model never needs and only crowds the prompt.
+            "character_state": state_view(state) if state else None,
             "people": people,
             "recent_repeated_phrases": repeated_phrases(history),
             "persona_time": "fictional; infer from the roleplay, not the server clock",
@@ -389,6 +432,7 @@ async def bot_main() -> None:
         BotCommand(command="new", description="새 대화 시작 (맥락 초기화)"),
         BotCommand(command="help", description="사용법"),
         BotCommand(command="status", description="인물 상태표"),
+        BotCommand(command="people", description="저장된 인물 기록"),
     ])
 
     me = await bot.get_me()

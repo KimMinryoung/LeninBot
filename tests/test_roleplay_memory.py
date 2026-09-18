@@ -27,7 +27,8 @@ class RoleplayMemoryTests(unittest.TestCase):
         numeric = set(changes or {}) & {"hunger", "fatigue", "pain", "tension"}
         return memory.roleplay_state(action, changes, reason, expected_revision=current["revision"],
             adjustment="correction" if any(current[k] is not None for k in numeric) else "initialize",
-            event_id=str(uuid4()), metric_reasons={k: reason for k in numeric})
+            event_id=str(uuid4()), metric_reasons={k: reason for k in numeric},
+            person_updates=[], person_review="인물의 새 정보 없음")
 
     def test_persistence_update_delete_and_isolation(self):
         with self.owner():
@@ -131,3 +132,63 @@ class RoleplayMemoryTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 memory.roleplay_person('save', 'overflow', changes={'name': '초과'})
             memory.roleplay_person('save', 'p0', changes={'name': '수정'})
+
+    def test_person_id_normalization_and_review_shapes(self):
+        with self.owner():
+            result = json.loads(memory.roleplay_person('save', 'Young Guard', changes={'name': '젊은 간수', 'reason': '등장'}))
+            self.assertEqual(result['person_id'], 'young_guard')
+            self.assertTrue(result['warnings'])
+            self.assertEqual(json.loads(memory.roleplay_person('read', 'Young Guard'))['matches'][0]['name'], '젊은 간수')
+            with self.assertRaises(ValueError):
+                memory.roleplay_person('save', '간수', changes={'name': '간수'})
+            self.state('update', {'participants': ['젊은 간수']}, '간수 입장')
+            self.assertEqual(memory.load_state(1)['participants'], ['young_guard'])
+            with self.assertRaises(ValueError) as caught:
+                self.state('update', {'participants': ['nobody']}, '미등록')
+            self.assertIn('young_guard', str(caught.exception))
+            current = memory.load_state(1)['revision']
+            result = json.loads(memory.roleplay_state('update', {'last_event': '간수가 물을 줌'}, '물', expected_revision=current,
+                person_updates=[{'person_id': 'young_guard', 'observed': '물을 줌'}, '다른 인물의 변화 없음'],
+                person_review_note='검토함'))
+            self.assertEqual(memory.load_people(1)[0]['observed'], '물을 줌')
+            self.assertNotIn('people_reminder', result)
+            self.assertIn('warnings', result)
+            with self.assertRaises(ValueError):
+                memory.roleplay_state('update', {'last_event': 'x'}, '잘못된 필드', expected_revision=current + 1,
+                                      person_updates=[{'person_id': 'young_guard', 'changes': {'name': '이름 변경'}}])
+
+    def test_memory_similar_key_hint(self):
+        with self.owner():
+            self.assertNotIn('similar_keys', json.loads(memory.roleplay_memory('save', '장면-구금방', '첫 메모')))
+            result = json.loads(memory.roleplay_memory('save', '장면-구금방(1939-04-21)', '둘째 메모'))
+            self.assertEqual(result['similar_keys'], ['장면-구금방'])
+            self.assertNotIn('similar_keys', json.loads(memory.roleplay_memory('save', '화법', '무관')))
+
+    def test_state_view_is_compact(self):
+        with self.owner():
+            self.state('update', {'hunger': 33.333, 'activity': 'rest', 'sleep_quality': 'normal', 'threat': 'safe', 'injuries': []}, '기준')
+            view = json.loads(memory.roleplay_state('read'))
+        self.assertEqual(view['hunger'], 33.3)
+        self.assertNotIn('recent_events', view)
+        self.assertNotIn('event_timestamps', view)
+        self.assertNotIn('last_scope_id', view)
+        self.assertNotIn('period', view)
+        self.assertEqual(view['clock']['daypart'], 'unknown')
+        self.assertEqual(memory.load_state(1)['hunger'], 33.333)
+
+    def test_dictionary_link_validation_and_removal(self):
+        with self.owner():
+            memory.roleplay_person('save', 'rodos', changes={'name': '로도스', 'observed': '역할극 사건'})
+            with patch('db.query_one', return_value={'id': 'boris-rodos'}) as query:
+                result = json.loads(memory.roleplay_person('save', 'rodos', changes={'commulingo_id': 'boris-rodos'}))
+                self.assertEqual(query.call_args.args[1], ('boris-rodos',))
+            self.assertEqual(result['commulingo_url'], 'https://cyber-lenin.com/commulingo/people/boris-rodos')
+            self.assertEqual(memory.people_context(1, [])['index'][0]['commulingo_id'], 'boris-rodos')
+            with patch('db.query_one', return_value=None):
+                with self.assertRaises(ValueError):
+                    memory.roleplay_person('save', 'rodos', changes={'commulingo_id': 'missing', 'observed': '덮어쓰기'})
+            saved = memory.load_people(1)[0]
+            self.assertEqual(saved['observed'], '역할극 사건')
+            self.assertEqual(saved['commulingo_id'], 'boris-rodos')
+            memory.roleplay_person('save', 'rodos', changes={'commulingo_id': ''})
+            self.assertEqual(memory.load_people(1)[0]['commulingo_url'], '')

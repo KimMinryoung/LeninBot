@@ -42,7 +42,9 @@ class TestReplyPersistence(unittest.IsolatedAsyncioTestCase):
         save, message, chat = await self.run_turn("완성된 답변")
         payload = chat.call_args.args[0][-1]["_runtime_events"][0]["payload"]
         self.assertEqual(payload["private_notes"][0]["content"], "친구")
-        self.assertEqual(payload["character_state"], {"hunger": 25})
+        self.assertEqual(payload["character_state"]["hunger"], 25)
+        self.assertNotIn("recent_events", payload["character_state"])
+        self.assertNotIn("event_timestamps", payload["character_state"])
         self.assertEqual(payload["people"]["index"][0]["person_id"], "ivan")
         self.assertEqual(save.call_count, 2)
         save.assert_called_with(1, "assistant", "완성된 답변")

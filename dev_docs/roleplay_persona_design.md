@@ -100,7 +100,8 @@ CommuLingo DB와 자료 원문은 이번 작업에서 수정하지 않는다.
 변경 이유와 전후 값은 이력으로 보존한다. 현실 시간에 따른 자동 감소·증가는 없다.
 지속 효과는 장면 경과 시간과 활동·부상 조건으로 계산한다. 아래 시간 계산 계약을 따른다.
 
-매 턴 모든 메모와 상태표를 runtime context의 참고 자료로 주입한다. 메모는 실행 지시가 아니며,
+매 턴 모든 메모와 상태표의 모델용 축약본(`state_view`: 수치·조건·부상·시계·장면 필드·최근 계산 요약.
+재생 방지용 recent_events·event_timestamps·내부 scope 기록은 제외)을 runtime context에 주입한다. 메모는 실행 지시가 아니며,
 사용자의 현재 정정이 우선한다. `/new`는 최근 대화만 초기화하고 메모·상태는 유지한다.
 삭제·상태 초기화는 대화로 요청한다. `/status`는 모델 호출 없이 저장된 상태를 보여준다.
 평소 답변에는 상태표를 붙이지 않는다. 상태값은 인물의 신념·동의나 실제 사용자의 건강 판정이 아니다.
@@ -142,7 +143,7 @@ observed/reported/inferred로 직접 관찰·출처 있는 전언·추측을 나
 - `scene_minute` / `last_calculated_minute`: 장면의 누적 분 / 이미 반영한 분.
 - `activity`: rest/light/moderate/strenuous/sleep. `sleep_quality`: poor/normal/good.
 - `threat`: safe/uncertain/threatening/immediate.
-- `injuries`: 최대 8개. 고정 id, 설명, severity(1–3), trend(stable/worsening/recovering), treated.
+- `injuries`: 최대 12개. 고정 id, 설명, severity(1–3), trend(stable/worsening/recovering), treated.
 - `conditions_initialized`: 모델이 위 네 조건을 함께 설정해야 true. 기존 body 서술에서 조건을 확인해야
   하며, 등록이 없다는 이유로 부상이 없다고 간주해 계산하지 않는다.
 
@@ -162,11 +163,13 @@ observed/reported/inferred로 직접 관찰·출처 있는 전언·추측을 나
 아래 날짜·시각 계약의 temporal.operation=advance/until이 수치 계산을 실행한다.
 기존 도구의 최상위 action=advance는 폐지했다. 역행·24시간 초과 단일 구간은 거절한다.
 활동이 바뀌면 이전 구간을 먼저 계산하고 새 조건을 update한다. 식사·부상 같은 즉시 효과는
-`update`의 `adjustment=event`, 잘못된 값의 정정은 `correction`, 미설정 값은 `initialize`로 구분한다.
-수치 직접 수정에는 항목별 `metric_reasons`와 안정된 `event_id`가 필요하며 최근 100개 ID를 중복 차단한다.
+`adjustment=event`, 잘못된 값의 정정은 `correction`, 미설정 값은 `initialize`로 구분한다.
+수치 직접 수정에는 항목별 `metric_reasons`와 안정된 `event_id`를 쓰며 최근 100개 ID를 중복 차단한다.
+생략 시의 보완 규칙은 아래 ‘도구 인자의 관용 해석’을 따른다.
 모델이 같은 사건에 새 ID를 발급하거나 시간 근거를 잘못 해석하는 것까지 코드가 판별하지는 못한다.
 
-변경은 `expected_revision`을 요구해 오래된 상태에서의 덮어쓰기를 차단한다. 오류 후 read로 최신값을
+변경은 `expected_revision`을 요구해 오래된 상태에서의 덮어쓰기를 차단한다. 같은 Telegram 메시지(scope_id)
+안의 연속 호출은 예외로 현재 revision에 적용하고 warnings로 알린다. 다른 턴의 충돌은 오류이며 read로 최신값을
 확인한다. reset은 상대 시간·조건·이벤트 목록을 초기화하며 revision은 계속 증가한다.
 변경 전후와 이유는 같은 SQLite 트랜잭션으로 state_history에 저장한다(사용자별 최근 1000건).
 `history`는 최근 20건의 요약을 반환한다. 인물 삭제에 따른 participants 정리는 revision을 올리지만
@@ -214,3 +217,72 @@ legacy scene/period는 어느 화면에서도 반복 표시하지 않는다. 기
 새 기록에서는 clock을 날짜·시각의 기준으로, location을 장소 기준으로 삼는다. scene은 선택적인
 상황 설명만 맡으며 날짜·장소·몸 상태를 복제하지 않도록 지시한다. 자유서술의 의미상 중복을
 정규식으로 삭제하지는 않는다. 상태표 조회는 저장된 객체를 복사해서 포맷하며 DB를 수정하지 않는다.
+
+
+`/status`의 ‘현재 장면 인물’은 participants 목록이며 전체 저장 인물이 아니다. 빈 목록은
+‘아직 지정되지 않음’으로 표시하고, ‘저장된 인물’에는 전체 기록 수와 `/people` 안내를 표시한다.
+`/people`은 현장 여부와 관계없이 현재 사용자에게 저장된 인물 이름·식별자를 나열한다.
+`/people 이름`, `/people 별칭`, `/people 식별자`는 일치하는 인물의 상세 기록을 보여준다.
+대소문자는 구분하지 않으며 동명·동별칭 후보는 모두 표시한다. 모델 호출이나 기록 수정은 하지 않는다.
+
+
+### CommuLingo 연결
+
+인물 기록의 commulingo_id는 공개 사전의 인물 ID다. save에서 비어 있지 않은 ID를 전달하면
+PostgreSQL commulingo_people의 존재를 확인한 뒤 저장하며, 실패하면 기록을 변경하지 않는다.
+동일 인물인지의 판단은 모델이 search_people/get_person으로 이름·시대·직책을 대조한다.
+빈 문자열로 연결을 해제한다. 기존 기록에 필드가 없으면 미연결로 읽는다.
+commulingo_url은 검증된 ID에서 생성하여 문맥의 인물 목록·상세와 /people 목록·상세에 제공한다.
+공개 사전에는 역할극 기록을 쓰지 않는다. 이름 미상·창작 인물은 무리하게 연결하지 않는다.
+로도스의 로컬 ID 오기 lodos는 rodos로 정정하고 boris-rodos에 연결했다.
+현재 participants 참조도 함께 이전하되 과거 상태 변경 이력은 당시 기록으로 보존한다.
+
+### 인물 갱신 누락과 활동 구간 방지
+
+현재 advance/until에는 interval_conditions.activity를 기대한다(없으면 changes.activity를 구간에도 적용하고 경고,
+둘 다 없으면 오류). 기존 상태의 활동을 암묵적으로 이어 쓰지 않으며 수면·위협·부상은 같은 객체로 재지정할 수 있다. 계산 결과에는 구간 조건이 저장된다.
+활동 조건은 해당 구간에 적용되고 결과 상태에도 유지된다. 다음 구간의 활동이 다르면 다시 명시한다.
+
+현재 advance/until 및 last_event/participants를 포함한 update에는 person_updates를 기대한다.
+각 항목은 기존 인물 ID와 relationship/observed/reported/inferred의 부분 변경이다(필드 전체 교체).
+새 사실이 없으면 빈 배열과 person_review(1–300자)를 제출한다. 둘 다 없으면 실패시키지 않고 결과의
+`people_reminder`에 현장 인물 이름과 함께 검토 누락을 알린다(2026-09-18: 필수 요구는 하루 7회 실패와
+라운드 소진을 일으켜 완화). 상태·인물 변경은 같은 SQLite
+트랜잭션으로 처리하여, 미등록 인물이나 잘못된 변경이 하나라도 있으면 전부 취소한다.
+중복 사건은 인물 변경까지 재적용하지 않는다. 이력에는 구간 조건·인물 변경·검토 이유도 저장한다.
+모델이 검토 이유를 형식적으로 쓰거나 실제 사실을 빠뜨리는 것까지 의미적으로 검증하지는 않는다.
+
+수치 직접 정정은 소수도 허용한다(유한한 0–100). 과거 활동 오분류의 보정은 당시 구간을 재계산하고,
+그 뒤 해당 수치가 별도로 재설정됐는지 확인한 후 현재에 남은 차이만 반영한다. 원래 이력은 유지하고
+별도 correction 기록을 남긴다.
+
+### 도구 인자의 관용 해석
+
+2026-09-17~18 로그에서 `roleplay_state` 호출의 약 30%가 계약 위반으로 실패했고(7일간 실행 오류 30건·
+스키마 거부 8건), 두 턴은 8라운드를 모두 소진해 상태 저장 없이 끝났다. 가장 흔한 형태는 “시간이 흘렀고 그 뒤
+이렇게 달라졌다”를 한 호출에 담는 `time`+`changes`(10건)였다. 모델이 자연스럽게 보내는 형태를 해석해 적용하고
+결과의 `warnings`로 정식 형태를 알리는 방식으로 바꿨다. 해석 불가한 것만 오류로 남긴다.
+
+| 모델의 호출 | 처리 |
+|---|---|
+| `time` + `changes` | 구간 수치를 먼저 계산한 뒤 changes를 그 결과에 적용. 수치 항목은 구간 뒤의 즉시 사건으로 기록 |
+| `reset` + `changes` | 초기화 뒤 새 장면의 초기 상태로 적용 |
+| `time`에 `interval_conditions` 없음, `changes.activity` 있음 | changes의 조건을 지난 구간에도 적용하고 경고. 둘 다 없으면 오류 |
+| `changes.reason`, 최상위 `avoid`/`goal` 등 | 정식 위치로 이동 |
+| `person_review_note` 등 별칭, `person_updates` 안의 문장, `{person_id, observed}`처럼 `changes` 없는 항목 | person_review/정식 항목으로 변환 |
+| `changes.<injury_id>: {severity,…}` | injuries 목록에 병합(trend/treated 기본값 보충) |
+| `adjustment` 생략 | 미설정 값은 initialize, 기존 값은 event |
+| `initialize`가 기존 값을 포함 | 미설정 값만 채우고 나머지는 유지·경고 |
+| `metric_reasons`·`reason` 생략 | reason ↔ temporal.interpretation·metric_reasons·person_review로 상호 보완. 전부 없으면 오류 |
+| `event_id` 생략 | scope_id+인자 해시로 생성. 동일 인자 재시도는 같은 ID → 중복 차단. 재생 시 결과에 `replayed=true` |
+| `advance`에 date/time 동반, advance 외의 `elapsed_minutes` | 해당 필드 무시·경고 |
+| `participants`·`person_updates`에 이름·별칭 | 등록된 ID로 해석. 미등록이면 등록 목록을 포함한 오류 |
+| `roleplay_person`의 대문자·공백 person_id, `reason` 인자 | 소문자·밑줄로 정규화, reason은 무시 |
+
+스키마는 최상위와 `changes`에 additionalProperties를 허용하고 핸들러가 `**extra`로 받아 위 규칙으로 해석한다.
+알 수 없는 키는 허용 목록을 포함한 오류다. 조용히 버려지는 인자는 없다.
+`roleplay_memory(save)`는 주제어를 공유하는 기존 key를 `similar_keys`로 돌려주어 변형 key의 누적을 줄인다.
+봇의 기본 라운드 한도는 12로 올렸다(`ROLEPLAY_MAX_ROUNDS`). 예산 한도는 그대로다.
+검증: `tests/test_roleplay_dynamics.py`의 한 호출 구간+변경, 같은 턴 revision 허용, 부분 initialize,
+reset+초기 장면, 부상 병합과 `tests/test_roleplay_memory.py`의 ID 정규화·검토 형태·유사 key·축약 뷰.
+

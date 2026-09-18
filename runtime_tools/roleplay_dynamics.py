@@ -6,6 +6,7 @@ METRICS = ("hunger", "fatigue", "pain", "tension")
 ACTIVITIES = {"rest": -2.0, "light": 2.0, "moderate": 5.0, "strenuous": 10.0, "sleep": -8.0}
 SLEEP_QUALITY = {"poor": 0.25, "normal": 1.0, "good": 1.25}
 THREAT_TARGETS = {"safe": 10.0, "uncertain": 40.0, "threatening": 75.0, "immediate": 90.0}
+MAX_INJURIES = 12
 DYNAMICS_DEFAULTS = {
     "revision": 0, "scene_minute": 0, "last_calculated_minute": 0,
     "time_basis": "현재 저장 상태를 기준 시점(0분)으로 삼음. 이전 경과 시간은 재계산하지 않음.",
@@ -28,8 +29,8 @@ def validate_conditions(changes):
             raise ValueError(f"Invalid {key}")
     if "injuries" in changes:
         injuries = changes["injuries"]
-        if not isinstance(injuries, list) or len(injuries) > 8:
-            raise ValueError("Use at most 8 ongoing injuries")
+        if not isinstance(injuries, list) or len(injuries) > MAX_INJURIES:
+            raise ValueError(f"Use at most {MAX_INJURIES} ongoing injuries; merge related wounds into one entry")
         ids = set()
         for item in injuries:
             required = {"id", "description", "severity", "trend", "treated"}
@@ -58,7 +59,7 @@ def advance(state, target_minute, time_basis):
     if target_minute - start > 1440:
         raise ValueError("Advance at most 1440 minutes per interval; split longer passages")
     if not state["conditions_initialized"]:
-        raise ValueError("First update activity, sleep_quality, threat and injuries from the current scene")
+        raise ValueError("Time cannot be calculated until activity, sleep_quality, threat and injuries are all set for this scene: pass all four in interval_conditions (or set them with update first)")
     if not isinstance(time_basis, str) or not 1 <= len(time_basis.strip()) <= 300:
         raise ValueError("Explain the fictional elapsed time in time_basis (1–300 characters)")
     result = deepcopy(state)
@@ -94,7 +95,7 @@ CONDITION_SCHEMA = {
     "activity": {"type": "string", "enum": list(ACTIVITIES)},
     "sleep_quality": {"type": "string", "enum": list(SLEEP_QUALITY)},
     "threat": {"type": "string", "enum": list(THREAT_TARGETS)},
-    "injuries": {"type": "array", "maxItems": 8, "items": {
+    "injuries": {"type": "array", "maxItems": MAX_INJURIES, "items": {
         "type": "object", "properties": {
             "id": {"type": "string", "maxLength": 64},
             "description": {"type": "string", "maxLength": 200},
