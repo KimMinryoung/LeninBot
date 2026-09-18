@@ -2,8 +2,24 @@
 
 ## 목적
 
-agentskills.io 오픈 표준 기반의 외부 스킬을 leninbot의 `skills/` 디렉토리로 가져와서
-에이전트(general, programmer)가 사용할 수 있게 한다.
+agentskills.io 오픈 표준 기반의 외부 스킬을 leninbot의 `skills/` 디렉토리로 가져온다.
+이 디렉토리는 봇 런타임용이며 Codex 개발 스킬과 별개다.
+
+## 현재 스킬과 로딩 경계
+
+| 스킬 | 용도와 참조 |
+|------|------------|
+| `geopolitical-analysis` | 지정학 분석 지침. `services/a2a_handler.py`가 A2A 프롬프트에 직접 로드 |
+| `research-report` | 리서치·보고서 출처 형식. `services/a2a_handler.py`가 A2A 프롬프트에 직접 로드 |
+| `kg-maintenance` | KG 관리 지침과 운영 스크립트. 하위 `scripts/`는 MCP 관리 도구와 KG 백업에서도 참조 |
+
+`telegram/bot.py`는 `skills_loader.build_skills_prompt()`로 이름·설명 목록을
+orchestrator 프롬프트에 넣는다. 본문은 필요할 때 `read_file`로 읽도록 안내한다.
+전문 에이전트에 이 목록이 자동 주입되는 것은 아니다.
+
+`skills_loader.py`는 최초 로드 결과를 프로세스 안에 캐시한다. 스킬 추가·삭제는
+해당 프로세스에서 `reload_skills()`를 호출하거나 봇을 재시작해야 목록에 반영된다.
+별도 CLI 프로세스에서 목록을 확인해도 실행 중인 봇의 캐시는 갱신되지 않는다.
 
 ## 외부 스킬 소스
 
