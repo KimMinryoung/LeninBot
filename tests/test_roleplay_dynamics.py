@@ -71,6 +71,11 @@ class DynamicsTests(unittest.TestCase):
         self.assertEqual((capped[0]['severity'], capped[0]['progress_minutes']), (3, 1440))
         slow, _ = progress_injuries([{**wound, 'trend': 'recovering', 'progress_minutes': 0}], 2879)
         self.assertEqual(slow[0]['severity'], 1)
+        # Records saved before the clock existed carry no progress_minutes at all.
+        legacy = {'id': 'old', 'description': '옛 기록', 'severity': 2, 'trend': 'recovering', 'treated': True}
+        self.assertEqual(carry_injury_progress([legacy], [dict(legacy)])[0]['progress_minutes'], 0)
+        from runtime_tools.roleplay_dynamics import reconcile_injuries
+        self.assertEqual(reconcile_injuries([legacy], [dict(legacy)], [dict(legacy)])[0]['progress_minutes'], 0)
         # A model-sent list keeps the server clock for unchanged trends and restarts it on a change.
         carried = carry_injury_progress([{**burn, 'progress_minutes': 700}, {**cut, 'progress_minutes': 300}],
                                         [dict(burn), {**cut, 'trend': 'recovering'}, {'id': 'new', 'description': '새 상처', 'severity': 1, 'trend': 'stable', 'treated': False}])

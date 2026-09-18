@@ -99,7 +99,8 @@ def carry_injury_progress(previous, injuries):
         item = dict(injury)
         old = before.get(item["id"])
         if "progress_minutes" not in item:
-            item["progress_minutes"] = old["progress_minutes"] if old and old.get("trend") == item["trend"] else 0
+            # Records saved before the healing clock existed carry no progress yet.
+            item["progress_minutes"] = old.get("progress_minutes", 0) if old and old.get("trend") == item["trend"] else 0
         result.append(item)
     return result
 
@@ -119,9 +120,9 @@ def reconcile_injuries(before, after_interval, sent):
             continue
         if echoed:
             item["severity"] = cur["severity"]
-            item.setdefault("progress_minutes", cur["progress_minutes"])
+            item.setdefault("progress_minutes", cur.get("progress_minutes", 0))
         elif cur is not None and item["trend"] == cur["trend"]:
-            item.setdefault("progress_minutes", cur["progress_minutes"])
+            item.setdefault("progress_minutes", cur.get("progress_minutes", 0))
         else:
             item.setdefault("progress_minutes", 0)
         result.append(item)
