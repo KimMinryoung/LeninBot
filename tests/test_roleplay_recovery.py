@@ -65,3 +65,7 @@ class TestReplyPersistence(unittest.IsolatedAsyncioTestCase):
         with patch.object(bot.asyncio, "to_thread", new=AsyncMock(return_value={**STATE_DEFAULTS, "hunger": 50})):
             await bot.cmd_status(message)
         self.assertIn("허기: 50", message.answer.call_args.args[0])
+        self.assertIn("의지: 미설정", message.answer.call_args.args[0])
+        with patch.object(bot.asyncio, "to_thread", new=AsyncMock(return_value={**STATE_DEFAULTS, "resolve": 42.26, "humiliation": 70})):
+            await bot.cmd_status(message)
+        self.assertIn("의지: 42.3 · 명료함: 미설정 · 굴욕: 70", message.answer.call_args.args[0])

@@ -2,12 +2,17 @@
 from copy import deepcopy
 from runtime_tools.roleplay_clock import clock_defaults
 
-METRICS = ("hunger", "fatigue", "pain", "tension")
+PHYSICAL_METRICS = ("hunger", "fatigue", "pain", "tension")
+# Mental axes: resolve/clarity read 100 = strong/lucid, humiliation reads 100 = extreme.
+MENTAL_METRICS = ("resolve", "clarity", "humiliation")
+METRICS = PHYSICAL_METRICS + MENTAL_METRICS
+RESOLVE_BY_THREAT = {"safe": 2.0, "uncertain": 0.5, "threatening": -1.5, "immediate": -3.0}
 ACTIVITIES = {"rest": -2.0, "light": 2.0, "moderate": 5.0, "strenuous": 10.0, "sleep": -8.0}
 SLEEP_QUALITY = {"poor": 0.25, "normal": 1.0, "good": 1.25}
 THREAT_TARGETS = {"safe": 10.0, "uncertain": 40.0, "threatening": 75.0, "immediate": 90.0}
 MAX_INJURIES = 12
 DYNAMICS_DEFAULTS = {
+    **{key: None for key in METRICS},  # legacy states lack the mental axes; unset stays unset
     "revision": 0, "scene_minute": 0, "last_calculated_minute": 0,
     "time_basis": "현재 저장 상태를 기준 시점(0분)으로 삼음. 이전 경과 시간은 재계산하지 않음.",
     "activity": "rest", "sleep_quality": "normal", "threat": "uncertain",
@@ -47,6 +52,24 @@ def validate_conditions(changes):
                 raise ValueError("Invalid injury trend/treatment")
 
 
+def mental_rates(state):
+    """Hourly drift of the mental axes from the conditions at the start of the interval."""
+    fatigue = state["fatigue"] if state["fatigue"] is not None else 0
+    pain = state["pain"] if state["pain"] is not None else 0
+    threat, activity = state["threat"], state["activity"]
+    sleeping = activity == "sleep"
+    resolve = RESOLVE_BY_THREAT[threat] - (1 if fatigue > 70 else 0) - (1 if pain > 60 else 0)
+    if sleeping and state["sleep_quality"] != "poor":
+        resolve += 1
+    if sleeping:
+        clarity = 6 * SLEEP_QUALITY[state["sleep_quality"]]
+    else:
+        clarity = -(2 if fatigue > 80 else 1 if fatigue > 60 else 0) - (1 if pain > 60 else 0) - (1 if threat == "immediate" else 0)
+        if activity == "rest" and fatigue <= 60:
+            clarity += 1
+    return {"resolve": resolve, "clarity": clarity, "humiliation": -0.5 if threat == "safe" else 0.0}
+
+
 def advance(state, target_minute, time_basis):
     """Apply only the as-yet unaccounted interval using previously saved conditions."""
     if type(target_minute) is not int or target_minute < 0:
@@ -79,6 +102,7 @@ def advance(state, target_minute, time_basis):
     tension_delta = 0 if tension is None else max(-6 * hours, min(6 * hours, target - tension))
     deltas = {"hunger": 3 * hours, "fatigue": fatigue_rate * hours,
               "pain": pain_rate * hours, "tension": tension_delta}
+    deltas.update({k: v * hours for k, v in mental_rates(state).items()})
     for key, delta in deltas.items():
         if state[key] is not None:
             result[key] = round(max(0, min(100, state[key] + delta)), 4)

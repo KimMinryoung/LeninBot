@@ -243,7 +243,7 @@ ADJUSTMENTS = {"initialize", "event", "correction"}
 EVENT_TYPES = {"other", "meal", "sleep", "injury", "treatment"}
 REVIEW_TRIGGERS = {"last_event", "participants"}
 
-STATE_DEFAULTS = {**{key: "" for key in sorted(SCENE_TEXT_FIELDS)}, "participants": [], "hunger": None, "fatigue": None, "pain": None, "tension": None,
+STATE_DEFAULTS = {**{key: "" for key in sorted(SCENE_TEXT_FIELDS)}, "participants": [], **{key: None for key in METRICS},
                   "body": "미설정", "mood": "미설정", "scene": "미설정", "reason": "아직 설정되지 않음"}
 VIEW_CLOCK_KEYS = ("date", "year", "time", "daypart", "relative_day", "certainty", "elapsed_complete", "unquantified_gaps")
 
@@ -533,7 +533,7 @@ def roleplay_state(action: str, changes: dict | None = None, reason: str = "", *
 
 ROLEPLAY_STATE_TOOL = {
     "name": "roleplay_state",
-    "description": "역할극 인물의 지속 상태표. read=현재 상태, history=최근 변경, update=즉시 변경, time=장면 시간 진행(+같은 호출의 changes로 그 뒤의 상태), reset=새 장면. 한 사건은 한 호출로: time에는 temporal(source_quote/interpretation/relation current·past·plan/certainty/operation anchor·advance·until·next_day·correct·reference)과 지난 구간의 interval_conditions.activity, 그리고 구간 뒤 달라진 것을 changes에 함께 넣는다. changes: hunger/fatigue/pain/tension(0–100, 시간 경과가 아닌 식사·부상 같은 즉시 사건만), body/mood/scene, location/participants(등록된 인물 ID)/last_event/unresolved/goal/avoid/next_action, activity/sleep_quality/threat/injuries(전체 목록 교체). 빈 문자열·빈 배열로 해소된 항목을 비운다. expected_revision=현재 revision. person_updates=[{person_id, changes:{observed/reported/relationship/inferred}}]로 인물 기록을 같은 트랜잭션에서 갱신하고, 새 정보가 없으면 person_review에 이유. 누락·형식 차이는 가능한 한 해석해 적용하고 결과의 warnings에 알린다.",
+    "description": "역할극 인물의 지속 상태표. read=현재 상태, history=최근 변경, update=즉시 변경, time=장면 시간 진행(+같은 호출의 changes로 그 뒤의 상태), reset=새 장면. 한 사건은 한 호출로: time에는 temporal(source_quote/interpretation/relation current·past·plan/certainty/operation anchor·advance·until·next_day·correct·reference)과 지난 구간의 interval_conditions.activity, 그리고 구간 뒤 달라진 것을 changes에 함께 넣는다. changes: hunger/fatigue/pain/tension과 정신 수치 resolve(의지)/clarity(명료함)/humiliation(굴욕)(0–100, 시간 경과가 아닌 식사·부상·굴욕 사건 같은 즉시 사건만), body/mood/scene, location/participants(등록된 인물 ID)/last_event/unresolved/goal/avoid/next_action, activity/sleep_quality/threat/injuries(전체 목록 교체). 빈 문자열·빈 배열로 해소된 항목을 비운다. expected_revision=현재 revision. person_updates=[{person_id, changes:{observed/reported/relationship/inferred}}]로 인물 기록을 같은 트랜잭션에서 갱신하고, 새 정보가 없으면 person_review에 이유. 누락·형식 차이는 가능한 한 해석해 적용하고 결과의 warnings에 알린다.",
     "input_schema": {
         "type": "object",
         "properties": {

@@ -244,7 +244,8 @@ async def cmd_status(message: Message) -> None:
     state["injuries"] = "; ".join(f"{i['description']} ({trends[i['trend']]}, {'처치함' if i['treated'] else '미처치'})" for i in state.get("injuries", [])) or "등록 없음"
     if not state.get("conditions_initialized"):
         state["injuries"] += " — 시간 계산 조건 미확인"
-    for key in ("hunger", "fatigue", "pain", "tension"):
+    from runtime_tools.roleplay_dynamics import METRICS
+    for key in METRICS:
         if isinstance(state.get(key), (int, float)):
             state[key] = round(state[key], 1)
     from runtime_tools.roleplay_clock import clock_defaults
@@ -267,7 +268,10 @@ async def cmd_status(message: Message) -> None:
             return f"{value:g}"
         return str(value)
 
-    lines = ["인물 상태 (0–100)", " · ".join(f"{label}: {display(state.get(key))}" for key, label in metrics.items())]
+    mental = {"resolve": "의지", "clarity": "명료함", "humiliation": "굴욕"}
+    lines = ["인물 상태 (0–100)", " · ".join(f"{label}: {display(state.get(key))}" for key, label in metrics.items()),
+             "정신 상태 (의지·명료함 100=굳건·또렷, 굴욕 100=극심)",
+             " · ".join(f"{label}: {display(state.get(key))}" for key, label in mental.items())]
     labels = {"calendar_display": "시각", "location": "장소", "participants": "현재 장면 인물", "saved_people": "저장된 인물",
               "body": "몸 상태", "mood": "기분", "activity": "활동",
               "last_event": "직전 사건", "goal": "목적", "unresolved": "미해결"}

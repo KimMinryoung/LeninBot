@@ -36,6 +36,23 @@ class DynamicsTests(unittest.TestCase):
         self.assertEqual(advance(self.initial(threat='safe'), 120, '두 시간')['tension'], 38)
         self.assertEqual(advance(self.initial(threat='threatening'), 120, '두 시간')['tension'], 62)
 
+    def test_mental_axes_drift(self):
+        mental = dict(resolve=50, clarity=50, humiliation=50)
+        safe_rest = advance(self.initial(threat='safe', **mental), 60, '안전한 휴식 한 시간')
+        self.assertEqual((safe_rest['resolve'], safe_rest['clarity'], safe_rest['humiliation']), (52, 51, 49.5))
+        coerced = advance(self.initial(threat='immediate', activity='strenuous', fatigue=75, pain=65, **mental), 60, '강요 한 시간')
+        self.assertEqual((coerced['resolve'], coerced['clarity'], coerced['humiliation']), (45, 47, 50))
+        slept = advance(self.initial(activity='sleep', sleep_quality='good', threat='uncertain', **mental), 120, '두 시간 숙면')
+        self.assertEqual((slept['resolve'], slept['clarity']), (53, 65))
+        poor = advance(self.initial(activity='sleep', sleep_quality='poor', threat='uncertain', **mental), 120, '두 시간 선잠')
+        self.assertEqual((poor['resolve'], poor['clarity']), (51, 53))
+        # Unset mental values stay unset; physical drift is unaffected by them.
+        unset = advance(self.initial(threat='immediate'), 60, '정신 수치 미설정')
+        self.assertIsNone(unset['resolve'])
+        self.assertEqual(unset['hunger'], 33)
+        bounded = advance(self.initial(resolve=1, clarity=99, activity='sleep', sleep_quality='good', threat='immediate'), 120, '경계값')
+        self.assertEqual((bounded['resolve'], bounded['clarity']), (0, 100))
+
     def test_partial_intervals_bounds_and_unknowns(self):
         state = self.initial()
         for minute in range(1, 61):
