@@ -287,7 +287,7 @@ class Store:
                              for line in metrics.get('tool_work_details',[]))
         metrics = {k:v for k,v in metrics.items() if k in {
             'rounds_used','input_tokens','output_tokens','model_calls','pipeline_cache_hits',
-            'preflight_checks','preflight_failures','preflight_passed','rejections'}}
+            'preflight_checks','preflight_failures','preflight_passed','rejections','provider_fallback'}}
         metrics['terminal_calls'] = terminal_calls
         if 'rejections' in metrics:
             metrics['rejections'] = metrics['rejections'][-12:]
@@ -333,7 +333,12 @@ class Store:
             if not cur.fetchone():
                 raise LostLease(str(job['id']))
             metrics = {k:v for k,v in (usage or {}).items() if k in
-                       {'total_cost','rounds_used','input_tokens','output_tokens','pipeline_cache_hits'}}
+                       {'total_cost','rounds_used','input_tokens','output_tokens','pipeline_cache_hits','provider_fallback'}}
+            if (usage or {}).get('provider_fallback'):
+                # Later stages see the same sources; skip the provider that refused them.
+                cur.execute('''UPDATE commulingo_pipeline_jobs
+                    SET payload=payload || %s::jsonb WHERE id=%s''',
+                    (Json({'provider_fallback':usage['provider_fallback']}),job['id']))
             if value.get('remaining_topics'):
                 cur.execute('''UPDATE commulingo_pipeline_jobs
                     SET payload=payload || %s::jsonb WHERE id=%s''',

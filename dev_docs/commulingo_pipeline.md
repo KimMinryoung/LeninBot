@@ -86,6 +86,10 @@ ready/research·attempts=0이며 artifact·수집 원문 연결·비용 이력�
 단계는 480초로 제한한다. 배치 단계 한도에서 추가하는 저장은 claim 후에도
 submit 단계인지 확인하며, 다른 단계로 바뀌었으면 새 조사를 시작하지 않고 반환한다. 소유권을 잃으면 실행을 취소하며 예전 lease의 결과 저장을 거부한다.
 실패는 1시간 뒤 해당 단계부터 재시도하고 같은 단계의 3회 실패는 escalated로 남긴다.
+DeepSeek가 입력 검열(`Content Exists Risk`, HTTP 400)로 거부하면 같은 소스로는 재시도해도 같으므로
+`model_call`이 그 단계를 GPT(`provider_fallback=openai`)로 한 번 다시 돌리고, 성공하면 job payload에
+`provider_fallback`을 남겨 이후 단계(draft·validate·review)는 처음부터 GPT로 실행한다. attempt·artifact
+metrics의 `provider_fallback`으로 식별한다. 다른 오류는 그대로 escalation 규칙을 따른다.
 
 조사기는 원문과 field별 주장·호출 내 짧은 source ID(S1, S2)·화면에 표시된 chunk 번호를 제출한다.
 실행기는 짧은 ID를 내용 hash 기반 영속 ID로 변환하여 artifact에 저장한다. 기존 영속 ID 입력도

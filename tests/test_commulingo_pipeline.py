@@ -1,5 +1,6 @@
 import asyncio
 from contextlib import contextmanager
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import os
@@ -336,6 +337,47 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
             await model_call(spec=spec('research'),prompt='Fixture',tool=tool,handler=handler,
                              reads=set(),usage=Usage(),budget=.2)
         self.assertEqual(saved,[{'reason':'A sourced conclusion'}])
+
+    async def test_model_stage_reruns_on_gpt_when_deepseek_refuses_content(self):
+        from commulingo_pipeline.stages import model_call, result_tool
+        from commulingo_pipeline.prompts import spec
+        from commulingo_pipeline.engine import Usage
+        tool = result_tool({'type':'object','properties':{'reason':{'type':'string'}},'required':['reason']})
+        saved, seen = [], []
+        async def handler(value):
+            saved.append(value)
+            return 'OK'
+        async def refuse(*args,**kwargs):
+            raise RuntimeError("Error code: 400 - {'error': {'message': 'Content Exists Risk'}}")
+        async def accept(messages,**kwargs):
+            self.assertEqual(messages[0]['role'],'user')
+            await kwargs['tool_handlers'][tool['name']](reason='sourced')
+        def resolve(agent_spec,policy):
+            seen.append(agent_spec.provider)
+            return SimpleNamespace(chat=refuse if agent_spec.provider=='deepseek' else accept,
+                                   client=None,model='fixture',render_provider=agent_spec.provider,reasoning={})
+        usage = Usage()
+        with patch('bot_config.resolve_agent_tool_loop',side_effect=resolve):
+            await model_call(spec=replace(spec('research'),provider='deepseek'),prompt='Fixture',tool=tool,
+                             handler=handler,reads=set(),usage=usage,budget=.2,job={'id':1,'payload':{}})
+        self.assertEqual(seen,['deepseek','openai'])
+        self.assertEqual(saved,[{'reason':'sourced'}])
+        self.assertEqual(usage.tracker['provider_fallback'],'openai')
+        self.assertEqual(usage.tracker['model_calls'],2)
+        # A job that already fell back starts on GPT; any other error surfaces unchanged.
+        seen.clear()
+        with patch('bot_config.resolve_agent_tool_loop',side_effect=resolve):
+            await model_call(spec=replace(spec('research'),provider='deepseek'),prompt='Fixture',tool=tool,
+                             handler=handler,reads=set(),usage=Usage(),budget=.2,
+                             job={'id':1,'payload':{'provider_fallback':'openai'}})
+        self.assertEqual(seen,['openai'])
+        async def other(*args,**kwargs):
+            raise RuntimeError('upstream HTTP 500')
+        with patch('bot_config.resolve_agent_tool_loop',return_value=SimpleNamespace(
+                chat=other,client=None,model='fixture',render_provider='deepseek',reasoning={})):
+            with self.assertRaisesRegex(RuntimeError,'HTTP 500'):
+                await model_call(spec=replace(spec('research'),provider='deepseek'),prompt='Fixture',tool=tool,
+                                 handler=handler,reads=set(),usage=Usage(),budget=.2)
 
     async def test_term_draft_compiles_evidence_and_keeps_original_revision(self):
         from commulingo_pipeline.stages import Draft
@@ -767,6 +809,13 @@ class PostgresTests(unittest.TestCase):
         resumed = self.store.claim(job_id=parent['id'])
         self.assertEqual(resumed['payload']['remaining_topics'],['sections'])
         self.assertEqual(resumed['payload']['topics'],['bio','sections'])
+        self.store.finish_stage(resumed,{'claims':[]},next_stage='draft',usage={'provider_fallback':'openai','rounds_used':3})
+        again = self.store.claim(job_id=parent['id'])
+        self.assertEqual(again['payload']['provider_fallback'],'openai')
+        self.assertEqual(again['payload']['remaining_topics'],['sections'])
+        with self.store.transaction() as cur:
+            cur.execute("SELECT metrics FROM commulingo_pipeline_artifacts WHERE job_id=%s ORDER BY id DESC LIMIT 1",(parent['id'],))
+            self.assertEqual(cur.fetchone()['metrics'],{'provider_fallback':'openai','rounds_used':3})
 
     def test_consolidate_keeps_all_explicit_gap_links(self):
         from commulingo_pipeline.bundles import gap_ids

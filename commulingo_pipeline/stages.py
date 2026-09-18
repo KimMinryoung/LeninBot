@@ -4,6 +4,7 @@ from copy import deepcopy
 from dataclasses import replace
 import json
 import hashlib
+import logging
 import re
 from datetime import datetime, timezone
 
@@ -12,8 +13,16 @@ from .evidence import snapshot, compile_evidence, resolve_claim_chunks, SOURCE_C
 from . import service
 from .bundles import work_topics, advance
 
+logger = logging.getLogger(__name__)
+
 MAX_UNCHANGED_REVIEW_REVISIONS = 2
 DRAFT_ROUNDS = 8
+# DeepSeek's server-side input filter rejects the whole request (HTTP 400) once
+# the context holds politically sensitive source text (job #489 "decoupling":
+# zh.wikipedia 中美关系 + trade-war pages). Retrying the same sources fails the
+# same way, so the stage reruns once on GPT and the job stays on GPT afterwards.
+CONTENT_RISK = 'Content Exists Risk'
+FALLBACK_PROVIDER = 'openai'
 
 READS = {'wiki_search','wiki_get','web_search','fetch_url','commulingo_people'}
 
@@ -55,14 +64,21 @@ def stage_evidence(payload):
     )])
 
 
-async def model_call(*, spec, prompt, tool, handler, reads, usage, budget, read_wrap=None, scope_id=None, read_tools=None, max_rounds=12):
+def content_risk(exc):
+    return CONTENT_RISK in str(exc)
+
+
+async def model_call(*, spec, prompt, tool, handler, reads, usage, budget, read_wrap=None, scope_id=None, read_tools=None, max_rounds=12, job=None):
     from bot_config import resolve_agent_tool_loop
     from runtime_tools.registry import TOOLS, TOOL_HANDLERS
     from tool_gateway.inference import resolve_agent_inference_policy
     from tool_gateway.security import caller_scope, new_run_context
     from tool_gateway.results import ToolRejection
+    fallback = ((job or {}).get('payload') or {}).get('provider_fallback')
+    if fallback:
+        spec = replace(spec,provider=fallback,model=None)
+        usage.tracker['provider_fallback'] = fallback
     policy = resolve_agent_inference_policy(spec)
-    binding = resolve_agent_tool_loop(spec,policy)
     tools = [deepcopy((read_tools or {}).get(t['name'],t)) for t in TOOLS if t['name'] in reads]
     handlers = {name: TOOL_HANDLERS[name] for name in reads}
     if read_wrap:
@@ -89,23 +105,37 @@ async def model_call(*, spec, prompt, tool, handler, reads, usage, budget, read_
     # Durable public-write idempotency belongs to the RPC receipt, not this tool.
     context = replace(context,task_id=None,session_id=None)
     from llm.execution_context import attach_context, context_record
-    messages = attach_context([{'role':'user','content':prompt}], [context_record(
-        'pipeline_stage', 'commulingo_pipeline_runtime', {
-            'terminal_tool': tool['name'],
-            'stage_result': 'not recorded yet',
-            'publication': 'not implied by stage completion; only submit/review receipts establish application',
-            'evidence': 'source IDs/hash/ranges and baseline revision belong to the supplied artifacts; do not invent or refresh them',
-        }, scope=scope_id or 'commulingo_pipeline:standalone', temporal_scope='current stage',
-    )])
-    with caller_scope(context):
-        usage.started = True
-        await binding.chat(messages,
-            client=binding.client,model=binding.model,tools=[*tools,tool],tool_handlers=handlers,
-            system_prompt=spec.render_prompt(provider=binding.render_provider),
-            max_rounds=min(policy.max_rounds,max_rounds),max_tokens=policy.max_output_tokens,
-            max_input_tokens=policy.max_input_tokens,budget_usd=budget,budget_tracker=usage.tracker,
-            agent_name=spec.name,finalization_tools=[tool['name']],terminal_tools=[tool['name']],
-            terminal_required=True,**binding.reasoning)
+    def messages():
+        # The loop appends to this list, so every run starts from a fresh copy.
+        return attach_context([{'role':'user','content':prompt}], [context_record(
+            'pipeline_stage', 'commulingo_pipeline_runtime', {
+                'terminal_tool': tool['name'],
+                'stage_result': 'not recorded yet',
+                'publication': 'not implied by stage completion; only submit/review receipts establish application',
+                'evidence': 'source IDs/hash/ranges and baseline revision belong to the supplied artifacts; do not invent or refresh them',
+            }, scope=scope_id or 'commulingo_pipeline:standalone', temporal_scope='current stage',
+        )])
+    async def run(spec):
+        binding = resolve_agent_tool_loop(spec,policy)
+        with caller_scope(context):
+            usage.started = True
+            await binding.chat(messages(),
+                client=binding.client,model=binding.model,tools=[*tools,tool],tool_handlers=handlers,
+                system_prompt=spec.render_prompt(provider=binding.render_provider),
+                max_rounds=min(policy.max_rounds,max_rounds),max_tokens=policy.max_output_tokens,
+                max_input_tokens=policy.max_input_tokens,budget_usd=budget,budget_tracker=usage.tracker,
+                agent_name=spec.name,finalization_tools=[tool['name']],terminal_tools=[tool['name']],
+                terminal_required=True,**binding.reasoning)
+    try:
+        await run(spec)
+    except Exception as exc:
+        if completed or not content_risk(exc) or spec.effective_provider()==FALLBACK_PROVIDER:
+            raise
+        logger.warning('%s: %s refused the stage input (%s); rerunning on %s',
+                       scope_id, spec.effective_provider(), CONTENT_RISK, FALLBACK_PROVIDER)
+        usage.tracker['provider_fallback'] = FALLBACK_PROVIDER
+        usage.tracker['model_calls'] = usage.tracker.get('model_calls',0) + 1
+        await run(replace(spec,provider=FALLBACK_PROVIDER,model=None))
     usage.complete = True
     if not completed:
         detail = '; '.join(dict.fromkeys(rejections[-3:]))
@@ -223,7 +253,7 @@ class Research:
                 'original_proposal':(job.get('payload') or {}).get('original_proposal')}))
         await model_call(spec=spec,prompt=prompt,tool=result_tool(schema),handler=finish,
                          reads=READS,usage=usage,budget=budget,read_wrap=wrap,
-                         scope_id=f'commulingo_pipeline:{job["id"]}:research')
+                         scope_id=f'commulingo_pipeline:{job["id"]}:research',job=job)
         box['current'] = current
         box['baseline'] = (current or {}).get('revision','')
         box['inspected_sources'] = sorted({s['url'] for s in sources.values()})
@@ -327,7 +357,7 @@ class Discover:
             + stage_evidence(job['payload']))
         await model_call(spec=spec,prompt=prompt,tool=result_tool(schema),handler=finish,
                          reads={'commulingo_people'},usage=usage,budget=budget,
-                         scope_id=f'commulingo_pipeline:{job["id"]}:discover')
+                         scope_id=f'commulingo_pipeline:{job["id"]}:discover',job=job)
         return Result(box,'complete','complete')
 
 
@@ -498,7 +528,7 @@ class Draft:
         # distribution without funding twelve rounds of sentence shaving.
         await model_call(spec=spec,prompt=prompt,tool=tool,handler=finish,reads={'commulingo_people'},usage=usage,budget=budget,
                          read_wrap=wrap_lookup,read_tools={'commulingo_people':lookup_tool},
-                         scope_id=f'commulingo_pipeline:{job.get("id")}:draft',max_rounds=DRAFT_ROUNDS)
+                         scope_id=f'commulingo_pipeline:{job.get("id")}:draft',max_rounds=DRAFT_ROUNDS,job=job)
         return Result(box,'validate')
 
 
@@ -579,7 +609,7 @@ class Review:
             + convergence + '\n'
             +stage_evidence({'suggestion':proposal,'current_person':current,'previous_reviews':previous_reviews}),
             tool=DECISION_TOOL,handler=finish,reads=READS,usage=usage,budget=budget,
-            read_wrap=lambda name,call:handlers[name],scope_id=f'commulingo_pipeline:{job["id"]}:review')
+            read_wrap=lambda name,call:handlers[name],scope_id=f'commulingo_pipeline:{job["id"]}:review',job=job)
         if box['decision']=='revise':
             # Count unchanged content, not lifetime requests or newly added source handles.
             content = {k:v for k,v in draft['fields'].items()
