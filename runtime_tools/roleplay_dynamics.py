@@ -10,6 +10,12 @@ RESOLVE_BY_THREAT = {"safe": 2.0, "uncertain": 0.5, "threatening": -1.5, "immedi
 ACTIVITIES = {"rest": -2.0, "light": 2.0, "moderate": 5.0, "strenuous": 10.0, "sleep": -8.0}
 SLEEP_QUALITY = {"poor": 0.25, "normal": 1.0, "good": 1.25}
 THREAT_TARGETS = {"safe": 10.0, "uncertain": 40.0, "threatening": 75.0, "immediate": 90.0}
+# Tension settles toward a target that threat sets but quiet hours, resolve,
+# sleep and pain move: an uneventful day in a cell should be felt.
+HABITUATION_MAX = 15.0      # target drops 1 per calm hour (safe/uncertain), up to this
+RESOLVE_TENSION_SPAN = 10.0  # resolve 100 lowers the target by this, resolve 0 raises it
+SLEEP_TENSION_RELIEF = 10.0
+PAIN_TENSION_PENALTY = 5.0   # while pain is at or above PAIN_HINDERS_REST
 MAX_INJURIES = 12
 # Wounds imply a baseline of pain that rest alone cannot remove; several wounds
 # combine noisy-or style so a dozen bruises do not add up past a burn.
@@ -27,7 +33,7 @@ DYNAMICS_DEFAULTS = {
     "revision": 0, "scene_minute": 0, "last_calculated_minute": 0,
     "time_basis": "현재 저장 상태를 기준 시점(0분)으로 삼음. 이전 경과 시간은 재계산하지 않음.",
     "activity": "rest", "sleep_quality": "normal", "threat": "uncertain",
-    "injuries": [], "conditions_initialized": False, "recent_events": [],
+    "injuries": [], "conditions_initialized": False, "recent_events": [], "calm_minutes": 0,
     "last_calculation": None, "clock": None, "event_timestamps": [],
 }
 
@@ -155,6 +161,18 @@ def progress_injuries(injuries, minutes):
     return updated, changes
 
 
+def tension_target(state):
+    calm_hours = state.get("calm_minutes", 0) / 60
+    target = THREAT_TARGETS[state["threat"]] - min(HABITUATION_MAX, calm_hours)
+    if state["resolve"] is not None:
+        target -= (state["resolve"] - 50) / 50 * RESOLVE_TENSION_SPAN
+    if state["pain"] is not None and state["pain"] >= PAIN_HINDERS_REST:
+        target += PAIN_TENSION_PENALTY
+    if state["activity"] == "sleep":
+        target -= SLEEP_TENSION_RELIEF
+    return round(max(5.0, min(95.0, target)), 4)
+
+
 def advance(state, target_minute, time_basis):
     """Apply only the as-yet unaccounted interval using previously saved conditions."""
     if type(target_minute) is not int or target_minute < 0:
@@ -189,8 +207,10 @@ def advance(state, target_minute, time_basis):
     else:
         pain_delta = max(floor - pain, pain_rate * hours)
     tension = state["tension"]
-    target = THREAT_TARGETS[state["threat"]]
+    target = tension_target(state)
     tension_delta = 0 if tension is None else max(-6 * hours, min(6 * hours, target - tension))
+    calm = state["threat"] in ("safe", "uncertain")
+    result["calm_minutes"] = state.get("calm_minutes", 0) + (target_minute - start) if calm else 0
     deltas = {"hunger": 3 * hours, "fatigue": fatigue_rate * hours,
               "pain": pain_delta, "tension": tension_delta}
     deltas.update({k: v * hours for k, v in mental_rates(state).items()})
@@ -203,7 +223,7 @@ def advance(state, target_minute, time_basis):
         "from_minute": start, "to_minute": target_minute, "basis": time_basis.strip(),
         "conditions": {k: deepcopy(state[k]) for k in ("activity", "sleep_quality", "threat", "injuries")},
         "before": {k: state[k] for k in METRICS}, "after": {k: result[k] for k in METRICS},
-        "pain_floor": floor, "injury_changes": injury_changes,
+        "pain_floor": floor, "tension_target": target, "injury_changes": injury_changes,
         "healed": [c["id"] for c in injury_changes if c["to"] == 0],
     }
     return result

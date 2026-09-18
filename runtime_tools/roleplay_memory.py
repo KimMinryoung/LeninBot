@@ -274,7 +274,8 @@ def state_view(state: dict) -> dict:
     view["pain_floor"] = injury_pain_floor(state.get("injuries") or [])
     calculation = state.get("last_calculation")
     if calculation:
-        view["last_calculation"] = {k: calculation.get(k) for k in ("from_minute", "to_minute", "basis", "before", "after", "injury_changes", "healed") if calculation.get(k) not in (None, [])}
+        view["last_calculation"] = {k: calculation.get(k) for k in ("from_minute", "to_minute", "basis", "before", "after", "tension_target", "injury_changes", "healed") if calculation.get(k) not in (None, [])}
+    view["calm_hours"] = round(state.get("calm_minutes", 0) / 60, 1)
     unset = [key for key in METRICS if state.get(key) is None]
     if unset:
         # A null among numbers is easy to skim past; name the gap and what closes it.
@@ -392,6 +393,9 @@ def _apply_changes(base: dict, changes: dict, *, adjustment: str, metric_reasons
             kept.append(key)
             continue
         state[key] = changes[key]
+    # A shock (a wound, or tension pushed up by an event) ends the calm streak that eases tension.
+    if adjustment == "event" and (event_type == "injury" or ("tension" in numeric and base["tension"] is not None and changes["tension"] > base["tension"])):
+        state["calm_minutes"] = 0
     if kept:
         warnings.append(f"initialize는 미설정 값만 채움: {kept}는 기존 값 유지 (바꾸려면 adjustment=event 또는 correction)")
     state["recent_events"] = (base["recent_events"] + [event_id])[-100:] if event_id not in base["recent_events"] else base["recent_events"]

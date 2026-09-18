@@ -81,6 +81,29 @@ class DynamicsTests(unittest.TestCase):
                                         [dict(burn), {**cut, 'trend': 'recovering'}, {'id': 'new', 'description': '새 상처', 'severity': 1, 'trend': 'stable', 'treated': False}])
         self.assertEqual([i['progress_minutes'] for i in carried], [700, 0, 0])
 
+    def test_tension_eases_with_calm_resolve_sleep_and_rises_with_pain(self):
+        from runtime_tools.roleplay_dynamics import tension_target
+        base = self.initial(threat='uncertain', tension=40)
+        self.assertEqual(tension_target(base), 40)
+        self.assertEqual(tension_target({**base, 'calm_minutes': 8 * 60}), 32)
+        self.assertEqual(tension_target({**base, 'calm_minutes': 40 * 60}), 25)
+        self.assertEqual(tension_target({**base, 'resolve': 100}), 30)
+        self.assertEqual(tension_target({**base, 'resolve': 0}), 50)
+        self.assertEqual(tension_target({**base, 'pain': 60}), 45)
+        self.assertEqual(tension_target({**base, 'activity': 'sleep'}), 30)
+        self.assertEqual(tension_target({**base, 'threat': 'safe', 'calm_minutes': 40 * 60, 'resolve': 100, 'activity': 'sleep'}), 5)
+        # A quiet day in the cell: tension settles well below the bare threat level.
+        state = base
+        for _ in range(12):
+            state = advance(state, state['scene_minute'] + 60, '조용한 한 시간')
+        self.assertEqual(state['calm_minutes'], 720)
+        self.assertLess(state['tension'], 32)
+        self.assertEqual(state['last_calculation']['tension_target'], 29)
+        # A threatening interval ends the calm streak.
+        shaken = advance({**state, 'threat': 'threatening'}, state['scene_minute'] + 30, '방문자')
+        self.assertEqual(shaken['calm_minutes'], 0)
+        self.assertGreater(shaken['tension'], state['tension'])
+
     def test_mental_axes_drift(self):
         mental = dict(resolve=50, clarity=50, humiliation=50)
         safe_rest = advance(self.initial(threat='safe', **mental), 60, '안전한 휴식 한 시간')
@@ -247,6 +270,16 @@ class StateTransactionTests(unittest.TestCase):
         self.assertEqual(state['injuries'][0]['progress_minutes'], 0)
         self.assertEqual(result['last_calculation']['injury_changes'], [{'id': 'burn', 'from': 2, 'to': 1}])
         self.assertEqual(result['pain_floor'], 3)
+
+    def test_tension_event_resets_calm(self):
+        temporal = {'relation': 'current', 'certainty': 'explicit', 'operation': 'advance', 'elapsed_minutes': 600,
+                    'source_quote': '열 시간', 'interpretation': '조용한 열 시간'}
+        memory.roleplay_state('time', reason='조용', expected_revision=1, event_id='quiet', temporal=temporal,
+                              interval_conditions={'activity': 'rest', 'threat': 'uncertain'}, person_updates=[], person_review='없음')
+        self.assertEqual(memory.load_state(1)['calm_minutes'], 600)
+        memory.roleplay_state('update', {'tension': 80}, '문이 열림', expected_revision=2, adjustment='event', event_id='door')
+        self.assertEqual(memory.load_state(1)['calm_minutes'], 0)
+        self.assertEqual(json.loads(memory.roleplay_state('read'))['calm_hours'], 0)
 
     def test_one_call_interval_then_changes(self):
         memory.roleplay_person('save', 'rodos', changes={'name': '로도스', 'aliases': ['보리스']})

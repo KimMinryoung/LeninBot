@@ -228,6 +228,10 @@ warnings는 다음 호출에서 고칠 힌트이지 실패가 아니다. 오류�
   "30분 뒤"는 explicit, 소요 시간 추정은 estimated다. 짧은 대사로 수십 분·밤샘을 만들지 않는다.
   advance는 시계를 코드가 계산하므로 목표 시각을 함께 주지 않는다. 한 구간은 최대 24시간이며
   활동이 다른 구간은 나눈다. 수면은 interval_conditions에 activity=sleep과 sleep_quality를 넣는다.
+- 긴장(tension)은 위협 단계가 정하는 목표값으로 시간당 최대 6씩 움직이되, 조용한 시간이 쌓이면(safe/uncertain
+  구간의 calm_hours, 시간당 1씩 최대 15) 목표가 내려가고 의지가 높을수록·수면 중에 더 내려가며 통증 50 이상이면
+  올라간다. 문이 열리거나 방문자가 들어오는 순간의 충격은 구간 계산이 아니라 tension을 올리는 event로 넣는다.
+  그러면 조용한 시간의 누적이 끊긴다. 위협 단계는 실제 상황이 바뀔 때만 바꾼다.
 - interval_conditions는 이번에 계산할 구간의 활동이다. 물 마시기·서서 대화는 light, 가만히 쉬기는 rest,
   걷기·이동은 moderate, 폭행·강요·중노동은 strenuous. 위협(safe/uncertain/threatening/immediate)과
   부상(injuries)도 그 구간의 상태로 넣는다. 구간이 끝난 뒤의 활동을 그 구간 전체에 소급하지 않는다.
