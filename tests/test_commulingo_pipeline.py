@@ -420,6 +420,37 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.value['fields']['evidence'][0]['excerpt'],source['body'])
         self.assertEqual(result.next_stage,'validate')
 
+    async def test_term_draft_drops_echoed_year_fields_but_keeps_real_changes(self):
+        from commulingo_pipeline.stages import Draft, drop_unchanged_term_facts
+        from commulingo_pipeline.engine import Usage
+        current = {'startYear':2023,'endYear':None,'period':{'ko':'2023년–현재','en':'2023–present'}}
+        fields = {'definition':{'ko':'정의','en':'Definition'},'startYear':2023,'endYear':None,
+                  'period':{'ko':'2023년–현재','en':'2023–present'}}
+        drop_unchanged_term_facts(fields,current,'update')
+        self.assertEqual(set(fields),{'definition'})
+        changed = {'startYear':2018,'endYear':None,'period':{'ko':'개념','en':'Concept'}}
+        drop_unchanged_term_facts(changed,current,'update')
+        self.assertEqual(set(changed),{'startYear','period'})
+        cleared = {'startYear':None}
+        drop_unchanged_term_facts(cleared,current,'update')
+        self.assertEqual(set(cleared),{'startYear'})
+        created = {'term':{'ko':'용어','en':'Term'},'startYear':None,'endYear':None,'period':{'ko':'개념','en':'Concept'}}
+        drop_unchanged_term_facts(created,{},'create')
+        self.assertEqual(set(created),{'term','period'})
+        # End to end: the validate call never sees the echoed keys.
+        store = Mock()
+        source = snapshot('https://example.org/definition','The archive defines the concept and its historical use.')
+        store.sources.return_value = {source['id']:source}
+        claim = {'field':'definition','claim':'Documented definition','source_id':source['id'],'start':0,'end':len(source['body'])}
+        async def model(**kwargs):
+            await kwargs['handler']({'fields':{'definition':{'ko':'정의','en':'Definition'},'startYear':2023,'endYear':None}})
+        validate = Mock(return_value={})
+        with patch('commulingo_pipeline.stages.model_call',side_effect=model), patch('commulingo_pipeline.stages.service.call',validate):
+            result = await Draft(store)({'kind':'term','action':'update','topic':'definition','target':'fixture'},
+                [{'stage':'research','value':{'claims':[claim],'baseline':'rev','current':current}}],Usage(),.2)
+        self.assertEqual(set(result.value['fields']),{'definition','evidence','expectedRevision'})
+        self.assertEqual(set(validate.call_args.args[0]['fields']),{'definition','evidence','expectedRevision'})
+
     async def test_review_revisions_are_bounded_and_uncertainty_stays_internal(self):
         from commulingo_pipeline.stages import Review
         from commulingo_pipeline.engine import Usage

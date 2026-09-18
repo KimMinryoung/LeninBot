@@ -52,6 +52,29 @@ def write_request(job, draft):
             'fields':draft['fields'],'sources':draft['sources'],'changedBy':'commulingo-pipeline'}
 
 
+TERM_FACT_FIELDS = ('startYear','endYear','period')
+
+
+def drop_unchanged_term_facts(fields, current, action):
+    """Remove year/period keys the draft merely echoed.
+
+    The term service demands evidence for every fact key present in the edit,
+    including ``endYear: null``. Drafts copy the current years back (or fill
+    the nullable keys with null), research cannot ground "no end year", and
+    the job cycles validate→research→draft until it escalates (#1470, #1707,
+    #2049, #16869). A value equal to the current record is no edit; a null on
+    create is the column default. A real change still needs its claim.
+    """
+    for field in TERM_FACT_FIELDS:
+        if field not in fields:
+            continue
+        value = fields[field]
+        if action=='update' and field in current and value==current[field]:
+            del fields[field]
+        elif action=='create' and value is None:
+            del fields[field]
+
+
 def result_tool(schema):
     return {'name':'commulingo_pipeline_result',
             'description':'Save this stage result. This does not publish dictionary content.',
@@ -461,6 +484,8 @@ class Draft:
             original = (job.get('payload') or {}).get('original_proposal') or {}
             if section and original and fields.get('slug')!=(original.get('patch_json') or {}).get('slug'):
                 raise ValueError('correction must retain the original section slug')
+            if job['kind']=='term':
+                drop_unchanged_term_facts(fields,research.get('current') or {},job['action'])
             if not fields:
                 raise ValueError('empty edit')
             if groups and any(fields[f] not in group_ids for f in ('group','groupId') if f in fields):
