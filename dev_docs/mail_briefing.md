@@ -69,13 +69,15 @@ Failed/interrupted tasks retain prepared items but do not take this delivery pat
 Tasks without prepared items retain the normal orchestrator callback. This direct
 delivery path does not automatically close a mission.
 
-Verification of a task with staged items is the ledger itself: `_run_verification`
-records a pass naming the staged mail IDs and skips the LLM verifier, and the
-reflexion diagnose→revise pass over the report is skipped too. The summaries are
-the deliverable and delivery only follows the verdict, so a model verifier can never
-observe it; when it was asked to, every daily run of 2026-09-16..18 failed three
-times over ("delivery unconfirmed"), sent nothing and cost up to $0.45 a day.
-Tasks that stage nothing still go through the ordinary verifier.
+Verification of a mail-reading task is the ledger itself, by owner decision
+(2026-09-18: "don't verify mail checks so strictly"): when a task staged summaries,
+recorded body reads, or called `check_inbox` at all, `_run_verification` records a
+pass naming the staged mail IDs and read count and skips the LLM verifier; the
+reflexion diagnose→revise pass over the report is skipped when the ledger has
+entries. The summaries are the deliverable and delivery only follows the verdict,
+so a model verifier can never observe it; when it was asked to, every daily run of
+2026-09-16..18 failed three times over ("delivery unconfirmed"), sent nothing and
+cost up to $0.45 a day. A "no new mail" result is likewise accepted as reported.
 
 A send timeout or crash between Telegram acceptance and receipt storage leaves
 delivery unknown and may produce a duplicate on retry; no exactly-once guarantee

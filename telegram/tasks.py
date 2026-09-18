@@ -614,6 +614,19 @@ def _staged_mail_items(task_id: int) -> list[dict]:
     return mail_store.briefing_items(*scope) if scope else []
 
 
+def _mail_task_evidence(task_id: int) -> dict:
+    """What the mail ledger and tool log record for this task: staged summaries,
+    mails whose body pages it read, and whether check_inbox ran at all."""
+    staged = _staged_mail_items(task_id)
+    reads = _query_one("SELECT COUNT(*) AS n FROM mail_briefing_reads WHERE task_id = %s", (task_id,))
+    row = _query_one("SELECT COALESCE(tool_log, '') AS tool_log FROM telegram_tasks WHERE id = %s", (task_id,))
+    return {
+        "staged": staged,
+        "reads": int((reads or {}).get("n") or 0),
+        "checked_inbox": "check_inbox" in ((row or {}).get("tool_log") or ""),
+    }
+
+
 async def _run_verification(
     bot: Bot,
     task: dict,
@@ -635,24 +648,30 @@ async def _run_verification(
         )
         return {"status": "passed", "details": details, "policy": policy, "retry_limit": 0, "goal": "unverified", "execution": "unknown", "retry": "no"}
 
-    # Mail briefings: the staged summaries are the deliverable and the callback
-    # sends them only after this verdict, so an LLM verifier can never observe
-    # delivery — demanding it deadlocked every daily run (2026-09-16..18, three
-    # attempts each, nothing sent). Full-body reads are already enforced by
-    # prepare_mail_briefing; pass on the staged ledger instead of a model round.
+    # Mail-reading tasks are verified by the mail ledger, not by a model round.
+    # The staged summaries are the deliverable and the callback sends them only
+    # after this verdict, so an LLM verifier can never observe delivery —
+    # demanding it deadlocked every daily run (2026-09-16..18, three attempts
+    # each, nothing sent). Full-body reads are already enforced by
+    # prepare_mail_briefing, and "no new mail" needs no critic either: the owner
+    # asked for mail checks to be verified leniently, and a retry re-reads the
+    # same mailbox at full cost for nothing.
     try:
-        staged = await asyncio.to_thread(_staged_mail_items, task_id)
+        mail = await asyncio.to_thread(_mail_task_evidence, task_id)
     except Exception as e:
-        logger.warning("Staged mail lookup failed for task %d: %s", task_id, e)
-        staged = []
-    if staged:
+        logger.warning("Mail ledger lookup failed for task %d: %s", task_id, e)
+        mail = {"staged": [], "reads": 0, "checked_inbox": False}
+    staged = mail["staged"]
+    if staged or mail["reads"] or mail["checked_inbox"]:
         mail_ids = [int(item["mail_id"]) for item in staged]
         outcome = {"execution": "appropriate", "goal": "complete", "retry": "no"}
         details = (
             "outcome: " + json.dumps(outcome, ensure_ascii=False) + "\n"
-            f"mail_briefing: {len(staged)} summaries staged for mail {mail_ids}; full-body reads enforced by "
-            "prepare_mail_briefing; the completion callback sends these exact summaries and records receipts. "
-            "LLM verification skipped: delivery only follows this verdict, so it cannot be verified beforehand."
+            f"mail_task: {len(staged)} summaries staged for mail {mail_ids}, body pages read for "
+            f"{mail['reads']} mail(s), check_inbox called: {mail['checked_inbox']}. "
+            "Full-body reads are enforced by prepare_mail_briefing and the completion callback sends the staged "
+            "summaries and records receipts. LLM verification skipped by policy: mail checks are verified by the "
+            "ledger, and delivery only follows this verdict."
         )
         await asyncio.to_thread(
             _execute,
@@ -865,14 +884,16 @@ async def _maybe_reflexion_revise_report(
     from llm.reflexion import build_report_revision_prompt, diagnose, diagnosis_is_pass
 
     task_id = task["id"]
-    # A mail briefing delivers its staged summaries, not this report; a
+    # A mail task delivers its staged summaries, not this report; a
     # diagnose→revise pass over the report would be two paid rounds for nothing.
+    # (tool_log is not persisted yet at this point, so the ledger decides.)
     try:
-        if await asyncio.to_thread(_staged_mail_items, task_id):
-            logger.info("Task %d reflexion: skipped, staged mail summaries are the deliverable", task_id)
+        mail = await asyncio.to_thread(_mail_task_evidence, task_id)
+        if mail["staged"] or mail["reads"]:
+            logger.info("Task %d reflexion: skipped, mail task verified by the ledger", task_id)
             return None
     except Exception as e:
-        logger.warning("Staged mail lookup failed for task %d: %s", task_id, e)
+        logger.warning("Mail ledger lookup failed for task %d: %s", task_id, e)
     task_context = content[:2000]
     try:
         notes = await diagnose(

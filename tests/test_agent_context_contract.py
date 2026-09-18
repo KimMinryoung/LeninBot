@@ -99,11 +99,12 @@ def verdict(goal="complete", execution="appropriate", retry="no", verdict="PASS"
 
 
 class VerificationTests(unittest.IsolatedAsyncioTestCase):
-    async def verify(self, response=None, error=None, tools=None, handlers=None, report="Result with evidence", staged=()):
+    async def verify(self, response=None, error=None, tools=None, handlers=None, report="Result with evidence", staged=(), checked_inbox=False):
         self.chat = AsyncMock(return_value=response, side_effect=error)
         self.execute = Mock()
         with patch.object(tasks, "_execute", self.execute), \
-                patch.object(tasks, "_staged_mail_items", Mock(return_value=list(staged))):
+                patch.object(tasks, "_mail_task_evidence", Mock(return_value={
+                    "staged": list(staged), "reads": len(staged), "checked_inbox": bool(staged) or checked_inbox})):
             return await tasks._run_verification(
                 None, {"id": 1, "user_id": 0, "agent_type": "analyst", "content": "Check source"}, report,
                 chat_with_tools_fn=self.chat, get_model_fn=AsyncMock(return_value="stub"),
@@ -118,6 +119,12 @@ class VerificationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["retry"], "no")
         self.assertIn("2 summaries staged for mail [43, 44]", result["details"])
         self.assertEqual(self.execute.call_args.args[1][0], result["details"])
+
+    async def test_mail_check_without_new_mail_passes_without_a_model_round(self):
+        result = await self.verify(verdict(verdict="FAIL"), report="새 메일 없음", checked_inbox=True)
+        self.chat.assert_not_called()
+        self.assertEqual(result["status"], "passed")
+        self.assertIn("0 summaries staged", result["details"])
 
     async def test_complete_evidence_passes_and_persists_axes(self):
         result = await self.verify(verdict())
