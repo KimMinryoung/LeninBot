@@ -7,13 +7,18 @@ PHYSICAL_METRICS = ("hunger", "fatigue", "pain", "tension")
 MENTAL_METRICS = ("resolve", "clarity", "humiliation")
 METRICS = PHYSICAL_METRICS + MENTAL_METRICS
 RESOLVE_BY_THREAT = {"safe": 2.0, "uncertain": 0.5, "threatening": -1.5, "immediate": -3.0}
+SLEEP_CLARITY_RATE = 4.0
+# Recovery of the mental axes slows as they climb: quiet time and sleep restore
+# a shaken mind but never manufacture a perfect one. Drains are not scaled.
+MENTAL_RECOVERY_CEILING = 90.0
+MENTAL_RECOVERY_SPAN = 40.0
 ACTIVITIES = {"rest": -2.0, "light": 2.0, "moderate": 5.0, "strenuous": 10.0, "sleep": -8.0}
 SLEEP_QUALITY = {"poor": 0.25, "normal": 1.0, "good": 1.25}
 THREAT_TARGETS = {"safe": 10.0, "uncertain": 40.0, "threatening": 75.0, "immediate": 90.0}
 # Tension settles toward a target that threat sets but quiet hours, resolve,
 # sleep and pain move: an uneventful day in a cell should be felt.
-HABITUATION_MAX = 15.0      # target drops 1 per calm hour (safe/uncertain), up to this
-RESOLVE_TENSION_SPAN = 10.0  # resolve 100 lowers the target by this, resolve 0 raises it
+HABITUATION_MAX = 10.0      # target drops 1 per calm hour (safe/uncertain), up to this
+RESOLVE_TENSION_SPAN = 8.0   # resolve 100 lowers the target by this, resolve 0 raises it
 SLEEP_TENSION_RELIEF = 10.0
 PAIN_TENSION_PENALTY = 5.0   # while pain is at or above PAIN_HINDERS_REST
 MAX_INJURIES = 12
@@ -28,12 +33,22 @@ MOVEMENT_PAIN = {"rest": 0, "sleep": 0, "light": 0.1, "moderate": 0.5, "strenuou
 HEALING_STEP = {True: 1440, False: 2880}
 WORSENING_STEP = {True: 2880, False: 1440}
 PAIN_HINDERS_REST = 50  # at or above this, rest and sleep recover half the fatigue
+# Solitary confinement: hours without anyone present accumulate; a visit of
+# 30 minutes or more breaks the streak, a shorter one (a meal pushed through
+# the door) only takes a few hours off it. Effects add to the other drifts.
+ISOLATION_RESET_MINUTES = 30
+ISOLATION_BRIEF_CONTACT_RELIEF = 240
+ISOLATION_STAGES = (  # (from_hours, label, description, clarity/h, resolve/h, tension target)
+    (168, "왜곡", "지각 왜곡·환각의 경계, 무감동 또는 충동성", -0.75, -0.5, 15.0),
+    (72, "침식", "침입적 사고 반복, 사소한 접촉 과대평가, 집중 붕괴", -0.5, -0.25, 10.0),
+    (24, "단절", "시간 감각 흐려짐, 소리·발소리에 과민, 상상 대화", -0.25, 0.0, 5.0),
+)
 DYNAMICS_DEFAULTS = {
     **{key: None for key in METRICS},  # legacy states lack the mental axes; unset stays unset
     "revision": 0, "scene_minute": 0, "last_calculated_minute": 0,
     "time_basis": "현재 저장 상태를 기준 시점(0분)으로 삼음. 이전 경과 시간은 재계산하지 않음.",
     "activity": "rest", "sleep_quality": "normal", "threat": "uncertain",
-    "injuries": [], "conditions_initialized": False, "recent_events": [], "calm_minutes": 0,
+    "injuries": [], "conditions_initialized": False, "recent_events": [], "calm_minutes": 0, "isolation_minutes": 0,
     "last_calculation": None, "clock": None, "event_timestamps": [],
 }
 
@@ -72,21 +87,33 @@ def validate_conditions(changes):
 
 
 def mental_rates(state):
-    """Hourly drift of the mental axes from the conditions at the start of the interval."""
+    """Hourly drift of the mental axes from the conditions at the start of the interval.
+    Gains thin out near the ceiling (see _diminish); drains always apply in full."""
     fatigue = state["fatigue"] if state["fatigue"] is not None else 0
     pain = state["pain"] if state["pain"] is not None else 0
     threat, activity = state["threat"], state["activity"]
     sleeping = activity == "sleep"
-    resolve = RESOLVE_BY_THREAT[threat] - (1 if fatigue > 70 else 0) - (1 if pain > 60 else 0)
-    if sleeping and state["sleep_quality"] != "poor":
-        resolve += 1
+    stage = isolation_stage(state.get("isolation_minutes", 0)) or {"resolve": 0.0, "clarity": 0.0}
+    by_threat = RESOLVE_BY_THREAT[threat]
+    resolve_gain = max(0.0, by_threat) + (1 if sleeping and state["sleep_quality"] != "poor" else 0)
+    resolve_drain = min(0.0, by_threat) - (1 if fatigue > 70 else 0) - (1 if pain > 60 else 0) + stage["resolve"]
     if sleeping:
-        clarity = 6 * SLEEP_QUALITY[state["sleep_quality"]]
+        clarity_gain = SLEEP_CLARITY_RATE * SLEEP_QUALITY[state["sleep_quality"]]
+        clarity_drain = 0.0
     else:
-        clarity = -(2 if fatigue > 80 else 1 if fatigue > 60 else 0) - (1 if pain > 60 else 0) - (1 if threat == "immediate" else 0)
-        if activity == "rest" and fatigue <= 60:
-            clarity += 1
-    return {"resolve": resolve, "clarity": clarity, "humiliation": -0.5 if threat == "safe" else 0.0}
+        # Quiet rest sharpens the mind, except in solitary once isolation has set in.
+        clarity_gain = 1.0 if activity == "rest" and fatigue <= 60 and not stage.get("label") else 0.0
+        clarity_drain = -(2 if fatigue > 80 else 1 if fatigue > 60 else 0) - (1 if pain > 60 else 0) - (1 if threat == "immediate" else 0)
+    clarity_drain += stage["clarity"]
+    return {"resolve": _diminish(resolve_gain, state["resolve"]) + resolve_drain,
+            "clarity": _diminish(clarity_gain, state["clarity"]) + clarity_drain,
+            "humiliation": -0.5 if threat == "safe" else 0.0}
+
+
+def _diminish(rate, value):
+    if rate <= 0 or value is None:
+        return rate
+    return rate * max(0.0, min(1.0, (MENTAL_RECOVERY_CEILING - value) / MENTAL_RECOVERY_SPAN))
 
 
 def injury_pain_floor(injuries):
@@ -161,9 +188,31 @@ def progress_injuries(injuries, minutes):
     return updated, changes
 
 
+def isolation_stage(minutes):
+    """(label, description, clarity/h, resolve/h, tension target add) for hours alone; None below a day."""
+    hours = minutes / 60
+    for from_hours, label, description, clarity, resolve, tension in ISOLATION_STAGES:
+        if hours >= from_hours:
+            return {"label": label, "description": description, "clarity": clarity, "resolve": resolve, "tension": tension}
+    return None
+
+
+def isolation_after(state, minutes):
+    """Minutes alone after an interval: someone present resets or relieves the streak."""
+    current = state.get("isolation_minutes", 0)
+    if not state.get("participants"):
+        return current + minutes
+    if minutes >= ISOLATION_RESET_MINUTES:
+        return 0
+    return max(0, current - ISOLATION_BRIEF_CONTACT_RELIEF)
+
+
 def tension_target(state):
     calm_hours = state.get("calm_minutes", 0) / 60
     target = THREAT_TARGETS[state["threat"]] - min(HABITUATION_MAX, calm_hours)
+    stage = isolation_stage(state.get("isolation_minutes", 0))
+    if stage:
+        target += stage["tension"]
     if state["resolve"] is not None:
         target -= (state["resolve"] - 50) / 50 * RESOLVE_TENSION_SPAN
     if state["pain"] is not None and state["pain"] >= PAIN_HINDERS_REST:
@@ -211,6 +260,7 @@ def advance(state, target_minute, time_basis):
     tension_delta = 0 if tension is None else max(-6 * hours, min(6 * hours, target - tension))
     calm = state["threat"] in ("safe", "uncertain")
     result["calm_minutes"] = state.get("calm_minutes", 0) + (target_minute - start) if calm else 0
+    result["isolation_minutes"] = isolation_after(state, target_minute - start)
     deltas = {"hunger": 3 * hours, "fatigue": fatigue_rate * hours,
               "pain": pain_delta, "tension": tension_delta}
     deltas.update({k: v * hours for k, v in mental_rates(state).items()})
@@ -224,6 +274,7 @@ def advance(state, target_minute, time_basis):
         "conditions": {k: deepcopy(state[k]) for k in ("activity", "sleep_quality", "threat", "injuries")},
         "before": {k: state[k] for k in METRICS}, "after": {k: result[k] for k in METRICS},
         "pain_floor": floor, "tension_target": target, "injury_changes": injury_changes,
+        "isolation_stage": (isolation_stage(state.get("isolation_minutes", 0)) or {}).get("label"),
         "healed": [c["id"] for c in injury_changes if c["to"] == 0],
     }
     return result

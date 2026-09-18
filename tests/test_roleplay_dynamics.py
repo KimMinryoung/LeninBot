@@ -86,9 +86,9 @@ class DynamicsTests(unittest.TestCase):
         base = self.initial(threat='uncertain', tension=40)
         self.assertEqual(tension_target(base), 40)
         self.assertEqual(tension_target({**base, 'calm_minutes': 8 * 60}), 32)
-        self.assertEqual(tension_target({**base, 'calm_minutes': 40 * 60}), 25)
-        self.assertEqual(tension_target({**base, 'resolve': 100}), 30)
-        self.assertEqual(tension_target({**base, 'resolve': 0}), 50)
+        self.assertEqual(tension_target({**base, 'calm_minutes': 40 * 60}), 30)
+        self.assertEqual(tension_target({**base, 'resolve': 100}), 32)
+        self.assertEqual(tension_target({**base, 'resolve': 0}), 48)
         self.assertEqual(tension_target({**base, 'pain': 60}), 45)
         self.assertEqual(tension_target({**base, 'activity': 'sleep'}), 30)
         self.assertEqual(tension_target({**base, 'threat': 'safe', 'calm_minutes': 40 * 60, 'resolve': 100, 'activity': 'sleep'}), 5)
@@ -98,11 +98,41 @@ class DynamicsTests(unittest.TestCase):
             state = advance(state, state['scene_minute'] + 60, '조용한 한 시간')
         self.assertEqual(state['calm_minutes'], 720)
         self.assertLess(state['tension'], 32)
-        self.assertEqual(state['last_calculation']['tension_target'], 29)
+        self.assertEqual(state['last_calculation']['tension_target'], 30)
         # A threatening interval ends the calm streak.
         shaken = advance({**state, 'threat': 'threatening'}, state['scene_minute'] + 30, '방문자')
         self.assertEqual(shaken['calm_minutes'], 0)
         self.assertGreater(shaken['tension'], state['tension'])
+
+    def test_isolation_stages_and_contact(self):
+        from runtime_tools.roleplay_dynamics import isolation_stage, isolation_after, tension_target, mental_rates
+        self.assertIsNone(isolation_stage(23 * 60))
+        self.assertEqual([isolation_stage(h * 60)['label'] for h in (24, 72, 168)], ['단절', '침식', '왜곡'])
+        alone = self.initial(threat='uncertain', resolve=60, clarity=60, humiliation=40)
+        self.assertEqual(isolation_after(alone, 600), 600)
+        self.assertEqual(isolation_after({**alone, 'isolation_minutes': 3000, 'participants': ['guard']}, 10), 2760)
+        self.assertEqual(isolation_after({**alone, 'isolation_minutes': 3000, 'participants': ['guard']}, 30), 0)
+        self.assertEqual(isolation_after({**alone, 'isolation_minutes': 100, 'participants': ['guard']}, 5), 0)
+        self.assertEqual(mental_rates(alone)['clarity'], 0.75)  # quiet rest sharpens the mind, less so near the ceiling
+        self.assertEqual(mental_rates({**alone, 'isolation_minutes': 30 * 60})['clarity'], -0.25)  # not in solitary
+        day3 = mental_rates({**alone, 'isolation_minutes': 80 * 60})
+        self.assertEqual((day3['clarity'], day3['resolve']), (-0.5, 0.5 * 0.75 - 0.25))  # gain thinned, drain in full
+        self.assertLess(mental_rates({**alone, 'isolation_minutes': 80 * 60, 'resolve': 88})['resolve'], 0)
+        self.assertEqual(tension_target({**alone, 'isolation_minutes': 30 * 60}) - tension_target(alone), 5)
+        # Two quiet days alone: after the first day clarity erodes despite rest.
+        state = alone
+        for _ in range(48):
+            state = advance(state, state['scene_minute'] + 60, '홀로 한 시간')
+        self.assertEqual(state['isolation_minutes'], 48 * 60)
+        self.assertEqual(state['last_calculation']['isolation_stage'], '단절')
+        day_one = alone
+        for _ in range(24):
+            day_one = advance(day_one, day_one['scene_minute'] + 60, '홀로 한 시간')
+        self.assertLess(day_one['clarity'], 90)
+        self.assertAlmostEqual(state['clarity'], day_one['clarity'] - 6, places=3)
+        self.assertGreater(state['tension'], advance({**state, 'isolation_minutes': 0}, state['scene_minute'] + 60, '비교')['tension'] - 6)
+        visited = advance({**state, 'participants': ['guard']}, state['scene_minute'] + 45, '간수와 45분')
+        self.assertEqual(visited['isolation_minutes'], 0)
 
     def test_mental_axes_drift(self):
         mental = dict(resolve=50, clarity=50, humiliation=50)
@@ -111,15 +141,19 @@ class DynamicsTests(unittest.TestCase):
         coerced = advance(self.initial(threat='immediate', activity='strenuous', fatigue=75, pain=65, **mental), 60, '강요 한 시간')
         self.assertEqual((coerced['resolve'], coerced['clarity'], coerced['humiliation']), (45, 47, 50))
         slept = advance(self.initial(activity='sleep', sleep_quality='good', threat='uncertain', **mental), 120, '두 시간 숙면')
-        self.assertEqual((slept['resolve'], slept['clarity']), (53, 65))
+        self.assertEqual((slept['resolve'], slept['clarity']), (53, 60))
         poor = advance(self.initial(activity='sleep', sleep_quality='poor', threat='uncertain', **mental), 120, '두 시간 선잠')
-        self.assertEqual((poor['resolve'], poor['clarity']), (51, 53))
+        self.assertEqual((poor['resolve'], poor['clarity']), (51, 52))
         # Unset mental values stay unset; physical drift is unaffected by them.
         unset = advance(self.initial(threat='immediate'), 60, '정신 수치 미설정')
         self.assertIsNone(unset['resolve'])
         self.assertEqual(unset['hunger'], 33)
         bounded = advance(self.initial(resolve=1, clarity=99, activity='sleep', sleep_quality='good', threat='immediate'), 120, '경계값')
-        self.assertEqual((bounded['resolve'], bounded['clarity']), (0, 100))
+        self.assertEqual(bounded['resolve'], 0)
+        self.assertEqual(bounded['clarity'], 99)  # drift never lifts a mind past the ceiling
+        # Recovery thins out near the ceiling: a resolute mind gains little from a quiet hour.
+        self.assertEqual(advance(self.initial(threat='safe', resolve=90), 60, '한 시간')['resolve'], 90)
+        self.assertEqual(advance(self.initial(threat='safe', resolve=70), 60, '한 시간')['resolve'], 71)
 
     def test_partial_intervals_bounds_and_unknowns(self):
         state = self.initial()

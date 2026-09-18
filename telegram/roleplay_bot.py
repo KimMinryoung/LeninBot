@@ -258,6 +258,10 @@ async def cmd_status(message: Message) -> None:
     trends = {"stable": "유지", "worsening": "악화 중", "recovering": "회복 중"}
     from runtime_tools.roleplay_dynamics import injury_pain_floor
     state["pain_floor"] = f"{injury_pain_floor(state.get('injuries', [])):g}"
+    from runtime_tools.roleplay_dynamics import isolation_stage
+    stage = isolation_stage(state.get("isolation_minutes", 0))
+    state["isolation"] = f"{state.get('isolation_minutes', 0) / 60:g}시간" + (f" — {stage['label']}: {stage['description']}" if stage else "")
+    state["calm"] = f"{state.get('calm_minutes', 0) / 60:g}시간"
     state["injuries"] = "; ".join(f"{i['description']} (심각도 {i['severity']}, {trends[i['trend']]}, {'처치함' if i['treated'] else '미처치'})" for i in state.get("injuries", [])) or "등록 없음"
     if not state.get("conditions_initialized"):
         state["injuries"] += " — 시간 계산 조건 미확인"
@@ -302,7 +306,8 @@ async def cmd_status(message: Message) -> None:
                        "time_evidence": "최근 시간 해석", "scene_minute": "계산된 경과(분)",
                        "last_calculated_minute": "마지막 계산(분)", "time_basis": "시간 근거",
                        "sleep_quality": "수면의 질", "threat": "위협 상태",
-                       "injuries": "세부 부상", "pain_floor": "부상 기저 통증", "reason": "최근 변경 이유"})
+                       "injuries": "세부 부상", "pain_floor": "부상 기저 통증",
+                       "isolation": "홀로 지낸 시간", "calm": "조용한 시간", "reason": "최근 변경 이유"})
     lines.extend(f"{label}: {display(state.get(key))}" for key, label in labels.items()
                  if key in {"calendar_display", "location", "participants"} or state.get(key) not in (None, "", "미설정"))
     if not detailed:

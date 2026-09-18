@@ -13,7 +13,7 @@ from pathlib import Path
 from tool_gateway.security import get_caller
 from runtime_tools.roleplay_clock import TEMPORAL_SCHEMA, interpret_clock, validate_temporal
 from runtime_tools.roleplay_dynamics import (METRICS, CONDITION_SCHEMA, with_defaults, validate_conditions, advance,
-                                             carry_injury_progress, injury_pain_floor, reconcile_injuries)
+                                             carry_injury_progress, injury_pain_floor, reconcile_injuries, isolation_stage)
 
 MEMORY_PATH = Path(__file__).resolve().parents[1] / "output" / "roleplay_memory.sqlite3"
 MAX_NOTES = 30
@@ -274,8 +274,11 @@ def state_view(state: dict) -> dict:
     view["pain_floor"] = injury_pain_floor(state.get("injuries") or [])
     calculation = state.get("last_calculation")
     if calculation:
-        view["last_calculation"] = {k: calculation.get(k) for k in ("from_minute", "to_minute", "basis", "before", "after", "tension_target", "injury_changes", "healed") if calculation.get(k) not in (None, [])}
+        view["last_calculation"] = {k: calculation.get(k) for k in ("from_minute", "to_minute", "basis", "before", "after", "tension_target", "isolation_stage", "injury_changes", "healed") if calculation.get(k) not in (None, [])}
     view["calm_hours"] = round(state.get("calm_minutes", 0) / 60, 1)
+    view["isolation_hours"] = round(state.get("isolation_minutes", 0) / 60, 1)
+    stage = isolation_stage(state.get("isolation_minutes", 0))
+    view["isolation_stage"] = f"{stage['label']}: {stage['description']}" if stage else None
     unset = [key for key in METRICS if state.get(key) is None]
     if unset:
         # A null among numbers is easy to skim past; name the gap and what closes it.
