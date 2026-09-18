@@ -10,7 +10,15 @@ set IMAP `\Seen`; that flag is never a briefing receipt.
 returns external-source-wrapped JSON. Delegated tasks default to `unbriefed_only=true`
 unless `unread_only=true`; non-task reads retain ordinary mailbox browsing by default.
 Set `unbriefed_only=false` to browse history. The audience is resolved from the
-runtime task's `telegram_tasks.user_id`, not model-supplied arguments.
+runtime task's `telegram_tasks.user_id`, not model-supplied arguments; a bot-generated
+task (`user_id` 0, e.g. a verification auto-retry) resolves to the single
+`ALLOWED_USER_IDS` owner because that is where its callback delivers.
+
+"Unbriefed" is bounded: the IMAP search adds `SINCE` now minus
+`MAIL_BRIEFING_WINDOW_DAYS` (default 7; 0 disables), reported as
+`new_mail_window_days` and per-folder `coverage.since`. Mail older than the window
+is history, never new; without this bound every historical message without a
+receipt stayed "unbriefed" forever and made coverage numbers unreadable.
 
 The cache identity is `(account hash, folder, UIDVALIDITY, UID)`. The hash covers
 configured IMAP host, port and username; it contains no password. Missing
@@ -21,8 +29,10 @@ for cached messages. `mail_id` detail reads paginate saved content without IMAP.
 Folders are searched read-only; this path never changes server read flags.
 
 Each result separates `imap_read` and its observation time, collection time,
-`body_fully_returned_at`/task ID, current-task full-body coverage, and
-`briefing_delivered`. Full-body coverage means text was returned to the agent,
+`body_fully_returned_at`/task ID, current-task full-body coverage
+(`body_returned_completely_in_this_task` plus `body_unread_ranges_in_this_task`,
+the exact character spans still missing), and `briefing_delivered`. `next` always
+asks for a full 12000-character page, whatever the listing page size was. Full-body coverage means text was returned to the agent,
 not proof of comprehension. Task-scoped ranges are merged transactionally, so
 overlaps cannot conceal gaps. A metadata-only listing does not count as a body read.
 The combined message JSON is bounded to 40k characters before recording returned
@@ -45,7 +55,8 @@ and may surface it again; Message-ID deduplication across folders is not inferre
 Scout has `prepare_mail_briefing(items=[{mail_id, summary}])`, a staged-write tool.
 It requires a runtime delegated task, 1–20 distinct cached IDs from this account,
 complete body coverage in that task, and 1–1800 character source-attributed summaries.
-Batch validation/storage is transactional. Raw mail is already archived by the
+A coverage rejection names the missing spans and the exact `check_inbox` call to make
+next. Batch validation/storage is transactional. Raw mail is already archived by the
 read tool; scout should not create duplicate markdown mail archives.
 
 For a non-interrupted, done task without a failed verification verdict, the Telegram
@@ -57,6 +68,14 @@ leaves earlier successes delivered and later items eligible for the next check.
 Failed/interrupted tasks retain prepared items but do not take this delivery path.
 Tasks without prepared items retain the normal orchestrator callback. This direct
 delivery path does not automatically close a mission.
+
+Verification of a task with staged items is the ledger itself: `_run_verification`
+records a pass naming the staged mail IDs and skips the LLM verifier, and the
+reflexion diagnose→revise pass over the report is skipped too. The summaries are
+the deliverable and delivery only follows the verdict, so a model verifier can never
+observe it; when it was asked to, every daily run of 2026-09-16..18 failed three
+times over ("delivery unconfirmed"), sent nothing and cost up to $0.45 a day.
+Tasks that stage nothing still go through the ordinary verifier.
 
 A send timeout or crash between Telegram acceptance and receipt storage leaves
 delivery unknown and may produce a duplicate on retry; no exactly-once guarantee

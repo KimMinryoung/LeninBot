@@ -25,6 +25,13 @@ def test_read_ranges_do_not_confuse_overlap_with_full_coverage():
     assert store.merge_ranges([[0, 100], [200, 300]], 100, 200) == [[0, 300]]
 
 
+def test_missing_ranges_name_every_gap_including_the_tail():
+    assert store.missing_ranges([[0, 1200], [13200, 15739]], 15739) == [[1200, 13200]]
+    assert store.missing_ranges([[0, 12000]], 15739) == [[12000, 15739]]
+    assert store.missing_ranges([], 0) == []
+    assert store.missing_ranges([[0, 10]], 10) == []
+
+
 @pytest.fixture
 def ledger(monkeypatch):
     if os.environ.get('MAIL_TEST_DATABASE') != '1':
@@ -56,7 +63,7 @@ def ledger(monkeypatch):
     with connection() as conn, conn.cursor() as cur:
         cur.execute(Path('mail_runtime/schema.sql').read_text())
         cur.execute('CREATE TABLE telegram_tasks(id BIGINT PRIMARY KEY, user_id BIGINT)')
-        cur.execute('INSERT INTO telegram_tasks VALUES (1,42),(2,42),(3,43)')
+        cur.execute('INSERT INTO telegram_tasks VALUES (1,42),(2,42),(3,43),(4,0)')
     try:
         yield query
     finally:
@@ -69,6 +76,7 @@ class Imap:
         self.box = None
         self.validity = b'100'
         self.fetches = []
+        self.searches = []
         self.seen = True
 
     def select(self, folder, readonly=True):
@@ -82,7 +90,8 @@ class Imap:
 
     def uid(self, command, *args):
         if command == 'search':
-            return 'OK', [b'' if args[-1] == 'UNSEEN' and self.seen else b'1 2']
+            self.searches.append((self.box, args[1:]))
+            return 'OK', [b'' if 'UNSEEN' in args and self.seen else b'1 2']
         uid, spec = args
         self.fetches.append((self.box, uid, spec))
         flags = f'{uid} (UID {uid} FLAGS (' + ('\\Seen' if self.seen else '') + '))'
@@ -110,11 +119,16 @@ def test_cached_pagination_and_delivery_are_independent_of_seen(ledger):
     assert first['briefing_delivered'] is False
     assert first['body_returned_completely_in_this_task'] is False
     mail_id = first['mail_id']
-    with pytest.raises(ValueError, match='read all'):
+    assert first['body_unread_ranges_in_this_task'] == [[100, first['body_chars']]]
+    assert first['next']['body_max_chars'] == 12000
+    with pytest.raises(ValueError, match=f'next: check_inbox\\(mail_id={mail_id}, body_offset=100'):
         store.prepare(1, '42', store.account_key(), [{'mail_id': mail_id, 'summary': '내용 요약'}])
+    with pytest.raises(ValueError, match='body_offset=0'):
+        store.prepare(2, '42', store.account_key(), [{'mail_id': mail_id, 'summary': '내용 요약'}])
     before = len(imap.fetches)
     second = read(imap, **first['next'])['messages'][0]
     assert second['body_returned_completely_in_this_task'] is True
+    assert second['body_unread_ranges_in_this_task'] == []
     assert len(imap.fetches) == before  # Offline page: no IMAP fetch at all.
     items = [{'mail_id': mail_id, 'summary': '메일은 본문을 반복한다고 설명합니다.'}]
     store.prepare(1, '42', store.account_key(), items)
@@ -189,3 +203,25 @@ def test_output_budget_records_only_returned_ranges_and_preserves_prior_reads(le
     later = render_messages([rows[0]], (2, '42'), False, 0, 12000)[0]
     assert later['body_fully_returned_task_id'] == 1
     assert not later['body_returned_completely_in_this_task']
+
+
+def test_unbriefed_listing_is_bounded_to_the_new_mail_window(ledger, monkeypatch):
+    monkeypatch.setenv('MAIL_BRIEFING_WINDOW_DAYS', '3')
+    imap = Imap()
+    result = read(imap, folder='INBOX', limit=1)
+    assert result['mode'] == 'unbriefed' and result['new_mail_window_days'] == 3
+    box, criteria = imap.searches[-1]
+    assert criteria[0] == 'ALL' and criteria[1] == 'SINCE' and criteria[2] == result['coverage'][0]['since']
+    assert read(imap, folder='INBOX', unbriefed_only=False)['new_mail_window_days'] is None
+    assert imap.searches[-1][1] == ('ALL',)
+    monkeypatch.setenv('MAIL_BRIEFING_WINDOW_DAYS', '0')
+    assert read(imap, folder='INBOX')['new_mail_window_days'] is None
+    assert imap.searches[-1][1] == ('ALL',)
+
+
+def test_bot_generated_tasks_stage_for_the_owner_audience(ledger, monkeypatch):
+    monkeypatch.setenv('ALLOWED_USER_IDS', '42')
+    assert store.task_scope(4) == (4, '42')
+    assert store.task_scope(3) == (3, '43')
+    monkeypatch.setenv('ALLOWED_USER_IDS', '42,43')
+    assert store.task_scope(4) == (4, '0')

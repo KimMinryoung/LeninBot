@@ -13,11 +13,22 @@ def account_key():
     return hashlib.sha256(json.dumps(identity).encode()).hexdigest()
 
 
+def owner_audience():
+    """The single allowed Telegram user; '0' when ownership is not unique."""
+    ids = [u.strip() for u in os.environ.get('ALLOWED_USER_IDS', '').split(',') if u.strip()]
+    return ids[0] if len(ids) == 1 else '0'
+
+
 def task_scope(task_id):
     if not task_id:
         return None
     row = query_one('SELECT id, user_id FROM telegram_tasks WHERE id=%s', (int(task_id),))
-    return (int(row['id']), str(row['user_id'])) if row else None
+    if not row:
+        return None
+    # Bot-generated tasks (user_id 0, e.g. verification auto-retries) report to
+    # the owner, so their summaries must be staged for that same audience.
+    audience = str(row['user_id'])
+    return (int(row['id']), audience if audience != '0' else owner_audience())
 
 
 def namespace(account, folder, validity, audience):
@@ -59,6 +70,18 @@ def merge_ranges(ranges, start, end):
     return merged
 
 
+def missing_ranges(ranges, size):
+    """Body character spans not covered by the merged, sorted read ranges."""
+    gaps, cursor = [], 0
+    for left, right in ranges:
+        if left > cursor:
+            gaps.append([cursor, left])
+        cursor = max(cursor, right)
+    if cursor < size:
+        gaps.append([cursor, size])
+    return gaps
+
+
 def record_read(task_id, mail_id, start, end):
     with get_conn() as conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute('''INSERT INTO mail_briefing_reads(task_id,mail_id) VALUES (%s,%s)
@@ -75,10 +98,12 @@ def read_state(mail_id, body_chars, task_id=None):
     rows = query('''SELECT task_id,ranges,updated_at FROM mail_briefing_reads
         WHERE mail_id=%s ORDER BY updated_at DESC''', (mail_id,))
     full = [r for r in rows if not body_chars or r['ranges'] == [[0, body_chars]]]
+    mine = next((r['ranges'] for r in rows if r['task_id'] == task_id), [])
     return {
         'body_fully_returned_at': str(full[0]['updated_at']) if full else None,
         'body_fully_returned_task_id': full[0]['task_id'] if full else None,
         'body_returned_completely_in_this_task': any(r['task_id'] == task_id for r in full),
+        'body_unread_ranges_in_this_task': missing_ranges(mine, body_chars) if task_id else None,
     }
 
 
@@ -96,8 +121,13 @@ def prepare(task_id, audience, account, items):
                 WHERE m.id=%s AND m.account=%s''', (task_id, item['mail_id'], account))
             row = cur.fetchone()
             size = row['parsed']['body_chars'] if row else 0
-            if not row or (size and row['ranges'] != [[0, size]]):
-                raise ValueError(f"Mail {item['mail_id']}: read all cached body pages in this task before preparing.")
+            gaps = missing_ranges(row['ranges'], size) if row else [[0, size]]
+            if gaps:
+                raise ValueError(
+                    f"Mail {item['mail_id']}: read all cached body pages in this task before preparing. "
+                    f"Unread chars {gaps} of {size}; next: check_inbox(mail_id={item['mail_id']}, "
+                    f"body_offset={gaps[0][0]}, body_max_chars=12000), then follow each result's "
+                    f"next until body_returned_completely_in_this_task is true.")
             cur.execute('''INSERT INTO mail_briefing_items(task_id,mail_id,audience,summary)
                 VALUES (%s,%s,%s,%s) ON CONFLICT(task_id,mail_id) DO UPDATE
                 SET summary=EXCLUDED.summary, prepared_at=now()

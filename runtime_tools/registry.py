@@ -1212,7 +1212,7 @@ CHECK_INBOX_TOOL = {
         "type": "object",
         "properties": {
             "mail_id": {"type": "integer", "description": "Stored mail ID: read cached content without IMAP. Follow next for body pagination."},
-            "unbriefed_only": {"type": "boolean", "description": "Only mail without a delivery receipt for this audience. Default true in delegated tasks unless unread_only=true. Set false to browse history."},
+            "unbriefed_only": {"type": "boolean", "description": "Only mail received within the new-mail window (MAIL_BRIEFING_WINDOW_DAYS, reported as new_mail_window_days) without a delivery receipt for this audience. Default true in delegated tasks unless unread_only=true. Set false to browse history."},
             "sender_filter": {
                 "type": "string",
                 "description": "Filter by sender address or domain (e.g. 'substack.com', 'platformer'). Optional.",

@@ -1,11 +1,30 @@
 """Read IMAP identity/flags live, cache immutable message contents once."""
 import asyncio
 import json
+import os
 import re
+from datetime import datetime, timedelta, timezone
 
 from mail_runtime import store
 from security_gateway.context import get_caller
 from tool_gateway.results import ToolFailure
+
+
+PAGE_MAX = 12000
+_IMAP_MONTHS = ('Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec')
+
+
+def new_mail_window_days():
+    """Unbriefed listings only look this many days back; 0 disables the bound."""
+    try:
+        return max(0, int(os.environ.get('MAIL_BRIEFING_WINDOW_DAYS', '7')))
+    except ValueError:
+        return 7
+
+
+def _imap_since(days):
+    day = datetime.now(timezone.utc) - timedelta(days=days)
+    return f'{day.day:02d}-{_IMAP_MONTHS[day.month - 1]}-{day.year}'
 
 
 def _validity(conn, folder):
@@ -59,7 +78,7 @@ def _render(row, scope, include_body, offset, size):
         **store.read_state(row['id'], len(body), scope[0] if scope else None),
         'body': body[start:end] if include_body else '',
         'returned_chars': [start, end] if include_body else None,
-        'next': ({'mail_id': row['id'], 'body_offset': end, 'body_max_chars': size,
+        'next': ({'mail_id': row['id'], 'body_offset': end, 'body_max_chars': PAGE_MAX,
                   'include_body': True} if include_body and end < len(body) else None),
     }
 
@@ -76,7 +95,7 @@ def render_messages(rows, scope, include_body, offset, size):
         if len(json.dumps([*messages, item], ensure_ascii=False)) > 40000:
             item = _render(row, scope, False, offset, page_size)
             item['next'] = {'mail_id': row['id'], 'body_offset': offset,
-                            'body_max_chars': size, 'include_body': True}
+                            'body_max_chars': PAGE_MAX, 'include_body': True}
             if len(json.dumps([*messages, item], ensure_ascii=False)) > 40000:
                 break
         if item['returned_chars'] is not None and scope:
@@ -90,7 +109,7 @@ def collect(*, connect, parse, scope, audience, sender_filter='', subject_filter
             unread_only=False, unbriefed_only=None, limit=5, include_body=True,
             body_max_chars=12000, body_offset=0, folder='', uid='', mail_id=None):
     account = store.account_key()
-    size = max(1, min(12000, int(body_max_chars or 12000)))
+    size = max(1, min(PAGE_MAX, int(body_max_chars or PAGE_MAX)))
     offset = max(0, int(body_offset or 0))
     limit = max(1, min(20, int(limit)))
     if mail_id:
@@ -106,6 +125,8 @@ def collect(*, connect, parse, scope, audience, sender_filter='', subject_filter
     only_new = bool(scope) and not unread_only if unbriefed_only is None else unbriefed_only
     if only_new and not audience:
         raise ValueError('An identified audience is required for unbriefed_only.')
+    window = new_mail_window_days() if only_new and not uid else 0
+    since = _imap_since(window) if window else None
     conn = connect()
     if conn is None:
         raise RuntimeError('IMAP credentials not configured')
@@ -118,7 +139,8 @@ def collect(*, connect, parse, scope, audience, sender_filter='', subject_filter
                 if uid:
                     uids = [str(uid)]
                 else:
-                    status, data = conn.uid('search', None, 'UNSEEN' if unread_only else 'ALL')
+                    criteria = ['UNSEEN' if unread_only else 'ALL'] + (['SINCE', since] if since else [])
+                    status, data = conn.uid('search', None, *criteria)
                     if status != 'OK':
                         raise RuntimeError('UID SEARCH failed')
                     uids = [u.decode() for u in (data[0].split() if data and data[0] else [])]
@@ -146,7 +168,7 @@ def collect(*, connect, parse, scope, audience, sender_filter='', subject_filter
                     matched += 1
                 coverage.append({'folder': box, 'uidvalidity': validity, 'eligible_count': len(uids),
                                  'examined_count': fetched, 'unexamined_count': len(uids) - fetched,
-                                 'errors': errors})
+                                 'since': since, 'errors': errors})
             except RuntimeError as exc:
                 coverage.append({'folder': box, 'error': str(exc)})
     finally:
@@ -157,7 +179,11 @@ def collect(*, connect, parse, scope, audience, sender_filter='', subject_filter
     messages = render_messages([row for row, _ in results[:limit]], scope,
                                include_body, offset if uid else 0, size)
     return {'mode': 'unbriefed' if only_new and not uid else 'mailbox',
-            'history_note': 'No delivery receipt means unrecorded, not necessarily never briefed historically.',
+            'new_mail_window_days': window or None,
+            'history_note': ('Unbriefed means received within the window and without a delivery receipt; '
+                             'older mail is history, not new. Set unbriefed_only=false to browse it.'
+                             if window else
+                             'No delivery receipt means unrecorded, not necessarily never briefed historically.'),
             'coverage': coverage, 'matched_but_not_returned': len(results) - len(messages),
             'messages': messages}
 

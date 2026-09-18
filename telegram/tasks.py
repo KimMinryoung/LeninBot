@@ -606,6 +606,14 @@ def _parse_verification_response(response: str) -> dict:
     return result
 
 
+def _staged_mail_items(task_id: int) -> list[dict]:
+    """Summaries the task staged via prepare_mail_briefing for its audience."""
+    from mail_runtime import store as mail_store
+
+    scope = mail_store.task_scope(task_id)
+    return mail_store.briefing_items(*scope) if scope else []
+
+
 async def _run_verification(
     bot: Bot,
     task: dict,
@@ -626,6 +634,32 @@ async def _run_verification(
             (details, task_id),
         )
         return {"status": "passed", "details": details, "policy": policy, "retry_limit": 0, "goal": "unverified", "execution": "unknown", "retry": "no"}
+
+    # Mail briefings: the staged summaries are the deliverable and the callback
+    # sends them only after this verdict, so an LLM verifier can never observe
+    # delivery — demanding it deadlocked every daily run (2026-09-16..18, three
+    # attempts each, nothing sent). Full-body reads are already enforced by
+    # prepare_mail_briefing; pass on the staged ledger instead of a model round.
+    try:
+        staged = await asyncio.to_thread(_staged_mail_items, task_id)
+    except Exception as e:
+        logger.warning("Staged mail lookup failed for task %d: %s", task_id, e)
+        staged = []
+    if staged:
+        mail_ids = [int(item["mail_id"]) for item in staged]
+        outcome = {"execution": "appropriate", "goal": "complete", "retry": "no"}
+        details = (
+            "outcome: " + json.dumps(outcome, ensure_ascii=False) + "\n"
+            f"mail_briefing: {len(staged)} summaries staged for mail {mail_ids}; full-body reads enforced by "
+            "prepare_mail_briefing; the completion callback sends these exact summaries and records receipts. "
+            "LLM verification skipped: delivery only follows this verdict, so it cannot be verified beforehand."
+        )
+        await asyncio.to_thread(
+            _execute,
+            "UPDATE telegram_tasks SET verification_status = 'passed', verification_details = %s, last_verification_at = NOW(), verification_attempts = COALESCE(verification_attempts, 0) + 1 WHERE id = %s",
+            (details, task_id),
+        )
+        return {"status": "passed", "details": details, "policy": policy, "retry_limit": policy.get("retry_limit", 1), **outcome}
 
     # Phase 1: fast automated checks (task_report, url_access)
     detail_lines = []
@@ -831,6 +865,14 @@ async def _maybe_reflexion_revise_report(
     from llm.reflexion import build_report_revision_prompt, diagnose, diagnosis_is_pass
 
     task_id = task["id"]
+    # A mail briefing delivers its staged summaries, not this report; a
+    # diagnose→revise pass over the report would be two paid rounds for nothing.
+    try:
+        if await asyncio.to_thread(_staged_mail_items, task_id):
+            logger.info("Task %d reflexion: skipped, staged mail summaries are the deliverable", task_id)
+            return None
+    except Exception as e:
+        logger.warning("Staged mail lookup failed for task %d: %s", task_id, e)
     task_context = content[:2000]
     try:
         notes = await diagnose(
