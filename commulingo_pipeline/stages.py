@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 
 from .engine import Result
 from .evidence import snapshot, compile_evidence, locate_claim_quotes, SourceHandles, SourcePages
+from .citation_gate import check_claims
 from . import service
 from .bundles import work_topics, advance
 
@@ -371,9 +372,13 @@ class Research:
             if invalid:
                 raise ValueError('claims.field must name a writable field, not a commissioned topic: ' + ', '.join(sorted(str(f) for f in invalid)))
             claims = locate_claim_quotes(handles.resolve(value['claims'], sources), sources)
+            # A located quote exists; the gate asks whether it says what the
+            # claim asserts (citation_gate). Only this call's claims are judged;
+            # carried-over claims were judged when they were made.
+            checks = await check_claims(claims, sources, usage=usage)
             if targeted:
                 claims = merge_claims(carried,claims)
-            value = {**value, 'claims': claims}
+            value = {**value, 'claims': claims, 'citation_checks': checks}
             compile_evidence(value['claims'],sources,{c['field'] for c in value['claims']})
             if value['status']=='ready' and not value['claims']:
                 raise ValueError('ready research requires retrieved supporting claims')

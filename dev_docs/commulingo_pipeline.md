@@ -116,6 +116,11 @@ reason이 probe·placeholder·진행 메모("Investigating … before returning"
 길이와 무관하게 거절한다 — 2026-09-19에 그런 호출 두 건이 `sources_unavailable`로 통과해 작업을
 90일 미뤘다. 원문 일치·만료·20~6000자 인용 검증은 유지한다.
 추출문에 PostgreSQL text가 수용하지 않는 NUL이 있으면 U+FFFD로 바꾼 뒤 hash와 범위를 계산한다.
+인용 위치 확인 뒤 **인용 지지 게이트**(`citation_gate.py`, registry `commulingo_citation_support`, Jev)가 claim마다
+발췌가 주장을 뒷받침하는지 판정한다(2026-09-19). 고신뢰 unrelated/contradicts 또는 봇 확인·동의 안내 같은 boilerplate
+발췌는 결과 호출을 거절해 그 claim만 고치게 하고, 모든 판정은 research artifact `citation_checks`에 남는다.
+`enforce=false`로 shadow, `enabled=false`로 중단, 판정 모델 불가 시 통과. 표본 30쌍 중 조사·검토를 모두 통과한 무관 인용
+5건(Britannica 봇 페이지 포함)을 오탐 없이 3건 즉시·2건 유보로 가려냈다(`dev_docs/jev_system_one_adoption.md` 4.5).
 작성기는 제한된
 초안 도구와 사전 조회만 받는다. 실행기가 20~6000자의 원문 인용과 기준 revision을 붙인다.
 작성 모델에는 evidence/revision을 수정하는 인자가 없다. 인물 상세 절도 같은 경로를 사용한다.

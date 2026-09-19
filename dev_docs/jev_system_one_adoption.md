@@ -159,6 +159,47 @@ conf < lo        → 행동하지 않음, 현재 폴백
 - 대기: credstore의 `openrouter_api_key.cred`가 401 나는 옛 키라 사용자가 새 키로 교체해야 한다(`systemd-creds encrypt`,
   sudo). 교체 → 유닛 재설치·daemon-reload → 프록시 재시작 뒤 `scripts/smoke_jev.py`가 프록시 경유로 동작한다.
 
+## 4.5 실데이터 기준선 비교 (2026-09-19, 총 $0.015)
+
+같은 표본에 기존 파이프라인·Jev·정답을 나란히 놓았다. 정답은 원문을 직접 읽어 매김.
+
+**A. 인용 지지 — 조사 단계가 통과시킨 claim↔인용 발췌 30쌍** (S 핵심 사실 뒷받침 / P 일부 절만 / N 무관)
+
+| 정답 | n | 기존 조사 단계 | 하류 독립 검토 | Jev (conf ≥0.85만 행동) |
+|---|---|---|---|---|
+| S | 20 | 20/20 통과 | 승인 | 19/20 supports (1건 unrelated, conf 0.29 → 유보) |
+| N | 5 | 0/5 검출 | 0/5 검출(전부 approve) | 5/5 unrelated; 3건 conf ≥0.85(즉시 차단), 2건 저신뢰(유보) |
+| P | 5 | 5/5 통과 | 승인 | 1 supports, 4 unrelated/contradicts — 전부 conf <0.65(유보) |
+| 대조군(섞은 쌍) | 29 | — | — | 29/29 unrelated, 오인 0 |
+
+S+N 25건 정확도: 기존 20/25(80%) vs Jev 24/25(96%); 행동 기준 오탐 0, 고신뢰 미탐 0, 저신뢰 미탐 2.
+N 5건의 실체: Britannica 봇 확인 페이지(acmeism), 저자 명단 주장↔인터뷰 단락(500-day-program),
+1933년 경력↔미학 이론 단락(lunacharsky), 득표수 주장↔숫자 없는 단락(maria-spiridonova), 종결연도↔시기구분(pink-tide).
+독립 검토는 자기 인용을 새로 뽑아 사실을 확인하므로 발행 내용은 맞았을 수 있으나, 편집에 저장된 '근거'가 엉뚱한 채 남았고
+이를 잡는 단계가 없었다.
+
+**B. 태스크 라우팅 — 실제 위임 태스크 30건, 정답 = 실제 배정 에이전트**
+
+| | 기존 `task_routing_advisor` (deepseek-flash) | Jev |
+|---|---|---|
+| 정확도 | 26/30 (87%) | 28/30 (93%) |
+| 오답 | diary→programmer ×2, programmer→analyst, scout→browser | programmer→analyst ×2 (1건 conf 0.41) |
+| 평균 지연 | 1,556 ms | 372 ms |
+| 30건 비용 | $0.0082 | $0.0030 |
+| 자신감 표시 | 텍스트 "medium"(전부 동일) | 수치 confidence |
+
+둘이 같이 틀린 1건("정치노선 보강" = 프롬프트 파일 수정)은 criteria에 규칙을 적으면 잡히는 유형. 표본이 30건이라 교체 전 shadow 일주일.
+
+## 4.6 인용 지지 게이트 (구현 2026-09-19)
+
+`commulingo_pipeline/citation_gate.py`, registry 항목 `commulingo_citation_support`. 조사 단계 `finish`에서
+`locate_claim_quotes` 직후 이번 호출의 claim마다 Jev에 `{field, claim, source_url, excerpt}`를 주고
+`support` choice + `specific`·`boilerplate` noul을 받는다(동시 8, claim당 ~$0.00002).
+`unrelated/contradicts` conf ≥ `thresholds.reject`(0.85) 또는 `boilerplate` ≥ 0.9면 결과 호출을 거절하고
+해당 claim만 지목한 메시지("다른 인용·다른 출처·claim 삭제")를 돌려준다. 전 claim의 판정은 research artifact
+`citation_checks`에 기록(보정용). `enforce=false`면 기록만(shadow), `enabled=false`면 호출 없음, 판정 불가(None)는
+통과+`citation_unavailable` 집계. 위 30쌍에 실행하면 정확히 N 3건(고신뢰)만 거절되고 Britannica 페이지는 boilerplate로 잡힌다.
+
 ## 5. 롤아웃 단계 (각 단계 시작 전 승인)
 
 **0. 계정·키·shadow 평가 (지출 발생 — 승인 필요).** console.typesafe.ai 가입, 키를 프록시 credential로 설치. 위 4.1~4.2 구현. 그 다음 **실제 동작은 바꾸지 않고** 다음 세 곳에서 기존 호출과 병행 실행해 일치율을 `llm_audit_log`·journald에 남긴다:
