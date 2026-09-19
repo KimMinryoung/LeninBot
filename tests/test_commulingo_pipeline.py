@@ -701,7 +701,7 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
                 [{'stage':'research','value':{'baseline':'v1','claims':[],'current':{'revision':'v1','role':{}}}}],Usage(),.2)
             self.assertTrue({'role','groupId'} <= seen['props'])
 
-    async def test_section_draft_rejects_work_plan_and_keeps_notes_internal(self):
+    async def test_section_draft_is_one_section_and_notes_stay_out_of_fields(self):
         # Job 5432 (2026-09-19): research supported three section edits, the
         # tool takes one section, and the author's plan went live as a section.
         from commulingo_pipeline.stages import Draft, prose_problem
@@ -722,8 +722,6 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
                           'en':"The commissioned topic is 'sections'. 1. replace section body 'fall-trial-no-rehabilitation': "+prose['en']}}
             with self.assertRaisesRegex(ValueError,'not the person'):
                 await kwargs['handler']({'fields':plan})
-            with self.assertRaisesRegex(ValueError,'work plan'):
-                await kwargs['handler']({'fields':{**plan,'slug':'sections-revision'}})
             with self.assertRaisesRegex(ValueError,"person's name"):
                 await kwargs['handler']({'fields':{'slug':'cult','heading':{'ko':'니콜라이 예조프','en':'Cult'},'body':prose}})
             with self.assertRaisesRegex(ValueError,'minLength|too short'):
@@ -743,25 +741,28 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('fall-trial',result.value['notes'])
         self.assertNotIn('notes',validate.call_args.args[0]['fields'])
         self.assertFalse(prose_problem(result.value['fields']))
-        self.assertIn('work plan',prose_problem({'body':{'en':"This draft adds section 'x'."}}))
-        # Ordinary historical uses of section/draft/구획 stay allowed.
-        self.assertFalse(prose_problem({'body':{'en':"The NKVD 3rd Special Section handled arrests; the 1936 draft constitution was revised.",
-                                                'ko':'행정 구획을 개편했고 1936년 헌법 초안은 그가 검토했다.'}}))
 
     async def test_submission_replay_uses_identical_receipt_keys(self):
         from commulingo_pipeline.stages import submit
         from commulingo_pipeline.engine import Usage
         job = {'id':9,'kind':'term','action':'update','target':'test'}
-        artifacts = [{'stage':'draft','value':{'fields':{'definition':{'ko':'정의','en':'Definition'}},'sources':['source']}},
+        artifacts = [{'stage':'draft','value':{'fields':{'definition':{'ko':'정의','en':'Definition'}},'sources':['source'],
+                                               'notes':'examples still unsupported'}},
                      {'stage':'review','value':{'decision':'approve','reason':'Independent check','checks':[]}}]
         requests = []
         def rpc(request):
             requests.append(request)
+            if request['command']=='note':
+                return {'noteId':1}
             return {'suggestionId':12,'status':'approved' if request['command']=='review' else 'pending'}
         with patch('commulingo_pipeline.config.load',return_value={'phase':'live'}),patch('commulingo_pipeline.stages.service.call',side_effect=rpc):
             await submit(job,artifacts,Usage(),.2)
             await submit(job,artifacts,Usage(),.2)
-        self.assertEqual(requests[:2],requests[2:])
+        self.assertEqual(requests[:3],requests[3:])
+        # The author's notes outlive the job: saved with the entry, replayable by key.
+        self.assertEqual([r['command'] for r in requests[:3]],['submit','review','note'])
+        self.assertEqual(requests[2]['note'],'examples still unsupported')
+        self.assertNotIn('notes',requests[0]['fields'])
 
     async def test_source_stage_resumes_from_committed_artifact(self):
         store = Mock()

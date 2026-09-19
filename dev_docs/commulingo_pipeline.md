@@ -106,13 +106,16 @@ metrics의 `provider_fallback`으로 식별한다. 다른 오류는 그대로 es
 초안 도구와 사전 조회만 받는다. 실행기가 20~6000자의 원문 인용과 기준 revision을 붙인다.
 작성 모델에는 evidence/revision을 수정하는 인자가 없다. 인물 상세 절도 같은 경로를 사용한다.
 인물 상세 절 초안은 절 하나(slug·heading·body·sortOrder)만 받는다. 조사가 여러 절이나 기존 절 정정을
-뒷받침하면 가장 중요한 절 하나를 쓰고 나머지는 결과 도구의 `notes`에 적는다. `notes`는 draft artifact에만
-남고 공개 필드로 전달되지 않는다. 신설 절의 slug가 인물 id와 같거나, heading이 인물 이름과 같거나,
-body가 ko 200자·en 300자에 못 미치거나, heading/body가 작업 계획 문구(`'slug' 구획`, `구획 추가/교체`,
-`commissioned topic`, `replace section` 등)를 담으면 작성·validate 단계에서 거절하고, 독립 검토에도
-사실이 맞더라도 작업 계획은 revise하라고 지시한다. 2026-09-19 예조프 작업(5432)이 절 셋의 계획을 절
-하나로 제출해 공개된 사고와, 9-15 이후 절 101건 중 49건이 인물 id를 slug로 쓰고 26건이 인물 이름을
-heading으로 쓴 결과의 재발 방지다. sortOrder는 절 도구와 같은 YYYYMM 키다.
+뒷받침하면 가장 중요한 절 하나를 쓰고 나머지는 결과 도구의 `notes`에 적는다. `notes`는 발행 성공 뒤
+frontend 편집 RPC의 `note` 명령으로 `commulingo_editorial_notes`(대상별 작업 메모, 비공개)에 저장되고,
+같은 항목의 다음 작업이 `read`로 받는 `current.notes`에 최신 20건이 실린다. 조사 단계는 이를 출발점으로
+삼도록 지시받는다. 절 조사는 body 근거만 수집한다(heading 키 주장은 제목 제안일 뿐이라, 그것만 받은
+작성기가 제목을 본문으로 낸 사례가 2026-09-18 bukharin·voroshilov·stucka). 작성 단계는 신설 절의 slug가
+인물 id와 같거나, heading이 인물 이름과 같거나, body가 ko 200자·en 300자에 못 미치면 거절하고, 독립
+검토에는 사실이 맞더라도 작업 계획 문장은 revise하라고 지시한다. 본문 문구를 패턴 검색해 거르지는
+않는다. 2026-09-19 예조프 작업(5432)이 절 셋의 계획을 절 하나로 제출해 공개된 사고와, 9-15 이후 절
+101건 중 49건이 인물 id를 slug로 쓰고 26건이 인물 이름을 heading으로 쓴 결과의 재발 방지다.
+sortOrder는 절 도구와 같은 YYYYMM 키다.
 작성 단계의 사전 조회는 get_person/get_term/get_office/get_event/get_sections만 도구 schema에 노출하며
 최대 세 번으로 제한한다. 목록 탐색이나 검색 action을 먼저 보여준 뒤 거절하지 않는다.
 검색 전용 q/group_id/status/limit 인자와 설명도 작성 schema에서 제외하고, 각 get action에
