@@ -606,14 +606,14 @@ def _format_invalidation_note(
 
 # ── Public research document publication ───────────────────────────────
 
-async def _review_before_public_write(document: str, notes: str | None) -> str:
+async def _review_before_public_write(document: str, notes: str | None, slug: str | None = None) -> str:
     """Task/manual research gets an independent body review before side effects.
 
     Autonomous publications retain their existing cross-tick review contract.
     """
     if is_autonomous_publication_context():
         return ""
-    receipt = await review_research_document(document=document, notes=notes or "")
+    receipt = await review_research_document(document=document, notes=notes or "", slug=slug)
     expected = hashlib.sha256(document.encode()).hexdigest()
     if receipt.get("verdict") != "PASS" or receipt.get("document_sha256") != expected:
         issues = "\n".join(f"- {item}" for item in receipt.get("issues", []))
@@ -885,7 +885,7 @@ async def _exec_research_document_publish_public(
     else:
         review_note = review_result
 
-    independent_note = await _review_before_public_write(document, fact_check_notes)
+    independent_note = await _review_before_public_write(document, fact_check_notes, slug=fname)
     if isinstance(independent_note, ToolFailure):
         return independent_note
     review_note = "\n".join(note for note in (review_note, independent_note) if note)
@@ -1162,7 +1162,7 @@ async def _exec_research_document_edit_public(
                 content=body,
                 public_url=_public_url(fname),
             )
-        independent_note = await _review_before_public_write(document, fact_check_notes)
+        independent_note = await _review_before_public_write(document, fact_check_notes, slug=fname)
         if isinstance(independent_note, ToolFailure):
             return independent_note
         review_note = "\n".join(note for note in (review_note, independent_note) if note)

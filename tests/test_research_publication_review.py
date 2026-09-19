@@ -312,3 +312,61 @@ def test_incomplete_review_does_not_instruct_body_edits(isolated, monkeypatch):
 def test_verdict_tool_is_registered_with_the_gateway():
     from security_gateway.policy import risk_class
     assert risk_class(VERDICT) == "state"
+
+
+def _write_receipt(tmp_path, name, **fields):
+    path = tmp_path / f"{name}.json"
+    path.write_text(json.dumps({"verdict": "REVISE", "reason": "old", "issues": ["fix x"],
+                                "slug": "report.md", "reviewed_at": "2026-09-19T00:00:00+00:00", **fields}))
+    return path
+
+
+@pytest.mark.parametrize("prior,expected", [
+    (None, None),
+    ({}, ["fix x"]),
+    ({"verdict": "PASS", "issues": []}, None),
+    ({"slug": "other.md"}, None),
+    ({"failure_kind": "no_verdict", "issues": []}, None),
+])
+def test_resubmission_hands_previous_blocked_findings_to_the_reviewer(monkeypatch, tmp_path, prior, expected):
+    monkeypatch.setattr(review, "REVIEW_DIR", tmp_path)
+    if prior is not None:
+        _write_receipt(tmp_path, "prior", **prior)
+    seen = {}
+
+    async def chat(messages, **kw):
+        seen.update(json.loads(messages[0]["content"]))
+        await kw["extra_handlers"][VERDICT](verdict="UNVERIFIED", reason="not enough", issues=[])
+
+    install_reviewer(monkeypatch, chat)
+    result = asyncio.run(review.review_research_document(document=BODY, slug="report.md"))
+    assert result["slug"] == "report.md"
+    if expected is None:
+        assert "previous_review" not in seen
+    else:
+        assert seen["previous_review"]["issues"] == expected and seen["previous_review"]["verdict"] == "REVISE"
+
+
+def test_latest_receipt_for_slug_wins(monkeypatch, tmp_path):
+    import os
+    monkeypatch.setattr(review, "REVIEW_DIR", tmp_path)
+    old = _write_receipt(tmp_path, "old", issues=["old finding"])
+    os.utime(old, (1, 1))
+    _write_receipt(tmp_path, "new", verdict="PASS", issues=[])
+    assert review._previous_findings("report.md") is None
+    (tmp_path / "new.json").unlink()
+    assert review._previous_findings("report.md")["issues"] == ["old finding"]
+
+
+def test_public_paths_pass_the_slug_to_the_review(isolated, monkeypatch):
+    slugs = []
+
+    async def inspect(**kw):
+        slugs.append(kw.get("slug"))
+        return receipt(kw["document"], "REVISE")
+
+    monkeypatch.setattr(r, "review_research_document", inspect)
+    asyncio.run(r._exec_research_document(action="publish_public", slug="report", fact_check_notes=NOTES))
+    isolated[0]["status"] = "public"
+    asyncio.run(r._exec_research_document(action="edit_public", slug="report", content=BODY, fact_check_notes=NOTES))
+    assert slugs == ["report.md", "report.md"]

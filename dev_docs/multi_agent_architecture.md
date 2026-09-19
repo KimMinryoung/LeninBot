@@ -265,8 +265,11 @@ ends without a verdict, times out, or fails is UNVERIFIED with a `failure_kind`
 (`no_verdict`, `review_unavailable`, `receipt_unavailable`) and cannot authorize
 publication. `ToolFailure` guidance then tells the author to retry the same call
 unchanged; only a real REVISE/UNVERIFIED verdict directs them to the findings and
-`edit_staged`/`edit_public`. No human approval is introduced. Each attempt stores the
-candidate's SHA-256 (and its text only when blocked; a PASS text is in the DB), verdict, provider/model, cost, source evidence (references, hashes,
+`edit_staged`/`edit_public`. A resubmission under the same slug hands the reviewer the
+latest blocked verdict's findings (`previous_review`, context not proof) so it first checks
+those are resolved and then samples the rest, instead of re-sampling the whole document
+from scratch each round. No human approval is introduced. Each attempt stores the slug,
+the candidate's SHA-256 (and its text only when blocked; a PASS text is in the DB), verdict, provider/model, cost, source evidence (references, hashes,
 bounded excerpts) and, when no verdict was recorded, the final prose, under ignored
 `data/publication_drafts/research_reviews/`; the author is not asked to read the
 receipt. PASS applies only to the

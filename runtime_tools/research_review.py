@@ -60,6 +60,9 @@ Return concrete quote-anchored corrections to the author if necessary. Small cos
 may be mentioned without blocking. PASS means no material unresolved issue; unavailable
 evidence needed for a material claim means UNVERIFIED. One source read alone does not prove
 all claims. The candidate URL may not be live yet: that is expected, not a failure.
+If previous_review is present, it lists the findings of an earlier review of a prior version
+of this document: first check whether each finding is resolved in this candidate, then sample
+the rest of the document for other material issues. Those findings are context, not proof.
 When you are done, call research_review_verdict exactly once. PASS requires an empty issues
 array and at least one source you actually read; REVISE requires at least one concrete issue.
 Do not invent source access or successful checks.
@@ -89,7 +92,24 @@ def make_verdict_recorder(evidence: list, box: dict):
     return record
 
 
-async def _run_review(document: str, notes: str, evidence: list) -> tuple[dict, dict, str]:
+def _previous_findings(slug: str) -> dict | None:
+    """Latest blocked verdict for this slug, so a resubmission is checked against it."""
+    for path in sorted(REVIEW_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
+        try:
+            receipt = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if receipt.get("slug") != slug or receipt.get("failure_kind"):
+            continue
+        if receipt.get("verdict") == "PASS":
+            return None
+        return {"reviewed_at": receipt.get("reviewed_at"), "verdict": receipt.get("verdict"),
+                "reason": receipt.get("reason"), "issues": receipt.get("issues", [])}
+    return None
+
+
+async def _run_review(document: str, notes: str, evidence: list,
+                      previous: dict | None = None) -> tuple[dict, dict, str]:
     """Return (verdict, usage, final_text); final_text is only kept for diagnosis."""
     from bot_config import _get_task_provider
     from llm.runtime_profile import resolve_runtime_profile
@@ -120,8 +140,11 @@ async def _run_review(document: str, notes: str, evidence: list) -> tuple[dict, 
     box = {}
     handlers[VERDICT_TOOL["name"]] = make_verdict_recorder(evidence, box)
     tracker = {}
+    payload = {"candidate": document, "author_notes": notes}
+    if previous:
+        payload["previous_review"] = previous
     response = await chat_fn(
-        [{"role": "user", "content": json.dumps({"candidate": document, "author_notes": notes}, ensure_ascii=False)}],
+        [{"role": "user", "content": json.dumps(payload, ensure_ascii=False)}],
         system_prompt=REVIEW_PROMPT, model=profile.model_id,
         max_rounds=REVIEW_MAX_ROUNDS, max_tokens=3000, budget_usd=REVIEW_BUDGET_USD,
         extra_tools=[t for t in TOOLS if t.get("name") in handlers] + [VERDICT_TOOL],
@@ -141,11 +164,13 @@ async def _run_review(document: str, notes: str, evidence: list) -> tuple[dict, 
     return dict(box), usage, ""
 
 
-async def review_research_document(*, document: str, notes: str = "") -> dict:
+async def review_research_document(*, document: str, notes: str = "", slug: str | None = None) -> dict:
     """Review and persist a receipt; never cache PASS across document changes.
 
     A separate asyncio task prevents the nested loop's provenance/context state
     from replacing the author's state. No model sees the author's tool history.
+    With a slug, the latest blocked verdict for it is handed to the reviewer so
+    a resubmission converges on those findings instead of a fresh sample.
     """
     evidence = []
     usage = {}
@@ -153,8 +178,10 @@ async def review_research_document(*, document: str, notes: str = "") -> dict:
     try:
         if len(document) > 120000:
             raise ValueError("Candidate exceeds the full-document review limit (120000 characters)")
+        previous = await asyncio.to_thread(_previous_findings, slug) if slug else None
         verdict, usage, final_text = await asyncio.wait_for(
-            asyncio.create_task(_run_review(document, notes, evidence)), timeout=REVIEW_DEADLINE_SECONDS,
+            asyncio.create_task(_run_review(document, notes, evidence, previous)),
+            timeout=REVIEW_DEADLINE_SECONDS,
         )
     except Exception as exc:
         logger.warning("Research publication review unavailable: %s", exc)
@@ -162,7 +189,7 @@ async def review_research_document(*, document: str, notes: str = "") -> dict:
     # A PASS candidate is written to the DB under this SHA-256, so only a
     # blocked candidate is copied here; otherwise its text would be lost.
     receipt = {
-        **verdict, "document_sha256": hashlib.sha256(document.encode()).hexdigest(),
+        **verdict, "slug": slug, "document_sha256": hashlib.sha256(document.encode()).hexdigest(),
         **({} if verdict["verdict"] == "PASS" else {"document": document}),
         "reviewed_at": datetime.now(timezone.utc).isoformat(), "evidence": evidence, "usage": usage,
     }
