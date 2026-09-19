@@ -38,17 +38,17 @@ class EvidenceContracts(TestCase):
         self.assertEqual(len(result),64)
         self.assertEqual({(c['start'],c['end']) for c in result},{(0,240),(480,720)})
 
-    def test_valid_draft_survives_downstream_error_and_stale_id_is_not_applied(self):
+    def test_valid_draft_survives_downstream_error_and_repairs_follow_the_current_draft(self):
         repair=DraftRepair({'name':'draft','input_schema':{'type':'object','properties':{
             'fields':{'type':'object','properties':{'years':{'type':'string'}}}},'required':['fields']}})
         repair.prepare({'fields':{'years':'present'}})
         old=draft_id(repair.draft)
         self.assertIn(old,repair.feedback('years must be a range'))
         repair.prepare({'draft_id':old,'repairs':[{'op':'set','path':'/fields/years','value':'1900–'}]})
-        current=draft_id(repair.draft)
-        with self.assertRaisesRegex(ValueError,current):
-            repair.prepare({'draft_id':old,'repairs':[{'op':'set','path':'/fields/years','value':'wrong'}]})
-        self.assertEqual(repair.draft['args']['fields']['years'],'1900–')
+        self.assertNotEqual(draft_id(repair.draft),old)
+        # An echoed earlier ID no longer costs a round: the call holds one draft.
+        repair.prepare({'draft_id':old,'repairs':[{'op':'set','path':'/fields/years','value':'1900–1950'}]})
+        self.assertEqual(repair.draft['args']['fields']['years'],'1900–1950')
 
 
 class BatchContracts(IsolatedAsyncioTestCase):

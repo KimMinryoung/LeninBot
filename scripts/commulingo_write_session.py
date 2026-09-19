@@ -22,9 +22,9 @@ def repair_schema(schema, baseline=None):
             schema["required"].remove("expected_revision")
     properties = schema.setdefault("properties", {})
     properties.update({
-        "draft_id": {"type": "string", "description": "Exact ID of the rejected draft returned by this tool."},
+        "draft_id": {"type": "string", "description": "Optional: ID of the rejected draft as returned by this tool. Repairs always apply to the current rejected draft of this call."},
         "repairs": {"type": "array", "minItems": 1, "maxItems": 30,
-            "description": "Repair only rejected arguments; paths are JSON pointers such as /fields/bio/ko. The complete draft is revalidated before submission.",
+            "description": "Repair only rejected arguments of the current rejected draft; paths are JSON pointers such as /fields/bio/ko/2. The complete draft is revalidated before submission.",
             "items": {"type": "object", "additionalProperties": False,
                 "properties": {"path": {"type": "string", "pattern": "^/"},
                     "op": {"type": "string", "enum": ["set", "remove"]}, "value": {}},
@@ -34,16 +34,19 @@ def repair_schema(schema, baseline=None):
     schema["if"] = {"anyOf": [{"required": ["draft_id"]}, {"required": ["repairs"]}]}
     schema["then"] = {"type": "object", "additionalProperties": False,
         "properties": {k: properties[k] for k in ("draft_id", "repairs")},
-        "required": ["draft_id", "repairs"]}
+        "required": ["repairs"]}
     schema["else"] = {"required": required}
     return schema
 
 
 def prepare_write(name, args, draft, schema=None, baseline=None):
     args = deepcopy(args)
-    if "draft_id" in args:
-        if set(args) != {"draft_id", "repairs"} or not draft or draft["tool"] != name or args["draft_id"] != draft_id(draft):
-            raise ToolRejection("draft_id does not identify this tool's current rejected draft")
+    if "repairs" in args or "draft_id" in args:
+        # One call holds one rejected draft, so repairs target it whether or
+        # not the model echoes the right ID: 31 repairs a week were refused for
+        # quoting an ID from an earlier rejection in the same call (2026-09-19).
+        if not set(args) <= {"draft_id", "repairs"} or "repairs" not in args or not draft or draft["tool"] != name:
+            raise ToolRejection("repairs apply to this tool's current rejected draft; send repairs (and nothing else) after a rejection")
         repaired = deepcopy(draft["args"])
         for edit in args["repairs"]:
             parts = [part.replace("~1", "/").replace("~0", "~") for part in edit["path"].split("/")[1:]]

@@ -47,18 +47,26 @@ class DraftRepairTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(failed,result)
         self.assertEqual(completed,[{'fields':{'bio':{'en':'Concise biography'},'groupId':'valid-group'}}])
 
-    def test_stale_id_unknown_fields_and_revision_changes_cannot_pass(self):
+    def test_repairs_target_the_current_draft_and_cannot_change_revision_or_shape(self):
         session=self.session()
+        with self.assertRaises(ValueError):
+            session.prepare({'draft_id':'nothing-yet','repairs':[{'op':'set','path':'/fields/bio/en','value':'Short'}]})
         with self.assertRaises(ValueError):
             session.prepare({'fields':{'bio':{'en':'Long prose that exceeds the original limit'}}})
         current=draft_id(session.draft)
         for value in (
-            {'draft_id':'stale','repairs':[{'op':'set','path':'/fields/bio/en','value':'Short'}]},
             {'draft_id':current,'repairs':[{'op':'set','path':'/fields/expectedRevision','value':'new'}]},
-            {'draft_id':current,'repairs':[{'op':'set','path':'/fields','value':{'unexpected':1}}]},
+            {'repairs':[{'op':'set','path':'/fields/bio/en','value':'Short'}],'fields':{}},
         ):
             with self.assertRaises(ValueError):
                 session.prepare(value)
+        # A stale or missing ID still repairs the one draft this call holds.
+        self.assertEqual(session.prepare({'draft_id':'stale','repairs':[{'op':'set','path':'/fields/bio/en','value':'Short'}]}),
+                         {'fields':{'bio':{'en':'Short'}}})
+        self.assertEqual(session.prepare({'repairs':[{'op':'set','path':'/fields/bio/en','value':'Shorter'}]}),
+                         {'fields':{'bio':{'en':'Shorter'}}})
+        with self.assertRaises(ValueError):
+            session.prepare({'repairs':[{'op':'set','path':'/fields','value':{'unexpected':1}}]})
 
 
 if __name__=='__main__':unittest.main()

@@ -42,9 +42,9 @@ class DraftRepair:
 
     def feedback(self, message):
         if self.draft and 'Saved draft_id=' not in message:
-            message += (f'\nSaved draft_id={draft_id(self.draft)}. Use this current ID and repairs only. '
-                'Replace rejected fields using JSON pointers; unchanged fields remain saved. '
-                'A stale ID was not applied. Retain supported claims and obey final field limits.')
+            message += (f'\nSaved draft_id={draft_id(self.draft)}. Send only repairs (JSON pointers such as '
+                '/fields/bio/ko/2) to replace or remove the rejected parts; unchanged fields remain saved. '
+                'Retain supported claims and obey final field limits.')
             guidance = self.length_guidance(message)
             if guidance:
                 message += '\n' + guidance
