@@ -94,6 +94,7 @@ TOOL_RISK_CLASS: dict[str, str] = {
     # section writes bounced mid-task).
     "commulingo_review_decision": "state",  # runner-local decision, applied by the review worker
     "commulingo_pipeline_result": "state",  # runner-local artifact; no dictionary write
+    "research_review_verdict": "state",  # reviewer-local verdict record; the author's tool publishes
     "commulingo_person_create": "write",
     "commulingo_person_update": "write",
     "commulingo_section_save": "write",

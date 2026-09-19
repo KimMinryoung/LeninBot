@@ -1340,6 +1340,7 @@ async def _chat_with_tools(
     provider_override: str | None = None,
     finalization_tools: list[str] | None = None,
     terminal_tools: list[str] | None = None,
+    terminal_required: bool = False,
     extra_system_context: str = "",
     agent_name: str | None = None,
     runtime_kind: str | None = None,
@@ -1527,6 +1528,7 @@ async def _chat_with_tools(
         mission_id=_mission_id,
         finalization_tools=finalization_tools,
         terminal_tools=terminal_tools,
+        terminal_required=terminal_required,
     )
 
     # ── Provider dispatch: Claude vs OpenAI vs Local ──
@@ -1862,6 +1864,7 @@ def _make_provider_chat_fn(provider: str):
         thinking_policy="tool_loop", thinking_budget_tokens=8192, budget_usd=None, extra_tools=None,
         extra_handlers=None, on_progress=None, budget_tracker=None,
         task_id=None, finalization_tools=None, terminal_tools=None,
+        terminal_required=False,
         agent_name=None,
         runtime_kind=None,
         user_id=None, session_id=None, request_id=None, parent_request_id=None,
@@ -1878,6 +1881,7 @@ def _make_provider_chat_fn(provider: str):
             task_id=task_id, provider_override=provider,
             finalization_tools=finalization_tools,
             terminal_tools=terminal_tools,
+            terminal_required=terminal_required,
             agent_name=agent_name,
             runtime_kind=runtime_kind,
             user_id=user_id, session_id=session_id, request_id=request_id,

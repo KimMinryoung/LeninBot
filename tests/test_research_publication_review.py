@@ -137,17 +137,11 @@ def test_header_normalization_handles_observed_duplicate():
     assert r._strip_leading_research_scaffold(r._build_document("보고서", "---\n\n" + BODY, "2026-09-15")) == BODY
 
 
-@pytest.mark.parametrize("response", ["", "PASS", '{"verdict":"PASS"}',
-    '{"verdict":"PASS","reason":"ok","issues":["unsupported"]}', "```json\n{}\n```"])
-def test_ambiguous_review_never_passes(response):
-    assert review.parse_review(response)["verdict"] == "UNVERIFIED"
-
-
 def test_review_exception_saved_as_unverified(monkeypatch, tmp_path):
     monkeypatch.setattr(review, "REVIEW_DIR", tmp_path)
     monkeypatch.setattr(review, "_run_review", AsyncMock(side_effect=RuntimeError("provider unavailable")))
     result = asyncio.run(review.review_research_document(document=BODY))
-    assert result["verdict"] == "UNVERIFIED"
+    assert result["verdict"] == "UNVERIFIED" and result["failure_kind"] == "review_unavailable"
     stored = json.loads(next(tmp_path.glob("*.json")).read_text())
     assert stored["document_sha256"] == hashlib.sha256(BODY.encode()).hexdigest()
 
@@ -158,7 +152,7 @@ def test_review_does_not_replace_author_context(monkeypatch, tmp_path):
 
     async def fake(*args, **kwargs):
         init_provenance_buffer(agent="task_verifier")
-        return {"verdict": "PASS", "reason": "Source checked", "issues": []}, {}
+        return {"verdict": "PASS", "reason": "Source checked", "issues": []}, {}, ""
 
     monkeypatch.setattr(review, "_run_review", fake)
 
@@ -187,25 +181,97 @@ def install_reviewer(monkeypatch, chat):
     monkeypatch.setitem(sys.modules, "telegram.bot", SimpleNamespace(_make_provider_chat_fn=lambda _: chat))
 
 
-@pytest.mark.parametrize("read_source,interrupted", [(False, False), (True, False), (True, True)])
-def test_reviewer_surface_and_evidence_receipt(monkeypatch, read_source, interrupted):
+VERDICT = review.VERDICT_TOOL["name"]
 
+
+def test_reviewer_surface_records_verdict_and_evidence(monkeypatch):
     async def chat(messages, **kw):
-        assert {t["name"] for t in kw["extra_tools"]} == {"fetch_url"}
-        assert set(kw["extra_handlers"]) == {"fetch_url"}
+        assert {t["name"] for t in kw["extra_tools"]} == {"fetch_url", VERDICT}
+        assert set(kw["extra_handlers"]) == {"fetch_url", VERDICT}
+        assert kw["terminal_tools"] == kw["finalization_tools"] == [VERDICT] and kw["terminal_required"]
+        assert kw["budget_usd"] == review.REVIEW_BUDGET_USD and kw["max_rounds"] == review.REVIEW_MAX_ROUNDS
         assert json.loads(messages[0]["content"])["candidate"] == BODY
-        if read_source:
-            await kw["extra_handlers"]["fetch_url"](url="https://example.org/source")
-        kw["budget_tracker"]["final_response"] = json.dumps({"verdict": "PASS", "reason": "Source checked", "issues": []})
-        kw["budget_tracker"]["final_response_truncated"] = interrupted
-        return "progress is not the verdict"
+        await kw["extra_handlers"]["fetch_url"](url="https://example.org/source")
+        assert await kw["extra_handlers"][VERDICT](verdict="PASS", reason="Source checked", issues=[]) == "Verdict recorded: PASS"
+        kw["budget_tracker"].update(total_cost=0.01, rounds_used=2, final_response="prose is ignored")
+        return "prose is ignored"
 
     install_reviewer(monkeypatch, chat)
     evidence = []
-    verdict, _ = asyncio.run(review._run_review(BODY, NOTES, evidence))
-    assert verdict["verdict"] == ("PASS" if read_source and not interrupted else "UNVERIFIED")
-    if read_source:
-        assert evidence[0]["sha256"] == hashlib.sha256(b"Observed source text").hexdigest()
+    verdict, usage, final_text = asyncio.run(review._run_review(BODY, NOTES, evidence))
+    assert verdict == {"verdict": "PASS", "reason": "Source checked", "issues": []}
+    assert usage == {"provider": "deepseek", "model": "fake-low", "total_cost": 0.01, "rounds_used": 2}
+    assert final_text == ""
+    assert evidence[0]["sha256"] == hashlib.sha256(b"Observed source text").hexdigest()
+
+
+@pytest.mark.parametrize("read_source,args,message", [
+    (True, {"verdict": "PASS", "reason": "ok", "issues": ["unsupported"]}, "PASS cannot list"),
+    (True, {"verdict": "REVISE", "reason": "bad", "issues": []}, "REVISE requires"),
+    (True, {"verdict": "REVISE", "reason": "bad", "issues": ["  "]}, "REVISE requires"),
+    (True, {"verdict": "PASS", "reason": " ", "issues": []}, "reason must"),
+    (False, {"verdict": "PASS", "reason": "ok", "issues": []}, "PASS requires at least one"),
+])
+def test_verdict_tool_rejects_inconsistent_verdicts(read_source, args, message):
+    from tool_gateway.results import ToolRejection
+    evidence = [{"tool": "fetch_url", "error": not read_source}]
+    box = {}
+    with pytest.raises(ToolRejection, match=message):
+        asyncio.run(review.make_verdict_recorder(evidence, box)(**args))
+    assert not box
+
+
+def test_verdict_tool_records_once():
+    from tool_gateway.results import ToolRejection
+    box = {}
+    record = review.make_verdict_recorder([], box)
+    asyncio.run(record(verdict="UNVERIFIED", reason="source 401", issues=[]))
+    with pytest.raises(ToolRejection, match="already recorded"):
+        asyncio.run(record(verdict="REVISE", reason="changed my mind", issues=["x"]))
+    assert box["verdict"] == "UNVERIFIED"
+
+
+def test_prose_without_verdict_is_unverified_and_kept_for_diagnosis(monkeypatch, tmp_path):
+    monkeypatch.setattr(review, "REVIEW_DIR", tmp_path)
+
+    async def chat(messages, **kw):
+        await kw["extra_handlers"]["fetch_url"](url="https://example.org/source")
+        kw["budget_tracker"]["final_response"] = '{"verdict": "PASS", "reason": "in prose", "issues": []}'
+        return "ignored"
+
+    install_reviewer(monkeypatch, chat)
+    result = asyncio.run(review.review_research_document(document=BODY))
+    assert result["verdict"] == "UNVERIFIED" and result["failure_kind"] == "no_verdict"
+    stored = json.loads(next(tmp_path.glob("*.json")).read_text())
+    assert stored["final_text"].startswith('{"verdict": "PASS"')
+    assert stored["evidence"][0]["tool"] == "fetch_url"
+
+
+def test_deadline_is_unverified(monkeypatch, tmp_path):
+    monkeypatch.setattr(review, "REVIEW_DIR", tmp_path)
+    monkeypatch.setattr(review, "REVIEW_DEADLINE_SECONDS", 0.05)
+
+    async def chat(messages, **kw):
+        await kw["extra_handlers"]["fetch_url"](url="https://example.org/source")
+        await asyncio.sleep(5)
+
+    install_reviewer(monkeypatch, chat)
+    result = asyncio.run(review.review_research_document(document=BODY))
+    assert result["failure_kind"] == "review_unavailable" and "TimeoutError" in result["reason"]
+    assert json.loads(next(tmp_path.glob("*.json")).read_text())["evidence"]
+
+
+def test_unsaved_receipt_withdraws_pass_but_keeps_findings(monkeypatch, tmp_path):
+    monkeypatch.setattr(review, "REVIEW_DIR", tmp_path / "missing.json")
+    (tmp_path / "missing.json").write_text("not a directory")
+
+    async def chat(messages, **kw):
+        await kw["extra_handlers"][VERDICT](verdict="REVISE", reason="bad claim", issues=["fix attribution"])
+
+    install_reviewer(monkeypatch, chat)
+    result = asyncio.run(review.review_research_document(document=BODY))
+    assert result["verdict"] == "UNVERIFIED" and result["failure_kind"] == "receipt_unavailable"
+    assert result["issues"] == ["fix attribution"] and "receipt_path" not in result
 
 
 def test_autonomous_keeps_existing_review_contract(isolated, monkeypatch):
@@ -216,159 +282,28 @@ def test_autonomous_keeps_existing_review_contract(isolated, monkeypatch):
     mocked.assert_not_awaited()
 
 
-VALID_PASS = json.dumps({"verdict": "PASS", "reason": "Source checked", "issues": []})
-
-
-@pytest.mark.parametrize("wrapper", ["{}", "```json\n{}\n```", "```\n{}\n```", "```JSON\n{}```", "\n{}\n"])
-def test_single_verdict_wrappers(wrapper):
-    assert review.parse_review(wrapper.format(VALID_PASS))["verdict"] == "PASS"
-
-
-@pytest.mark.parametrize("response", [
-    "Result:\n" + VALID_PASS, VALID_PASS + "\n" + VALID_PASS,
-    "```json\n" + VALID_PASS + "\n```\nBut this claim is unsupported.",
-    '{"verdict":"REVISE","reason":"bad","issues":[]}',
-    '{"verdict":[],"reason":"bad","issues":[]}', None,
-])
-def test_invalid_response_preserves_parse_error(response):
-    result = review.parse_review(response)
-    assert result["verdict"] == "UNVERIFIED"
-    assert result["failure_kind"] == "invalid_response" and result["parse_error"]
-
-
-@pytest.mark.parametrize("second,reads,interrupted,expected", [
-    (VALID_PASS, True, False, "PASS"),
-    ("still malformed", True, False, "UNVERIFIED"),
-    (VALID_PASS, False, False, "UNVERIFIED"),
-    (VALID_PASS, True, True, "UNVERIFIED"),
-])
-def test_one_fresh_retry_preserves_raw_responses_and_requires_own_evidence(
-    monkeypatch, tmp_path, second, reads, interrupted, expected,
-):
-    monkeypatch.setattr(review, "REVIEW_DIR", tmp_path)
-    budgets = []
-
-    async def chat(messages, **kw):
-        budgets.append(kw["budget_usd"])
-        first = len(budgets) == 1
-        assert len(messages) == 1  # No malformed prior prose becomes evidence.
-        if first or reads:
-            await kw["extra_handlers"]["fetch_url"](url="https://example.org/source")
-        kw["budget_tracker"].update(
-            final_response="malformed first response" if first else second,
-            total_cost=0.01, rounds_used=2,
-            final_response_truncated=not first and interrupted,
-        )
-        return "ignored progress"
-
-    install_reviewer(monkeypatch, chat)
-    result = asyncio.run(review.review_research_document(document=BODY))
-    assert result["verdict"] == expected
-    assert budgets == pytest.approx([0.15, 0.14])
-    stored = json.loads(next(tmp_path.glob("*.json")).read_text())
-    assert stored["usage"] == {"total_cost": 0.02, "rounds_used": 4}
-    assert stored["attempts"][0]["raw_response"] == "malformed first response"
-    assert stored["attempts"][0]["parse_error"]
-    assert stored["attempts"][1]["raw_response"] == second
-
-
-@pytest.mark.parametrize("response,cost,interrupted", [
-    (VALID_PASS, 0.01, False),
-    ('{"verdict":"REVISE","reason":"bad claim","issues":["fix attribution"]}', 0.01, False),
-    ('{"verdict":"UNVERIFIED","reason":"source unavailable","issues":[]}', 0.01, False),
-    ("malformed", 0.15, False),
-    ("malformed", 0.01, True),
-    ("malformed", None, False),
-])
-def test_no_retry_for_valid_verdict_or_exhausted_or_unknown_limits(monkeypatch, tmp_path, response, cost, interrupted):
-    monkeypatch.setattr(review, "REVIEW_DIR", tmp_path)
-    calls = []
-
-    async def chat(messages, **kw):
-        calls.append(kw)
-        await kw["extra_handlers"]["fetch_url"](url="https://example.org/source")
-        kw["budget_tracker"].update(final_response=response, was_interrupted=interrupted)
-        if cost is not None:
-            kw["budget_tracker"]["total_cost"] = cost
-        return response
-
-    install_reviewer(monkeypatch, chat)
-    asyncio.run(review.review_research_document(document=BODY))
-    assert len(calls) == 1
-
-
-def test_retry_exception_keeps_first_response(monkeypatch, tmp_path):
-    monkeypatch.setattr(review, "REVIEW_DIR", tmp_path)
-    calls = []
-
-    async def chat(messages, **kw):
-        calls.append(kw)
-        if len(calls) == 2:
-            raise RuntimeError("provider unavailable")
-        kw["budget_tracker"].update(final_response="malformed", total_cost=0.01)
-        return "malformed"
-
-    install_reviewer(monkeypatch, chat)
-    result = asyncio.run(review.review_research_document(document=BODY))
-    assert result["failure_kind"] == "review_unavailable"
-    stored = json.loads(next(tmp_path.glob("*.json")).read_text())
-    assert stored["attempts"][0]["raw_response"] == "malformed"
-
-
-def test_execution_failure_does_not_instruct_body_edits(isolated, monkeypatch):
-    result = receipt(isolated[0]["markdown"], "UNVERIFIED")
-    result.update(review.parse_review("malformed"))
-    monkeypatch.setattr(r, "review_research_document", AsyncMock(return_value=result))
-    message = asyncio.run(r._exec_research_document(action="publish_public", slug="report", fact_check_notes=NOTES))
-    assert isinstance(message, ToolFailure)
-    assert "unchanged draft" in message and "edit_staged" not in message
-    assert not isolated[1]
-
-
-def test_deadline_during_retry_keeps_first_attempt_diagnostics(monkeypatch, tmp_path):
-    monkeypatch.setattr(review, "REVIEW_DIR", tmp_path)
-    monkeypatch.setattr(review, "REVIEW_DEADLINE_SECONDS", 0.2)
-    calls = []
-
-    async def chat(messages, **kw):
-        calls.append(kw)
-        kw["budget_tracker"].update(rounds_used=1, total_cost=0.01)
-        if len(calls) == 2:
-            await asyncio.sleep(5)
-        kw["budget_tracker"]["final_response"] = "malformed"
-        return "malformed"
-
-    install_reviewer(monkeypatch, chat)
-    result = asyncio.run(review.review_research_document(document=BODY))
-    assert result["failure_kind"] == "review_unavailable"
-    stored = json.loads(next(tmp_path.glob("*.json")).read_text())
-    assert stored["attempts"][0]["raw_response"] == "malformed"
-    assert stored["attempts"][0]["parse_error"]
-    assert stored["attempts"][1]["tracker"] == {"rounds_used": 1, "total_cost": 0.01}
-    assert "raw_response" not in stored["attempts"][1]
-
-
-def test_unsaved_receipt_withdraws_pass_but_keeps_findings(monkeypatch, tmp_path):
-    monkeypatch.setattr(review, "REVIEW_DIR", tmp_path / "missing.json")
-    (tmp_path / "missing.json").write_text("not a directory")
-
-    async def chat(messages, **kw):
-        await kw["extra_handlers"]["fetch_url"](url="https://example.org/source")
-        return '{"verdict":"REVISE","reason":"bad claim","issues":["fix attribution"]}'
-
-    install_reviewer(monkeypatch, chat)
-    result = asyncio.run(review.review_research_document(document=BODY))
-    assert result["verdict"] == "UNVERIFIED" and result["failure_kind"] == "receipt_unavailable"
-    assert result["issues"] == ["fix attribution"] and "receipt_path" not in result
-
-
 @pytest.mark.parametrize("verdict,expected,forbidden", [
-    ("REVISE", "edit_staged", "unchanged draft"),
-    ("UNVERIFIED", "evidence gaps", "edit_staged"),
+    ("REVISE", "edit_staged", "unchanged"),
+    ("UNVERIFIED", "edit_staged", "unchanged"),
 ])
-def test_content_verdicts_keep_author_guidance(isolated, monkeypatch, verdict, expected, forbidden):
+def test_content_verdicts_direct_the_author_to_the_findings(isolated, monkeypatch, verdict, expected, forbidden):
     monkeypatch.setattr(r, "review_research_document", AsyncMock(side_effect=lambda **kw: receipt(kw["document"], verdict)))
     message = asyncio.run(r._exec_research_document(action="publish_public", slug="report", fact_check_notes=NOTES))
     assert isinstance(message, ToolFailure)
     assert expected in message and forbidden not in message
     assert not isolated[1]
+
+
+def test_incomplete_review_does_not_instruct_body_edits(isolated, monkeypatch):
+    result = receipt(isolated[0]["markdown"], "UNVERIFIED")
+    result.update(review._unverified("no_verdict", "Reviewer ended without recording a verdict."))
+    monkeypatch.setattr(r, "review_research_document", AsyncMock(return_value=result))
+    message = asyncio.run(r._exec_research_document(action="publish_public", slug="report", fact_check_notes=NOTES))
+    assert isinstance(message, ToolFailure)
+    assert "Retry the same publication call unchanged" in message and "edit_staged" not in message
+    assert not isolated[1]
+
+
+def test_verdict_tool_is_registered_with_the_gateway():
+    from security_gateway.policy import risk_class
+    assert risk_class(VERDICT) == "state"

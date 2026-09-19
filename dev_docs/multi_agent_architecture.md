@@ -250,27 +250,26 @@ and `runtime_tools/research_review.py`. Outside autonomous context, public creat
 public edits, republishing and private-to-public publication run a fresh-context
 independent review of the exact normalized document before public DB writes, cache
 purges or broadcasts. The reviewer uses the task provider's low tier, a $0.15 budget,
-10 rounds per attempt and a shared 180-second deadline. Its only tools are `fetch_url`, `read_self`,
+10 rounds and a 180-second deadline. Its read tools are `fetch_url`, `read_self`,
 `read_file`, `search_files`, and `list_directory`. It checks sources, attribution,
 quotations and material reasoning; stylistic preferences and clearly attributed
 self-statements do not require blocking corrections.
 
-Verdicts are `PASS`, `REVISE`, or `UNVERIFIED`. The parser accepts one JSON object,
-optionally enclosed in a single Markdown code fence; it never extracts a PASS from
-surrounding prose or conflicting objects. REVISE requires concrete issues. A malformed
-response triggers at most one fresh independent review within the remaining $0.15
-budget and shared deadline (no retry if cost accounting is unavailable). The retry
-must read its own sources; a formatting model cannot turn malformed prose into PASS.
-Valid REVISE/UNVERIFIED verdicts, interrupted reviews and missing source evidence are
-not automatically retried. None can authorize publication.
-
-Failures return `ToolFailure`: content findings direct the author to fix the findings,
-whereas execution/format/receipt errors instruct retrying review of the unchanged
-draft, not speculative body edits. No human approval is introduced. The receipt stores
-the exact candidate and SHA-256, plus each attempt's raw final response, parse error,
-provider/model, completion flags, verdict and source evidence under ignored
-`data/publication_drafts/research_reviews/`; completed-attempt costs/rounds are summed.
-Earlier attempt diagnostics survive a later timeout or provider error. PASS applies only to the
+The verdict is recorded only through the terminal tool `research_review_verdict`
+(`verdict` PASS/REVISE/UNVERIFIED, `reason`, `issues`); prose is never parsed. The
+schema fixes the shape, and the handler rejects inconsistent calls (PASS with issues,
+REVISE without issues, PASS without a successfully read source, a second verdict) so
+the same review corrects itself in-loop; a prose ending is reminded once, and the
+forced-final call at the round limit keeps only the verdict tool. A review that still
+ends without a verdict, times out, or fails is UNVERIFIED with a `failure_kind`
+(`no_verdict`, `review_unavailable`, `receipt_unavailable`) and cannot authorize
+publication. `ToolFailure` guidance then tells the author to retry the same call
+unchanged; only a real REVISE/UNVERIFIED verdict directs them to the findings and
+`edit_staged`. No human approval is introduced. Each attempt stores the exact
+candidate, SHA-256, verdict, provider/model, cost, source evidence (references, hashes,
+bounded excerpts) and, when no verdict was recorded, the final prose, under ignored
+`data/publication_drafts/research_reviews/`; the author is not asked to read the
+receipt. PASS applies only to the
 document subsequently written, never a cached verdict for a slug. The nested loop
 runs in an isolated asyncio context so its provenance does not replace the author's.
 Autonomous publication retains its cross-tick and Stasova workflow. The post-hoc
