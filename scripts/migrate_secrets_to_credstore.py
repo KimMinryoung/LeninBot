@@ -79,7 +79,9 @@ SERVICE_CREDS: dict[str, set[str]] = {
     # Base provider keys are declared in the static proxy unit. Optional admin
     # keys are emitted only after they exist in credstore and are consumed only
     # by the proxy's fixed read-only cost-report endpoints.
-    "leninbot-llm-proxy": {"ANTHROPIC_ADMIN_KEY", "OPENAI_ADMIN_KEY"},
+    "leninbot-llm-proxy": {"ANTHROPIC_ADMIN_KEY", "OPENAI_ADMIN_KEY",
+                           # Jev decision routes (2026-09-19): optional, mounted only when present.
+                           "OPENROUTER_API_KEY", "TYPESAFE_API_KEY"},
 
     # Agent hosts — broad tool access, all non-provider Tier A secrets.
     "leninbot-api": _FULL,

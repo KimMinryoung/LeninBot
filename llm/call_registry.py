@@ -729,9 +729,19 @@ def _stringify_criteria(questions: dict) -> dict:
 
 
 class DecisionHTTPError(RuntimeError):
-    def __init__(self, status_code: int, body: str):
+    def __init__(self, status_code: int, body: str, retry_after: str | None = None):
         self.status_code = status_code
+        self.retry_after = _parse_retry_after(retry_after)
         super().__init__(f"HTTP {status_code}: {body[:300]}")
+
+
+def _parse_retry_after(value) -> float | None:
+    """Seconds from a Retry-After header (delay-seconds form), else None."""
+    try:
+        seconds = float(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+    return seconds if seconds >= 0 else None
 
 
 def _post_decision(p: CallSiteProfile, state, questions: dict) -> tuple[dict, int]:
@@ -749,7 +759,7 @@ def _post_decision(p: CallSiteProfile, state, questions: dict) -> tuple[dict, in
     response = httpx.post(url, headers=headers, json=body, timeout=p.timeout)
     latency_ms = int((time.monotonic() - started) * 1000)
     if response.status_code >= 400:
-        raise DecisionHTTPError(response.status_code, response.text)
+        raise DecisionHTTPError(response.status_code, response.text, response.headers.get("retry-after"))
     payload = response.json()
     if not isinstance(payload, dict) or not isinstance(payload.get("answers"), dict):
         raise RuntimeError(f"decision response without answers: {str(payload)[:200]}")
@@ -787,7 +797,7 @@ def decide_detailed(feature: str, state, questions: dict, *, label: str | None =
         payload, latency_ms = _post_decision(profile, state, questions)
     except Exception as exc:
         kind = _error_kind(exc)
-        retry_after = None
+        retry_after = getattr(exc, "retry_after", None)
         logger.warning("[llm-registry] %s (%s/%s) decision failed: %s",
                        feature, profile.provider, profile.model, exc)
         record_llm_call(surface="oneshot", caller=feature, provider=profile.provider,

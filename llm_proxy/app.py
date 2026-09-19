@@ -94,14 +94,14 @@ PROVIDERS: dict[str, dict] = {
                "auth": ("bearer",)},
     "gemini": {"upstream": "https://generativelanguage.googleapis.com", "secret": "GEMINI_API_KEY",
                "auth": ("x-goog-api-key",)},
-    # OpenRouter carries TypeSafe's Jev (System One decisions, /api/alpha/decisions)
-    # while the direct TypeSafe API is waitlisted; its credential is a normal
-    # bearer key, and its chat routes stay reachable through the same prefix.
+    # Jev (System One decisions) routes, 2026-09-19. OpenRouter serves Jev at
+    # /api/alpha/decisions while the direct TypeSafe API is waitlisted. Both
+    # credentials are mounted only where they exist (drop-in emitted by
+    # scripts/migrate_secrets_to_credstore.py), so both are "optional": a
+    # missing key makes that route answer 503 and decide() fall back, instead
+    # of /health — which gates every consumer's startup — reporting not_ready.
     "openrouter": {"upstream": "https://openrouter.ai", "secret": "OPENROUTER_API_KEY",
-                   "auth": ("bearer",)},
-    # Direct TypeSafe API: waitlisted as of 2026-09-19, so no credential is
-    # mounted yet. "optional" keeps /health (which gates every consumer's
-    # startup) from reporting not_ready over a route nothing calls.
+                   "auth": ("bearer",), "optional": True},
     "typesafe": {"upstream": "https://api.typesafe.ai", "secret": "TYPESAFE_API_KEY",
                  "auth": ("bearer",), "optional": True},
 }

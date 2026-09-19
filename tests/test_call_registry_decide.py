@@ -31,8 +31,9 @@ PAYLOAD = {
 
 
 class _Resp:
-    def __init__(self, status_code, payload=None, text=""):
+    def __init__(self, status_code, payload=None, text="", headers=None):
         self.status_code, self._payload, self.text = status_code, payload, text
+        self.headers = headers or {}
 
     def json(self):
         return self._payload
@@ -94,8 +95,12 @@ class DecideTests(unittest.TestCase):
         self.assertIsNone(result.decision)
         self.assertEqual(result.error_kind, "authentication")
         self.assertEqual(self.recorded[0]["status"], "error")
-        with mock.patch("httpx.post", return_value=_Resp(429, text="slow down")):
-            self.assertTrue(cr.decide_detailed("t", "s", QUESTIONS, profile=_profile()).retryable)
+        with mock.patch("httpx.post", return_value=_Resp(429, text="slow down", headers={"retry-after": "7"})):
+            result = cr.decide_detailed("t", "s", QUESTIONS, profile=_profile())
+        self.assertTrue(result.retryable)
+        self.assertEqual(result.retry_after, 7.0)
+        with mock.patch("httpx.post", return_value=_Resp(429, text="slow down", headers={"retry-after": "Sat, 1 Jan"})):
+            self.assertIsNone(cr.decide_detailed("t", "s", QUESTIONS, profile=_profile()).retry_after)
 
     def test_non_system_one_profile_is_a_configuration_error(self):
         result = cr.decide_detailed("t", "s", QUESTIONS, profile=_profile("deepseek", "deepseek-flash"))

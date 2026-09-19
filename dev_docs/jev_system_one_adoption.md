@@ -150,7 +150,7 @@ conf < lo        → 행동하지 않음, 현재 폴백
 
 ## 4.4 구현 상태 (2026-09-19)
 
-- 완료: 프록시 라우트 `openrouter`·`typesafe`(optional), 유닛 `LoadCredentialEncrypted=openrouter_api_key`,
+- 완료: 프록시 라우트 `openrouter`·`typesafe`(둘 다 optional — credential은 드롭인으로 있을 때만 마운트),
   `call_registry` 연결 항목·`decide()/decide_sync()/decide_detailed()`, gateway `SYSTEM_ONE_PRICING`·provider 추론,
   registry 항목 `system_one_smoke`, `scripts/smoke_jev.py`, `tests/test_call_registry_decide.py`.
   `OPENROUTER_API_KEY`는 provider 키로 분류해 api/telegram 드롭인 대상에서 제외(다음 드롭인 재생성 시 반영).
