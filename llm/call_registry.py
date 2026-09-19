@@ -645,6 +645,31 @@ _DECISION_PATHS = {
     "typesafe": "/v1/systemone",
 }
 _QUESTION_TYPES = ("noul", "choice", "score")
+_DECISION_RETRIES = 1            # extra attempts after a retryable failure
+_DECISION_RETRY_PAUSE = 0.5      # seconds when the provider names no Retry-After
+_DECISION_RETRY_PAUSE_MAX = 2.0
+
+
+def _decision_attempts(profile: CallSiteProfile) -> int:
+    """Total attempts for a decision: 1 + the entry's ``retries`` (default 1).
+    A malformed value keeps the default rather than breaking the call site."""
+    try:
+        retries = int((profile.extra or {}).get("retries", _DECISION_RETRIES))
+    except (TypeError, ValueError):
+        retries = _DECISION_RETRIES
+    return 1 + max(0, retries)
+
+
+def _decision_retryable(exc: Exception, kind: str) -> bool:
+    """Rate limits, 5xx and refused/dropped connections are retried; a read
+    timeout is not — the provider may have served the first request, and a
+    second wait would double the stall a gate imposes on its stage."""
+    name = type(exc).__name__.lower()
+    if "timeout" in name or isinstance(exc, TimeoutError):
+        return False
+    # httpx.ConnectError / ConnectionError are not counted as "transport" by
+    # _error_kind's name check ("connection"), so match the shorter stem here.
+    return kind in {"rate_limit", "server", "transport"} or "connect" in name
 
 
 @dataclass(frozen=True)
@@ -792,18 +817,29 @@ def decide_detailed(feature: str, state, questions: dict, *, label: str | None =
         check_llm_call(surface="oneshot", caller=feature, provider=profile.provider, model=profile.model)
     except LLMGatewayDenied as exc:
         return DecisionResult(error_kind="policy", error=str(exc))
-    started = time.monotonic()
-    try:
-        payload, latency_ms = _post_decision(profile, state, questions)
-    except Exception as exc:
-        kind = _error_kind(exc)
-        retry_after = getattr(exc, "retry_after", None)
-        logger.warning("[llm-registry] %s (%s/%s) decision failed: %s",
-                       feature, profile.provider, profile.model, exc)
-        record_llm_call(surface="oneshot", caller=feature, provider=profile.provider,
-                        model=profile.model, label=label, status="error", error_excerpt=str(exc),
-                        latency_ms=int((time.monotonic() - started) * 1000), estimate_cost=False)
-        return DecisionResult(error_kind=kind, error=str(exc), retry_after=retry_after)
+    # A rate limit, 5xx or dropped connection gets one more try after a short
+    # pause (Retry-After when the provider names one, capped so a gate never
+    # stalls its stage). A None answer costs the caller more than the retry:
+    # the citation gate passes the claim unchecked and route_task falls back
+    # to a chat model four times slower. ``retries`` in the entry overrides.
+    attempts = _decision_attempts(profile)
+    for attempt in range(1, attempts + 1):
+        started = time.monotonic()
+        try:
+            payload, latency_ms = _post_decision(profile, state, questions)
+            break
+        except Exception as exc:
+            kind = _error_kind(exc)
+            retry_after = getattr(exc, "retry_after", None)
+            logger.warning("[llm-registry] %s (%s/%s) decision failed (attempt %d/%d): %s",
+                           feature, profile.provider, profile.model, attempt, attempts, exc)
+            record_llm_call(surface="oneshot", caller=feature, provider=profile.provider,
+                            model=profile.model, label=label, status="error", error_excerpt=str(exc),
+                            latency_ms=int((time.monotonic() - started) * 1000), estimate_cost=False)
+            result = DecisionResult(error_kind=kind, error=str(exc), retry_after=retry_after)
+            if attempt == attempts or not _decision_retryable(exc, kind):
+                return result
+            time.sleep(min(retry_after or _DECISION_RETRY_PAUSE, _DECISION_RETRY_PAUSE_MAX))
     usage = payload.get("usage") or {}
     tokens_in = int(usage.get("input_tokens") or 0)
     tokens_out = int(usage.get("output_tokens") or 0)
@@ -827,13 +863,18 @@ def decide_sync(feature: str, state, questions: dict, **defaults) -> Decision | 
 
 
 async def decide(feature: str, state, questions: dict, **defaults) -> Decision | None:
-    """Async wrapper around decide_sync with the profile timeout enforced."""
+    """Async wrapper around decide_detailed (in a thread) returning only the
+    decision; the outer timeout covers every attempt the entry allows plus
+    the pauses between them, so a retry is never cancelled half-way."""
     profile = resolve(feature, **defaults)
+    attempts = _decision_attempts(profile)
+    budget = profile.timeout * attempts + _DECISION_RETRY_PAUSE_MAX * (attempts - 1) + 5
     try:
-        return await asyncio.wait_for(
-            asyncio.to_thread(decide_sync, feature, state, questions, **defaults),
-            timeout=profile.timeout + 5,
+        result = await asyncio.wait_for(
+            asyncio.to_thread(decide_detailed, feature, state, questions, profile=profile, **defaults),
+            timeout=budget,
         )
+        return result.decision
     except asyncio.TimeoutError:
-        logger.warning("[llm-registry] %s decision timed out after %.0fs", feature, profile.timeout + 5)
+        logger.warning("[llm-registry] %s decision timed out after %.0fs", feature, budget)
         return None

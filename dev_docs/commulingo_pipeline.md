@@ -121,6 +121,14 @@ reason이 probe·placeholder·진행 메모("Investigating … before returning"
 발췌는 결과 호출을 거절해 그 claim만 고치게 하고, 판정 수치는 각 claim의 `citation_check`에 남는다(거절 문구는 저장하지 않음). 반박 출처(`stance: disputes`)는 `contradicts`가 정상이다.
 `enforce=false`로 shadow, `enabled=false`로 중단, 판정 모델 불가 시 통과. 표본 30쌍 중 조사·검토를 모두 통과한 무관 인용
 5건(Britannica 봇 페이지 포함)을 오탐 없이 3건 즉시·2건 유보로 가려냈다(`dev_docs/jev_system_one_adoption.md` 4.5).
+집계(`citation_checks`·`citation_rejections`·`citation_unavailable`)는 research artifact의 `metrics`에 남는다.
+독립 검토에도 같은 게이트가 있다(`check_review_checks`, registry `commulingo_review_citation_support`): 검토자의
+`checks[].quote`가 `finding`이 확인한다고 적은 사실을 담는지 판정해 각 check의 `citation_check`와 review artifact
+`metrics`의 `review_citation_*`에 남긴다. 훅은 `make_handlers(..., gate=review_gate(usage))`로 결정이 기록되기 전에 돌며 파이프라인 검토와 검토 타이머의
+독립 검토(`scripts/commulingo_person_reviewer.py`) 양쪽에 걸린다. 승인 메모에 넣는 checks에서는 판정 수치를
+뺀다(`review_note_checks`). 저장된 검토
+40건 기준선에서 무관 인용 2건을 오탐 없이 잡았고(4.8), **`enforce=true`** — 고신뢰
+무관·반박 인용을 가진 결정 호출을 그 check만 지목해 거절한다(`enforce=false`면 기록만).
 작성기는 제한된
 초안 도구와 사전 조회만 받는다. 실행기가 20~6000자의 원문 인용과 기준 revision을 붙인다.
 작성 모델에는 evidence/revision을 수정하는 인자가 없다. 인물 상세 절도 같은 경로를 사용한다.

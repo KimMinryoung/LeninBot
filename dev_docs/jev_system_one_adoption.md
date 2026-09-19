@@ -1,7 +1,9 @@
 # Jev (TypeSafe System One) 도입 계획
 
-작성 2026-09-19. 아직 구현·계약·키 발급 전인 **계획 문서**다. 구현이 끝나면 내용은
-`llm_call_registry.md`·`llm_gateway.md`와 각 도메인 문서로 흡수하고 이 파일은 삭제한다.
+작성 2026-09-19. 1~3절은 도입 전 계획, 4.4절부터는 **구현 상태와 실측 기준선**이다. 배포된 것:
+`decide()` 인프라(4.4), CommuLingo 조사 인용 게이트(4.6, enforce), route_task 1차 분류기(4.7), CommuLingo
+독립 검토 인용 게이트(4.8, enforce). 각 도메인 문서(`llm_call_registry.md`·`llm_gateway.md`·`commulingo_pipeline.md`)가
+현재 동작을 기술하고, 이 문서는 후보 목록·기준선 표·채택/기각 근거를 보관한다.
 
 ## 1. Jev가 무엇인가
 
@@ -156,8 +158,11 @@ conf < lo        → 행동하지 않음, 현재 폴백
   `OPENROUTER_API_KEY`는 provider 키로 분류해 api/telegram 드롭인 대상에서 제외(다음 드롭인 재생성 시 반영).
 - 첫 호출 결과(사용자 직접 실행, OpenRouter 새 키): HTTP 200, 396ms, 501 입력 토큰, $0.000021.
   한국어 교정 판정 noul 0.17/0.72(방향 정확), 라우팅 choice confidence 0.99. 응답 model `typesafe/jev-1.13-20260917`.
-- 대기: credstore의 `openrouter_api_key.cred`가 401 나는 옛 키라 사용자가 새 키로 교체해야 한다(`systemd-creds encrypt`,
-  sudo). 교체 → 유닛 재설치·daemon-reload → 프록시 재시작 뒤 `scripts/smoke_jev.py`가 프록시 경유로 동작한다.
+- 프록시 credential 교체 완료(2026-09-19 11:35 프록시 재시작, `/health` providers_without_key 없음). 모든 판정 호출은
+  프록시 경유이며 감사 행은 oneshot(토큰·비용)과 proxy(전송) 두 줄이 남고 비용은 oneshot 행에만 있다.
+- 재시도: 429·5xx·연결 거부/끊김은 `decide_detailed`가 한 번 더 시도한다(Retry-After 존중, 최대 2초 대기; 항목의
+  `retries`로 조정, 0이면 없음; 읽기 타임아웃은 제외). 실패 행은 시도마다 남는다. 이유 — None 한 번의 대가가 크다(게이트는 미검사 통과,
+  라우팅은 4배 느린 DeepSeek 폴백).
 
 ## 4.5 실데이터 기준선 비교 (2026-09-19, 총 $0.015)
 
@@ -219,6 +224,54 @@ shadow 모드의 "claim 삭제" 문구가 작성기를 흔들면 안 된다). �
 diplomat 0.65(오답)였다 — 문턱값 0.80이면 29/30. 보수적으로 0.85를 두고 `llm_audit_log`의 두 caller 비율과 hint 불일치를
 일주일 보고 조정한다.
 
+## 4.8 독립 검토 인용 게이트 — shadow (구현 2026-09-19)
+
+검토자의 `checks[].quote`는 `resolve_review_checks`가 원문에서 위치를 확인하지만, 그 인용이 `finding`(이 인용이 무엇을
+확인하는지 적은 한국어 문장)을 실제로 담는지는 아무도 보지 않았다. `citation_gate.check_review_checks`가 조사 게이트와
+같은 질문(finding↔quote)을 Jev(registry `commulingo_review_citation_support`)에 묻고, 판정은 각 check의 `citation_check`와
+review artifact metrics의 `review_citation_*`에 남는다. 훅은 `make_handlers(..., gate=review_gate(usage))` — 결정이 box에 들어가기 전에
+돌아 enforce로 바꾸면 그 check만 지목한 ToolRejection으로 검토자에게 되돌아간다. 파이프라인 검토와 검토 타이머의
+독립 검토 양쪽에 걸리고, 승인 메모의 checks에서는 판정 수치를 뺀다. **배포 상태: `enforce=true`**(2026-09-19 사용자 지시, 기준선 오탐 0).
+
+**기준선 — 저장된 검토 결정 40건에서 check 하나씩 무작위 추출(최근 21일), 정답은 finding과 quote를 직접 대조**
+
+| 정답 | n | 검토 결정 | Jev |
+|---|---|---|---|
+| S 인용이 finding을 뒷받침 | 37 | approve 35 · revise 2 | 37/37 supports (conf 0.72~1.0, 0.85 미만 6건) |
+| P 일부만 | 1 | approve | supports 0.59 (인용이 앞뒤 잘려 몰로토프 절이 빠짐) |
+| N 무관 | 2 | revise 1 · approve 1 | 2/2 unrelated (conf 0.98 · 0.83) — enforce였다면 1건 즉시 거절, 1건 유보 |
+
+오탐 0. 40건 $0.0016, 평균 360ms. N 2건의 실체: 코시긴 사망일 회고를 확인한다는 finding에 1941년 철도 위원회 문장을
+인용(revise 결정 안), 피우수트스키의 '폴란드 부흥·사나차 실권자' 서술을 확인한다며 1932년 단치히 구축함 사건 문단을
+인용(approve 결정 안). 검토자 인용 40건 중 2건(5%)이 비어 있었으므로 조사 게이트(30건 중 5건)보다 낮지만 0은 아니다.
+`review_citation_rejections`가 검토 회차를 눈에 띄게 늘리면 문턱값을 올린다.
+
+## 4.9 기각 — `scout_kg_classify` (평가 2026-09-19)
+
+A군 후보였으나 실제 scout 완료 태스크 30건(최근 90일 202건에서 무작위)을 보니 **전부 메일함 브리핑**이라 분류는
+사실상 agent_knowledge/economy 이분법이고 정답 자체가 모호하다(AI 뉴스레터 요약을 economy로 볼지).
+
+| | 현재 `scout_kg_classify` (gpt-5.6-luna) | Jev |
+|---|---|---|
+| 둘의 일치 | 23/30 | |
+| 불일치 7건 | 판정 가능한 2건: 진행 메모→economy(오답 1) | agent_knowledge(정답 1) · 신규 메일 없음→economy 0.50(오답 1, 문턱값 미만이라 폴백됐을 것) · 나머지 5건은 정답 모호 |
+| 평균 지연 | 2,275 ms | 360 ms |
+| 30건 비용 | $0.0035 | $0.0010 |
+
+월 38회 호출이라 지연·비용 차이가 의미 없고 정확도 이득을 잴 수 없어 교체하지 않는다. 다시 볼 조건: scout가 메일
+브리핑 외 정찰(뉴스·SNS 모니터링)을 실제로 맡아 그룹 분류가 갈리기 시작할 때.
+
+## 4.10 남은 후보와 관찰 포인트
+
+- 조사 게이트 실데이터 첫 7건(12:06~12:35): 173 claim, unrelated 4건 전부 conf 0.12~0.62의 "일부 지지"(긴 복합 문장의
+  절 하나만 인용) → 거절 0. 기준선의 P군과 같은 양상. 복합 claim을 절 단위로 나누게 하거나 `partial` 선택지를 두는
+  것은 기준선을 다시 재야 하므로 보류.
+- 검토 사전 게이트(3절 B): 최근 14일 revise 사유를 읽으면 전부 "핵심 사실 대부분 검증, 그러나 X가 출처와 충돌"류라
+  초안만 보는 판정으로는 못 잡는다. 기각.
+- `research_spelling_proofread`: 최근 30일 호출 0건. 보류.
+- 남음: vector_search 청크 선별(러시아어 청크 관련성 기준선 필요), 웹챗·A2A 스크리닝(shadow), 도구 인자 위험 게이트
+  (shadow), Telegram 태스크 완료 검증 보조. 각각 같은 형식(표본·정답·기존·Jev)의 기준선 먼저.
+
 ## 5. 롤아웃 단계 (각 단계 시작 전 승인)
 
 **0. 계정·키·shadow 평가 (지출 발생 — 승인 필요).** console.typesafe.ai 가입, 키를 프록시 credential로 설치. 위 4.1~4.2 구현. 그 다음 **실제 동작은 바꾸지 않고** 다음 세 곳에서 기존 호출과 병행 실행해 일치율을 `llm_audit_log`·journald에 남긴다:
@@ -231,7 +284,8 @@ diplomat 0.65(오답)였다 — 문턱값 0.80이면 29/30. 보수적으로 0.85
 
 **2. B군 신설 게이트 — shadow 먼저.** 인용 지지 검사 → 웹챗 스크리닝 → vector_search 선별 → 도구 위험 게이트 순. 각각 로그만 쌓는 shadow 기간을 두고, enforce는 security_gateway와 같은 `gateway_enforce_mode` 식 스위치로 별도 승인.
 
-**3. 문서 흡수.** `llm_call_registry.md`(decide 진입점·kind), `llm_gateway.md`(프록시 라우트·요율), `commulingo_pipeline.md`/`security_gateway.md`/`web_research.md`(각 게이트) 갱신 후 이 문서 삭제.
+**3. 문서 흡수.** `llm_call_registry.md`(decide 진입점·kind·재시도), `llm_gateway.md`(프록시 라우트·요율), `commulingo_pipeline.md`(두 게이트)는
+갱신됨. 이 문서는 후보·기준선 보관용으로 유지한다.
 
 ## 6. 하지 말 것
 

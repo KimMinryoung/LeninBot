@@ -479,7 +479,7 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
         job={'id':9,'kind':'person','action':'create','target':'fixture','topic':'basics'}
         artifacts=[{'stage':'research','value':{'baseline':''}},
                    {'stage':'draft','value':{'fields':{},'sources':[]}}]
-        def handlers(reads,proposal,fetched,box):
+        def handlers(reads,proposal,fetched,box,gate=None):
             async def decide(**value):
                 box.update(value)
             return {'commulingo_review_decision':decide}
@@ -540,7 +540,7 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
                    {'stage':'review','value':{'decision':'revise','reason':'Fix the patronymic','needs_research':False,
                        'checks':[{'citation':'c','source':'s','quote':'q'*20,'finding':'부칭 표기 오류'}]}},
                    {'stage':'draft','value':{'fields':{'bio':{'ko':'수정','en':'fixed'}},'sources':[]}}]
-        def handlers(reads,proposal,fetched,box):
+        def handlers(reads,proposal,fetched,box,gate=None):
             async def decide(**value):
                 box.update(value)
             return {'commulingo_review_decision':decide}

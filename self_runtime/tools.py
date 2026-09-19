@@ -305,6 +305,9 @@ _ROUTING_CLASSES = {
     "email_a2a": "Email or agent-to-agent diplomatic communication.",
 }
 _ROUTING_DECISION_FEATURE = "task_routing_decision"
+# Jev takes at most 32k tokens per question; a delegation brief past this many
+# characters is judged on its head (the request comes first, context after).
+_ROUTING_TASK_MAX_CHARS = 12000
 
 
 def _agent_criteria(allowed: list[str]) -> dict[str, str]:
@@ -313,7 +316,7 @@ def _agent_criteria(allowed: list[str]) -> dict[str, str]:
     criteria = {}
     for agent in allowed:
         card = _AGENT_ROUTING_CARDS.get(agent, {})
-        text = "Use for: " + "; ".join(card.get("use_for", [])) or agent
+        text = "Use for: " + ("; ".join(card.get("use_for", [])) or agent)
         if card.get("do_not_use_for"):
             text += ". Not for: " + "; ".join(card["do_not_use_for"])
         if agent == "programmer":
@@ -340,7 +343,7 @@ async def _classify_route_with_jev(task: str, candidates: list[str] | None = Non
         if not extra.get("enabled", True):
             return None
         accept = float((extra.get("thresholds") or {}).get("accept", 0.85))
-        decision = await decide(_ROUTING_DECISION_FEATURE, {"task": task}, {
+        decision = await decide(_ROUTING_DECISION_FEATURE, {"task": task[:_ROUTING_TASK_MAX_CHARS]}, {
             "agent": {"type": "choice", "instructions": "Which LeninBot specialist agent should handle this delegated task?",
                       "criteria": _agent_criteria(allowed)},
             "routing_class": {"type": "choice", "instructions": "Which class of work is this task?",

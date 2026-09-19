@@ -114,6 +114,57 @@ class DecideTests(unittest.TestCase):
         self.assertEqual(result.error_kind, "configuration")
         post.assert_not_called()
 
+    def test_retryable_failure_is_retried_once_then_succeeds(self):
+        responses = [_Resp(429, text="slow down", headers={"retry-after": "1"}), _Resp(200, PAYLOAD)]
+        with mock.patch("httpx.post", side_effect=responses) as post, \
+             mock.patch.object(cr.time, "sleep") as sleep:
+            result = cr.decide_detailed("t", "s", QUESTIONS, profile=_profile())
+        self.assertIsNotNone(result.decision)
+        self.assertEqual(post.call_count, 2)
+        sleep.assert_called_once_with(1.0)
+        # One error row for the failed attempt, one billed row for the answer.
+        self.assertEqual([r.get("status", "ok") for r in self.recorded], ["error", "ok"])
+        self.assertEqual(self.recorded[1]["tokens_in"], 501)
+
+    def test_retry_pause_is_capped_and_non_retryable_errors_are_not_retried(self):
+        responses = [_Resp(503, text="busy", headers={"retry-after": "30"}), _Resp(200, PAYLOAD)]
+        with mock.patch("httpx.post", side_effect=responses), mock.patch.object(cr.time, "sleep") as sleep:
+            self.assertIsNotNone(cr.decide_detailed("t", "s", QUESTIONS, profile=_profile()).decision)
+        sleep.assert_called_once_with(cr._DECISION_RETRY_PAUSE_MAX)
+        with mock.patch("httpx.post", return_value=_Resp(401, text="Unauthorized")) as post, \
+             mock.patch.object(cr.time, "sleep") as sleep:
+            self.assertEqual(cr.decide_detailed("t", "s", QUESTIONS, profile=_profile()).error_kind, "authentication")
+        self.assertEqual(post.call_count, 1)
+        sleep.assert_not_called()
+
+    def test_read_timeout_is_not_retried_but_connection_errors_are(self):
+        import httpx
+        with mock.patch("httpx.post", side_effect=httpx.ReadTimeout("slow")) as post, \
+             mock.patch.object(cr.time, "sleep") as sleep:
+            result = cr.decide_detailed("t", "s", QUESTIONS, profile=_profile())
+        self.assertEqual((result.error_kind, post.call_count), ("transport", 1))
+        sleep.assert_not_called()
+        with mock.patch("httpx.post", side_effect=[httpx.ConnectError("refused"), _Resp(200, PAYLOAD)]) as post, \
+             mock.patch.object(cr.time, "sleep"):
+            self.assertIsNotNone(cr.decide_detailed("t", "s", QUESTIONS, profile=_profile()).decision)
+        self.assertEqual(post.call_count, 2)
+
+    def test_attempts_follow_the_entry_and_survive_bad_values(self):
+        self.assertEqual(cr._decision_attempts(_profile()), 2)
+        self.assertEqual(cr._decision_attempts(cr.CallSiteProfile(feature="t", provider="openrouter", model="m",
+                                                                  extra={"retries": 3})), 4)
+        self.assertEqual(cr._decision_attempts(cr.CallSiteProfile(feature="t", provider="openrouter", model="m",
+                                                                  extra={"retries": "one"})), 2)
+        self.assertEqual(cr._decision_attempts(cr.CallSiteProfile(feature="t", provider="openrouter", model="m",
+                                                                  extra={"retries": None})), 2)
+
+    def test_registry_entry_can_disable_retries(self):
+        profile = cr.CallSiteProfile(feature="t", provider="openrouter", model="typesafe/jev-1.13",
+                                     timeout=5.0, extra={"retries": 0})
+        with mock.patch("httpx.post", return_value=_Resp(429, text="slow down")) as post:
+            self.assertTrue(cr.decide_detailed("t", "s", QUESTIONS, profile=profile).retryable)
+        self.assertEqual(post.call_count, 1)
+
     def test_decide_sync_returns_none_on_failure(self):
         with mock.patch("httpx.post", side_effect=ConnectionError("down")):
             self.assertIsNone(cr.decide_sync("t", "s", QUESTIONS, profile=_profile()))

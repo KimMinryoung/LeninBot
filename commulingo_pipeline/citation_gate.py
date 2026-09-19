@@ -16,7 +16,14 @@ model quotes a passage that states the fact, picks another source, or drops
 the claim. Every check is recorded on the research artifact for calibration;
 an unavailable model never blocks research (the gate then only records).
 
-dev_docs/jev_system_one_adoption.md §4.5 has the measured baseline.
+The same question is asked of the independent reviewer's own checks
+(``check_review_checks``, feature ``commulingo_review_citation_support``):
+each check pairs a located quote with a Korean finding of what it verifies.
+In a 40-check sample from stored reviews, 2 quotes said nothing about their
+finding (one under a revise, one under an approve); no false positives, so
+it enforces from the start.
+
+dev_docs/jev_system_one_adoption.md §4.5 and §4.8 have the measured baselines.
 """
 import asyncio
 import logging
@@ -26,6 +33,7 @@ from llm.call_registry import resolve
 logger = logging.getLogger(__name__)
 
 FEATURE = 'commulingo_citation_support'
+REVIEW_FEATURE = 'commulingo_review_citation_support'
 DEFAULT_THRESHOLDS = {'reject': 0.85, 'boilerplate': 0.9}
 MAX_EXCERPT_CHARS = 3000
 CONCURRENCY = 8
@@ -52,10 +60,31 @@ QUESTIONS = {
     },
 }
 
+# The reviewer's check names what its quote verifies (a Korean "finding")
+# rather than a field claim; the questions differ only in those words.
+REVIEW_QUESTIONS = {
+    'support': {
+        'type': 'choice',
+        'instructions': 'Does the quoted source passage support what the finding says it verifies?',
+        'criteria': {
+            'supports': 'The passage states the facts the finding says it verifies (names, dates, events, roles may be '
+                        'paraphrased or translated).',
+            'contradicts': 'The passage states something incompatible with the finding.',
+            'unrelated': 'The passage does not speak to what the finding says it verifies.',
+        },
+    },
+    'specific': {
+        'type': 'noul',
+        'instructions': 'The passage contains the specific facts (names, dates, places, figures) the finding relies on, '
+                        'not only the general topic.',
+    },
+    'boilerplate': QUESTIONS['boilerplate'],
+}
 
-def settings():
+
+def settings(feature=FEATURE):
     """Hot-reloadable gate settings from the registry entry."""
-    profile = resolve(FEATURE)
+    profile = resolve(feature)
     extra = profile.extra or {}
     thresholds = {**DEFAULT_THRESHOLDS, **(extra.get('thresholds') or {})}
     return {'enabled': bool(extra.get('enabled', True)), 'enforce': bool(extra.get('enforce', True)),
@@ -100,6 +129,15 @@ def claim_key(claim):
             claim.get('stance') or 'supports')
 
 
+def review_check_state(check):
+    return {'finding': check.get('finding'), 'quote': str(check.get('quote') or '')[:MAX_EXCERPT_CHARS],
+            'source_url': check.get('source')}
+
+
+def review_check_key(check):
+    return (check.get('finding'), check.get('quote'), check.get('source'))
+
+
 def annotate(claims, checks):
     """Copy of ``claims`` with each judged claim carrying its compact check.
 
@@ -120,6 +158,62 @@ def annotate(claims, checks):
     return out
 
 
+async def _judge(feature, questions, items, *, key, state, skip, describe, usage=None, decide=None, cache=None,
+                 tracker_prefix='', noun='claim'):
+    """Shared core: one check per item, index-aligned; raises when enforce is on
+    and a verdict is a confident rejection. ``skip(item)`` names why an item
+    cannot be judged (None to judge it), ``describe(i, item)`` labels it in
+    the rejection message."""
+    conf = settings(feature)
+    if not conf['enabled'] or not items:
+        return []
+    if decide is None:
+        from llm.call_registry import decide as registry_decide
+        decide = registry_decide
+    cache = cache if cache is not None else {}
+    gate = asyncio.Semaphore(CONCURRENCY)
+
+    async def one(item):
+        reason = skip(item)
+        if reason:
+            return {'support': None, 'error': reason}
+        async with gate:
+            decision = await decide(feature, state(item), questions)
+        if decision is None:
+            return {'support': None, 'error': 'decision unavailable'}
+        return verdict(decision, conf['thresholds'], item.get('stance') or 'supports')
+
+    # One paid decision per distinct item: duplicates within the batch share
+    # the first item's task, and anything already judged comes from the cache.
+    pending = {}
+    for item in items:
+        k = key(item)
+        if k not in cache and k not in pending:
+            pending[k] = asyncio.ensure_future(one(item))
+    for k, task in pending.items():
+        result = await task
+        if result.get('support') is not None:
+            cache[k] = result
+        pending[k] = result
+    checks = [cache.get(key(item)) or pending[key(item)] for item in items]
+    if usage is not None:
+        tracker = usage.tracker
+        tracker[f'{tracker_prefix}citation_checks'] = tracker.get(f'{tracker_prefix}citation_checks', 0) + len(checks)
+        tracker[f'{tracker_prefix}citation_unavailable'] = (tracker.get(f'{tracker_prefix}citation_unavailable', 0)
+                                                            + sum(1 for c in checks if c.get('support') is None))
+    rejected = [(i, c) for i, c in enumerate(checks) if c.get('reject')]
+    if rejected:
+        logger.info('%s: %d/%d rejected (enforce=%s)', feature, len(rejected), len(checks), conf['enforce'])
+        if usage is not None:
+            usage.tracker[f'{tracker_prefix}citation_rejections'] = (
+                usage.tracker.get(f'{tracker_prefix}citation_rejections', 0) + len(rejected))
+        if conf['enforce']:
+            lines = [f'{describe(i, items[i])}: {c["reject"]}' for i, c in rejected]
+            raise ValueError('citation check failed for ' + (f'one {noun}' if len(lines) == 1 else f'{len(lines)} {noun}s')
+                             + f'; the other {noun}s are fine and may be resubmitted unchanged:\n' + '\n'.join(lines))
+    return checks
+
+
 async def check_claims(claims, sources, *, usage=None, decide=None, cache=None):
     """Judge every located claim; return the checks, raising ValueError on confident failures.
 
@@ -131,42 +225,39 @@ async def check_claims(claims, sources, *, usage=None, decide=None, cache=None):
     handler) makes that promise hold: a claim resubmitted unchanged keeps the
     verdict it already received instead of being judged again.
     """
-    conf = settings()
-    if not conf['enabled'] or not claims:
-        return []
-    if decide is None:
-        from llm.call_registry import decide as registry_decide
-        decide = registry_decide
+    def skip(claim):
+        return None if (sources.get(claim.get('source_id')) or {}).get('body') else 'source body unavailable'
+
+    return await _judge(FEATURE, QUESTIONS, claims, key=claim_key, skip=skip,
+                        state=lambda claim: claim_state(claim, sources.get(claim.get('source_id')) or {}),
+                        usage=usage, decide=decide, cache=cache,
+                        describe=lambda i, c: f'claim {i + 1} ({c.get("field")}, {str(c.get("claim"))[:120]!r})')
+
+
+def review_gate(usage=None, cache=None):
+    """The decision hook for make_handlers(gate=): judge the decision's checks
+    and return it with each verdict attached. One per review run so resubmitted
+    checks reuse their verdicts. ``usage`` needs a ``tracker`` dict."""
     cache = cache if cache is not None else {}
-    gate = asyncio.Semaphore(CONCURRENCY)
 
-    async def one(claim):
-        key = claim_key(claim)
-        if key in cache:
-            return cache[key]
-        source = sources.get(claim.get('source_id')) or {}
-        if not source.get('body'):
-            return {'support': None, 'error': 'source body unavailable'}
-        async with gate:
-            decision = await decide(FEATURE, claim_state(claim, source), QUESTIONS)
-        if decision is None:
-            return {'support': None, 'error': 'decision unavailable'}
-        cache[key] = verdict(decision, conf['thresholds'], claim.get('stance') or 'supports')
-        return cache[key]
+    async def gate(value):
+        checks = value.get('checks', [])
+        return {**value, 'checks': annotate(checks, await check_review_checks(checks, usage=usage, cache=cache))}
+    return gate
 
-    checks = list(await asyncio.gather(*(one(c) for c in claims)))
-    if usage is not None:
-        tracker = usage.tracker
-        tracker['citation_checks'] = tracker.get('citation_checks', 0) + len(checks)
-        tracker['citation_unavailable'] = tracker.get('citation_unavailable', 0) + sum(1 for c in checks if c.get('support') is None)
-    rejected = [(i, c) for i, c in enumerate(checks) if c.get('reject')]
-    if rejected:
-        logger.info('citation gate: %d/%d claims rejected (enforce=%s)', len(rejected), len(checks), conf['enforce'])
-        if usage is not None:
-            usage.tracker['citation_rejections'] = usage.tracker.get('citation_rejections', 0) + len(rejected)
-        if conf['enforce']:
-            lines = [f'claim {i + 1} ({claims[i].get("field")}, {str(claims[i].get("claim"))[:120]!r}): {c["reject"]}'
-                     for i, c in rejected]
-            raise ValueError('citation check failed for ' + ('one claim' if len(lines) == 1 else f'{len(lines)} claims')
-                             + '; the other claims are fine and may be resubmitted unchanged:\n' + '\n'.join(lines))
-    return checks
+
+async def check_review_checks(checks, *, usage=None, decide=None, cache=None):
+    """Judge the independent reviewer's checks (finding ↔ located quote).
+
+    ``checks`` are the decision's checks after resolve_review_checks, so each
+    carries the exact quote text and its source URL. Same contract as
+    check_claims: index-aligned results, counters under ``review_`` in the
+    usage tracker, ValueError naming the failing checks only when the review
+    gate's entry says enforce.
+    """
+    def skip(check):
+        return None if check.get('quote') and check.get('finding') else 'check without quote or finding'
+
+    return await _judge(REVIEW_FEATURE, REVIEW_QUESTIONS, checks, key=review_check_key, skip=skip,
+                        state=review_check_state, usage=usage, decide=decide, cache=cache, tracker_prefix='review_',
+                        describe=lambda i, c: f'check {i + 1} ({str(c.get("finding"))[:120]!r})', noun='check')

@@ -344,6 +344,16 @@
     "thresholds": {"reject": 0.85, "boilerplate": 0.9},
     "note": "CommuLingo 조사 단계 인용 지지 게이트(commulingo_pipeline/citation_gate.py): 위치 확인된 인용 발췌가 주장을 실제로 뒷받침하는지 Jev choice(supports/contradicts/unrelated)+noul(specific, boilerplate)로 판정. confidence≥thresholds.reject의 unrelated/contradicts 또는 boilerplate≥thresholds.boilerplate는 결과 호출을 거절해 모델이 인용을 고치게 함. enforce=false면 기록만(shadow), enabled=false면 호출 안 함. 판정 실패(None)는 기록만 하고 통과. 2026-09-19 기준선: 실제 30쌍 중 N 5건을 오탐 0으로 5/5 unrelated(3건 고신뢰), 대조군 29/29. claim당 ~$0.00002."
     },
+  "commulingo_review_citation_support": {
+    "provider": "openrouter",
+    "model": "typesafe/jev-1.13",
+    "timeout": 20,
+    "kind": "system_one",
+    "enabled": true,
+    "enforce": true,
+    "thresholds": {"reject": 0.85, "boilerplate": 0.9},
+    "note": "CommuLingo 독립 검토 인용 게이트(commulingo_pipeline/citation_gate.py::check_review_checks): 검토자의 checks[].quote가 finding이 확인한다고 말하는 사실을 실제로 담는지 Jev choice(supports/contradicts/unrelated)+noul(specific, boilerplate)로 판정. 판정 수치는 각 check의 citation_check에, 집계는 review artifact metrics의 review_citation_*에 남는다. 2026-09-19 기준선(저장된 검토 40건): 무관 인용 2건을 오탐 0으로 검출(conf 0.98·0.83). 2026-09-19 사용자 지시로 처음부터 enforce=true. enforce=true면 고신뢰 unrelated/contradicts 또는 boilerplate 인용을 가진 결정 호출을 거절해 검토자가 그 check만 고치게 한다."
+    },
   "task_routing_decision": {
     "provider": "openrouter",
     "model": "typesafe/jev-1.13",
