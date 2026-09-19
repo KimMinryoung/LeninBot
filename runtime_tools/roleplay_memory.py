@@ -12,8 +12,10 @@ from pathlib import Path
 
 from tool_gateway.security import get_caller
 from runtime_tools.roleplay_clock import TEMPORAL_SCHEMA, interpret_clock, validate_temporal
-from runtime_tools.roleplay_dynamics import (METRICS, CONDITION_SCHEMA, with_defaults, validate_conditions, advance,
-                                             carry_injury_progress, injury_pain_floor, reconcile_injuries, isolation_stage)
+from runtime_tools.roleplay_dynamics import (METRICS, CONDITION_SCHEMA, RESOLVE_EVENT_KINDS, RESOLVE_INTENSITY,
+                                             RESOLVE_EVENT_HISTORY, with_defaults, validate_conditions, advance,
+                                             carry_injury_progress, injury_pain_floor, reconcile_injuries,
+                                             isolation_stage, resolve_event_delta)
 
 MEMORY_PATH = Path(__file__).resolve().parents[1] / "output" / "roleplay_memory.sqlite3"
 MAX_NOTES = 30
@@ -275,6 +277,8 @@ def state_view(state: dict) -> dict:
     calculation = state.get("last_calculation")
     if calculation:
         view["last_calculation"] = {k: calculation.get(k) for k in ("from_minute", "to_minute", "basis", "before", "after", "tension_target", "isolation_stage", "injury_changes", "healed") if calculation.get(k) not in (None, [])}
+    if state.get("resolve_events"):
+        view["last_resolve_event"] = state["resolve_events"][-1]
     view["calm_hours"] = round(state.get("calm_minutes", 0) / 60, 1)
     view["isolation_hours"] = round(state.get("isolation_minutes", 0) / 60, 1)
     stage = isolation_stage(state.get("isolation_minutes", 0))
@@ -379,6 +383,9 @@ def _apply_changes(base: dict, changes: dict, *, adjustment: str, metric_reasons
         warnings.append(f"adjustment 미지정: {adjustment}로 처리함 (수치 직접 변경은 initialize/event/correction)")
     if adjustment not in ADJUSTMENTS:
         raise ValueError("adjustment must be initialize/event/correction")
+    if adjustment == "event" and "resolve" in numeric:
+        raise ValueError("의지(resolve)는 event로 직접 쓰지 않는다. resolve_event={kind, intensity}로 사건을 보내면 코드가 표에 따라 계산한다. "
+                         f"kind: {', '.join(f'{k}={v[1]}' for k, v in RESOLVE_EVENT_KINDS.items())}; intensity 1 스침/2 보통/3 극심. 잘못된 값의 정정만 adjustment=correction")
     reasons = dict(metric_reasons) if isinstance(metric_reasons, dict) else {}
     unknown = set(reasons) - set(METRICS)
     if unknown:
@@ -410,12 +417,54 @@ def _apply_changes(base: dict, changes: dict, *, adjustment: str, metric_reasons
     return state, adjustment, {k: reasons[k] for k in sorted(numeric)}
 
 
+def _normalize_resolve_event(value, action: str, warnings: list[str]):
+    if value in (None, {}, ""):
+        return None
+    if action not in {"update", "time"}:
+        raise ValueError("resolve_event is only accepted by update/time")
+    if isinstance(value, str):
+        value = {"kind": value}
+    if not isinstance(value, dict):
+        raise ValueError("resolve_event must be {kind, intensity, note?}")
+    item = dict(value)
+    kind = item.pop("kind", None) or item.pop("type", None)
+    intensity = item.pop("intensity", None)
+    note = item.pop("note", "") or item.pop("reason", "")
+    if item:
+        raise ValueError(f"resolve_event accepts kind/intensity/note; got {sorted(item)}")
+    if intensity is None:
+        intensity = 2
+        warnings.append("resolve_event.intensity 미지정: 2(보통)로 처리함")
+    if isinstance(intensity, float) and intensity.is_integer():
+        intensity = int(intensity)
+    if kind not in RESOLVE_EVENT_KINDS or type(intensity) is not int or intensity not in RESOLVE_INTENSITY:
+        raise ValueError(f"resolve_event.kind는 {', '.join(f'{k}({v[1]})' for k, v in RESOLVE_EVENT_KINDS.items())} 중 하나, intensity는 1 스침/2 보통/3 극심")
+    if not isinstance(note, str) or len(note) > 300:
+        raise ValueError("resolve_event.note must be a string of at most 300 characters")
+    return {"kind": kind, "intensity": intensity, "note": note.strip()}
+
+
+def _apply_resolve_event(state: dict, event: dict, *, event_id: str, reason: str) -> dict:
+    """Take the table's toll on resolve (after any interval and the direct changes of the same call)."""
+    if state["resolve"] is None:
+        raise ValueError("resolve is unset; initialize it in changes with adjustment=initialize before sending resolve_event")
+    delta, factors = resolve_event_delta(state, event["kind"], event["intensity"])
+    before = state["resolve"]
+    state["resolve"] = round(max(0, min(100, before + delta)), 4)
+    record = {"event_id": event_id, "kind": event["kind"], "intensity": event["intensity"], "delta": delta,
+              "from": before, "to": state["resolve"], "factors": factors, "scene_minute": state["scene_minute"],
+              "note": event["note"] or reason}
+    state["resolve_events"] = (state.get("resolve_events", []) + [record])[-RESOLVE_EVENT_HISTORY:]
+    return record
+
+
 def roleplay_state(action: str, changes: dict | None = None, reason: str = "", *,
                    expected_revision: int | None = None,
                    adjustment: str = "", event_id: str = "",
                    metric_reasons: dict | None = None, temporal: dict | None = None,
                    event_type: str = "other", interval_conditions: dict | None = None,
-                   person_updates: list | None = None, person_review: str = "", **extra) -> str:
+                   person_updates: list | None = None, person_review: str = "",
+                   resolve_event: dict | None = None, **extra) -> str:
     caller = get_caller()
     user_id = _owner_id()
     if action == "read":
@@ -448,7 +497,8 @@ def roleplay_state(action: str, changes: dict | None = None, reason: str = "", *
         warnings.append("changes 안의 metric_reasons는 최상위 인자로 옮겨 적용함")
     changes, inner_reason, injury_upserts = _normalize_changes(changes, extra, warnings)
     if extra:
-        raise ValueError(f"Unknown argument(s) {sorted(extra)}. Accepted: action, changes, reason, expected_revision, temporal, interval_conditions, person_updates, person_review, adjustment, event_id, metric_reasons, event_type")
+        raise ValueError(f"Unknown argument(s) {sorted(extra)}. Accepted: action, changes, reason, expected_revision, temporal, interval_conditions, person_updates, person_review, adjustment, event_id, metric_reasons, event_type, resolve_event")
+    resolve_event = _normalize_resolve_event(resolve_event, action, warnings)
     person_updates, person_review = _normalize_person_updates(person_updates, person_review, warnings)
     if action == "time":
         temporal = _normalize_temporal(temporal, warnings)
@@ -480,7 +530,7 @@ def roleplay_state(action: str, changes: dict | None = None, reason: str = "", *
         warnings.append("interval_conditions는 현재 시간의 advance/until에만 쓰이므로 무시함")
         interval_conditions = None
     if not isinstance(event_id, str) or not 1 <= len(event_id.strip()) <= 100:
-        if action == "time" or set(changes) & set(METRICS):
+        if action == "time" or set(changes) & set(METRICS) or resolve_event:
             event_id = _auto_event_id(caller.scope_id, action, changes, temporal)
             warnings.append(f"event_id 미지정: {event_id}로 자동 생성함. 같은 사건을 재시도할 때만 재사용")
         else:
@@ -533,6 +583,7 @@ def roleplay_state(action: str, changes: dict | None = None, reason: str = "", *
             event_id=event_id, event_type=event_type, warnings=warnings)
         if all(k in changes or k in (interval_conditions or {}) for k in CONDITION_SCHEMA):
             state["conditions_initialized"] = True
+        applied_resolve = _apply_resolve_event(state, resolve_event, event_id=event_id, reason=reason) if resolve_event else None
         applied_people = _apply_person_updates(conn, user_id, person_updates or [], warnings)
         state["revision"] = before["revision"] + 1
         state["reason"] = reason
@@ -541,6 +592,7 @@ def roleplay_state(action: str, changes: dict | None = None, reason: str = "", *
                  "adjustment": adjustment, "event_id": event_id, "metric_reasons": metric_reasons,
                  "temporal": temporal, "interval_conditions": interval_conditions,
                  "person_updates": applied_people, "person_review": person_review, "warnings": warnings,
+                 "resolve_event": applied_resolve,
                  "source_scope_id": caller.scope_id, "before": before, "after": state}
         conn.execute("INSERT INTO state_history(user_id, revision, payload) VALUES (?, ?, ?)",
                      (user_id, state["revision"], json.dumps(audit, ensure_ascii=False)))
@@ -561,7 +613,7 @@ def roleplay_state(action: str, changes: dict | None = None, reason: str = "", *
 
 ROLEPLAY_STATE_TOOL = {
     "name": "roleplay_state",
-    "description": "역할극 인물의 지속 상태표. read=현재 상태, history=최근 변경, update=즉시 변경, time=장면 시간 진행(+같은 호출의 changes로 그 뒤의 상태), reset=새 장면. 한 사건은 한 호출로: time에는 temporal(source_quote/interpretation/relation current·past·plan/certainty/operation anchor·advance·until·next_day·correct·reference)과 지난 구간의 interval_conditions.activity, 그리고 구간 뒤 달라진 것을 changes에 함께 넣는다. changes: hunger/fatigue/pain/tension과 정신 수치 resolve(의지)/clarity(명료함)/humiliation(굴욕)(0–100, 시간 경과가 아닌 식사·부상·굴욕 사건 같은 즉시 사건만), body/mood/scene, location/participants(등록된 인물 ID)/last_event/unresolved/goal/avoid/next_action, activity/sleep_quality/threat/injuries(전체 목록 교체). 빈 문자열·빈 배열로 해소된 항목을 비운다. expected_revision=현재 revision. person_updates=[{person_id, changes:{observed/reported/relationship/inferred}}]로 인물 기록을 같은 트랜잭션에서 갱신하고, 새 정보가 없으면 person_review에 이유. 누락·형식 차이는 가능한 한 해석해 적용하고 결과의 warnings에 알린다.",
+    "description": "역할극 인물의 지속 상태표. read=현재 상태, history=최근 변경, update=즉시 변경, time=장면 시간 진행(+같은 호출의 changes로 그 뒤의 상태), reset=새 장면. 한 사건은 한 호출로: time에는 temporal(source_quote/interpretation/relation current·past·plan/certainty/operation anchor·advance·until·next_day·correct·reference)과 지난 구간의 interval_conditions.activity, 그리고 구간 뒤 달라진 것을 changes에 함께 넣는다. changes: hunger/fatigue/pain/tension과 정신 수치 clarity(명료함)/humiliation(굴욕)(0–100, 시간 경과가 아닌 식사·부상·굴욕 사건 같은 즉시 사건만; resolve(의지)는 initialize/correction만 직접 쓰고 사건은 resolve_event={kind,intensity}로 보내 코드가 계산), body/mood/scene, location/participants(등록된 인물 ID)/last_event/unresolved/goal/avoid/next_action, activity/sleep_quality/threat/injuries(전체 목록 교체). 빈 문자열·빈 배열로 해소된 항목을 비운다. expected_revision=현재 revision. person_updates=[{person_id, changes:{observed/reported/relationship/inferred}}]로 인물 기록을 같은 트랜잭션에서 갱신하고, 새 정보가 없으면 person_review에 이유. 누락·형식 차이는 가능한 한 해석해 적용하고 결과의 warnings에 알린다.",
     "input_schema": {
         "type": "object",
         "properties": {
@@ -583,6 +635,13 @@ ROLEPLAY_STATE_TOOL = {
             "adjustment": {"type": "string", "enum": sorted(ADJUSTMENTS)},
             "event_id": {"type": "string", "maxLength": 100},
             "metric_reasons": {"type": "object", "properties": {k: {"type": "string", "maxLength": 300} for k in METRICS}, "additionalProperties": False},
+            "resolve_event": {"type": "object", "properties": {
+                "kind": {"type": "string", "enum": list(RESOLVE_EVENT_KINDS),
+                         "description": "; ".join(f"{k}={v[1]}" for k, v in RESOLVE_EVENT_KINDS.items())},
+                "intensity": {"type": "integer", "minimum": 1, "maximum": 3, "description": "1 스침, 2 보통, 3 극심"},
+                "note": {"type": "string", "maxLength": 300, "description": "이 사건이 의지에 미친 영향의 장면 근거"},
+            }, "required": ["kind", "intensity"], "additionalProperties": False,
+                "description": "의지(resolve)를 깎거나 돌리는 사건. 수치는 코드가 종류·강도·상태(통증 60↑, 피로 70↑, 고립)·반복으로 계산한다"},
         }, "required": ["action"], "additionalProperties": True,
     },
 }

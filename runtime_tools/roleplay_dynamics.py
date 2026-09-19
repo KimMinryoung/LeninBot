@@ -44,6 +44,24 @@ CALCULATION_STEP_MINUTES = 60
 # stored threat eases too (a visitor's return is a tension event, then a new threat).
 ALONE_THREAT_RELIEF_MINUTES = 60
 ALONE_THREAT_RELIEF_ACTIVITIES = ("rest", "sleep")
+# Resolve is the lever of an interrogation, so what an event takes from it is
+# a table, not the model's mood: the model names the kind and how hard it hit.
+RESOLVE_EVENT_KINDS = {  # kind: (base delta at intensity 2, label)
+    "beating": (-10.0, "구타·고문"),
+    "sexual_coercion": (-8.0, "성적 강요"),
+    "public_submission": (-5.0, "증인 앞 복종·공개 굴욕"),
+    "threat_to_kin": (-6.0, "가족·측근 언급 협박"),
+    "futile_effort": (-3.0, "자술서 물리기·헛수고"),
+    "kindness": (3.0, "작은 배려·양보"),
+}
+RESOLVE_INTENSITY = {1: 0.5, 2: 1.0, 3: 1.5}  # 스침 / 보통 / 극심
+RESOLVE_EVENT_CAP = 15.0            # one event never takes more than this
+RESOLVE_STATE_FACTOR = 1.25         # each of pain >= 60, fatigue >= 70, an isolation stage
+RESOLVE_PAIN_THRESHOLD = 60
+RESOLVE_FATIGUE_THRESHOLD = 70
+RESOLVE_REPEAT_WINDOW_MINUTES = 120  # the same kind again within this window counts half
+RESOLVE_REPEAT_FACTOR = 0.5
+RESOLVE_EVENT_HISTORY = 20
 # Solitary confinement: hours without anyone present accumulate; a visit of
 # 30 minutes or more breaks the streak, a shorter one (a meal pushed through
 # the door) only takes a few hours off it. Effects add to the other drifts.
@@ -60,7 +78,7 @@ DYNAMICS_DEFAULTS = {
     "time_basis": "현재 저장 상태를 기준 시점(0분)으로 삼음. 이전 경과 시간은 재계산하지 않음.",
     "activity": "rest", "sleep_quality": "normal", "threat": "uncertain",
     "injuries": [], "conditions_initialized": False, "recent_events": [], "calm_minutes": 0, "isolation_minutes": 0,
-    "last_calculation": None, "clock": None, "event_timestamps": [],
+    "last_calculation": None, "clock": None, "event_timestamps": [], "resolve_events": [],
 }
 
 
@@ -197,6 +215,37 @@ def progress_injuries(injuries, minutes):
         if severity > 0:
             updated.append({**item, "severity": severity})
     return updated, changes
+
+
+def resolve_event_delta(state, kind, intensity):
+    """What an event of this kind takes from (or gives to) resolve under the current state.
+    Returns (delta, factors): drains scale with pain/fatigue/isolation and halve when the
+    same kind repeats within the window; gains do not scale; drains stop at the cap."""
+    if kind not in RESOLVE_EVENT_KINDS:
+        raise ValueError(f"resolve_event.kind must be one of {sorted(RESOLVE_EVENT_KINDS)}")
+    if type(intensity) is not int or intensity not in RESOLVE_INTENSITY:
+        raise ValueError("resolve_event.intensity is 1 (스침), 2 (보통) or 3 (극심)")
+    base, label = RESOLVE_EVENT_KINDS[kind]
+    delta = base * RESOLVE_INTENSITY[intensity]
+    factors = {"base": base, "intensity": RESOLVE_INTENSITY[intensity]}
+    if delta < 0:
+        pain = state.get("pain") or 0
+        fatigue = state.get("fatigue") or 0
+        weights = {"pain": pain >= RESOLVE_PAIN_THRESHOLD, "fatigue": fatigue >= RESOLVE_FATIGUE_THRESHOLD,
+                   "isolation": bool(isolation_stage(state.get("isolation_minutes", 0)))}
+        for name, applies in weights.items():
+            if applies:
+                delta *= RESOLVE_STATE_FACTOR
+                factors[name] = RESOLVE_STATE_FACTOR
+        recent = [e for e in state.get("resolve_events", []) if e.get("kind") == kind
+                  and state.get("scene_minute", 0) - e.get("scene_minute", 0) <= RESOLVE_REPEAT_WINDOW_MINUTES]
+        if recent:
+            delta *= RESOLVE_REPEAT_FACTOR
+            factors["repeat"] = RESOLVE_REPEAT_FACTOR
+        if delta < -RESOLVE_EVENT_CAP:
+            delta = -RESOLVE_EVENT_CAP
+            factors["cap"] = RESOLVE_EVENT_CAP
+    return round(delta, 4), {**factors, "label": label}
 
 
 def isolation_stage(minutes):

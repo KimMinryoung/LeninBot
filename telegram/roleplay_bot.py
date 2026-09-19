@@ -262,6 +262,12 @@ async def cmd_status(message: Message) -> None:
     stage = isolation_stage(state.get("isolation_minutes", 0))
     state["isolation"] = f"{state.get('isolation_minutes', 0) / 60:g}시간" + (f" — {stage['label']}: {stage['description']}" if stage else "")
     state["calm"] = f"{state.get('calm_minutes', 0) / 60:g}시간"
+    last_resolve = (state.get("resolve_events") or [None])[-1]
+    if last_resolve:
+        factors = last_resolve.get("factors", {})
+        applied = [k for k in ("pain", "fatigue", "isolation", "repeat", "cap") if k in factors]
+        state["resolve_event"] = (f"{factors.get('label', last_resolve['kind'])} 강도 {last_resolve['intensity']} → {last_resolve['delta']:+g} "
+                                  f"({last_resolve['from']:g}→{last_resolve['to']:g})" + (f", 적용 배율: {', '.join(applied)}" if applied else ""))
     state["injuries"] = "; ".join(f"{i['description']} (심각도 {i['severity']}, {trends[i['trend']]}, {'처치함' if i['treated'] else '미처치'})" for i in state.get("injuries", [])) or "등록 없음"
     if not state.get("conditions_initialized"):
         state["injuries"] += " — 시간 계산 조건 미확인"
@@ -307,7 +313,8 @@ async def cmd_status(message: Message) -> None:
                        "last_calculated_minute": "마지막 계산(분)", "time_basis": "시간 근거",
                        "sleep_quality": "수면의 질", "threat": "위협 상태",
                        "injuries": "세부 부상", "pain_floor": "부상 기저 통증",
-                       "isolation": "홀로 지낸 시간", "calm": "조용한 시간", "reason": "최근 변경 이유"})
+                       "isolation": "홀로 지낸 시간", "calm": "조용한 시간", "resolve_event": "최근 의지 사건",
+                       "reason": "최근 변경 이유"})
     lines.extend(f"{label}: {display(state.get(key))}" for key, label in labels.items()
                  if key in {"calendar_display", "location", "participants"} or state.get(key) not in (None, "", "미설정"))
     if not detailed:

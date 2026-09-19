@@ -78,6 +78,30 @@ class DynamicsTests(unittest.TestCase):
         self.assertEqual(advance({**alone, 'activity': 'strenuous'}, 120, '강요')['threat'], 'threatening')
         self.assertEqual(advance({**alone, 'threat': 'immediate', 'activity': 'rest'}, 60, '혼자 휴식')['threat'], 'uncertain')
 
+    def test_resolve_event_table(self):
+        from runtime_tools.roleplay_dynamics import resolve_event_delta
+        calm = self.initial(pain=20, fatigue=10, resolve=60, scene_minute=600)
+        self.assertEqual(resolve_event_delta(calm, 'beating', 2)[0], -10)
+        self.assertEqual(resolve_event_delta(calm, 'beating', 1)[0], -5)
+        self.assertEqual(resolve_event_delta(calm, 'futile_effort', 3)[0], -4.5)
+        self.assertEqual(resolve_event_delta(calm, 'kindness', 3)[0], 4.5)
+        # Pain, exhaustion and solitary each weigh the blow; gains are never amplified.
+        worn = {**calm, 'pain': 60, 'fatigue': 70, 'isolation_minutes': 25 * 60}
+        delta, factors = resolve_event_delta(worn, 'public_submission', 2)
+        self.assertAlmostEqual(delta, -5 * 1.25 ** 3, places=4)
+        self.assertEqual((factors['pain'], factors['fatigue'], factors['isolation']), (1.25, 1.25, 1.25))
+        self.assertEqual(resolve_event_delta(worn, 'kindness', 2)[0], 3)
+        # One event stops at the cap; the same kind again within two hours counts half.
+        delta, factors = resolve_event_delta(worn, 'beating', 3)
+        self.assertEqual((delta, factors['cap']), (-15, 15))
+        repeated = {**calm, 'resolve_events': [{'kind': 'beating', 'scene_minute': 500}]}
+        self.assertEqual(resolve_event_delta(repeated, 'beating', 2)[0], -5)
+        self.assertEqual(resolve_event_delta({**calm, 'resolve_events': [{'kind': 'beating', 'scene_minute': 400}]}, 'beating', 2)[0], -10)
+        self.assertEqual(resolve_event_delta(repeated, 'sexual_coercion', 2)[0], -8)
+        for bad in (('slap', 2), ('beating', 0), ('beating', 2.0)):
+            with self.assertRaises(ValueError):
+                resolve_event_delta(calm, *bad)
+
     def test_pain_floor_and_healing_timeline(self):
         from runtime_tools.roleplay_dynamics import injury_pain_floor, progress_injuries, carry_injury_progress
         burn = {'id': 'burn', 'description': '화상', 'severity': 3, 'trend': 'recovering', 'treated': True}
@@ -363,6 +387,42 @@ class StateTransactionTests(unittest.TestCase):
         self.assertEqual(memory.load_state(1)['pain'], 30)
         self.assertTrue(any('metric_reasons' in w for w in result['warnings']))
         self.assertEqual(json.loads(memory.roleplay_state('history'))[0]['metric_reasons'], {'pain': '뺨을 맞음'})
+
+    def test_resolve_events_go_through_the_table(self):
+        memory.roleplay_state('update', {'resolve': 50, 'clarity': 60, 'humiliation': 40}, '정신 수치 설정', expected_revision=1,
+                              adjustment='initialize', event_id='mental-init')
+        # Direct resolve events are refused with the table in the message; corrections still work.
+        with self.assertRaises(ValueError) as ctx:
+            memory.roleplay_state('update', {'resolve': 30}, '구타', expected_revision=2, adjustment='event', event_id='direct')
+        self.assertIn('resolve_event', str(ctx.exception))
+        result = json.loads(memory.roleplay_state('update', {'last_event': '로도스가 뺨을 때렸다', 'humiliation': 50}, '구타', expected_revision=2,
+                                                  adjustment='event', event_id='slap', resolve_event={'kind': 'beating', 'intensity': 1, 'note': '한 대'}))
+        self.assertEqual(result['resolve'], 45)
+        self.assertEqual(result['last_resolve_event']['delta'], -5)
+        self.assertEqual(result['last_resolve_event']['factors']['label'], '구타·고문')
+        self.assertEqual(memory.load_state(1)['resolve_events'][-1]['event_id'], 'slap')
+        # In a time call the interval is computed first, then the event lands on the result.
+        temporal = {'relation': 'current', 'certainty': 'estimated', 'operation': 'advance', 'elapsed_minutes': 60,
+                    'source_quote': '한 시간', 'interpretation': '한 시간 뒤 다시 구타'}
+        result = json.loads(memory.roleplay_state('time', reason='다시 구타', expected_revision=3, event_id='slap2', temporal=temporal,
+                                                  interval_conditions={'activity': 'rest', 'threat': 'safe'}, person_updates=[], person_review='없음',
+                                                  resolve_event={'kind': 'beating'}))
+        self.assertTrue(any('intensity' in w for w in result['warnings']))
+        self.assertEqual(result['last_resolve_event']['factors']['repeat'], 0.5)  # 60 minutes after the first blow
+        self.assertAlmostEqual(result['resolve'], 45 + 2 - 5, delta=0.01)  # a safe hour's +2, then -10 halved
+        self.assertEqual(result['last_resolve_event']['scene_minute'], 60)
+        history = json.loads(memory.roleplay_state('history'))
+        self.assertEqual(history[0]['resolve_event']['kind'], 'beating')
+        replay = json.loads(memory.roleplay_state('time', reason='재시도', expected_revision=3, event_id='slap2', temporal=temporal,
+                                                  interval_conditions={'activity': 'rest'}, resolve_event={'kind': 'beating', 'intensity': 2}))
+        self.assertTrue(replay['replayed'])
+        memory.roleplay_state('update', {'resolve': 20}, '사용자 정정', expected_revision=4, adjustment='correction', event_id='fix-resolve')
+        self.assertEqual(memory.load_state(1)['resolve'], 20)
+        with self.assertRaises(ValueError):
+            memory.roleplay_state('update', {'mood': '무너짐'}, '잘못된 종류', expected_revision=5, resolve_event={'kind': 'slap', 'intensity': 2})
+        with caller_scope(new_run_context(interface='telegram', agent_name='roleplay', user_id='3', is_owner=True)):
+            with self.assertRaises(ValueError):  # resolve unset for this user
+                memory.roleplay_state('update', {'mood': '경계'}, '초기화 전', resolve_event={'kind': 'beating', 'intensity': 2})
 
     def test_tension_event_resets_calm(self):
         temporal = {'relation': 'current', 'certainty': 'explicit', 'operation': 'advance', 'elapsed_minutes': 600,

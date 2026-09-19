@@ -217,6 +217,31 @@ threatening으로 넘겨 의지가 −2.5/h로 0까지 소모됐다. 다음 규�
 검증: `test_acute_pain_subsides_by_activity`, `test_alone_at_rest_relieves_threat`,
 `test_alone_interval_warning_and_inner_metric_reasons`. 피로가 rest −2/h로 며칠 내내 0에 머무는 점은 이번에 바꾸지 않았다.
 
+#### 사건에 따른 의지 감소표 (2026-09-19)
+
+의지는 심문·자백 장면의 지렛대인데 2026-09-19까지 사건 감소량은 모델 재량이었다(실제 로그: 뺨 구타 −2.9, 베리야 강요 −10,
+누락분 몰아넣기 −17.9). 이제 `changes.resolve`는 initialize/correction만 받고 event는 거절한다. 사건은
+`resolve_event={kind, intensity, note}`로 보내며 `roleplay_dynamics.resolve_event_delta`가 계산한다.
+
+| kind | 기본치(강도 2) |
+|---|---|
+| beating 구타·고문 | −10 |
+| sexual_coercion 성적 강요 | −8 |
+| threat_to_kin 가족·측근 언급 협박 | −6 |
+| public_submission 증인 앞 복종·공개 굴욕 | −5 |
+| futile_effort 자술서 물리기·헛수고 | −3 |
+| kindness 작은 배려·양보 | +3 |
+
+강도 1/2/3은 ×0.5/×1/×1.5. 감소에만 상태 가중치가 붙는다: 통증 ≥60, 피로 ≥70, 고립 단계 각각 ×1.25(복합 최대 ×1.95).
+같은 kind가 장면 시간 120분 안에 되풀이되면 ×0.5(한 턴에 나눠 부르는 급락 방지). 한 사건의 감소 상한은 15.
+`time` 호출에서는 구간 계산과 changes 뒤에 적용한다. 기록은 `resolve_events`(최근 20건: event_id·kind·intensity·delta·
+전후값·factors·scene_minute)와 state_history의 `resolve_event`에 남고, 결과 뷰의 `last_resolve_event`와 `/status 상세`에
+표시한다. 의지 미설정이면 오류다. 행동 기준(40 이하 조건부 부분 인정, 25 이하 사실 단위 자백·사생활 진술 순응,
+10 이하 허위 혐의 받아쓰기, 사용자 지정 거부선은 유지)은 `identity/roleplay_persona.md`의 지침이며 코드가 강제하지 않는다.
+굴욕(humiliation)은 이전처럼 event로 직접 조정한다.
+
+검증: `test_resolve_event_table`, `test_resolve_events_go_through_the_table`.
+
 정신 3축은 2026-09-18에 추가했다. 조건 판정은 각 계산 단계 시작 시점의 피로·통증·위협을 쓴다. 한 구간은 내부에서
 60분 단위(`CALCULATION_STEP_MINUTES`)로 나눠 계산하므로 구간 중에 통증이 60 아래로 내려가거나 고립 단계·습관화가
 바뀌면 그 뒤 단계부터 반영된다(2026-09-19 이전에는 구간 시작 조건이 구간 전체에 적용됐다). 기존 저장 상태와 legacy JSON에는 없는 키이며 null(미설정)로 읽고 자동 생성하지 않는다.
