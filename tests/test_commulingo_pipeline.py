@@ -50,6 +50,31 @@ class EvidenceTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 resolve_claim_chunks([{**claim,'chunks':invalid}],{source['id']:source})
 
+    def test_quoted_claims_resolve_under_tolerant_matching(self):
+        from commulingo_pipeline.evidence import resolve_claim_chunks
+        body = 'Приговор был приведён в исполнение 6 февраля (по другой версии — 4 февраля) 1940 года\n\nв Сухановской тюрьме «особого назначения».'
+        source = snapshot('https://example.org/yezhov', body)
+        typed = 'исполнение 6 февраля (по другой версии - 4 февраля) 1940 года в Сухановской тюрьме "особого назначения".'
+        [claim] = resolve_claim_chunks([{'field':'body','claim':'Execution date','source_id':source['id'],'quote':typed}],{source['id']:source})
+        self.assertEqual(body[claim['start']:claim['end']], body[body.index('исполнение'):])
+        self.assertNotIn('quote', claim)
+        compiled = compile_evidence([claim],{source['id']:source},{'body'})
+        self.assertEqual(compiled[0]['excerpt'], body[claim['start']:claim['end']])
+        with self.assertRaisesRegex(ValueError,'quote not found'):
+            resolve_claim_chunks([{'field':'body','claim':'x','source_id':source['id'],'quote':'этой фразы в источнике нет вовсе'}],{source['id']:source})
+        with self.assertRaisesRegex(ValueError,'quote not found'):
+            resolve_claim_chunks([{'field':'body','claim':'x','source_id':source['id'],'quote':'6 февраля'}],{source['id']:source})
+
+    def test_review_quote_matching_folds_typography(self):
+        from runtime_tools.commulingo_review_policy import normalize, validate_decision
+        fetched = {'https://example.org/p': 'He called it “the cogs in a terrible machine” — and\u00a0meant it, 1936–1937.'}
+        check = {'citation':'https://example.org/p','source':'https://example.org/p','finding':'확인',
+                 'quote':'called it "the cogs in a terrible machine" - and meant it, 1936-1937.'}
+        value = validate_decision({'decision':'approve','reason':'Verified against the retrieved page text.',
+                                   'resolved_risks':[],'checks':[check]},{'risks':[]},fetched)
+        self.assertEqual(value['decision'],'approve')
+        self.assertEqual(normalize('A\u2014B'),normalize('a - b').replace(' ',''))
+
     def test_exact_range_and_expiry(self):
         source = snapshot('https://example.org/source','A documented event happened in 1917.')
         claim = {'field':'bio','claim':'The event happened in 1917',

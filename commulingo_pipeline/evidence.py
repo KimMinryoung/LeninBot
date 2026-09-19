@@ -5,13 +5,35 @@ from datetime import datetime, timedelta, timezone
 SOURCE_CHUNK_CHARS = 240
 
 
+QUOTE_CHARS = (20, 1000)
+
+
 def resolve_claim_chunks(claims, sources):
-    """Translate displayed chunk IDs to exact offsets; never ask a model to count."""
+    """Translate a verbatim quote or displayed chunk IDs to exact offsets.
+
+    A quote is located under the review policy's tolerant normalization
+    (quotes, dashes, spacing, case), so what the model copies from the
+    displayed source is found even when the page used typographic marks. A
+    model quotes far more reliably than it indexes: chunk-ID and source-ID
+    errors were 227 research rejections in the week to 2026-09-19.
+    """
+    from runtime_tools.commulingo_review_policy import locate
     resolved = []
     for claim in claims:
         source = sources.get(claim.get('source_id'))
         if not source or not source.get('body'):
             raise ValueError('unknown source_id; use an ID from a retrieved source')
+        if claim.get('quote') is not None:
+            quote = str(claim['quote'])
+            span = locate(source['body'], quote) if len(quote.strip()) >= QUOTE_CHARS[0] else None
+            if not span:
+                raise ValueError(f'quote not found in source {source["id"]}: copy {QUOTE_CHARS[0]}..{QUOTE_CHARS[1]} '
+                                 'characters verbatim from its displayed text (no ellipsis or paraphrase), '
+                                 'or cite displayed chunk IDs instead')
+            value = {k:v for k,v in claim.items() if k not in {'quote','chunks','chunk'}}
+            value.update(start=span[0], end=span[1])
+            resolved.append(value)
+            continue
         chunks = claim.get('chunks', [claim['chunk']] if 'chunk' in claim else [])
         count = (len(source['body']) + SOURCE_CHUNK_CHARS - 1) // SOURCE_CHUNK_CHARS
         if not chunks or any(type(n) is not int or n < 0 or n >= count for n in chunks):

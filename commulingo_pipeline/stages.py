@@ -9,7 +9,7 @@ import re
 from datetime import datetime, timezone
 
 from .engine import Result
-from .evidence import snapshot, compile_evidence, resolve_claim_chunks, SOURCE_CHUNK_CHARS, SourceHandles
+from .evidence import snapshot, compile_evidence, resolve_claim_chunks, SOURCE_CHUNK_CHARS, SourceHandles, QUOTE_CHARS
 from . import service
 from .bundles import work_topics, advance
 
@@ -316,12 +316,15 @@ class Research:
             'reason':{'type':'string','minLength':20},
             'claims':{'type':'array','items':{'type':'object','additionalProperties':False,
                 'properties':{'field':{'type':'string','enum':sorted(fields)},'claim':{'type':'string'},'source_id':{'type':'string'},
+                    'quote':{'type':'string','minLength':QUOTE_CHARS[0],'maxLength':QUOTE_CHARS[1],
+                             'description':'Preferred: the supporting passage copied verbatim from the displayed source '
+                                           f'({QUOTE_CHARS[0]}..{QUOTE_CHARS[1]} characters, contiguous, no ellipsis). The runner locates it.'},
                     'chunks':{'type':'array','minItems':1,'maxItems':25,
-                              'items':{'type':'integer','minimum':0}},
+                              'items':{'type':'integer','minimum':0},'description':'Alternative to quote: displayed chunk IDs.'},
                     'chunk':{'type':'integer','minimum':0,'description':'Single-chunk shorthand for chunks: [n].'},
                     'stance':{'type':'string','enum':['supports','disputes']}},
                 'required':['field','claim','source_id'],
-                'anyOf':[{'required':['chunks']},{'required':['chunk']}]}}},
+                'oneOf':[{'required':['quote']},{'required':['chunks']},{'required':['chunk']}]}}},
             'required':['status','reason','claims']}
         previous_error = latest(artifacts,'validate').get('error','')
         required_support = set(re.findall(r'(?:evidence required for |supporting )([A-Za-z][A-Za-z0-9]*)',
@@ -361,8 +364,9 @@ class Research:
             if targeted else
             'This is RESEARCH ONLY. Do not write a dictionary patch. Investigate all current commissioned topics together, '
             'identity and missing facts. Collect supporting AND conflicting sources. Finish through ')
-            + 'commulingo_pipeline_result with source_id and displayed chunk IDs in chunks (e.g. chunks: [2,3]). '
-            'The runner computes exact character ranges. Facts need field-specific claims. '
+            + 'commulingo_pipeline_result with source_id and, per claim, the supporting passage copied verbatim '
+            'into quote (preferred) or displayed chunk IDs in chunks (e.g. chunks: [2,3]). '
+            'The runner locates quotes and computes exact character ranges. Facts need field-specific claims. '
             'Reuse the dated sources below: fetch_url retrieves their cached text and chunk IDs. '
             'A no-edit status applies to ALL current topics; use it only when that judgement holds for all of them. '
             'Person sections are commissioned separately after card topics, with a fresh snapshot. '

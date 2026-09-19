@@ -30,8 +30,51 @@ DECISION_TOOL = {"name": "commulingo_review_decision", "description": "Submit on
         }, "required": ["decision", "reason", "resolved_risks", "checks"]}}
 
 
+# Characters that differ between a page and what a model types back from it:
+# typographic quotes and dashes, non-breaking and zero-width spaces, ellipsis.
+_FOLD = str.maketrans({
+    "\u2018": "'", "\u2019": "'", "\u201a": "'", "\u201b": "'", "\u2032": "'",
+    "\u201c": '"', "\u201d": '"', "\u201e": '"', "\u201f": '"', "\u00ab": '"', "\u00bb": '"',
+    "\u2010": "-", "\u2011": "-", "\u2012": "-", "\u2013": "-", "\u2014": "-", "\u2015": "-", "\u2212": "-",
+    "\u00a0": " ", "\u2009": " ", "\u202f": " ", "\u3000": " ",
+    "\u200b": "", "\u200c": "", "\u200d": "", "\ufeff": "", "\u00ad": "",
+    "\u2026": "...",
+})
+
+
 def normalize(text):
-    return re.sub(r"\s+", " ", text).strip()
+    """Whitespace-collapsed, quote/dash-folded, case-folded text for matching.
+
+    Exact matching lost 63 reviews in the week to 2026-09-19 to differences a
+    reader never notices (curly quotes, en dashes, NBSP). Every substitution is
+    one that keeps two renderings of the same passage equal, never one that
+    makes different passages equal.
+    """
+    return re.sub(r"\s+", " ", str(text).translate(_FOLD)).strip().casefold()
+
+
+def locate(body, quote):
+    """(start, end) of quote in body under normalize(), in body's own offsets."""
+    folded, index = [], []
+    pending_space = False
+    for i, ch in enumerate(str(body).translate(_FOLD)):
+        if ch.isspace():
+            pending_space = bool(folded)
+            continue
+        if pending_space:
+            folded.append(" ")
+            index.append(i)
+            pending_space = False
+        for c in ch.casefold():
+            folded.append(c)
+            index.append(i)
+    needle = normalize(quote)
+    if not needle:
+        return None
+    at = "".join(folded).find(needle)
+    if at < 0:
+        return None
+    return index[at], index[at + len(needle) - 1] + 1
 
 
 def review_source(url, body, snapshots):
