@@ -326,8 +326,8 @@ class Research:
             'claims':{'type':'array','items':{'type':'object','additionalProperties':False,
                 'properties':{'field':{'type':'string','enum':sorted(fields)},'claim':{'type':'string'},
                     'source_id':{'type':'string','description':'Source ID shown with the retrieved text (S1, S2, ...).'},
-                    'quote':{'type':'string','minLength':20,'maxLength':400,'description':
-                        'The supporting passage copied exactly from the displayed source text (20..400 characters, '
+                    'quote':{'type':'string','minLength':20,'maxLength':1000,'description':
+                        'The supporting passage copied exactly from the displayed source text (20..1000 characters, '
                         'no ellipsis). The runner locates it and stores the surrounding sentences.'},
                     'stance':{'type':'string','enum':['supports','disputes']}},
                 'required':['field','claim','source_id','quote']}}},
@@ -383,7 +383,7 @@ class Research:
             'This is RESEARCH ONLY. Do not write a dictionary patch. Investigate all current commissioned topics together, '
             'identity and missing facts. Collect supporting AND conflicting sources. Finish through ')
             + 'commulingo_pipeline_result: each claim names its source_id (S1, S2, ... as displayed) and a quote of '
-            '20..400 characters copied exactly from that source\'s displayed text; the runner locates the quote and '
+            '20..1000 characters copied exactly from that source\'s displayed text; the runner locates the quote and '
             'stores the surrounding sentences. Facts need field-specific claims. '
             'Reuse the dated sources below: fetch_url retrieves their cached text. '
             'A no-edit status applies to ALL current topics; use it only when that judgement holds for all of them. '

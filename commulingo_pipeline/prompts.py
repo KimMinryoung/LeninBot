@@ -47,7 +47,7 @@ startYear/endYear for a term. Other supported fields may carry their own claims.
 Claim field names must be actual writable fields, never commissioned topic names. For terms,
 history, distinctions and examples belong to body claims; definition claims cannot substitute
 for body evidence. For people, use bio rather than a topic such as basics.
-Source IDs (S1, S2, ...) come from retrieval results. Each claim carries a quote of 20..400
+Source IDs (S1, S2, ...) come from retrieval results. Each claim carries a quote of 20..1000
 characters copied exactly from the displayed text of its source; the runner locates it. Do not
 paraphrase, abbreviate with an ellipsis, or count characters.
 Return ready only when

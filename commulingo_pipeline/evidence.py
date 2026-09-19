@@ -48,7 +48,7 @@ def locate_claim_quotes(claims, sources):
                         source = other
                         break
         if found is None:
-            raise ValueError(f'quote not found in {claim.get("source_id")} or any retrieved source: copy 20..400 '
+            raise ValueError(f'quote not found in {claim.get("source_id")} or any retrieved source: copy 20..1000 '
                              'characters exactly as displayed (no ellipsis, no paraphrase)')
         start, end = excerpt_window(source['body'], *found)
         value = {k: v for k, v in claim.items() if k != 'quote'}
