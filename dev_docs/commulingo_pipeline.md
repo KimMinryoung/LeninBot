@@ -127,8 +127,8 @@ reason이 probe·placeholder·진행 메모("Investigating … before returning"
 `metrics`의 `review_citation_*`에 남긴다. 훅은 `make_handlers(..., gate=review_gate(usage))`로 결정이 기록되기 전에 돌며 파이프라인 검토와 검토 타이머의
 독립 검토(`scripts/commulingo_person_reviewer.py`) 양쪽에 걸린다. 승인 메모에 넣는 checks에서는 판정 수치를
 뺀다(`review_note_checks`). 저장된 검토
-40건 기준선에서 무관 인용 2건을 오탐 없이 잡았고(4.8), **현재 `enforce=false`(기록만)** — enforce로 바꾸면 고신뢰
-무관·반박 인용을 가진 결정 호출을 그 check만 지목해 거절한다.
+40건 기준선에서 무관 인용 2건을 오탐 없이 잡았고(4.8), **`enforce=true`** — 고신뢰
+무관·반박 인용을 가진 결정 호출을 그 check만 지목해 거절한다(`enforce=false`면 기록만).
 작성기는 제한된
 초안 도구와 사전 조회만 받는다. 실행기가 20~6000자의 원문 인용과 기준 revision을 붙인다.
 작성 모델에는 evidence/revision을 수정하는 인자가 없다. 인물 상세 절도 같은 경로를 사용한다.

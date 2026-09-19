@@ -2,7 +2,7 @@
 
 작성 2026-09-19. 1~3절은 도입 전 계획, 4.4절부터는 **구현 상태와 실측 기준선**이다. 배포된 것:
 `decide()` 인프라(4.4), CommuLingo 조사 인용 게이트(4.6, enforce), route_task 1차 분류기(4.7), CommuLingo
-독립 검토 인용 게이트(4.8, shadow). 각 도메인 문서(`llm_call_registry.md`·`llm_gateway.md`·`commulingo_pipeline.md`)가
+독립 검토 인용 게이트(4.8, enforce). 각 도메인 문서(`llm_call_registry.md`·`llm_gateway.md`·`commulingo_pipeline.md`)가
 현재 동작을 기술하고, 이 문서는 후보 목록·기준선 표·채택/기각 근거를 보관한다.
 
 ## 1. Jev가 무엇인가
@@ -231,7 +231,7 @@ diplomat 0.65(오답)였다 — 문턱값 0.80이면 29/30. 보수적으로 0.85
 같은 질문(finding↔quote)을 Jev(registry `commulingo_review_citation_support`)에 묻고, 판정은 각 check의 `citation_check`와
 review artifact metrics의 `review_citation_*`에 남는다. 훅은 `make_handlers(..., gate=review_gate(usage))` — 결정이 box에 들어가기 전에
 돌아 enforce로 바꾸면 그 check만 지목한 ToolRejection으로 검토자에게 되돌아간다. 파이프라인 검토와 검토 타이머의
-독립 검토 양쪽에 걸리고, 승인 메모의 checks에서는 판정 수치를 뺀다. **배포 상태: `enforce=false`**(기록만).
+독립 검토 양쪽에 걸리고, 승인 메모의 checks에서는 판정 수치를 뺀다. **배포 상태: `enforce=true`**(2026-09-19 사용자 지시, 기준선 오탐 0).
 
 **기준선 — 저장된 검토 결정 40건에서 check 하나씩 무작위 추출(최근 21일), 정답은 finding과 quote를 직접 대조**
 
@@ -244,7 +244,7 @@ review artifact metrics의 `review_citation_*`에 남는다. 훅은 `make_handle
 오탐 0. 40건 $0.0016, 평균 360ms. N 2건의 실체: 코시긴 사망일 회고를 확인한다는 finding에 1941년 철도 위원회 문장을
 인용(revise 결정 안), 피우수트스키의 '폴란드 부흥·사나차 실권자' 서술을 확인한다며 1932년 단치히 구축함 사건 문단을
 인용(approve 결정 안). 검토자 인용 40건 중 2건(5%)이 비어 있었으므로 조사 게이트(30건 중 5건)보다 낮지만 0은 아니다.
-enforce 전환은 실데이터 `review_citation_rejections` 분포를 본 뒤 별도 승인.
+`review_citation_rejections`가 검토 회차를 눈에 띄게 늘리면 문턱값을 올린다.
 
 ## 4.9 기각 — `scout_kg_classify` (평가 2026-09-19)
 

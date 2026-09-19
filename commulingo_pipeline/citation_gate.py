@@ -20,8 +20,8 @@ The same question is asked of the independent reviewer's own checks
 (``check_review_checks``, feature ``commulingo_review_citation_support``):
 each check pairs a located quote with a Korean finding of what it verifies.
 In a 40-check sample from stored reviews, 2 quotes said nothing about their
-finding (one under a revise, one under an approve). That gate records only
-(``enforce`` false) until its production numbers are read.
+finding (one under a revise, one under an approve); no false positives, so
+it enforces from the start.
 
 dev_docs/jev_system_one_adoption.md §4.5 and §4.8 have the measured baselines.
 """

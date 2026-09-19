@@ -43,7 +43,7 @@ TypeSafe Jev는 텍스트를 생성하지 않고 typed 판정을 돌려주는 �
   돌아오고 콜사이트는 기존 경로(LLM·기본 라벨)를 유지한다. 429·5xx·연결 거부/끊김은 한 번 더 시도한다(Retry-After
   존중, 최대 2초 대기; 항목 `retries`로 조정, 기본 1). 읽기 타임아웃은 재시도하지 않는다 — 첫 요청이 이미 처리됐을
   수 있고 게이트가 단계를 두 배로 세우게 된다. `async decide()`의 바깥 timeout은 항목의 시도 수 전체를 덮는다.
-- 현재 항목: `system_one_smoke`, `commulingo_citation_support`(enforce), `commulingo_review_citation_support`(shadow),
+- 현재 항목: `system_one_smoke`, `commulingo_citation_support`(enforce), `commulingo_review_citation_support`(enforce),
   `task_routing_decision`. 게이트 항목의 `enabled`/`enforce`/`thresholds`는 핫리로드된다.
 - 스모크: `venv/bin/python scripts/smoke_jev.py` (항목 `system_one_smoke`). 프록시에 credential이 없을 때
   승인된 1회 직접 실행은 `OPENROUTER_BASE_URL=https://openrouter.ai OPENROUTER_API_KEY=… ` env로.

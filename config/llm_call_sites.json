@@ -350,9 +350,9 @@
     "timeout": 20,
     "kind": "system_one",
     "enabled": true,
-    "enforce": false,
+    "enforce": true,
     "thresholds": {"reject": 0.85, "boilerplate": 0.9},
-    "note": "CommuLingo 독립 검토 인용 게이트(commulingo_pipeline/citation_gate.py::check_review_checks): 검토자의 checks[].quote가 finding이 확인한다고 말하는 사실을 실제로 담는지 Jev choice(supports/contradicts/unrelated)+noul(specific, boilerplate)로 판정. 판정 수치는 각 check의 citation_check에, 집계는 review artifact metrics의 review_citation_*에 남는다. 2026-09-19 기준선(저장된 검토 40건): 무관 인용 2건을 오탐 0으로 검출(conf 0.98·0.83). enforce=false(shadow)로 시작 — 실데이터 분포를 본 뒤 enforce 전환은 별도 승인. enforce=true면 고신뢰 unrelated/contradicts 또는 boilerplate 인용을 가진 결정 호출을 거절해 검토자가 그 check만 고치게 한다."
+    "note": "CommuLingo 독립 검토 인용 게이트(commulingo_pipeline/citation_gate.py::check_review_checks): 검토자의 checks[].quote가 finding이 확인한다고 말하는 사실을 실제로 담는지 Jev choice(supports/contradicts/unrelated)+noul(specific, boilerplate)로 판정. 판정 수치는 각 check의 citation_check에, 집계는 review artifact metrics의 review_citation_*에 남는다. 2026-09-19 기준선(저장된 검토 40건): 무관 인용 2건을 오탐 0으로 검출(conf 0.98·0.83). 2026-09-19 사용자 지시로 처음부터 enforce=true. enforce=true면 고신뢰 unrelated/contradicts 또는 boilerplate 인용을 가진 결정 호출을 거절해 검토자가 그 check만 고치게 한다."
     },
   "task_routing_decision": {
     "provider": "openrouter",
