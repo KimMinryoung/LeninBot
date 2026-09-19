@@ -58,6 +58,20 @@ class ClassifyTests(unittest.TestCase):
         filled = cc.fill_classification({**FIELDS, 'groupId': 'thaw', 'role': {'category': 'scholar'}}, out)
         self.assertEqual((filled['groupId'], filled['role']), ('international-revolutionary', {'category': 'socialist-bloc-leader'}))
 
+    def test_research_excerpts_for_bio_and_career_join_the_state(self):
+        seen = {}
+        def decide(feature, state, questions, label=None):
+            seen.update(state=state)
+            return result('international-revolutionary', 'socialist-bloc-leader')
+        claims = {'career': [{'claim': 'First Secretary 1956–1988', 'excerpt': 'x' * 2000}],
+                  'bio': [{'claim': 'b', 'excerpt': 'short'}], 'citizenship': [{'claim': 'c', 'excerpt': 'ignored here'}]}
+        cc.classify_person(FIELDS, catalogs=CATALOGS, claims=claims, decide=decide)
+        ex = seen['state']['research_excerpts']
+        self.assertEqual([e['field'] for e in ex], ['bio', 'career'])
+        self.assertEqual(len(ex[1]['excerpt']), cc.EVIDENCE_CHARS)
+        cc.classify_person(FIELDS, catalogs=CATALOGS, decide=decide)
+        self.assertNotIn('research_excerpts', seen['state'])
+
     def test_soviet_and_successor_citizens_may_receive_an_office(self):
         def decide(feature, state, questions, label=None):
             self.assertIn('nationalities-federal', questions['role']['criteria'])

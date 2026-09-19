@@ -350,8 +350,27 @@ def load_catalogs() -> tuple[list[dict], list[dict], list[dict]]:
     return _list_groups(), _list_offices(), _list_categories()
 
 
-def classify_person(fields: dict, *, catalogs=None, decide=None) -> dict | None:
+CLASSIFY_EVIDENCE_FIELDS = ("bio", "career", "moment", "years")
+EVIDENCE_PER_FIELD = 4
+EVIDENCE_CHARS = 900
+
+
+def evidence_for(claims: dict | None, fields=CLASSIFY_EVIDENCE_FIELDS) -> list[dict]:
+    """Research excerpts for the classifier: the writer's card summarises them,
+    but an office or era named only in the sources still counts. Capped so the
+    decision state stays about the person, not the whole research."""
+    out = []
+    for field in fields:
+        for c in (claims or {}).get(field, [])[:EVIDENCE_PER_FIELD]:
+            out.append({"field": field, "claim": c.get("claim"), "excerpt": str(c.get("excerpt") or "")[:EVIDENCE_CHARS]})
+    return out
+
+
+def classify_person(fields: dict, *, catalogs=None, claims: dict | None = None, decide=None) -> dict | None:
     """Group and role for a drafted person, or None when the model is unavailable.
+
+    ``claims`` (pipeline path) maps field name to [{"claim", "excerpt"}] from
+    the research artifact; bio/career/moment/years excerpts join the state.
 
     Returns {"groupId", "role": {"officeId"|"category"}, "confidence": {"group", "role"},
     "low_confidence": bool, "model"}. ``low_confidence`` (below the entry's
@@ -370,6 +389,9 @@ def classify_person(fields: dict, *, catalogs=None, decide=None) -> dict | None:
     if not groups or not categories:
         return None
     state = state_from_fields(fields)
+    evidence = evidence_for(claims)
+    if evidence:
+        state["research_excerpts"] = evidence
     soviet = offices_allowed((fields.get("citizenship") or {}).get("code"))
     result = (decide or decide_detailed)(FEATURE, state, build_questions(groups, offices, categories, soviet),
                                          label="person-classification")

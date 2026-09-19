@@ -720,14 +720,17 @@ class Draft:
                 raise ValueError('empty edit')
             if groups and any(fields[f] not in group_ids for f in ('group','groupId') if f in fields):
                 raise ValueError('select group/groupId from the supplied person group catalog')
+            excerpts = {}
+            if classify_codes is not None or classify is not None:
+                # Research excerpts by field for the classifiers (commulingo_classify):
+                # the codes read their own fields, group/role read bio/career/moment/years.
+                for c in claims:
+                    if c.get('source_id') in sources:
+                        body = sources[c['source_id']].get('body') or ''
+                        excerpts.setdefault(c['field'],[]).append({'claim':c.get('claim'),'excerpt':body[c.get('start',0):c.get('end',0)][:1500]})
             if classify_codes is not None:
                 from runtime_tools.commulingo_classify import fill_person_codes, missing_person_codes
                 if missing_person_codes(fields) or any(isinstance(fields.get(k),dict) for k in ('citizenship','nationalOrigin','fate')):
-                    excerpts = {}
-                    for c in claims:
-                        if c.get('field') in ('citizenship','nationalOrigin','fate') and c.get('source_id') in sources:
-                            body = sources[c['source_id']].get('body') or ''
-                            excerpts.setdefault(c['field'],[]).append({'claim':c.get('claim'),'excerpt':body[c.get('start',0):c.get('end',0)][:1500]})
                     codes = await asyncio.to_thread(classify_codes, fields, claims=excerpts)
                     fields = fill_person_codes(fields, codes)
                     if missing_person_codes(fields):
@@ -739,7 +742,7 @@ class Draft:
                              'codes_low_confidence':sorted(k for k,v in judged.items() if v['low_confidence'])})
             if classify is not None:
                 from runtime_tools.commulingo_classify import fill_classification
-                classification = await asyncio.to_thread(classify, fields, catalogs=catalogs)
+                classification = await asyncio.to_thread(classify, fields, catalogs=catalogs, claims=excerpts)
                 if classification is None:
                     raise ClassificationUnavailable('person group/role')
                 fields = fill_classification(fields, classification)

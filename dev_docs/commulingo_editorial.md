@@ -212,7 +212,8 @@ max_length_continuations로 실제 도구 루프에 전달한다. 응답당 8,00
 ## 인물 분류 자동 배정과 감사
 
 **등록 시 자동 배정 (2026-09-19).** 인물 create의 `groupId`와 `role`은 작성 모델이 고르지 않는다. 도구 schema에서 두 필드는
-필수가 아니고(작성 모델에게는 보이지 않음), 실행기가 초안의 이름·생몰·국적·별칭·경력·bio를 state로 Jev(registry
+필수가 아니고(작성 모델에게는 보이지 않음), 실행기가 초안의 이름·생몰·국적·출신·별칭·경력·bio·moment·fate 라벨과, 파이프라인에서는 조사 claim의
+bio·career·moment·years 발췌(필드당 4건, 900자)를 state로 Jev(registry
 `commulingo_person_classification`, `runtime_tools/commulingo_classify.py`)에 choice 판정을 받아 채운다. 관직 선택지는 소련·후계국
 국적에만 제시하고 비소련 인물은 카테고리만 고른다. 작성 모델의 schema에는 이 필드들이 아예 없다(create 도구와 초안 schema에서 제거). confidence가 `thresholds.accept`(0.7)
 미만이어도 채우되 draft artifact `metrics.classification`에 수치가 남아 검토 단계가 `classification_low_confidence` /
