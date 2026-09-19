@@ -345,12 +345,17 @@ class Research:
         if targeted:
             usage.tracker['targeted_research'] = sorted(required_support)
         async def finish(value):
-            # DeepSeek Flash issues a throwaway result call inside a batch of
-            # fetches ("reason": "placeholder", 12 times on 2026-09-19); the
-            # 20-character floor caught those, but a longer filler on a
-            # no-edit status would close the job.
-            if re.match(r'\W*(placeholder|todo|tbd|dummy|lorem)\b', str(value.get('reason','')), re.I):
-                raise ValueError('reason must state the actual judgement; a placeholder result is not recorded')
+            # DeepSeek Flash issues throwaway result calls: "placeholder" inside
+            # a batch of fetches (12 times on 2026-09-19), and worse, ones long
+            # enough to pass the floor — "Probe only — not a real submission"
+            # (afgantsy #42) and "Investigating commissioned topics before
+            # returning a final artifact" (#120) each closed a job as
+            # sources_unavailable for 90 days.
+            reason = str(value.get('reason',''))
+            if re.match(r'\W*(placeholder|probe|test|testing|checking|investigating|interim|in progress|'
+                        r'todo|tbd|dummy|lorem)\b', reason, re.I) or re.search(r'not a real submission', reason, re.I):
+                raise ValueError('reason must state the actual judgement; a probe or progress note is not a result. '
+                                 'Call commulingo_pipeline_result once, when the research is finished.')
             missing = required_support - {c.get('field') for c in value.get('claims',[])}
             if value.get('status')=='ready' and missing:
                 raise ValueError('ready research must resolve missing evidence for ' + ', '.join(sorted(missing)) +

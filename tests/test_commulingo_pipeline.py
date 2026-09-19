@@ -646,8 +646,15 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn('Chunks 1..2 of 0..2',second)      # page 2 numbering continues, never restarts
             self.assertIn('[chunk 2] ',second); self.assertNotIn('[chunk 0]',second)
             seen['saved']=[c.args[0]['url'] for c in store.save_source.call_args_list]
+            # Throwaway calls that passed the length floor closed jobs for 90 days (#42, #120).
+            for probe in ('Probe only — not a real submission, checking the tool.',
+                          'Investigating commissioned topics before returning a final artifact.'):
+                with self.assertRaisesRegex(ValueError,'probe or progress note'):
+                    await kwargs['handler']({'status':'sources_unavailable','reason':probe,'claims':[]})
+            # The persistent ID of the first page's snapshot with merged chunk numbers still resolves.
+            stale=next(c.args[0]['id'] for c in store.save_source.call_args_list if c.args[0]['body']==page1)
             await kwargs['handler']({'status':'ready','reason':'Both pages support the body claim.',
-                'claims':[{'field':'body','claim':'From page two','source_id':'S1','chunks':[2]}]})
+                'claims':[{'field':'body','claim':'From page two','source_id':stale,'chunks':[2]}]})
         job={'id':31,'kind':'term','action':'update','target':'fixture','topic':'history'}
         with patch('commulingo_pipeline.stages.service.call',return_value={'revision':'original'}), \
              patch('commulingo_pipeline.stages.model_call',side_effect=model):
