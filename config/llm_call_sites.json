@@ -363,6 +363,13 @@
     "thresholds": {"keep": 0.8},
     "note": "scout 보고서→KG 저장 전 사실 필터(kg_runtime/scout_ingest.py::_filter_fact_lines): 추출된 줄(최대 12)마다 noul '외부 세계에 대한 사실인가(메일함 UID·처리 절차·추론 메모가 아닌가)'를 한 요청으로 묻고 thresholds.keep 이상만 최대 7줄 저장, 남는 줄이 없으면 episode를 쓰지 않는다. 판정 불가 시 전부 유지(기존 동작). 2026-09-19 기준선(실제 scout 보고서 30건 100줄): 절차 줄 92건 전부 p≤0.11, 실제 뉴스 사실 6건 p≥0.85, 제목·표 행은 0.1~0.83. 보고서당 ~$0.00004. dev_docs/jev_system_one_adoption.md 4.10"
     },
+  "commulingo_classification_audit": {
+    "provider": "openrouter",
+    "model": "typesafe/jev-1.13",
+    "timeout": 20,
+    "kind": "system_one",
+    "note": "scripts/commulingo_classification_audit.py 전용: 인물 전원의 groupId·role을 Jev choice로 재판정해 저장값과 다른 고신뢰 건을 큐레이터 보고서로 뽑는다(쓰기 없음). criteria에 2026-09-19 운영자 확정 규칙(공화국 제1서기=nationalities-federal, 지방 서기=party-secretariat-cadres, ideology-propaganda=친소련 이데올로그, 비소련 인물은 시대 그룹 금지, scholar=이 역사의 연구자)이 들어 있고 인정된 경계 쌍은 보고에서 제외. 인물당 ~$0.00012, 2,341명 $0.31. dev_docs/jev_system_one_adoption.md 4.11"
+    },
   "task_routing_decision": {
     "provider": "openrouter",
     "model": "typesafe/jev-1.13",

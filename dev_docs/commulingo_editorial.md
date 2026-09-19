@@ -208,3 +208,12 @@ max_length_continuations로 실제 도구 루프에 전달한다. 응답당 8,00
 `ResearchMemory` 지침은 위임된 주장에 충분한 근거가 모이면 조사 종료 후 편집/no-edit 판단으로 진행하도록 한다. 기존 형식 오류 후 조사 재시작 차단은 유지하며 누락 근거·상충·변경 가능성은 재확인할 수 있다. 검색·Extract 비용은 runs의 LLM 비용과 별도로 [web 사용량 장부](web_research.md)에 기록된다.
 
 근거 배열과 독립 검토 checks에는 개수 상한을 두지 않는다. 각 항목의 출처·인용·필드 지원 검증은 유지하며, 충분히 확인된 사실에 인용을 더 모으는 것은 품질 목표가 아니다.
+
+## 분류 감사
+
+`scripts/commulingo_classification_audit.py`가 인물 전원의 groupId·role을 Jev(System One)로 재판정해 저장값과 다른
+고신뢰 건을 `logs/commulingo/person_classification_audit_<날짜>.md`로 뽑는다(쓰기 없음, 인물당 ~$0.00012). criteria에는
+운영자가 확정한 편집 규칙이 들어 있다: 공화국 제1서기·공화국 정부 수반은 `nationalities-federal`, 지방·주 서기와 콤소몰·중앙위
+서기는 `party-secretariat-cadres`, `ideology-propaganda`는 친소련 이데올로그 관직, 비소련 국적 인물은 소련 시대 그룹에 두지
+않으며, `scholar`는 이 역사를 연구한 역사가·사회과학자다. 정정은 편집 서비스 제출→승인으로 하고 승인 메모에 근거를 적는다
+(2026-09-19 첫 실행: 106명 정정, `dev_docs/jev_system_one_adoption.md` 4.11.1).
