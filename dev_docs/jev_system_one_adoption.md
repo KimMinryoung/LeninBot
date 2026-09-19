@@ -200,6 +200,20 @@ N 5건의 실체: Britannica 봇 확인 페이지(acmeism), 저자 명단 주장
 `citation_checks`에 기록(보정용). `enforce=false`면 기록만(shadow), `enabled=false`면 호출 없음, 판정 불가(None)는
 통과+`citation_unavailable` 집계. 위 30쌍에 실행하면 정확히 N 3건(고신뢰)만 거절되고 Britannica 페이지는 boilerplate로 잡힌다.
 
+## 4.7 태스크 라우팅 1차 분류기 (구현 2026-09-19)
+
+`self_runtime/tools.py::_classify_route` — `route_task` 도구가 부르는 분류기. 먼저 Jev(registry `task_routing_decision`)에
+`{task}`를 주고 `agent` choice(criteria는 `_AGENT_ROUTING_CARDS`에서 생성 + "정치노선·페르소나·프롬프트 텍스트는 코드 저장소
+파일이므로 programmer" 규칙), `routing_class` choice(7종), `needs_identifier` noul을 받는다. agent confidence ≥
+`thresholds.accept`(0.85)면 그 결과를 기존과 같은 형태(`reason`은 확률 판독문, 생성 문장 아님; `confidence_score` 추가,
+`source=jev_classifier`)로 돌려주고, 미만이면 기존 `task_routing_advisor`(DeepSeek)를 부르되 Jev 판독을 `system_one_hint`로
+첨부한다. 둘 다 실패하면 저신뢰 Jev 결과를 `low`로 표시해 돌려준다. `route_task` 응답 `classifier.engine`이 `jev`/`llm`/
+`jev_low_confidence`를 말한다. `enabled=false`면 바로 DeepSeek.
+
+같은 30건 재실행: 28/30, Jev 24건·폴백 6건. 오답 2건은 **폴백 DeepSeek**의 답이었고 그때 Jev 판독은 각각 programmer 0.82(정답)·
+diplomat 0.65(오답)였다 — 문턱값 0.80이면 29/30. 보수적으로 0.85를 두고 `llm_audit_log`의 두 caller 비율과 hint 불일치를
+일주일 보고 조정한다.
+
 ## 5. 롤아웃 단계 (각 단계 시작 전 승인)
 
 **0. 계정·키·shadow 평가 (지출 발생 — 승인 필요).** console.typesafe.ai 가입, 키를 프록시 credential로 설치. 위 4.1~4.2 구현. 그 다음 **실제 동작은 바꾸지 않고** 다음 세 곳에서 기존 호출과 병행 실행해 일치율을 `llm_audit_log`·journald에 남긴다:

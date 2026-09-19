@@ -19,6 +19,8 @@ Telegram user
       -> orchestrator report callback to user
 ```
 
+The orchestrator's `route_task` advisor classifies a task with a System One decision first (Jev via `task_routing_decision`, confidence-gated) and falls back to the `task_routing_advisor` LLM call below the threshold; see `jev_system_one_adoption.md` §4.7. The orchestrator's own `delegate()` choice remains final.
+
 The orchestrator has a limited tool set and does not directly edit code/files. Code work is delegated to `programmer`, whose current spec is a Codex CLI handoff rather than a normal broad Python tool set.
 
 For CommUlingo content, the Telegram orchestrator and delegated `analyst` may read with `commulingo_people` and write only through six target-specific narrow tools: person create/update, section save, event link, office-row save, and term create. The removed generic union write tool is not present in the global registry. Tool visibility is filtered by `tool_gateway.selection`; calls then pass through `tool_gateway.dispatcher` authorization/audit before the narrow handler reaches the shared CommUlingo normalization, validation, revision, and transactional write core.

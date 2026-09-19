@@ -291,6 +291,117 @@ def _normalize_llm_route(parsed: dict, task: str, candidates: list[str] | None) 
     return result
 
 
+_ROUTING_CLASSES = {
+    "public_content_edit": "Editing or publishing already-stored public content: research documents, task reports, blog "
+                           "posts, hub curations, CommuLingo people/term dictionary cards. Writes DB content, not code.",
+    "code_config_work": "Source code, configuration, scripts, templates, tests, scheduler/timer, routing, pipeline or "
+                        "deployment problems — including the prompt, persona and political-line (정치노선) text files "
+                        "kept in the code repository.",
+    "research": "Investigating a topic and writing up findings, fact-checking, KG/vector/web synthesis.",
+    "diary": "Writing, editing, deleting or unpublishing Cyber-Lenin diary entries.",
+    "browser_automation": "Driving a web browser interactively: login, forms, multi-page navigation, dynamic extraction.",
+    "external_platform_scout": "External platform reconnaissance: mailbox briefings, Moltbook/mersoom/X activity, "
+                               "news or social monitoring, large-scale patrol or crawling.",
+    "email_a2a": "Email or agent-to-agent diplomatic communication.",
+}
+_ROUTING_DECISION_FEATURE = "task_routing_decision"
+
+
+def _agent_criteria(allowed: list[str]) -> dict[str, str]:
+    """Choice criteria from the curated routing cards, so the classifier and the
+    orchestrator read the same description of each agent."""
+    criteria = {}
+    for agent in allowed:
+        card = _AGENT_ROUTING_CARDS.get(agent, {})
+        text = "Use for: " + "; ".join(card.get("use_for", [])) or agent
+        if card.get("do_not_use_for"):
+            text += ". Not for: " + "; ".join(card["do_not_use_for"])
+        if agent == "programmer":
+            text += ". The political line, persona and prompt texts live in the code repository, so revising them is code work."
+        criteria[agent] = text
+    return criteria
+
+
+async def _classify_route_with_jev(task: str, candidates: list[str] | None = None) -> dict | None:
+    """System One routing decision (dev_docs/jev_system_one_adoption.md §4.5).
+
+    Returns the same shape as the LLM classifier when the agent choice meets
+    the registry threshold, else None so the caller falls back. ``reason`` is
+    the probability readout, never generated prose.
+    """
+    try:
+        from llm.call_registry import decide, resolve
+
+        allowed = [agent for agent in _DELEGATABLE_AGENTS if not candidates or agent in candidates]
+        if len(allowed) < 2:
+            return None
+        profile = resolve(_ROUTING_DECISION_FEATURE)
+        extra = profile.extra or {}
+        if not extra.get("enabled", True):
+            return None
+        accept = float((extra.get("thresholds") or {}).get("accept", 0.85))
+        decision = await decide(_ROUTING_DECISION_FEATURE, {"task": task}, {
+            "agent": {"type": "choice", "instructions": "Which LeninBot specialist agent should handle this delegated task?",
+                      "criteria": _agent_criteria(allowed)},
+            "routing_class": {"type": "choice", "instructions": "Which class of work is this task?",
+                              "criteria": _ROUTING_CLASSES},
+            "needs_identifier": {"type": "noul",
+                                 "instructions": "The task acts on a specific existing content item (a document, report, "
+                                                 "post, diary entry, dictionary card) that must be identified by id, slug, "
+                                                 "title or URL before acting."},
+        })
+        if decision is None:
+            return None
+        agent, confidence = decision.choice("agent"), decision.confidence("agent") or 0.0
+        if agent not in allowed:
+            return None
+        ranked = sorted(decision.probabilities("agent").items(), key=lambda kv: -kv[1])
+        readout = ", ".join(f"{name} {p:.2f}" for name, p in ranked[:3])
+        routing_class = decision.choice("routing_class") or "unknown"
+        result = {
+            "recommended_agent": agent,
+            "confidence": "high" if confidence >= 0.95 else "medium" if confidence >= accept else "low",
+            "confidence_score": round(confidence, 3),
+            "reason": f"System One classifier ({decision.model}): {readout}; class {routing_class}.",
+            "content_type": routing_class,
+            "needs_identifier": (decision.noul("needs_identifier") or 0.0) >= 0.5,
+            "required_capabilities": [],
+            "forbidden_assumptions": [],
+            "routing_class": routing_class,
+            "routing_card": _AGENT_ROUTING_CARDS.get(agent, {}),
+            "alternatives": [
+                {"agent": name, "use_for": _AGENT_ROUTING_CARDS.get(name, {}).get("use_for", [])}
+                for name in _DELEGATABLE_AGENTS if name != agent and name in allowed
+            ][:4],
+            "source": "jev_classifier",
+        }
+        if confidence < accept:
+            # Below threshold the decision is advisory only; the caller runs the
+            # LLM classifier and keeps this readout beside it.
+            return {"below_threshold": True, **result}
+        return result
+    except Exception as e:
+        logger.info("route_task System One classifier unavailable: %s", e)
+        return None
+
+
+async def _classify_route(task: str, candidates: list[str] | None = None) -> tuple[dict | None, str | None]:
+    """(recommendation, engine): Jev when confident, else the LLM classifier."""
+    jev = await _classify_route_with_jev(task, candidates)
+    if jev and not jev.get("below_threshold"):
+        return jev, "jev"
+    llm = await _classify_route_with_llm(task, candidates)
+    if llm is not None:
+        if jev:
+            llm["system_one_hint"] = {k: jev[k] for k in ("recommended_agent", "confidence_score", "routing_class")}
+        return llm, "llm"
+    if jev:
+        # The LLM path failed too; a low-confidence typed decision beats nothing,
+        # labelled so the orchestrator weighs it accordingly.
+        return {k: v for k, v in jev.items() if k != "below_threshold"}, "jev_low_confidence"
+    return None, None
+
+
 async def _classify_route_with_llm(task: str, candidates: list[str] | None = None) -> dict | None:
     try:
         from llm.call_registry import generate as _registry_generate
@@ -2093,7 +2204,7 @@ async def _exec_route_task(
                     ensure_ascii=False,
                     indent=2,
                 )
-        recommendation = await _classify_route_with_llm(task or "", clean_candidates)
+        recommendation, engine = await _classify_route(task or "", clean_candidates)
         llm_used = recommendation is not None
         if recommendation is None:
             # No keyword fallback (removed 2026-07-11): a substring guess is
@@ -2117,6 +2228,7 @@ async def _exec_route_task(
             "classifier": {
                 "attempted": True,
                 "used": llm_used,
+                "engine": engine,
                 "fallback": None,
                 "classes": [
                     "public_content_edit",
