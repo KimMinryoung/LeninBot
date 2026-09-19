@@ -189,6 +189,25 @@ GEMINI_PRICING = {
 }
 
 
+# TypeSafe System One models (Jev): input-only billing, output tokens free.
+# $0.042/MTok on TypeSafe direct and on OpenRouter's Decisions route (audited
+# 2026-09-19). Keys are matched by substring of the model ID because routes
+# spell it differently: "jev-1.13.0" direct, "typesafe/jev-1.13" on OpenRouter
+# (the response then reports a dated snapshot such as "typesafe/jev-1.13-20260917").
+SYSTEM_ONE_PRICING = {
+    "jev": _per_token(0.042, 0.0, 0.042),
+}
+
+
+def system_one_pricing(model: str | None) -> dict[str, float] | None:
+    """Pricing row for a System One model ID, or None if it is not one."""
+    m = (model or "").lower()
+    for key, price in SYSTEM_ONE_PRICING.items():
+        if key in m.split("/")[-1]:
+            return price
+    return None
+
+
 def openai_compatible_pricing(
     model: str, now: datetime | None = None, *, input_tokens: int = 0,
 ) -> dict[str, float]:

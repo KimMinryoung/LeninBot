@@ -412,7 +412,8 @@ class TestProxyPolicyGate(unittest.TestCase):
         # Unmapped routes are their own policy names.
         for route in PROVIDERS:
             name = POLICY_PROVIDER.get(route, route)
-            self.assertIn(name, {"claude", "kimi", "deepseek", "openai", "gemini"})
+            self.assertIn(name, {"claude", "kimi", "deepseek", "openai", "gemini",
+                                 "openrouter", "typesafe"})
 
     def test_each_proxy_provider_has_exactly_one_credential(self):
         from llm_proxy.app import PROVIDERS
@@ -421,6 +422,38 @@ class TestProxyPolicyGate(unittest.TestCase):
             self.assertIn("secret", cfg)
             self.assertNotIn("secrets", cfg)
             self.assertIsInstance(cfg["secret"], str)
+
+
+class TestProxyOptionalRoutes(unittest.TestCase):
+    """A route whose credential may legitimately be absent must not gate /health."""
+
+    def test_health_ignores_optional_routes_without_key(self):
+        import asyncio
+        from llm_proxy import app as proxy
+
+        def fake_credential(name):
+            return "" if name in {"OPENROUTER_API_KEY", "TYPESAFE_API_KEY"} else "k"
+
+        with patch.object(proxy, "_credential", side_effect=fake_credential), \
+             patch.object(proxy.audit_sink, "sink_health", return_value="ok"):
+            response = asyncio.run(proxy.health())
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(json.loads(response.body)["providers_without_key"], [])
+
+    def test_health_still_fails_on_required_route(self):
+        import asyncio
+        from llm_proxy import app as proxy
+
+        with patch.object(proxy, "_credential", side_effect=lambda n: "" if n == "GEMINI_API_KEY" else "k"), \
+             patch.object(proxy.audit_sink, "sink_health", return_value="ok"):
+            response = asyncio.run(proxy.health())
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(json.loads(response.body)["providers_without_key"], ["gemini"])
+
+    def test_jev_routes_are_optional(self):
+        from llm_proxy.app import PROVIDERS
+        for route in ("openrouter", "typesafe"):
+            self.assertTrue(PROVIDERS[route].get("optional"), route)
 
 
 class TestProxyHeaderInjection(unittest.TestCase):

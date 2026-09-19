@@ -178,6 +178,10 @@ def provider_endpoint(
 
 _PROVIDER_PREFIXES = (
     ("claude", "claude"),
+    # Jev is billed by whichever route carried it; a bare "jev-…" ID means the
+    # TypeSafe direct API, "typesafe/…" is OpenRouter's Decisions spelling.
+    ("typesafe/", "openrouter"),
+    ("jev", "typesafe"),
     ("gpt", "openai"),
     ("deepseek", "deepseek"),
     ("kimi", "kimi"),
@@ -218,7 +222,15 @@ def estimate_cost_usd(
         anthropic_pricing_table,
         deepseek_price_triple,
         openai_compatible_pricing,
+        system_one_pricing,
     )
+
+    # System One (Jev) decisions: input-only billing, no cache tiers, and the
+    # same price on every route — resolved before the chat-model tables so a
+    # "typesafe/…" ID cannot fall through to an unrelated prefix match.
+    system_one = system_one_pricing(model)
+    if system_one is not None:
+        return tokens_in * system_one["input"] + tokens_out * system_one["output"]
 
     def _lookup(table: dict) -> dict | None:
         if model in table:

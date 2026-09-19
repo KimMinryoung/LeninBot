@@ -16,6 +16,7 @@
 | `security_gateway.md` | 실행 시점 인자 검증·권한·rate limit·idempotency·감사 |
 | `web_research.md` | 검색·Extract 전용 게이트웨이, 키 격리, 공용 일일 예산과 사용량 집계 |
 | `llm_call_registry.md` | 원샷 호출 등록과 실행 정책·핫리로드 |
+| `jev_system_one_adoption.md` | TypeSafe Jev(System One 판정 모델) 도입 계획 — 후보 지점·통합 구조·shadow 롤아웃 (계획, 미구현) |
 | `agent_improvement_roadmap.md` | 구현 현황의 설계 문서 연결과 남은 조건부 검토 |
 | `tool_security_gateway_improvements.md` | tool/security gateway 보안 검토 결과와 우선순위별 개선 체크리스트 |
 | `mcp_gateway.md` | Codex/Claude Code 같은 개발용 MCP client에 노출하는 읽기 중심 gateway |

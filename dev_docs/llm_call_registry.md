@@ -16,11 +16,33 @@
 모델 해석 우선순위: **레거시 env(`env` 배열) > 제네릭 env `LLM_SITE_<KEY>_MODEL` > JSON > 콜사이트 기본값**.
 
 `managed` 값:
-- `executor` — `generate()/generate_sync()`가 직접 실행 (gemini/deepseek/openai/claude/kimi 지원, system·json_mode·timeout 옵션)
+- `executor` — `generate()/generate_sync()`가 직접 실행 (gemini/deepseek/openai/claude/kimi 지원, system·json_mode·timeout 옵션). provider가 `openrouter`/`typesafe`인 항목은 `decide()`가 실행한다(아래)
 - `model-only` — 모델명만 여기서 조회, 실행은 자체 클라이언트 (KG graphiti, razvedchik, writer 경량 별칭)
 - `external` — 정보 등재만 (vision 폴백처럼 실행 구조가 특수한 곳)
 
 실패 시 항상 `None` 반환 — 콜사이트가 자체 폴백(추출식 요약, 기본 라벨, 스킵)을 유지한다.
+
+### System One 판정 호출 (`decide()`)
+
+TypeSafe Jev는 텍스트를 생성하지 않고 typed 판정을 돌려주는 모델이라 `generate()`가 아닌
+별도 진입점을 쓴다 (2026-09-19, `dev_docs/jev_system_one_adoption.md`).
+
+- 항목: `{"provider": "openrouter"|"typesafe", "model": "typesafe/jev-1.13"|"jev-1.13.0", "timeout", "kind": "system_one", "note"}`.
+  `openrouter`는 `POST /api/alpha/decisions`, `typesafe`는 `POST /v1/systemone` — body·answers는 동일.
+  현재 직접 API는 대기열이라 `openrouter`만 실제로 쓴다. `kind`는 표시용이며 실행은 provider가 결정한다.
+- `decide_detailed(feature, state, questions, label=) → DecisionResult`, `decide_sync(...) → Decision | None`,
+  `async decide(...)`. `state`는 문자열 또는 JSON 구조(질문에 필요한 필드만), `questions`는
+  `{key: {"type": "noul"|"choice"|"score", "instructions": str, "criteria": dict|list}}`.
+  choice는 2..255 옵션 dict, score는 2..10 단계 list. 중첩 criteria 값은 OpenRouter가 문자열만 받으므로
+  JSON 문자열로 직렬화해 보낸다.
+- `Decision.noul(key)/choice(key)/score(key)/confidence(key)/probabilities(key)`는 없는 키에 `None`.
+  응답의 실제 `model`(예: `typesafe/jev-1.13-20260917`)과 `usage`, 지연, 비용을 담는다.
+- 감사: `check_llm_call` → 호출 → `record_llm_call`. OpenRouter가 `usage.cost`를 주면 그 값을, 없으면
+  gateway의 `SYSTEM_ONE_PRICING`(입력 $0.042/M, 출력 0)으로 추정. 실패는 status=error 행 하나.
+- 실패(`4xx/5xx`, 전송 오류, 질문 형식 오류, 비-System One 항목)는 예외 없이 `decision=None`/`error_kind`로
+  돌아오고 콜사이트는 기존 경로(LLM·기본 라벨)를 유지한다.
+- 스모크: `venv/bin/python scripts/smoke_jev.py` (항목 `system_one_smoke`). 프록시에 credential이 없을 때
+  승인된 1회 직접 실행은 `OPENROUTER_BASE_URL=https://openrouter.ai OPENROUTER_API_KEY=… ` env로.
 
 원샷 executor의 endpoint와 credential은 공개 함수
 `resolve_provider_connection(provider)`가 한 번에 해석한다. 이 함수는 direct mode에서는

@@ -47,6 +47,7 @@ TIER_A = [
     "OPENAI_API_KEY",
     "OPENAI_ADMIN_KEY",
     "OPENROUTER_API_KEY",
+    "TYPESAFE_API_KEY",
     "R2_CF_API_TOKEN",
     "REPLICATE_API_TOKEN",
     "RESEND_API_KEY",
@@ -64,6 +65,10 @@ _LLM_PROVIDER_KEYS = {
     "ANTHROPIC_ADMIN_KEY", "ANTHROPIC_API_KEY",
     "OPENAI_ADMIN_KEY", "OPENAI_API_KEY",
     "DEEPSEEK_API_KEY", "MOONSHOT_API_KEY", "GEMINI_API_KEY",
+    # 2026-09-19: OpenRouter became an LLM route (Jev decisions) and moved to the
+    # proxy; it no longer mounts on the agent hosts. TYPESAFE_API_KEY follows
+    # the same rule once the direct API is out of its waitlist.
+    "OPENROUTER_API_KEY", "TYPESAFE_API_KEY",
 }
 _SEARCH_PROVIDER_KEYS = {"TAVILY_API_KEY", "BRAVE_SEARCH_API_KEY"}
 _FULL = set(TIER_A) - _LLM_PROVIDER_KEYS - _SEARCH_PROVIDER_KEYS
@@ -74,7 +79,9 @@ SERVICE_CREDS: dict[str, set[str]] = {
     # Base provider keys are declared in the static proxy unit. Optional admin
     # keys are emitted only after they exist in credstore and are consumed only
     # by the proxy's fixed read-only cost-report endpoints.
-    "leninbot-llm-proxy": {"ANTHROPIC_ADMIN_KEY", "OPENAI_ADMIN_KEY"},
+    "leninbot-llm-proxy": {"ANTHROPIC_ADMIN_KEY", "OPENAI_ADMIN_KEY",
+                           # Jev decision routes (2026-09-19): optional, mounted only when present.
+                           "OPENROUTER_API_KEY", "TYPESAFE_API_KEY"},
 
     # Agent hosts — broad tool access, all non-provider Tier A secrets.
     "leninbot-api": _FULL,
