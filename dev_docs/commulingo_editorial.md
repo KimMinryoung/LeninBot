@@ -221,8 +221,9 @@ max_length_continuations로 실제 도구 루프에 전달한다. 응답당 8,00
 `citizenship.code`(국가 코드)와 `fate.kind`도 실행기가 채운다(`classify_person_codes`, registry `commulingo_person_codes`,
 create·update 모두): 작성 모델은 라벨 문장만 쓰고, 파이프라인은 라벨 + 해당 필드의 조사 claim 발췌를, 도구 경로는 라벨만 Jev에
 준다. 생존 인물(`years`가 `–`로 끝남)의 fate는 호출 없이 빈 kind. 기준선(최근 초안 60건): citizenship 50/50, fate 32/35 —
-불일치 3건 중 claim 없는 초안에서 작성 모델이 natural로 적은 것을 Jev가 unconfirmed로 본 것이 포함된다. `nationalOrigin.code`는
-작성 모델이 계속 고른다(42/49, 유대계 배경을 israel로 고르는 오류). 용어 create의 `category`(10종)도 같다: `classify_term`(registry `commulingo_term_classification`)이 term·정의·기간·본문으로 고르고,
+불일치 3건 중 claim 없는 초안에서 작성 모델이 natural로 적은 것을 Jev가 unconfirmed로 본 것이 포함된다. `nationalOrigin.code`도 채운다: 출신 규칙(민족·국가 배경이지 출생지·활동지·시민권이 아님, 유대계는 가족의 출신 국가이지
+israel이 아님, 비러시아 민족의 소련 관리는 그 민족)을 instructions에 적자 42/49 → 48/49가 됐고, 남은 1건은 작성 모델 라벨이
+출생지였던 것을 Jev가 0.49로 유보한 사례다. 이로써 등록 API의 닫힌 집합 필드는 전부 실행기가 채운다. 용어 create의 `category`(10종)도 같다: `classify_term`(registry `commulingo_term_classification`)이 term·정의·기간·본문으로 고르고,
 confidence가 0.7 미만인데 작성 모델이 값을 줬으면 그 값을 남긴다. 저장된 용어 1,086건(작성 모델이 고른 값)과의 일치는 813,
 conf ≥0.85에서 628/714 — 저장값 자체의 일관성이 낮아 정확도 상한이 아니라 관행 재현율이다.
 

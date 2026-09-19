@@ -608,7 +608,7 @@ class Draft:
             # writes the labels and may still name a code.
             from runtime_tools.commulingo_classify import classify_person_codes
             classify_codes = classify_person_codes
-            for key,code in (('citizenship','code'),('fate','kind')):
+            for key,code in (('citizenship','code'),('nationalOrigin','code'),('origin','code'),('fate','kind')):
                 if key in schema['properties'] and isinstance(schema['properties'][key],dict):
                     schema['properties'][key]['required'] = [r for r in schema['properties'][key].get('required',[]) if r!=code]
         classify_term = None
@@ -713,10 +713,10 @@ class Draft:
                 raise ValueError('select group/groupId from the supplied person group catalog')
             if classify_codes is not None:
                 from runtime_tools.commulingo_classify import fill_person_codes, missing_person_codes
-                if missing_person_codes(fields) or any(isinstance(fields.get(k),dict) for k in ('citizenship','fate')):
+                if missing_person_codes(fields) or any(isinstance(fields.get(k),dict) for k in ('citizenship','nationalOrigin','fate')):
                     excerpts = {}
                     for c in claims:
-                        if c.get('field') in ('citizenship','fate') and c.get('source_id') in sources:
+                        if c.get('field') in ('citizenship','nationalOrigin','fate') and c.get('source_id') in sources:
                             body = sources[c['source_id']].get('body') or ''
                             excerpts.setdefault(c['field'],[]).append({'claim':c.get('claim'),'excerpt':body[c.get('start',0):c.get('end',0)][:1500]})
                     codes = await asyncio.to_thread(classify_codes, fields, claims=excerpts)
@@ -788,7 +788,7 @@ class Draft:
                'commissioned again for them. Give sortOrder as the chronological key of the period the section opens on.\n' if section else '')
             +             'Write bilingual equivalent claims; do not fill space or add facts beyond the research. '
             + ('For a new term, omit category: the runner assigns it from the definition after the draft. ' if classify_term is not None else '')
-            + ('Write citizenship and fate as labels only; the runner assigns citizenship.code and fate.kind from the '
+            + ('Write citizenship, nationalOrigin and fate as labels only; the runner assigns their code/kind from the '
                'labels and the research. ' if classify_codes is not None else '')
             + ('For a new person, omit groupId and role: the runner assigns them from the card after the draft. '
                if classify is not None else

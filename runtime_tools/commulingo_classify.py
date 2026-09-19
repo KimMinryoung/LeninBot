@@ -178,18 +178,30 @@ FATE_CRITERIA = {
     "exile": "died in exile or emigration",
     "natural": "died a natural death (illness, old age)",
 }
-# nationalOrigin stays with the writer: on the 2026-09-19 baseline Jev matched
-# the writer's origin code only 42/49 (a Jewish background became "israel").
+# Without these rules the origin code matched the writer 42/49 (a Jewish
+# background became "israel"); with them 48/49, the miss at 0.49 confidence.
+ORIGIN_INSTRUCTIONS = (
+    "Which code names the national or ethnic background stated in the label and the source excerpts? Rules: the "
+    "background is a people or nation, never a birthplace, place of activity or citizenship (Radek = poland though born "
+    "in today's Ukraine; Yezhov = russia, an ethnic Russian born in Lithuania; a Soviet official of a non-Russian "
+    "nationality keeps that nation: Sillari = estonia, Gumbaridze = georgia, never a blanket russia). A Jewish family "
+    "background takes the code of the country or region the family came from (russia, ukraine, belarus, poland, "
+    "lithuania, hungary, germany...), NEVER israel unless the person was born in Israel or Palestine. A mixed "
+    "background takes the code the label names first. Follow the label when it names a nation."
+)
 
 
 def _living(years) -> bool:
     return str(years or "").strip().endswith("–")
 
 
-def person_code_questions(fields: dict, citizenship_codes) -> dict:
-    """One question per code the card carries without a value: the
-    citizenship object's code and the fate object's kind."""
+def person_code_questions(fields: dict, citizenship_codes, origin_codes=()) -> dict:
+    """One question per code object on the card: citizenship.code,
+    nationalOrigin.code and fate.kind."""
     questions = {}
+    if isinstance(fields.get("nationalOrigin"), dict) and origin_codes:
+        questions["nationalOrigin"] = {"type": "choice", "criteria": {c: c for c in origin_codes},
+                                       "instructions": ORIGIN_INSTRUCTIONS}
     if isinstance(fields.get("citizenship"), dict):
         questions["citizenship"] = {
             "type": "choice", "criteria": {c: c for c in citizenship_codes},
@@ -208,6 +220,8 @@ def person_code_state(fields: dict, claims: dict | None) -> dict:
     return {"name": state_from_fields(fields)["name"], "years": fields.get("years"),
             "citizenship_label": (fields.get("citizenship") or {}).get("label"),
             "citizenship_claims": claims.get("citizenship", [])[:4],
+            "origin_label": (fields.get("nationalOrigin") or {}).get("label"),
+            "origin_claims": claims.get("nationalOrigin", [])[:4],
             "fate_label": (fields.get("fate") or {}).get("label"),
             "fate_claims": claims.get("fate", [])[:4]}
 
@@ -218,7 +232,7 @@ def classify_person_codes(fields: dict, *, claims: dict | None = None, decide=No
     person's fate is the empty kind without a call. ``claims`` maps field name to
     [{"claim", "excerpt"}] from the research artifact."""
     from llm.call_registry import decide_detailed, resolve
-    from runtime_tools.commulingo_people import _NATIONALITY_CODES
+    from runtime_tools.commulingo_people import _NATIONAL_ORIGIN_CODES, _NATIONALITY_CODES
 
     profile = resolve(CODES_FEATURE)
     extra = profile.extra or {}
@@ -228,7 +242,7 @@ def classify_person_codes(fields: dict, *, claims: dict | None = None, decide=No
     out = {}
     if isinstance(fields.get("fate"), dict) and _living(fields.get("years")):
         out["fate"] = {"kind": "", "confidence": 1.0, "low_confidence": False}
-    questions = person_code_questions(fields, sorted(_NATIONALITY_CODES))
+    questions = person_code_questions(fields, sorted(_NATIONALITY_CODES), sorted(_NATIONAL_ORIGIN_CODES))
     if not questions:
         return out
     result = (decide or decide_detailed)(CODES_FEATURE, person_code_state(fields, claims), questions,
@@ -237,6 +251,9 @@ def classify_person_codes(fields: dict, *, claims: dict | None = None, decide=No
     if decision is None:
         logger.warning("person code classification unavailable: %s", result.error)
         return None
+    if "nationalOrigin" in questions and decision.choice("nationalOrigin") in _NATIONAL_ORIGIN_CODES:
+        conf = round(decision.confidence("nationalOrigin") or 0.0, 3)
+        out["nationalOrigin"] = {"code": decision.choice("nationalOrigin"), "confidence": conf, "low_confidence": conf < accept}
     if "citizenship" in questions and decision.choice("citizenship") in _NATIONALITY_CODES:
         conf = round(decision.confidence("citizenship") or 0.0, 3)
         out["citizenship"] = {"code": decision.choice("citizenship"), "confidence": conf, "low_confidence": conf < accept}
@@ -254,7 +271,7 @@ def fill_person_codes(fields: dict, codes: dict | None) -> dict:
     out = dict(fields)
     if not codes:
         return out
-    for field, key in (("citizenship", "code"), ("fate", "kind")):
+    for field, key in (("citizenship", "code"), ("nationalOrigin", "code"), ("fate", "kind")):
         judged = codes.get(field)
         if not judged or not isinstance(out.get(field), dict):
             continue
@@ -269,8 +286,9 @@ def fill_person_codes(fields: dict, codes: dict | None) -> dict:
 def missing_person_codes(fields: dict) -> list[str]:
     """Code objects on the card that still lack their code/kind."""
     missing = []
-    if isinstance(fields.get("citizenship"), dict) and not fields["citizenship"].get("code"):
-        missing.append("citizenship.code")
+    for field in ("citizenship", "nationalOrigin"):
+        if isinstance(fields.get(field), dict) and not fields[field].get("code"):
+            missing.append(f"{field}.code")
     if isinstance(fields.get("fate"), dict) and fields["fate"].get("kind") is None:
         missing.append("fate.kind")
     return missing

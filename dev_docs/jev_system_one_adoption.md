@@ -339,8 +339,9 @@ accept 0.7 미만이고 작성 모델이 값을 줬으면 그 값을 남긴다. 
 
 **등록 API의 코드 필드 (2026-09-19).** `citizenship.code`·`fate.kind`를 `classify_person_codes`가 라벨 + 조사 claim 발췌로 채운다.
 기준선(최근 인물 초안 60건, 정답 = 작성 모델이 고른 값): citizenship 50/50, fate 32/35(conf ≥0.7 30/33; 불일치에는 claim 없는
-초안의 natural을 Jev가 unconfirmed로 본 건이 있어 Jev 쪽이 맞음), nationalOrigin 42/49(유대계→israel 같은 오류라 **미채택**,
-작성 모델 유지). 생존 인물 fate는 호출 없이 빈 kind. 등록 API에서 작성 모델이 고르던 닫힌 집합은 이제 nationalOrigin.code 하나다.
+초안의 natural을 Jev가 unconfirmed로 본 건이 있어 Jev 쪽이 맞음), nationalOrigin은 규칙 없이 42/49(유대계→israel)였으나
+사용자 지적대로 출신 규칙을 instructions에 적자 48/49(conf ≥0.7 46/46)가 되어 **채택**. 생존 인물 fate는 호출 없이 빈 kind.
+등록 API의 닫힌 집합 필드(groupId·role·category·citizenship.code·nationalOrigin.code·fate.kind)는 이제 전부 실행기가 채운다.
 
 ## 4.12 남은 후보와 관찰 포인트
 

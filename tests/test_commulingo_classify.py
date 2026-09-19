@@ -155,6 +155,7 @@ class ClassifyCodesTests(unittest.TestCase):
         self.assertEqual(filled['fate']['kind'], 'murdered')
         self.assertEqual(cc.missing_person_codes(filled), [])
         self.assertEqual(cc.missing_person_codes(CARD), ['citizenship.code', 'fate.kind'])
+        self.assertEqual(seen['questions'], {'citizenship', 'fate'})  # no nationalOrigin object on this card
 
     def test_unconfirmed_maps_to_empty_kind_and_unsure_yields_to_writer(self):
         def decide(feature, state, questions, label=None):
@@ -185,5 +186,17 @@ class ClassifyCodesTests(unittest.TestCase):
         props = COMMULINGO_PERSON_CREATE_TOOL['input_schema']['properties']['fields']['properties']
         self.assertEqual(props['citizenship']['required'], ['label'])
         self.assertEqual(props['fate']['required'], ['label'])
-        self.assertEqual(props['nationalOrigin']['required'], ['code', 'label'])
+        self.assertEqual(props['nationalOrigin']['required'], ['label'])
         self.assertEqual(_NATIONALITY_SCHEMA['required'], ['code', 'label'])  # shared object untouched
+
+    def test_origin_code_follows_the_background_rules(self):
+        seen = {}
+        def decide(feature, state, questions, label=None):
+            seen.update(state=state, instr=questions['nationalOrigin']['instructions'])
+            return codes_result(nationalOrigin=('poland', 0.96), citizenship=('soviet', 0.99), fate=('natural', 0.9))
+        card = {**CARD, 'nationalOrigin': {'label': {'ko': '폴란드계 유대인', 'en': 'Polish-Jewish'}}}
+        codes = cc.classify_person_codes(card, claims={'nationalOrigin': [{'claim': 'born to a Jewish family in Lwów', 'excerpt': 'x'}]}, decide=decide)
+        self.assertIn('NEVER israel', seen['instr'])
+        self.assertEqual(seen['state']['origin_claims'][0]['claim'], 'born to a Jewish family in Lwów')
+        self.assertEqual(cc.fill_person_codes(card, codes)['nationalOrigin']['code'], 'poland')
+        self.assertIn('nationalOrigin.code', cc.missing_person_codes(card))

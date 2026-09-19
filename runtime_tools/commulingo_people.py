@@ -3838,7 +3838,7 @@ def _person_write_tool(name: str, action: str) -> dict:
     # The runner assigns citizenship.code and fate.kind from the labels
     # (commulingo_classify.classify_person_codes); the writer writes the label
     # and may still name the code. Copy the shared objects before relaxing them.
-    for key, code in (("citizenship", "code"), ("fate", "kind")):
+    for key, code in (("citizenship", "code"), ("nationalOrigin", "code"), ("origin", "code"), ("fate", "kind")):
         if key in fields_schema["properties"]:
             relaxed = deepcopy(fields_schema["properties"][key])
             relaxed["required"] = [r for r in relaxed.get("required", []) if r != code]
@@ -3850,7 +3850,7 @@ def _person_write_tool(name: str, action: str) -> dict:
             "citations are a separate top-level argument. Public text is bilingual {ko,en}. "
             "Put evidence and reviewFlags INSIDE fields. expectedRevision and collection edits are update-only. "
             "On create, omit groupId and role: the runner classifies the person from the card. "
-            "Write citizenship and fate as labels; their code/kind may be omitted, the runner assigns them. "
+            "Write citizenship, nationalOrigin and fate as labels; their code/kind may be omitted, the runner assigns them. "
             "Read the record and reference lists first. On create, citizenship and "
             "nationalOrigin require evidence; if unknown, research or defer registration, never guess. Soviet and Yugoslav codes are citizenship-only. Preserve mixed ancestry in labels. "
             "nationalOrigin means national/ethnic "
