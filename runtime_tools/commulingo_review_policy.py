@@ -2,6 +2,7 @@
 import re
 import json
 import hashlib
+import unicodedata
 from urllib.parse import urlsplit
 
 DECISION_TOOL = {"name": "commulingo_review_decision", "description": "Submit one independently researched review decision; does not directly write dictionary content.",
@@ -44,14 +45,22 @@ def normalize(text):
     never makes different passages equal. Exact matching lost 63 reviews in
     the week to 2026-09-19 to curly quotes, en dashes and NBSPs.
     """
-    return re.sub(r"\s+", " ", str(text).translate(_FOLD)).strip().casefold()
+    return _fold_marks(re.sub(r"\s+", " ", str(text).translate(_FOLD)).strip().casefold())
 
 
-def locate(body, quote):
+def _fold_marks(text):
+    """Drop combining marks (Russian Wikipedia stress accents: Собра́ние) that a model may or may not copy."""
+    decomposed = unicodedata.normalize("NFD", str(text))
+    return "".join(ch for ch in decomposed if not unicodedata.category(ch).startswith("M"))
+
+
+def locate(body, quote, min_prefix=None):
     """(start, end) of quote in body under normalize(), in body's own offsets; None if absent."""
     folded, index = [], []
     pending_space = False
     for i, ch in enumerate(str(body).translate(_FOLD)):
+        if unicodedata.category(ch).startswith("M"):
+            continue
         if ch.isspace():
             pending_space = bool(folded)
             continue
@@ -59,13 +68,21 @@ def locate(body, quote):
             folded.append(" ")
             index.append(i)
             pending_space = False
-        for c in ch.casefold():
+        for c in _fold_marks(ch.casefold()):
             folded.append(c)
             index.append(i)
     needle = normalize(quote)
     if not needle:
         return None
-    at = "".join(folded).find(needle)
+    haystack = "".join(folded)
+    at = haystack.find(needle)
+    # A model's copy usually goes wrong late (a dropped footnote marker, a
+    # rewritten bracket), so the longest matching prefix of at least
+    # min_prefix folded characters still pins the passage; the caller stores
+    # the source's own text at that place, never the model's copy.
+    while at < 0 and min_prefix and len(needle) > min_prefix:
+        needle = needle[:max(min_prefix, len(needle) - 20)].rstrip()
+        at = haystack.find(needle)
     if at < 0:
         return None
     return index[at], index[at + len(needle) - 1] + 1

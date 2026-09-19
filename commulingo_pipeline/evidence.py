@@ -1,11 +1,14 @@
 """Content-addressed source snapshots and exact, bounded claim citations."""
 import hashlib
+import logging
 import re
 from datetime import datetime, timedelta, timezone
 
 # A cited passage is stored with the sentences around it so the excerpt a
 # reviewer reads is prose, not a tile cut mid-word. Bounded so one quote
 # cannot pull in a whole page.
+logger = logging.getLogger(__name__)
+
 EXCERPT_CONTEXT = 300
 _SENTENCE_END = re.compile(r'[.!?。]["\')\]]?\s|\n')
 
@@ -39,16 +42,17 @@ def locate_claim_quotes(claims, sources):
         quote = str(claim.get('quote') or '').strip()
         if len(quote) < 20:
             raise ValueError('quote must copy at least 20 characters verbatim from the displayed source text')
-        found = locate(source['body'], quote)
+        found = locate(source['body'], quote, min_prefix=40)
         if found is None:
             for other in sources.values():
                 if other is not source and other.get('body'):
-                    found = locate(other['body'], quote)
+                    found = locate(other['body'], quote, min_prefix=40)
                     if found:
                         source = other
                         break
         if found is None:
-            raise ValueError(f'quote not found in {claim.get("source_id")} or any retrieved source: copy 20..1000 '
+            logger.info('research quote not located in %s (%s): %r', claim.get('source_id'), source.get('url'), quote[:300])
+            raise ValueError(f'quote not found in {claim.get("source_id")} or any retrieved source: copy 20..2000 '
                              'characters exactly as displayed (no ellipsis, no paraphrase)')
         start, end = excerpt_window(source['body'], *found)
         value = {k: v for k, v in claim.items() if k != 'quote'}
