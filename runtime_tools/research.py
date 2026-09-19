@@ -617,12 +617,27 @@ async def _review_before_public_write(document: str, notes: str | None) -> str:
     expected = hashlib.sha256(document.encode()).hexdigest()
     if receipt.get("verdict") != "PASS" or receipt.get("document_sha256") != expected:
         issues = "\n".join(f"- {item}" for item in receipt.get("issues", []))
+        if receipt.get("failure_kind") or receipt.get("document_sha256") != expected:
+            guidance = (
+                "The review could not be completed or validated; this is not a content revision verdict. "
+                "Inspect the review receipt and retry independent review of the unchanged draft. "
+                "An empty issues array is not a review PASS."
+            )
+        elif receipt.get("verdict") == "UNVERIFIED":
+            guidance = (
+                "The reviewer could not verify material claims. Resolve the evidence gaps described "
+                "in the reason/issues and retry review; revise the body only where warranted."
+            )
+        else:
+            guidance = (
+                "Correct the listed issues with edit_staged, or revise the submitted content, "
+                "then retry publication. Do not treat your own fact_check_notes as a review PASS."
+            )
         return ToolFailure(
             "Publication blocked by independent document review; no public write or broadcast occurred.\n"
             f"Verdict: {receipt.get('verdict', 'UNVERIFIED')}\n{receipt.get('reason', '')}\n{issues}\n"
             f"Review receipt: {receipt.get('receipt_path', '(unavailable)')}\n"
-            "Correct the saved staged body with edit_staged, or revise the submitted content, "
-            "then retry publication. Do not treat your own fact_check_notes as a review PASS."
+            f"{guidance}"
         )
     return f"Independent document review: PASS sha256={expected}; receipt={receipt['receipt_path']}"
 

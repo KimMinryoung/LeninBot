@@ -156,7 +156,7 @@ def test_review_does_not_replace_author_context(monkeypatch, tmp_path):
     from provenance.runtime import init_provenance_buffer, get_provenance_buffer
     monkeypatch.setattr(review, "REVIEW_DIR", tmp_path)
 
-    async def fake(*args):
+    async def fake(*args, **kwargs):
         init_provenance_buffer(agent="task_verifier")
         return {"verdict": "PASS", "reason": "Source checked", "issues": []}, {}
 
@@ -170,8 +170,7 @@ def test_review_does_not_replace_author_context(monkeypatch, tmp_path):
     asyncio.run(run())
 
 
-@pytest.mark.parametrize("read_source,interrupted", [(False, False), (True, False), (True, True)])
-def test_reviewer_surface_and_evidence_receipt(monkeypatch, read_source, interrupted):
+def install_reviewer(monkeypatch, chat):
     import bot_config
     import llm.runtime_profile
     from runtime_tools import registry
@@ -185,6 +184,11 @@ def test_reviewer_surface_and_evidence_receipt(monkeypatch, read_source, interru
         "fetch_url": AsyncMock(return_value="Observed source text"),
         "research_document": AsyncMock(), "send_email": AsyncMock(),
     })
+    monkeypatch.setitem(sys.modules, "telegram.bot", SimpleNamespace(_make_provider_chat_fn=lambda _: chat))
+
+
+@pytest.mark.parametrize("read_source,interrupted", [(False, False), (True, False), (True, True)])
+def test_reviewer_surface_and_evidence_receipt(monkeypatch, read_source, interrupted):
 
     async def chat(messages, **kw):
         assert {t["name"] for t in kw["extra_tools"]} == {"fetch_url"}
@@ -196,7 +200,7 @@ def test_reviewer_surface_and_evidence_receipt(monkeypatch, read_source, interru
         kw["budget_tracker"]["final_response_truncated"] = interrupted
         return "progress is not the verdict"
 
-    monkeypatch.setitem(sys.modules, "telegram.bot", SimpleNamespace(_make_provider_chat_fn=lambda _: chat))
+    install_reviewer(monkeypatch, chat)
     evidence = []
     verdict, _ = asyncio.run(review._run_review(BODY, NOTES, evidence))
     assert verdict["verdict"] == ("PASS" if read_source and not interrupted else "UNVERIFIED")
@@ -210,3 +214,161 @@ def test_autonomous_keeps_existing_review_contract(isolated, monkeypatch):
     monkeypatch.setattr(r, "review_research_document", mocked)
     assert asyncio.run(r._review_before_public_write(BODY, NOTES)) == ""
     mocked.assert_not_awaited()
+
+
+VALID_PASS = json.dumps({"verdict": "PASS", "reason": "Source checked", "issues": []})
+
+
+@pytest.mark.parametrize("wrapper", ["{}", "```json\n{}\n```", "```\n{}\n```", "```JSON\n{}```", "\n{}\n"])
+def test_single_verdict_wrappers(wrapper):
+    assert review.parse_review(wrapper.format(VALID_PASS))["verdict"] == "PASS"
+
+
+@pytest.mark.parametrize("response", [
+    "Result:\n" + VALID_PASS, VALID_PASS + "\n" + VALID_PASS,
+    "```json\n" + VALID_PASS + "\n```\nBut this claim is unsupported.",
+    '{"verdict":"REVISE","reason":"bad","issues":[]}',
+    '{"verdict":[],"reason":"bad","issues":[]}', None,
+])
+def test_invalid_response_preserves_parse_error(response):
+    result = review.parse_review(response)
+    assert result["verdict"] == "UNVERIFIED"
+    assert result["failure_kind"] == "invalid_response" and result["parse_error"]
+
+
+@pytest.mark.parametrize("second,reads,interrupted,expected", [
+    (VALID_PASS, True, False, "PASS"),
+    ("still malformed", True, False, "UNVERIFIED"),
+    (VALID_PASS, False, False, "UNVERIFIED"),
+    (VALID_PASS, True, True, "UNVERIFIED"),
+])
+def test_one_fresh_retry_preserves_raw_responses_and_requires_own_evidence(
+    monkeypatch, tmp_path, second, reads, interrupted, expected,
+):
+    monkeypatch.setattr(review, "REVIEW_DIR", tmp_path)
+    budgets = []
+
+    async def chat(messages, **kw):
+        budgets.append(kw["budget_usd"])
+        first = len(budgets) == 1
+        assert len(messages) == 1  # No malformed prior prose becomes evidence.
+        if first or reads:
+            await kw["extra_handlers"]["fetch_url"](url="https://example.org/source")
+        kw["budget_tracker"].update(
+            final_response="malformed first response" if first else second,
+            total_cost=0.01, rounds_used=2,
+            final_response_truncated=not first and interrupted,
+        )
+        return "ignored progress"
+
+    install_reviewer(monkeypatch, chat)
+    result = asyncio.run(review.review_research_document(document=BODY))
+    assert result["verdict"] == expected
+    assert budgets == pytest.approx([0.15, 0.14])
+    stored = json.loads(next(tmp_path.glob("*.json")).read_text())
+    assert stored["usage"] == {"total_cost": 0.02, "rounds_used": 4}
+    assert stored["attempts"][0]["raw_response"] == "malformed first response"
+    assert stored["attempts"][0]["parse_error"]
+    assert stored["attempts"][1]["raw_response"] == second
+
+
+@pytest.mark.parametrize("response,cost,interrupted", [
+    (VALID_PASS, 0.01, False),
+    ('{"verdict":"REVISE","reason":"bad claim","issues":["fix attribution"]}', 0.01, False),
+    ('{"verdict":"UNVERIFIED","reason":"source unavailable","issues":[]}', 0.01, False),
+    ("malformed", 0.15, False),
+    ("malformed", 0.01, True),
+    ("malformed", None, False),
+])
+def test_no_retry_for_valid_verdict_or_exhausted_or_unknown_limits(monkeypatch, tmp_path, response, cost, interrupted):
+    monkeypatch.setattr(review, "REVIEW_DIR", tmp_path)
+    calls = []
+
+    async def chat(messages, **kw):
+        calls.append(kw)
+        await kw["extra_handlers"]["fetch_url"](url="https://example.org/source")
+        kw["budget_tracker"].update(final_response=response, was_interrupted=interrupted)
+        if cost is not None:
+            kw["budget_tracker"]["total_cost"] = cost
+        return response
+
+    install_reviewer(monkeypatch, chat)
+    asyncio.run(review.review_research_document(document=BODY))
+    assert len(calls) == 1
+
+
+def test_retry_exception_keeps_first_response(monkeypatch, tmp_path):
+    monkeypatch.setattr(review, "REVIEW_DIR", tmp_path)
+    calls = []
+
+    async def chat(messages, **kw):
+        calls.append(kw)
+        if len(calls) == 2:
+            raise RuntimeError("provider unavailable")
+        kw["budget_tracker"].update(final_response="malformed", total_cost=0.01)
+        return "malformed"
+
+    install_reviewer(monkeypatch, chat)
+    result = asyncio.run(review.review_research_document(document=BODY))
+    assert result["failure_kind"] == "review_unavailable"
+    stored = json.loads(next(tmp_path.glob("*.json")).read_text())
+    assert stored["attempts"][0]["raw_response"] == "malformed"
+
+
+def test_execution_failure_does_not_instruct_body_edits(isolated, monkeypatch):
+    result = receipt(isolated[0]["markdown"], "UNVERIFIED")
+    result.update(review.parse_review("malformed"))
+    monkeypatch.setattr(r, "review_research_document", AsyncMock(return_value=result))
+    message = asyncio.run(r._exec_research_document(action="publish_public", slug="report", fact_check_notes=NOTES))
+    assert isinstance(message, ToolFailure)
+    assert "unchanged draft" in message and "edit_staged" not in message
+    assert not isolated[1]
+
+
+def test_deadline_during_retry_keeps_first_attempt_diagnostics(monkeypatch, tmp_path):
+    monkeypatch.setattr(review, "REVIEW_DIR", tmp_path)
+    monkeypatch.setattr(review, "REVIEW_DEADLINE_SECONDS", 0.2)
+    calls = []
+
+    async def chat(messages, **kw):
+        calls.append(kw)
+        kw["budget_tracker"].update(rounds_used=1, total_cost=0.01)
+        if len(calls) == 2:
+            await asyncio.sleep(5)
+        kw["budget_tracker"]["final_response"] = "malformed"
+        return "malformed"
+
+    install_reviewer(monkeypatch, chat)
+    result = asyncio.run(review.review_research_document(document=BODY))
+    assert result["failure_kind"] == "review_unavailable"
+    stored = json.loads(next(tmp_path.glob("*.json")).read_text())
+    assert stored["attempts"][0]["raw_response"] == "malformed"
+    assert stored["attempts"][0]["parse_error"]
+    assert stored["attempts"][1]["tracker"] == {"rounds_used": 1, "total_cost": 0.01}
+    assert "raw_response" not in stored["attempts"][1]
+
+
+def test_unsaved_receipt_withdraws_pass_but_keeps_findings(monkeypatch, tmp_path):
+    monkeypatch.setattr(review, "REVIEW_DIR", tmp_path / "missing.json")
+    (tmp_path / "missing.json").write_text("not a directory")
+
+    async def chat(messages, **kw):
+        await kw["extra_handlers"]["fetch_url"](url="https://example.org/source")
+        return '{"verdict":"REVISE","reason":"bad claim","issues":["fix attribution"]}'
+
+    install_reviewer(monkeypatch, chat)
+    result = asyncio.run(review.review_research_document(document=BODY))
+    assert result["verdict"] == "UNVERIFIED" and result["failure_kind"] == "receipt_unavailable"
+    assert result["issues"] == ["fix attribution"] and "receipt_path" not in result
+
+
+@pytest.mark.parametrize("verdict,expected,forbidden", [
+    ("REVISE", "edit_staged", "unchanged draft"),
+    ("UNVERIFIED", "evidence gaps", "edit_staged"),
+])
+def test_content_verdicts_keep_author_guidance(isolated, monkeypatch, verdict, expected, forbidden):
+    monkeypatch.setattr(r, "review_research_document", AsyncMock(side_effect=lambda **kw: receipt(kw["document"], verdict)))
+    message = asyncio.run(r._exec_research_document(action="publish_public", slug="report", fact_check_notes=NOTES))
+    assert isinstance(message, ToolFailure)
+    assert expected in message and forbidden not in message
+    assert not isolated[1]
