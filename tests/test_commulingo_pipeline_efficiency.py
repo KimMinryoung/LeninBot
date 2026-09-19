@@ -28,8 +28,37 @@ class EvidenceContracts(TestCase):
             self.assertEqual(resolve_claim_chunks(result,sources)[0]['start'],0)
         with self.assertRaisesRegex(ValueError,'S1: chunks 0..'):
             handles.resolve([{'source_id':'S99'}],sources)
-        self.assertEqual(handles.handle('another-id'),'S2')
-        self.assertEqual(handles.handle(source['id']),'S1')
+        other=snapshot('https://example.org/other','Another page. '*10)
+        self.assertEqual(handles.handle(other),'S2')
+        self.assertEqual(handles.handle(source),'S1')
+        # A later snapshot of the same URL keeps the handle and becomes its current target.
+        later=snapshot('https://example.org/archive','Documented fact. '*80+'Appended page.')
+        self.assertEqual(handles.handle(later),'S1')
+        self.assertEqual(handles.ids['S1'],later['id'])
+
+    def test_pages_of_one_url_merge_into_one_numbering(self):
+        from commulingo_pipeline.evidence import SourcePages, SOURCE_CHUNK_CHARS
+        pages=SourcePages()
+        first,span1,created=pages.absorb('https://example.org/long','A'*600)
+        self.assertTrue(created); self.assertEqual(span1,(0,600))
+        second,span2,created=pages.absorb('https://example.org/long','B'*500)
+        self.assertTrue(created)
+        self.assertEqual(span2,(601,1101))
+        self.assertEqual(second['body'],'A'*600+'\n'+'B'*500)
+        self.assertEqual(span2[0]//SOURCE_CHUNK_CHARS,2,'page 2 starts in chunk 2, not at chunk 0')
+        again,span_again,created=pages.absorb('https://example.org/long','A'*600)
+        self.assertFalse(created); self.assertIs(again,second); self.assertEqual(span_again,span1)
+        # Snapshots a job already holds for one URL are merged oldest first.
+        from datetime import datetime,timezone,timedelta
+        t=datetime(2026,9,19,tzinfo=timezone.utc)
+        old={**snapshot('https://example.org/p','page one. '*30,now=t),}
+        new={**snapshot('https://example.org/p','page two. '*30,now=t+timedelta(minutes=1))}
+        single=snapshot('https://example.org/q','only page. '*30,now=t)
+        seeded=SourcePages()
+        merged=seeded.seed({old['id']:old,new['id']:new,single['id']:single})
+        self.assertEqual([m['url'] for m in merged],['https://example.org/p'])
+        self.assertTrue(merged[0]['body'].startswith('page one. ') and merged[0]['body'].endswith('page two. '))
+        self.assertIs(seeded.current['https://example.org/q'],single)
 
     def test_expanded_ranges_preserve_all_evidence_above_old_limit(self):
         source=snapshot('https://example.org/archive','Documented fact. '*100)

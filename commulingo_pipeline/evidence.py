@@ -5,46 +5,13 @@ from datetime import datetime, timedelta, timezone
 SOURCE_CHUNK_CHARS = 240
 
 
-QUOTE_CHARS = (20, 1000)
-
-
 def resolve_claim_chunks(claims, sources):
-    """Translate a verbatim quote or displayed chunk IDs to exact offsets.
-
-    A quote is located under the review policy's tolerant normalization
-    (quotes, dashes, spacing, case), so what the model copies from the
-    displayed source is found even when the page used typographic marks. A
-    model quotes far more reliably than it indexes: chunk-ID and source-ID
-    errors were 227 research rejections in the week to 2026-09-19.
-    """
-    from runtime_tools.commulingo_review_policy import locate
+    """Translate displayed chunk IDs to exact offsets; never ask a model to count."""
     resolved = []
     for claim in claims:
         source = sources.get(claim.get('source_id'))
         if not source or not source.get('body'):
             raise ValueError('unknown source_id; use an ID from a retrieved source')
-        if claim.get('quote') is not None:
-            quote = str(claim['quote'])
-            span = locate(source['body'], quote) if len(quote.strip()) >= QUOTE_CHARS[0] else None
-            if not span and len(quote.strip()) >= QUOTE_CHARS[0]:
-                # A paginated page is several snapshots of one URL, and the
-                # model often names the first page's handle while quoting the
-                # second. The quote itself identifies the passage: accept it
-                # from another snapshot of the same job when it is unambiguous.
-                found = [(other, hit) for other in sources.values()
-                         if other is not source and other.get('body') and (hit := locate(other['body'], quote))]
-                same_url = [f for f in found if f[0]['url'] == source['url']]
-                found = same_url or found
-                if found and len({f[0]['url'] for f in found}) == 1:
-                    source, span = found[0]
-            if not span:
-                raise ValueError(f'quote not found in source {source["id"]}: copy {QUOTE_CHARS[0]}..{QUOTE_CHARS[1]} '
-                                 'characters verbatim from its displayed text (no ellipsis or paraphrase), '
-                                 'or cite displayed chunk IDs instead')
-            value = {k:v for k,v in claim.items() if k not in {'quote','chunks','chunk'}}
-            value.update(source_id=source['id'], start=span[0], end=span[1])
-            resolved.append(value)
-            continue
         chunks = claim.get('chunks', [claim['chunk']] if 'chunk' in claim else [])
         count = (len(source['body']) + SOURCE_CHUNK_CHARS - 1) // SOURCE_CHUNK_CHARS
         if not chunks or any(type(n) is not int or n < 0 or n >= count for n in chunks):
@@ -102,16 +69,30 @@ def compile_evidence(claims, sources, changed_fields):
 
 
 class SourceHandles:
-    """Attempt-local short names; persisted artifacts always use content IDs."""
-    def __init__(self, sources):
-        self.ids = {}
-        for source_id in sorted(sources):
-            self.handle(source_id)
+    """Attempt-local short names, one per URL.
 
-    def handle(self, source_id):
-        if source_id not in self.ids.values():
-            self.ids[f'S{len(self.ids)+1}'] = source_id
-        return next(k for k,v in self.ids.items() if v == source_id)
+    A page fetched in several offsets used to be several snapshots with
+    separate handles and chunk numbering that restarted at 0 on each; the
+    model then cited page 2's chunk numbers under page 1's handle. 68 of the
+    71 jobs with chunk-ID rejections in the week to 2026-09-19 had such a
+    URL. Now a URL has one handle whose current snapshot is the merged text
+    of every page fetched (see SourcePages); older snapshots stay in the
+    job's source map so carried-over claims still compile, and any
+    persistent ID remains accepted.
+    """
+    def __init__(self, sources):
+        self.ids = {}      # handle -> current source id
+        self.by_url = {}   # url -> handle
+        for source in sorted(sources.values(), key=lambda s: (s['url'], str(s.get('fetched_at') or ''))):
+            self.register(source)
+
+    def register(self, source):
+        handle = self.by_url.setdefault(source['url'], f'S{len(self.by_url)+1}')
+        self.ids[handle] = source['id']
+        return handle
+
+    def handle(self, source):
+        return self.register(source)
 
     def resolve(self, claims, sources):
         result = []
@@ -119,8 +100,55 @@ class SourceHandles:
             source_id = self.ids.get(claim.get('source_id'), claim.get('source_id'))
             source = sources.get(source_id)
             if not source or not source.get('body'):
-                available = ', '.join(f'{self.handle(k)}: chunks 0..{(len(v["body"])-1)//SOURCE_CHUNK_CHARS}'
-                    for k,v in sources.items() if v.get('body'))
+                available = ', '.join(f'{handle}: chunks 0..{(len(sources[sid]["body"])-1)//SOURCE_CHUNK_CHARS}'
+                    for handle,sid in self.ids.items() if sources.get(sid,{}).get('body'))
                 raise ValueError('unknown source_id; retrieve or use an available source: ' + available)
             result.append({**claim, 'source_id':source_id})
         return result
+
+
+class SourcePages:
+    """One growing snapshot per URL within a research attempt.
+
+    absorb(url, page) returns the merged snapshot and the character span the
+    page occupies in it, so a paginated fetch is displayed as chunks a..b of
+    one continuous numbering. Pages are identified by content hash, never by
+    text search, so re-fetching the same offset changes nothing.
+    """
+    def __init__(self):
+        self.current = {}   # url -> merged snapshot
+        self.spans = {}     # url -> {page hash: (start, end)}
+
+    def seed(self, sources):
+        """Merge the snapshots a job already holds for a URL, oldest first."""
+        merged = []
+        by_url = {}
+        for source in sorted((s for s in sources.values() if s.get('body')),
+                             key=lambda s: str(s.get('fetched_at') or '')):
+            by_url.setdefault(source['url'], []).append(source)
+        for url, pages in by_url.items():
+            if len(pages) == 1:
+                self.current[url] = pages[0]
+                self.spans[url] = {pages[0]['content_hash']: (0, len(pages[0]['body']))}
+                continue
+            for page in pages:
+                snapshot_, span, created = self.absorb(url, page['body'])
+            merged.append(self.current[url])
+        return merged
+
+    def absorb(self, url, body):
+        body = body.replace('\x00', '\ufffd')
+        digest = hashlib.sha256(body.encode()).hexdigest()
+        current = self.current.get(url)
+        spans = self.spans.setdefault(url, {})
+        if current is None:
+            merged = snapshot(url, body)
+            spans[digest] = (0, len(body))
+        elif digest in spans:
+            return current, spans[digest], False
+        else:
+            offset = len(current['body']) + 1
+            merged = snapshot(url, current['body'] + '\n' + body)
+            spans[digest] = (offset, offset + len(body))
+        self.current[url] = merged
+        return merged, spans[digest], True

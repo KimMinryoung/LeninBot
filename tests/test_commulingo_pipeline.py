@@ -50,40 +50,6 @@ class EvidenceTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 resolve_claim_chunks([{**claim,'chunks':invalid}],{source['id']:source})
 
-    def test_quoted_claims_resolve_under_tolerant_matching(self):
-        from commulingo_pipeline.evidence import resolve_claim_chunks
-        body = 'Приговор был приведён в исполнение 6 февраля (по другой версии — 4 февраля) 1940 года\n\nв Сухановской тюрьме «особого назначения».'
-        source = snapshot('https://example.org/yezhov', body)
-        typed = 'исполнение 6 февраля (по другой версии - 4 февраля) 1940 года в Сухановской тюрьме "особого назначения".'
-        [claim] = resolve_claim_chunks([{'field':'body','claim':'Execution date','source_id':source['id'],'quote':typed}],{source['id']:source})
-        self.assertEqual(body[claim['start']:claim['end']], body[body.index('исполнение'):])
-        self.assertNotIn('quote', claim)
-        compiled = compile_evidence([claim],{source['id']:source},{'body'})
-        self.assertEqual(compiled[0]['excerpt'], body[claim['start']:claim['end']])
-        with self.assertRaisesRegex(ValueError,'quote not found'):
-            resolve_claim_chunks([{'field':'body','claim':'x','source_id':source['id'],'quote':'этой фразы в источнике нет вовсе'}],{source['id']:source})
-        # A quote from page 2 of the same URL, filed under page 1's handle, resolves to page 2.
-        page2 = snapshot('https://example.org/yezhov', 'Second page: 24 апреля 1939 года Ежовым было написано заявление с признанием.')
-        other = snapshot('https://example.org/elsewhere', 'Unrelated page that also says 24 апреля 1939 года Ежовым было написано заявление с признанием.')
-        [moved] = resolve_claim_chunks([{'field':'body','claim':'x','source_id':source['id'],'quote':'24 апреля 1939 года Ежовым было написано заявление'}],
-                                       {source['id']:source, page2['id']:page2, other['id']:other})
-        self.assertEqual(moved['source_id'], page2['id'])
-        with self.assertRaisesRegex(ValueError,'quote not found'):
-            resolve_claim_chunks([{'field':'body','claim':'x','source_id':source['id'],'quote':'24 апреля 1939 года Ежовым было написано заявление'}],
-                                 {source['id']:source, other['id']:other, snapshot('https://example.org/third','Third: 24 апреля 1939 года Ежовым было написано заявление.')['id']:snapshot('https://example.org/third','Third: 24 апреля 1939 года Ежовым было написано заявление.')})
-        with self.assertRaisesRegex(ValueError,'quote not found'):
-            resolve_claim_chunks([{'field':'body','claim':'x','source_id':source['id'],'quote':'6 февраля'}],{source['id']:source})
-
-    def test_review_quote_matching_folds_typography(self):
-        from runtime_tools.commulingo_review_policy import normalize, validate_decision
-        fetched = {'https://example.org/p': 'He called it “the cogs in a terrible machine” — and\u00a0meant it, 1936–1937.'}
-        check = {'citation':'https://example.org/p','source':'https://example.org/p','finding':'확인',
-                 'quote':'called it "the cogs in a terrible machine" - and meant it, 1936-1937.'}
-        value = validate_decision({'decision':'approve','reason':'Verified against the retrieved page text.',
-                                   'resolved_risks':[],'checks':[check]},{'risks':[]},fetched)
-        self.assertEqual(value['decision'],'approve')
-        self.assertEqual(normalize('A\u2014B'),normalize('a - b').replace(' ',''))
-
     def test_exact_range_and_expiry(self):
         source = snapshot('https://example.org/source','A documented event happened in 1917.')
         claim = {'field':'bio','claim':'The event happened in 1917',
@@ -659,6 +625,37 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
             result=await Research(store)(job,[{'stage':'validate','value':{'error':'400: evidence required for endYear'}}],Usage(),.2)
         self.assertEqual(result.next_stage,'draft')
         self.assertEqual(result.value['claims'][0]['field'],'body')
+
+    async def test_paginated_fetch_is_one_source_with_continuous_chunks(self):
+        from commulingo_pipeline.stages import Research
+        from commulingo_pipeline.engine import Usage
+        store=Mock()
+        store.job_sources.return_value={}
+        store.cached_source.return_value=None
+        page1='First page of the article. '*12   # 324 chars -> chunks 0..1
+        page2='Second page continues here. '*12
+        async def fetch(**kwargs):
+            return f'<external source="web">\n{page1 if kwargs["offset"]==0 else page2}\n</external>'
+        seen={}
+        async def model(**kwargs):
+            fetch_url=kwargs['read_wrap']('fetch_url',fetch)
+            first=await fetch_url(url='https://example.org/article',max_chars=400,offset=0)
+            second=await fetch_url(url='https://example.org/article',max_chars=400,offset=400)
+            self.assertIn('Source ID: S1',first); self.assertIn('Source ID: S1',second)
+            self.assertIn('Chunks 0..1 of 0..1',first)
+            self.assertIn('Chunks 1..2 of 0..2',second)      # page 2 numbering continues, never restarts
+            self.assertIn('[chunk 2] ',second); self.assertNotIn('[chunk 0]',second)
+            seen['saved']=[c.args[0]['url'] for c in store.save_source.call_args_list]
+            await kwargs['handler']({'status':'ready','reason':'Both pages support the body claim.',
+                'claims':[{'field':'body','claim':'From page two','source_id':'S1','chunks':[2]}]})
+        job={'id':31,'kind':'term','action':'update','target':'fixture','topic':'history'}
+        with patch('commulingo_pipeline.stages.service.call',return_value={'revision':'original'}), \
+             patch('commulingo_pipeline.stages.model_call',side_effect=model):
+            result=await Research(store)(job,[],Usage(),.2)
+        [claim]=result.value['claims']
+        self.assertEqual((claim['start'],claim['end']),(480,len(page1)+1+len(page2)))
+        merged=next(c.args[0] for c in store.save_source.call_args_list if c.args[0]['id']==claim['source_id'])
+        self.assertTrue(merged['body'].startswith(page1) and merged['body'].endswith(page2))
 
     async def test_validate_bounce_runs_targeted_research_and_carries_claims(self):
         from commulingo_pipeline.stages import Research, TARGETED_RESEARCH_ROUNDS

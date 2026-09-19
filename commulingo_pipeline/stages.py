@@ -9,7 +9,7 @@ import re
 from datetime import datetime, timezone
 
 from .engine import Result
-from .evidence import snapshot, compile_evidence, resolve_claim_chunks, SOURCE_CHUNK_CHARS, SourceHandles, QUOTE_CHARS
+from .evidence import snapshot, compile_evidence, resolve_claim_chunks, SOURCE_CHUNK_CHARS, SourceHandles, SourcePages
 from . import service
 from .bundles import work_topics, advance
 
@@ -268,21 +268,34 @@ class Research:
             return Result({'reason':'target no longer exists'},'complete','escalated')
         sources = await asyncio.to_thread(self.store.job_sources, job['id'])
         box = {}
-        handles = SourceHandles(sources)
-        def display(source):
-            chunks = [f'[chunk {i//SOURCE_CHUNK_CHARS}] {source["body"][i:i+SOURCE_CHUNK_CHARS]}'
-                      for i in range(0,len(source['body']),SOURCE_CHUNK_CHARS)]
-            return (f'Source ID: {handles.handle(source["id"])}\nPersistent ID: {source["id"]}\nURL: {source["url"]}\nRetrieved: {source["fetched_at"]}\n'
+        pages = SourcePages()
+        for merged in pages.seed(sources):
+            await asyncio.to_thread(self.store.save_source,merged)
+            await asyncio.to_thread(self.store.link_source,job['id'],merged['id'])
+            sources[merged['id']] = merged
+        handles = SourceHandles({s['id']:s for s in pages.current.values()})
+        def display(source, span=None):
+            body = source['body']
+            total = (len(body)-1)//SOURCE_CHUNK_CHARS
+            first, last = (0, total) if span is None else (span[0]//SOURCE_CHUNK_CHARS, (span[1]-1)//SOURCE_CHUNK_CHARS)
+            chunks = [f'[chunk {i}] {body[i*SOURCE_CHUNK_CHARS:(i+1)*SOURCE_CHUNK_CHARS]}' for i in range(first,last+1)]
+            return (f'Source ID: {handles.handle(source)}\nPersistent ID: {source["id"]}\nURL: {source["url"]}\nRetrieved: {source["fetched_at"]}\n'
+                    f'Chunks {first}..{last} of 0..{total} for this URL\n'
                     '<external source="pipeline-source">\n'+'\n'.join(chunks)+'\n</external>')
+        async def absorb(url, body):
+            merged, span, created = pages.absorb(url, body)
+            if created:
+                await asyncio.to_thread(self.store.save_source,merged)
+                await asyncio.to_thread(self.store.link_source,job['id'],merged['id'])
+                sources[merged['id']] = merged
+            return display(merged, span)
         def wrap(name, call):
             async def fetched(**kwargs):
                 if name in {'fetch_url','wiki_get'}:
                     cached = await asyncio.to_thread(self.store.cached_source,name,kwargs)
                     if cached:
                         usage.tracker['pipeline_cache_hits'] = usage.tracker.get('pipeline_cache_hits',0)+1
-                        await asyncio.to_thread(self.store.link_source,job['id'],cached['id'])
-                        sources[cached['id']] = cached
-                        return display(cached)
+                        return await absorb(cached['url'], cached['body'])
                 raw = await call(**kwargs)
                 text = str(raw)
                 match = re.search(r'<external source="[^"]*">\n(.*)\n</external>',text,re.S)
@@ -290,12 +303,10 @@ class Research:
                     urls = [kwargs.get('url')] if name=='fetch_url' else re.findall(r'https?://[^\s<>\]"\)]+',text[:1000])
                     url = next((u for u in urls if isinstance(u,str) and external_url(u)),None)
                     if url:
-                        source = snapshot(url,match[1])
-                        await asyncio.to_thread(self.store.save_source,source)
-                        await asyncio.to_thread(self.store.cache_source,name,kwargs,source['id'])
-                        await asyncio.to_thread(self.store.link_source,job['id'],source['id'])
-                        sources[source['id']] = source
-                        return display(source)
+                        page = snapshot(url,match[1])
+                        await asyncio.to_thread(self.store.save_source,page)
+                        await asyncio.to_thread(self.store.cache_source,name,kwargs,page['id'])
+                        return await absorb(url, page['body'])
                 return raw
             return fetched
         from runtime_tools.commulingo_people import (COMMULINGO_PERSON_CREATE_TOOL,
@@ -316,15 +327,12 @@ class Research:
             'reason':{'type':'string','minLength':20},
             'claims':{'type':'array','items':{'type':'object','additionalProperties':False,
                 'properties':{'field':{'type':'string','enum':sorted(fields)},'claim':{'type':'string'},'source_id':{'type':'string'},
-                    'quote':{'type':'string','minLength':QUOTE_CHARS[0],'maxLength':QUOTE_CHARS[1],
-                             'description':'Preferred: the supporting passage copied verbatim from the displayed source '
-                                           f'({QUOTE_CHARS[0]}..{QUOTE_CHARS[1]} characters, contiguous, no ellipsis). The runner locates it.'},
                     'chunks':{'type':'array','minItems':1,'maxItems':25,
-                              'items':{'type':'integer','minimum':0},'description':'Alternative to quote: displayed chunk IDs.'},
+                              'items':{'type':'integer','minimum':0}},
                     'chunk':{'type':'integer','minimum':0,'description':'Single-chunk shorthand for chunks: [n].'},
                     'stance':{'type':'string','enum':['supports','disputes']}},
                 'required':['field','claim','source_id'],
-                'oneOf':[{'required':['quote']},{'required':['chunks']},{'required':['chunk']}]}}},
+                'anyOf':[{'required':['chunks']},{'required':['chunk']}]}}},
             'required':['status','reason','claims']}
         previous_error = latest(artifacts,'validate').get('error','')
         required_support = set(re.findall(r'(?:evidence required for |supporting )([A-Za-z][A-Za-z0-9]*)',
@@ -354,7 +362,8 @@ class Research:
             box.update(value)
             return 'OK: research artifact recorded'
         reusable = [{k:str(v) if k in {'fetched_at','expires_at'} else v for k,v in s.items() if k!='body'}
-                    for s in sources.values() if s.get('body') and s['expires_at']>datetime.now(timezone.utc)]
+                    for s in sources.values() if s['id'] in handles.ids.values()
+                    and s.get('body') and s['expires_at']>datetime.now(timezone.utc)]
         sections_only = job['kind']=='person' and work_topics(job)==['sections']
         prompt = (('TARGETED FOLLOW-UP RESEARCH ONLY. The previous_claims below are kept and carried over '
             'automatically; do not resubmit them. Find field-specific support ONLY for: '
@@ -364,9 +373,8 @@ class Research:
             if targeted else
             'This is RESEARCH ONLY. Do not write a dictionary patch. Investigate all current commissioned topics together, '
             'identity and missing facts. Collect supporting AND conflicting sources. Finish through ')
-            + 'commulingo_pipeline_result with source_id and, per claim, the supporting passage copied verbatim '
-            'into quote (preferred) or displayed chunk IDs in chunks (e.g. chunks: [2,3]). '
-            'The runner locates quotes and computes exact character ranges. Facts need field-specific claims. '
+            + 'commulingo_pipeline_result with source_id and displayed chunk IDs in chunks (e.g. chunks: [2,3]). '
+            'The runner computes exact character ranges. Facts need field-specific claims. '
             'Reuse the dated sources below: fetch_url retrieves their cached text and chunk IDs. '
             'A no-edit status applies to ALL current topics; use it only when that judgement holds for all of them. '
             'Person sections are commissioned separately after card topics, with a fresh snapshot. '
