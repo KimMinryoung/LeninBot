@@ -35,57 +35,7 @@ from datetime import date
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 FEATURE = "commulingo_classification_audit"
-SOVIET_CITIZENSHIP = {"soviet", "russia"}
-# Successor states of union republics: their citizens may legitimately hold a
-# Soviet office (a republic first secretary coded with today's state).
-SOVIET_SUCCESSORS = {"armenia", "azerbaijan", "belarus", "estonia", "georgia", "kazakhstan", "kyrgyzstan", "latvia",
-                     "lithuania", "moldova", "tajikistan", "turkmenistan", "ukraine", "uzbekistan"}
-ERA_GROUPS = ("old-regime", "bolshevik", "stalin-era", "thaw", "perestroika")
-
-GROUP_RULES = {
-    "old-regime": "Inside the Russian Empire before October 1917: tsarist officials and generals, White commanders of the "
-                  "civil war, and the revolutionaries and thinkers (Chernyshevsky, Plekhanov, Zasulich) whose activity peaked "
-                  "before 1917 or who died before the Soviet state formed.",
-    "bolshevik": "Soviet citizens whose public role peaked 1917–1940: Old Bolsheviks, civil-war commanders, early Soviet "
-                 "officials, many purged in the 1930s.",
-    "stalin-era": "Soviet citizens whose public role peaked 1929–1953: enforcers, officials, commanders, scientists and "
-                  "artists of the Stalin years, including victims of the terror whose careers began under Stalin.",
-    "thaw": "Soviet citizens whose public role peaked 1953–1985: thaw and stagnation, space and science, reformers, dissidents.",
-    "perestroika": "Soviet citizens whose public role peaked 1985–1991 or who presided over the end of the USSR and the first "
-                   "post-Soviet years.",
-    "international-revolutionary": "Anyone OUTSIDE the Soviet state apparatus on the revolutionary or socialist side: "
-                                   "communists, socialists, leaders and officials of socialist states (Poland, Hungary, "
-                                   "Czechoslovakia, East Germany, China, Cuba, Vietnam...), their reformers and dissidents. "
-                                   "A non-Soviet citizen never belongs to a Soviet era group.",
-    "foreign-statesmen": "Non-communist politicians, diplomats and generals of other states who negotiated with or confronted "
-                         "the USSR: presidents, prime ministers, foreign ministers, ambassadors, monarchs.",
-    "international-counterrevolutionary": "Rulers, soldiers and movements outside the USSR that fought revolution and the "
-                                          "socialist camp by force: fascists, military dictators, anti-communist insurgents. "
-                                          "Not Russian Whites (old-regime).",
-    "scholar": "ONLY historians and social scientists who researched and interpreted this history (Soviet studies, Marxist "
-               "theory scholarship). NOT natural scientists, engineers or physicians — those belong to the era group of their "
-               "Soviet career.",
-}
-
-OFFICE_RULES = {
-    "party-leadership": "Politburo/Presidium members and Central Committee secretaries at the all-union top, and the General "
-                        "Secretary; Lenin belongs here.",
-    "party-secretariat-cadres": "The Secretariat, Orgburo and cadres apparatus, AND regional/oblast/city first secretaries "
-                                "(Moscow, Leningrad, Sverdlovsk...) and Komsomol leaders — the party machine below the top.",
-    "nationalities-federal": "Union-republic first secretaries and republic heads of government (Ukraine, Kazakhstan, "
-                             "the Baltics, Caucasus, Central Asia, Moldova...) and the institutions managing nationalities "
-                             "and the federal structure.",
-    "ideology-propaganda": "Pro-Soviet ideologues who ran ideology, censorship and propaganda for the party (Suslov, Zhdanov "
-                           "line). Never a dissident or a scientist who published critical essays.",
-    "science-nuclear-space": "Scientists, chief designers and administrators of the atomic, missile and space programmes, "
-                             "including physicists who later dissented (Sakharov).",
-    "state-security": "Cheka/GPU/NKVD/MGB/KGB command line, military counter-intelligence (Special Departments, SMERSH) "
-                      "and GRU chiefs.",
-    "defence": "War Commissariat and Ministry of Defence: commanders and marshals, not intelligence chiefs.",
-    "head-of-government": "Chairmen of Sovnarkom / Council of Ministers and their deputies; an ambiguous line — prefer the "
-                          "person's defining office when they also held one.",
-    "comintern": "Comintern functionaries of any nationality (Dimitrov, Kolarov, Manuilsky).",
-}
+from runtime_tools.commulingo_classify import build_questions, offices_allowed  # noqa: E402  shared editorial rules
 
 # stored→judged pairs the operator has accepted as boundary judgements; a
 # disagreement on these lines is not reported (2026-09-19 decisions).
@@ -109,25 +59,6 @@ def load_people(limit: int | None) -> list[dict]:
     return query(sql)
 
 
-def build_questions(groups: list[dict], offices: list[dict], categories: list[dict], soviet: bool) -> dict:
-    group_criteria = {g["id"]: f"{g['title_en']} ({g['range_label']}). {GROUP_RULES.get(g['id'], g.get('blurb_en') or '')}"
-                      for g in groups}
-    role_criteria = {c["id"]: f"CATEGORY {c['label_en']} / {c['label_ko']}" for c in categories}
-    if soviet:
-        role_criteria.update({o["id"]: f"OFFICE {o['title_en']} ({o['range_label']}): {OFFICE_RULES.get(o['id'], '')}"
-                              for o in offices})
-    return {
-        "group": {"type": "choice", "criteria": group_criteria,
-                  "instructions": "Which dictionary group does this person belong to? Soviet citizens go to the era in which "
-                                  "their public role peaked; people outside the Soviet state go to one of the four "
-                                  "non-Soviet groups."},
-        "role": {"type": "choice", "criteria": role_criteria,
-                 "instructions": ("Which single role identifies this person? Choose a catalogued OFFICE only when the career "
-                                  "shows they held it; otherwise the closest CATEGORY." if soviet else
-                                  "Which category best identifies this non-Soviet person's role in this history?")},
-    }
-
-
 def state_of(p: dict) -> dict:
     return {"name": p["name_ko"], "years": p["years_label"], "citizenship": p["citizenship_code"], "epithet": p["epithet_ko"],
             "career": [f"{c.get('t')} ({c.get('y')})" for c in (p.get("career") or [])],
@@ -136,7 +67,7 @@ def state_of(p: dict) -> dict:
 
 def judge(p: dict, catalogs: tuple, decide) -> dict:
     groups, offices, categories = catalogs
-    soviet = p["citizenship_code"] in SOVIET_CITIZENSHIP | SOVIET_SUCCESSORS
+    soviet = offices_allowed(p["citizenship_code"])
     result = decide(FEATURE, state_of(p), build_questions(groups, offices, categories, soviet), label="classification-audit")
     row = {"id": p["id"], "name": p["name_ko"], "years": p["years_label"],
            "stored": {"group": p["group_id"], "role": p["office_id"] or p["category_id"]}}

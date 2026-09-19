@@ -326,6 +326,12 @@ international-revolutionary 0.94), 이반 파블로프(생리학자)가 `theoris
 레닌은 `party-leadership`; `head-of-government`·카메네프 comintern·톰스키/루주타크 economic-management·에이헤 agriculture는
 애매하므로 Jev 불일치만으로 옮기지 않는다. 비소련 국적 인물은 소련 시대 그룹에 두지 않는다(그룹 정의대로).
 
+**등록 시 자동 배정으로 전환 (2026-09-19, 사용자 결정).** 감사 후 사용자가 "등록할 때부터 Jev가 채우게" 하라고 해서
+`runtime_tools/commulingo_classify.py::classify_person`을 초안 단계와 create 도구에 넣었다: 작성 모델은 groupId·role을 내지 않고
+실행기가 확정 규칙이 든 criteria로 판정해 채운다(관직은 소련·후계국 국적에만, accept 0.7 미만은 reviewFlags로 검토자 확인, 판정
+불가면 작성 모델에 직접 지정 요구). 라이브 확인: 카다르 → international-revolutionary 1.0 / bloc-reform-leader 0.47(플래그),
+쿠나예프 → thaw 0.9 / nationalities-federal 0.96. 감사 스크립트는 같은 criteria를 import한다.
+
 ## 4.12 남은 후보와 관찰 포인트
 
 - 조사 게이트 실데이터 첫 7건(12:06~12:35): 173 claim, unrelated 4건 전부 conf 0.12~0.62의 "일부 지지"(긴 복합 문장의

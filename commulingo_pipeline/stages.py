@@ -565,13 +565,20 @@ class Draft:
             # ceiling-only schema; the section target starts at 350 Korean characters.
             for lang,floor in (('ko',200),('en',300)):
                 schema['properties']['body']['properties'][lang]['minLength'] = floor
-        groups, role_categories = [], []
+        groups, role_categories, catalogs, classify = [], [], None, None
         if job['kind']=='person' and not section:
-            from runtime_tools.commulingo_people import _list_groups, _list_categories
-            groups, role_categories = await asyncio.gather(asyncio.to_thread(_list_groups),
-                                                         asyncio.to_thread(_list_categories))
+            from runtime_tools.commulingo_classify import classify_person, load_catalogs
+            catalogs = await asyncio.to_thread(load_catalogs)
+            groups, _offices, role_categories = catalogs
             if not groups or not role_categories:
                 raise ValueError('person classification catalogs unavailable; cannot draft a valid classification')
+            # The runner assigns group and role after the draft (commulingo_classify):
+            # the writer no longer chooses them, so they leave the required list
+            # and the catalogs leave the prompt. An explicit value is still
+            # accepted for the outage path (classification unavailable).
+            if job['action']=='create':
+                classify = classify_person
+                schema['required'] = [f for f in schema.get('required',[]) if f not in {'group','groupId','role'}]
             group_ids = sorted({g['id'] for g in groups})
             for field in ('group','groupId'):
                 if field in schema['properties']:
@@ -681,6 +688,17 @@ class Draft:
                 raise ValueError('empty edit')
             if groups and any(fields[f] not in group_ids for f in ('group','groupId') if f in fields):
                 raise ValueError('select group/groupId from the supplied person group catalog')
+            if classify is not None:
+                from runtime_tools.commulingo_classify import fill_classification
+                classification = await asyncio.to_thread(classify, fields, catalogs=catalogs)
+                if classification is None and not (fields.get('groupId') and fields.get('role')):
+                    raise ValueError('automatic classification is unavailable; supply groupId and role '
+                                     '(officeId or category) in this draft')
+                fields = fill_classification(fields, classification)
+                if classification:
+                    usage.tracker['classification'] = {**classification['confidence'],'low_confidence':classification['low_confidence']}
+                    if classification['low_confidence']:
+                        fields['reviewFlags'] = sorted(set(fields.get('reviewFlags') or []) | {'identity_uncertain'})
             evidence = compile_evidence([c for c in claims if c['field'] in fields],sources,set(fields))
             fields['evidence'] = evidence
             if job['action']=='update':
@@ -731,9 +749,11 @@ class Draft:
                'single most important as this section and list the rest in notes with their sources; the entry is '
                'commissioned again for them. Give sortOrder as the chronological key of the period the section opens on.\n' if section else '')
             +             'Write bilingual equivalent claims; do not fill space or add facts beyond the research. '
-            'For people, choose group/groupId from person_groups using their descriptions, not title alone. '
-            'Choose role.category from role_categories; do not invent category or office IDs. '
-            'Use the supplied current snapshot. At most three targeted dictionary lookups are available; '
+            + ('For a new person, omit groupId and role: the runner assigns them from the card after the draft. '
+               if classify is not None else
+               'For people, choose group/groupId from person_groups using their descriptions, not title alone. '
+               'Choose role.category from role_categories; do not invent category or office IDs. ')
+            + 'Use the supplied current snapshot. At most three targeted dictionary lookups are available; '
             'Look up only a known ID with get_person/get_sections (person_id), get_term (term_id), '
             'get_office (office_id), or get_event (event_id). Search actions and q are unavailable. '
             'do not browse lists or investigate unchanged relationships. Submit the first draft early to leave rounds for repair. '
@@ -746,8 +766,9 @@ class Draft:
             'Keep definitions concise: obey every schema maxLength; move detailed history and qualifications into body. '
             'Resolve supplied validation and review feedback using verified research; do not repeat research.\n' + stage_evidence(
                 {'job':job,'current_topics':work_topics(job),'research':research,'previous_draft':latest(artifacts,'draft'),
-                 'validation':latest(artifacts,'validate'),'evidence_fields':sorted({c['field'] for c in claims}), 'person_groups':groups,
-                 'role_categories':role_categories,'prose_budgets':prose_budgets,
+                 'validation':latest(artifacts,'validate'),'evidence_fields':sorted({c['field'] for c in claims}),
+                 'person_groups':[] if classify is not None else groups,
+                 'role_categories':[] if classify is not None else role_categories,'prose_budgets':prose_budgets,
                  'review_feedback':latest(artifacts,'review') or (job.get('payload') or {}).get('review_feedback'),
                  'original_proposal':(job.get('payload') or {}).get('original_proposal')}))
         # One draft plus a few whole-field repairs; the forced-final retries add

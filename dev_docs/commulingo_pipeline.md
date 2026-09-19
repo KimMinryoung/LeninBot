@@ -129,7 +129,8 @@ reason이 probe·placeholder·진행 메모("Investigating … before returning"
 뺀다(`review_note_checks`). 저장된 검토
 40건 기준선에서 무관 인용 2건을 오탐 없이 잡았고(4.8), **`enforce=true`** — 고신뢰
 무관·반박 인용을 가진 결정 호출을 그 check만 지목해 거절한다(`enforce=false`면 기록만).
-작성기는 제한된
+인물 create 초안에서 `groupId`·`role`은 작성기가 아니라 실행기가 Jev로 배정한다(`runtime_tools/commulingo_classify.py`,
+`dev_docs/commulingo_editorial.md` "인물 분류 자동 배정"); 판정 수치는 draft artifact `metrics.classification`에 남는다. 작성기는 제한된
 초안 도구와 사전 조회만 받는다. 실행기가 20~6000자의 원문 인용과 기준 revision을 붙인다.
 작성 모델에는 evidence/revision을 수정하는 인자가 없다. 인물 상세 절도 같은 경로를 사용한다.
 인물 상세 절 초안은 절 하나(slug·heading·body·sortOrder)만 받는다. 조사가 여러 절이나 기존 절 정정을

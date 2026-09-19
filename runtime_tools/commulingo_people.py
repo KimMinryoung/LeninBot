@@ -2930,6 +2930,15 @@ def _run_edit(target_type: str, action: str, target_id: str, patch: dict,
         if isinstance(fields.get("role"), dict) and "categoryId" in fields["role"]:
             fields["role"] = {**fields["role"], "category": fields["role"]["categoryId"]}
             fields["role"].pop("categoryId")
+        if target_type == "person" and action == "create" and not (fields.get("groupId") and fields.get("role")):
+            from runtime_tools.commulingo_classify import classify_person, fill_classification
+            classification = classify_person(fields)
+            if classification is None:
+                return ("Error: automatic classification is unavailable right now; supply groupId and "
+                        "role (officeId or category) yourself for this create.")
+            fields = fill_classification(fields, classification)
+            if classification["low_confidence"]:
+                fields["reviewFlags"] = sorted(set(fields.get("reviewFlags") or []) | {"identity_uncertain"})
         evidence_errors = _person_evidence_errors(fields, sources)
         if evidence_errors:
             return "Error: evidence validation: " + "; ".join(evidence_errors)
@@ -3804,9 +3813,10 @@ def _person_write_tool(name: str, action: str) -> dict:
     update_only = {'expectedRevision', 'aliasEdits', 'careerEdits', 'sceneEdits'}
     field_keys = tuple(key for key in _PERSON_NARROW_KEYS
                        if action != 'create' or key not in update_only)
+    # groupId and role are assigned by the runner (commulingo_classify) when
+    # the writer leaves them out; they stay accepted for an explicit choice.
     required_fields = (
-        "groupId", "epithet", "bio", "career", "role", "citizenship", "nationalOrigin",
-        "evidence",
+        "epithet", "bio", "career", "citizenship", "nationalOrigin", "evidence",
     ) if action == "create" else ("expectedRevision", "evidence")
     return {
         "name": name,
@@ -3814,6 +3824,7 @@ def _person_write_tool(name: str, action: str) -> dict:
             f"{action.title()} one CommuLingo person card. This tool accepts person fields only; "
             "citations are a separate top-level argument. Public text is bilingual {ko,en}. "
             "Put evidence and reviewFlags INSIDE fields. expectedRevision and collection edits are update-only. "
+            "On create, omit groupId and role: the runner classifies the person from the card. "
             "Read the record and reference lists first. On create, citizenship and "
             "nationalOrigin require evidence; if unknown, research or defer registration, never guess. Soviet and Yugoslav codes are citizenship-only. Preserve mixed ancestry in labels. "
             "nationalOrigin means national/ethnic "

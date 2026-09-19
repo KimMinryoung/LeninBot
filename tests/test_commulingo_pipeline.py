@@ -745,6 +745,8 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
             await kwargs['handler']({'fields':{'groupId':'foreign-statesmen'}})
         with patch('runtime_tools.commulingo_people._list_groups',return_value=groups), \
              patch('runtime_tools.commulingo_people._list_categories',return_value=[{'id':'foreign-statesman'}]), \
+             patch('runtime_tools.commulingo_people._list_offices',return_value=[]), \
+             patch('runtime_tools.commulingo_classify.classify_person',return_value=None), \
              patch('commulingo_pipeline.stages.model_call',side_effect=model), patch('commulingo_pipeline.stages.service.call',return_value={}):
             result=await Draft(store)({'id':921,'kind':'person','action':'update','topic':'basics','target':'fixture'},
                 [{'stage':'research','value':{'baseline':'original','claims':[]}}],Usage(),.2)
@@ -775,6 +777,8 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
             await kwargs['handler']({'fields':{**base,'years':'1895–1940'}})
         with patch('runtime_tools.commulingo_people._list_groups',return_value=groups), \
              patch('runtime_tools.commulingo_people._list_categories',return_value=[{'id':'bolshevik'}]), \
+             patch('runtime_tools.commulingo_people._list_offices',return_value=[]), \
+             patch('runtime_tools.commulingo_classify.classify_person',return_value=None), \
              patch('commulingo_pipeline.stages.model_call',side_effect=model), patch('commulingo_pipeline.stages.service.call',return_value={}):
             result=await Draft(store)({'id':3,'kind':'person','action':'create','topic':'basics','target':'new-person'},
                 [{'stage':'research','value':{'baseline':'','claims':claims}}],Usage(),.2)
@@ -796,6 +800,7 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
                  'role':{'officeId':'party-leadership','category':''}}
         with patch('runtime_tools.commulingo_people._list_groups',return_value=groups), \
              patch('runtime_tools.commulingo_people._list_categories',return_value=[{'id':'socialist-bloc-leader'}]), \
+             patch('runtime_tools.commulingo_people._list_offices',return_value=[]), \
              patch('commulingo_pipeline.stages.model_call',side_effect=model), patch('commulingo_pipeline.stages.service.call',return_value={}):
             await Draft(store)({'id':1,'kind':'person','action':'update','topic':'basics','target':'stalin'},
                 [{'stage':'research','value':{'baseline':'v1','claims':[],'current':current}}],Usage(),.2)

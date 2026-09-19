@@ -363,6 +363,15 @@
     "thresholds": {"keep": 0.8},
     "note": "scout 보고서→KG 저장 전 사실 필터(kg_runtime/scout_ingest.py::_filter_fact_lines): 추출된 줄(최대 12)마다 noul '외부 세계에 대한 사실인가(메일함 UID·처리 절차·추론 메모가 아닌가)'를 한 요청으로 묻고 thresholds.keep 이상만 최대 7줄 저장, 남는 줄이 없으면 episode를 쓰지 않는다. 판정 불가 시 전부 유지(기존 동작). 2026-09-19 기준선(실제 scout 보고서 30건 100줄): 절차 줄 92건 전부 p≤0.11, 실제 뉴스 사실 6건 p≥0.85, 제목·표 행은 0.1~0.83. 보고서당 ~$0.00004. dev_docs/jev_system_one_adoption.md 4.10"
     },
+  "commulingo_person_classification": {
+    "provider": "openrouter",
+    "model": "typesafe/jev-1.13",
+    "timeout": 20,
+    "kind": "system_one",
+    "enabled": true,
+    "thresholds": {"accept": 0.7},
+    "note": "인물 등록 시 groupId·role 자동 배정(runtime_tools/commulingo_classify.py::classify_person). 작성 모델은 두 값을 내지 않고 실행기가 초안의 이름·생몰·국적·별칭·경력·bio로 Jev choice 판정을 받아 채운다(관직은 소련·후계국 국적에만 제시). confidence<thresholds.accept면 그래도 채우되 reviewFlags로 독립 검토자 확인 요청, 판정 불가면 작성 모델에 직접 지정을 요구. criteria는 2026-09-19 운영자 확정 규칙. enabled=false면 작성 모델이 예전처럼 직접 고른다. dev_docs/commulingo_editorial.md"
+    },
   "commulingo_classification_audit": {
     "provider": "openrouter",
     "model": "typesafe/jev-1.13",

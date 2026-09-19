@@ -209,9 +209,17 @@ max_length_continuations로 실제 도구 루프에 전달한다. 응답당 8,00
 
 근거 배열과 독립 검토 checks에는 개수 상한을 두지 않는다. 각 항목의 출처·인용·필드 지원 검증은 유지하며, 충분히 확인된 사실에 인용을 더 모으는 것은 품질 목표가 아니다.
 
-## 분류 감사
+## 인물 분류 자동 배정과 감사
 
-`scripts/commulingo_classification_audit.py`가 인물 전원의 groupId·role을 Jev(System One)로 재판정해 저장값과 다른
+**등록 시 자동 배정 (2026-09-19).** 인물 create의 `groupId`와 `role`은 작성 모델이 고르지 않는다. 도구 schema에서 두 필드는
+필수가 아니고(명시적 값은 여전히 받음), 실행기가 초안의 이름·생몰·국적·별칭·경력·bio를 state로 Jev(registry
+`commulingo_person_classification`, `runtime_tools/commulingo_classify.py`)에 choice 판정을 받아 채운다. 관직 선택지는 소련·후계국
+국적에만 제시하고 비소련 인물은 카테고리만 고른다. confidence가 `thresholds.accept`(0.7) 미만이면 그래도 채우되
+`reviewFlags: identity_uncertain`을 붙여 독립 검토자가 확인하게 하고, 판정 불가(None)면 작성 모델에 직접 지정을 요구한다.
+파이프라인 초안 단계(`stages.Draft`)와 `commulingo_person_create` 도구 양쪽이 같은 함수를 쓰며, 초안 프롬프트에서는 그룹·카테고리
+카탈로그가 빠진다. update에서는 기존 분류가 잠겨 있으므로 해당 없음. `enabled=false`면 예전처럼 작성 모델이 고른다.
+
+**감사.** `scripts/commulingo_classification_audit.py`가 인물 전원의 groupId·role을 Jev(System One)로 재판정해 저장값과 다른
 고신뢰 건을 `logs/commulingo/person_classification_audit_<날짜>.md`로 뽑는다(쓰기 없음, 인물당 ~$0.00012). criteria에는
 운영자가 확정한 편집 규칙이 들어 있다: 공화국 제1서기·공화국 정부 수반은 `nationalities-federal`, 지방·주 서기와 콤소몰·중앙위
 서기는 `party-secretariat-cadres`, `ideology-propaganda`는 친소련 이데올로그 관직, 비소련 국적 인물은 소련 시대 그룹에 두지
