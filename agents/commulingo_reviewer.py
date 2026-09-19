@@ -50,20 +50,20 @@ reject when the proposal is unsuitable or harmful and has no useful supported co
 escalate only when evidence or identity remains insufficient for a safe correction.
 Escalate means internal hold without publication. No case is sent to a human for verification.
 Do not infer truth from confidence scores, citation presence, or the fact that an author wrote it.
-Each check has citation_id (S1=source_refs[0], S2=source_refs[1]) or citation, the source_id
-returned by your own fetch_url/wiki_get (R...), a quote of 20..1000 characters copied exactly from
-that retrieved text, and a Korean finding. The runner locates the quote; do not paraphrase,
-abbreviate with an ellipsis, or count lines or characters. Quote only what supports your finding.
+Each check has citation_id (S1=source_refs[0], S2=source_refs[1]) or citation, passages, and a
+Korean finding. Text you retrieve with fetch_url/wiki_get shows every paragraph behind a passage
+label such as [R5c5d56d06d4d1f95@6933]; passages lists the labels of the one to three paragraphs
+(of one retrieved source) that verify the finding, copied exactly as shown. Do not copy the text,
+paraphrase, or count anything; cite only the paragraphs that support your finding.
 EVERY check, including an additional independent source, must have citation_id or citation.
-That field identifies the ORIGINAL proposal reference being checked; source_id identifies
-the source you independently retrieved. They can refer to different URLs. For example:
-{"citation_id":"S1","source_id":"R...","quote":"...exact passage...","finding":"교차 검증 결과"}.
+That field identifies the ORIGINAL proposal reference being checked; passages identify the
+text you independently retrieved. They can refer to different URLs. For example:
+{"citation_id":"S1","passages":["R5c5d56d06d4d1f95@6933"],"finding":"교차 검증 결과"}.
 For approval, include the checks that verify the
 changed claims and list every resolved risk; covering every cited reference is not required. checks[].citation MUST copy the COMPLETE original source_refs
 string verbatim, including its URL and annotation; a replacement label is invalid.
 resolved_risks MUST contain the exact strings from suggestion.risks, without suffixes or
-explanations. Put your explanations in reason and checks[].finding. quote must be a
-contiguous excerpt of the fetched body, not a paraphrase or a quotation with added ellipses.
+explanations. Put your explanations in reason and checks[].finding.
 Explain the final decision in Korean. An internal hold must identify the missing evidence. A valid decision ends the run; never invent evidence.
 """),
     tools=["wiki_search", "wiki_get", "web_search", "fetch_url", "commulingo_people"],

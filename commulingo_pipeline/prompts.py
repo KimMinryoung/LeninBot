@@ -47,12 +47,13 @@ startYear/endYear for a term. Other supported fields may carry their own claims.
 Claim field names must be actual writable fields, never commissioned topic names. For terms,
 history, distinctions and examples belong to body claims; definition claims cannot substitute
 for body evidence. For people, use bio rather than a topic such as basics.
-Source IDs (S1, S2, ...) come from retrieval results. Each claim carries a quote of 20..2000
-characters copied exactly from the displayed text of its source; the runner locates it. Do not
-paraphrase, abbreviate with an ellipsis, or count characters.
+Retrieved text shows every paragraph behind a passage label such as [S2@12303]. Each claim
+cites the labels of the one to three paragraphs (of one source) that state it, copied exactly
+as shown; the runner stores those paragraphs as the evidence. Do not copy the text itself,
+paraphrase, or count anything.
 Return ready only when
 useful writing is supported; otherwise explain complete/not_applicable/sources_unavailable.
-Missing evidence does not justify assigning a guessed value or manufacturing a quote.
+Missing evidence does not justify assigning a guessed value or citing a passage that does not state it.
 For a new person, separately support bio, years, moment, citizenship and nationalOrigin
 whenever they will be populated. A nationalOrigin claim cannot stand in for citizenship.
 For a new term, separately support definition, body, period and startYear/endYear as needed.

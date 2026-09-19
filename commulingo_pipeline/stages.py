@@ -9,7 +9,7 @@ import re
 from datetime import datetime, timezone
 
 from .engine import Result
-from .evidence import snapshot, compile_evidence, locate_claim_quotes, SourceHandles, SourcePages
+from .evidence import snapshot, compile_evidence, label_passages, resolve_passages, SourceHandles, SourcePages, MAX_PASSAGES
 from .citation_gate import check_claims, review_gate, annotate as annotate_citations
 from . import service
 from .bundles import work_topics, advance
@@ -286,12 +286,18 @@ class Research:
             await asyncio.to_thread(self.store.link_source,job['id'],merged['id'])
             sources[merged['id']] = merged
         handles = SourceHandles({s['id']:s for s in pages.current.values()})
+        shown = {}   # passage label -> (start, end, text) of every paragraph displayed in this attempt
         def display(source, span=None):
             body = source['body']
             first, last = (0, len(body)) if span is None else span
-            return (f'Source ID: {handles.handle(source)}\nURL: {source["url"]}\nRetrieved: {source["fetched_at"]}\n'
+            handle = handles.handle(source)
+            text, labels = label_passages(handle, body, first, last)
+            for label, (start, end) in labels.items():
+                shown[label] = (start, end, body[start:end])
+            return (f'Source ID: {handle}\nURL: {source["url"]}\nRetrieved: {source["fetched_at"]}\n'
                     f'Characters {first}..{last} of {len(body)} for this URL\n'
-                    '<external source="pipeline-source">\n'+body[first:last]+'\n</external>')
+                    f'Each paragraph starts with its passage label [{handle}@offset]; a claim cites those labels.\n'
+                    '<external source="pipeline-source">\n'+text+'\n</external>')
         async def absorb(url, body):
             merged, span, created = pages.absorb(url, body)
             if created:
@@ -337,12 +343,13 @@ class Research:
             'reason':{'type':'string','minLength':20},
             'claims':{'type':'array','items':{'type':'object','additionalProperties':False,
                 'properties':{'field':{'type':'string','enum':sorted(fields)},'claim':{'type':'string'},
-                    'source_id':{'type':'string','description':'Source ID shown with the retrieved text (S1, S2, ...).'},
-                    'quote':{'type':'string','minLength':20,'maxLength':2000,'description':
-                        'The supporting passage copied exactly from the displayed source text (20..2000 characters, '
-                        'no ellipsis). The runner locates it and stores the surrounding sentences.'},
+                    'passages':{'type':'array','minItems':1,'maxItems':MAX_PASSAGES,
+                        'items':{'type':'string','pattern':'^S[0-9]+@[0-9]+$'},'description':
+                        'The labels shown in brackets at the start of the displayed paragraphs that state this claim '
+                        '(for example S2@12303): one to three paragraphs of one source, copied exactly. '
+                        'The runner stores those paragraphs as the evidence.'},
                     'stance':{'type':'string','enum':['supports','disputes']}},
-                'required':['field','claim','source_id','quote']}}},
+                'required':['field','claim','passages']}}},
             'required':['status','reason','claims']}
         previous_error = latest(artifacts,'validate').get('error','')
         required_support = set(re.findall(r'(?:evidence required for |supporting )([A-Za-z][A-Za-z0-9]*)',
@@ -372,9 +379,9 @@ class Research:
             invalid = {c.get('field') for c in value.get('claims',[])} - fields
             if invalid:
                 raise ValueError('claims.field must name a writable field, not a commissioned topic: ' + ', '.join(sorted(str(f) for f in invalid)))
-            claims = locate_claim_quotes(handles.resolve(value['claims'], sources), sources)
-            # A located quote exists; the gate asks whether it says what the
-            # claim asserts (citation_gate). Only this call's claims are judged
+            claims = resolve_passages(value['claims'], shown, handles, sources)
+            # The cited passages exist; the gate asks whether they say what
+            # the claim asserts (citation_gate). Only this call's claims are judged
             # — carried-over claims keep the check they got when made — and
             # each verdict rides on its claim so the two never drift apart.
             claims = annotate_citations(claims, await check_claims(claims, sources, usage=usage, cache=citation_cache))
@@ -398,9 +405,9 @@ class Research:
             if targeted else
             'This is RESEARCH ONLY. Do not write a dictionary patch. Investigate all current commissioned topics together, '
             'identity and missing facts. Collect supporting AND conflicting sources. Finish through ')
-            + 'commulingo_pipeline_result: each claim names its source_id (S1, S2, ... as displayed) and a quote of '
-            '20..2000 characters copied exactly from that source\'s displayed text; the runner locates the quote and '
-            'stores the surrounding sentences. Facts need field-specific claims. '
+            + 'commulingo_pipeline_result: each claim cites passages, the labels shown in brackets at the start of '
+            'the displayed paragraphs that state it (for example S2@12303), one to three paragraphs of one source; '
+            'the runner stores those paragraphs as the evidence. Facts need field-specific claims. '
             'Reuse the dated sources below: fetch_url retrieves their cached text. '
             'A no-edit status applies to ALL current topics; use it only when that judgement holds for all of them. '
             'Person sections are commissioned separately after card topics, with a fresh snapshot. '

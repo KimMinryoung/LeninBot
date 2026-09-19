@@ -69,8 +69,11 @@ def make_handlers(read_handlers, proposal, fetched, box, gate=None):
                     for url in urls:
                         if isinstance(url,str) and external_url(url):
                             fetched[url] = fetched.get(url, '') + '\n' + body[1]
-                            source_id, _ = review_source(url, body[1], snapshots)
-                            return f'Review source_id={source_id}; cite it with a quote copied exactly from the text below.\n' + text
+                            base = kwargs.get('offset') or kwargs.get('char_offset') or 0
+                            source_id, labelled = review_source(url, body[1], snapshots, base=int(base) if str(base).isdigit() else 0)
+                            return (f'Review source_id={source_id}; each paragraph below starts with its passage label '
+                                    f'[{source_id}@offset] and a check cites those labels.\n'
+                                    + text[:body.start(1)] + labelled + text[body.end(1):])
                 return result
             return wrapped
         handlers[name] = wrap(name,handler)

@@ -1,61 +1,108 @@
-"""Content-addressed source snapshots and exact, bounded claim citations."""
+"""Content-addressed source snapshots and exact, bounded claim citations.
+
+A displayed source shows every paragraph behind a label ``[S2@12303]`` (the
+source handle and the paragraph's character offset). A claim cites labels;
+the runner already knows what text each label showed, so nothing is copied,
+matched or counted. Copied quotes located by folded substring matching
+(2026-09-19, one day) bounced whole results when one copy drifted, and the
+numbered 240-character tiles before that drifted from their snapshots.
+"""
 import hashlib
 import logging
 import re
 from datetime import datetime, timedelta, timezone
 
-# A cited passage is stored with the sentences around it so the excerpt a
-# reviewer reads is prose, not a tile cut mid-word. Bounded so one quote
-# cannot pull in a whole page.
 logger = logging.getLogger(__name__)
 
-EXCERPT_CONTEXT = 300
-_SENTENCE_END = re.compile(r'[.!?。]["\')\]]?\s|\n')
+LABEL = re.compile(r'^(S[0-9]+|R[0-9a-f]{16})@([0-9]+)$')
+MAX_PARAGRAPH_CHARS = 3000   # a longer paragraph is shown as several labelled pieces
+MAX_PASSAGE_CHARS = 6000     # the most one claim may cite (compile_evidence bound)
+MAX_PASSAGES = 3
+_SENTENCE_END = re.compile(r'[.!?。]["\')\]]?\s')
 
 
-def excerpt_window(body, start, end):
-    """Widen (start, end) to the sentence boundaries around it, within EXCERPT_CONTEXT."""
-    lo = max(0, start - EXCERPT_CONTEXT)
-    before = list(_SENTENCE_END.finditer(body, lo, start))
-    if before:
-        start = before[-1].end()
-    # From end-1 so a quote that ends on its own full stop closes there.
-    after = _SENTENCE_END.search(body, max(start, end - 1), min(len(body), end + EXCERPT_CONTEXT))
-    if after:
-        end = after.start() + 1 if body[after.start()] != '\n' else after.start()
-    return start, min(end, len(body))
+def paragraph_spans(body, first=0, last=None):
+    """(start, end) of each non-blank line of body[first:last], in body offsets.
 
-
-def locate_claim_quotes(claims, sources):
-    """Find each claim's verbatim quote and replace it with exact offsets.
-
-    The model copies a passage; the runner finds it (typographic quotes,
-    dashes, spacing and case folded) in the named source, or failing that in
-    any retrieved source of the job, and never asks the model to count.
+    A line longer than MAX_PARAGRAPH_CHARS is split at sentence ends so every
+    piece stays citable within the passage bound.
     """
-    from runtime_tools.commulingo_review_policy import locate
+    last = len(body) if last is None else last
+    spans = []
+    for match in re.finditer(r'[^\n]+', body[first:last]):
+        start, end = first + match.start(), first + match.end()
+        while start < end and body[start].isspace():
+            start += 1
+        while end > start and body[end - 1].isspace():
+            end -= 1
+        if end == start:
+            continue
+        while end - start > MAX_PARAGRAPH_CHARS:
+            cut = _SENTENCE_END.search(body, start + MAX_PARAGRAPH_CHARS // 2, min(end, start + MAX_PARAGRAPH_CHARS))
+            split = cut.end() if cut else start + MAX_PARAGRAPH_CHARS
+            spans.append((start, split))
+            start = split
+            while start < end and body[start].isspace():
+                start += 1
+        if end > start:
+            spans.append((start, end))
+    return spans
+
+
+def label_passages(handle, body, first=0, last=None, base=0):
+    """Render body[first:last] with a passage label before each paragraph.
+
+    Returns (text, {label: (start, end)}) with spans in ``body`` offsets; the
+    label's number is the offset plus ``base`` (a page's position in its
+    source when ``body`` is one fetched slice).
+    """
+    lines, shown = [], {}
+    for start, end in paragraph_spans(body, first, last):
+        label = f'{handle}@{base + start}'
+        shown[label] = (start, end)
+        lines.append(f'[{label}] {body[start:end]}')
+    return '\n'.join(lines), shown
+
+
+def resolve_passages(claims, shown, handles, sources):
+    """Replace each claim's passage labels with its source snapshot and character range.
+
+    ``shown`` maps every label displayed in this attempt to (start, end, text).
+    The range spans the cited paragraphs of one source; nothing is searched.
+    """
     resolved = []
-    for claim in claims:
-        source = sources.get(claim.get('source_id'))
+    for index, claim in enumerate(claims, 1):
+        labels = [str(label) for label in (claim.get('passages') or [])]
+        if not labels:
+            raise ValueError(f'claim {index}: passages must list the labels shown in brackets before the paragraphs '
+                             'that state it (for example S2@12303)')
+        handle_set, spans = set(), []
+        for label in labels:
+            match = LABEL.match(label)
+            entry = shown.get(label) if match else None
+            if entry is None:
+                raise ValueError(f'claim {index}: passage label {label!r} was not displayed in this research; copy a '
+                                 'label exactly as shown in brackets at the start of a paragraph')
+            handle_set.add(match[1])
+            spans.append(entry)
+        if len(handle_set) > 1:
+            raise ValueError(f'claim {index}: passages must come from one source; cite the other source in a separate claim')
+        handle = handle_set.pop()
+        source = sources.get(handles.ids.get(handle))
         if not source or not source.get('body'):
-            raise ValueError('unknown source_id; use an ID from a retrieved source')
-        quote = str(claim.get('quote') or '').strip()
-        if len(quote) < 20:
-            raise ValueError('quote must copy at least 20 characters verbatim from the displayed source text')
-        found = locate(source['body'], quote, min_prefix=40)
-        if found is None:
-            for other in sources.values():
-                if other is not source and other.get('body'):
-                    found = locate(other['body'], quote, min_prefix=40)
-                    if found:
-                        source = other
-                        break
-        if found is None:
-            logger.info('research quote not located in %s (%s): %r', claim.get('source_id'), source.get('url'), quote[:300])
-            raise ValueError(f'quote not found in {claim.get("source_id")} or any retrieved source: copy 20..2000 '
-                             'characters exactly as displayed (no ellipsis, no paraphrase)')
-        start, end = excerpt_window(source['body'], *found)
-        value = {k: v for k, v in claim.items() if k != 'quote'}
+            raise ValueError(f'claim {index}: source {handle} is not available; retrieve it again')
+        start, end = min(s for s, _, _ in spans), max(e for _, e, _ in spans)
+        body = source['body']
+        if end > len(body) or any(body[s:e] != text for s, e, text in spans):
+            raise ValueError(f'claim {index}: the text of {handle} changed since those passages were shown; retrieve it '
+                             'again and cite the new labels')
+        if end - start < 20:
+            raise ValueError(f'claim {index}: the cited passage is a heading or fragment of {end - start} characters; '
+                             'cite the paragraph that states the fact')
+        if end - start > MAX_PASSAGE_CHARS:
+            raise ValueError(f'claim {index}: the cited passages span {end - start} characters; cite at most '
+                             f'{MAX_PASSAGE_CHARS} (fewer or nearer paragraphs)')
+        value = {k: v for k, v in claim.items() if k != 'passages'}
         value.update(source_id=source['id'], start=start, end=end)
         resolved.append(value)
     return resolved
@@ -75,7 +122,7 @@ def snapshot(url, body, now=None):
 
 
 def compile_evidence(claims, sources, changed_fields):
-    """The model selects offsets; it cannot supply a fabricated excerpt."""
+    """The model selects displayed passages; it cannot supply a fabricated excerpt."""
     result = []
     now = datetime.now(timezone.utc)
     for claim in claims:
@@ -86,8 +133,8 @@ def compile_evidence(claims, sources, changed_fields):
         body = source['body']
         if type(start) is not int or type(end) is not int or not 0 <= start < end <= len(body):
             raise ValueError('invalid source character range')
-        if not 20 <= end-start <= 6000:
-            raise ValueError('source range must contain 20..6000 characters')
+        if not 20 <= end-start <= MAX_PASSAGE_CHARS:
+            raise ValueError(f'source range must contain 20..{MAX_PASSAGE_CHARS} characters')
         if claim.get('field') not in changed_fields or not str(claim.get('claim', '')).strip():
             raise ValueError('claim must name a changed field and explain its support')
         stance = claim.get('stance', 'supports')

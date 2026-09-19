@@ -3,7 +3,7 @@ from unittest import IsolatedAsyncioTestCase, TestCase
 from unittest.mock import AsyncMock, Mock, patch
 
 from commulingo_pipeline.draft_repair import DraftRepair
-from commulingo_pipeline.evidence import SourceHandles, snapshot, locate_claim_quotes
+from commulingo_pipeline.evidence import SourceHandles, snapshot, label_passages, resolve_passages
 from commulingo_pipeline.engine import Engine, Result, Usage
 from commulingo_pipeline.stages import Draft, validate
 from scripts.commulingo_write_session import draft_id
@@ -30,7 +30,9 @@ class EvidenceContracts(TestCase):
         for name in ('S1',source['id']):
             result=handles.resolve([{**claim,'source_id':name}],sources)
             self.assertEqual(result[0]['source_id'],source['id'])
-            self.assertEqual(locate_claim_quotes(result,sources)[0]['start'],0)
+        _,labels=label_passages('S1',source['body'])
+        shown={l:(a,b,source['body'][a:b]) for l,(a,b) in labels.items()}
+        self.assertEqual(resolve_passages([{'field':'body','claim':'fact','passages':['S1@0']}],shown,handles,sources)[0]['start'],0)
         with self.assertRaisesRegex(ValueError,r'S1 \(https://example.org/archive\)'):
             handles.resolve([{'source_id':'S99'}],sources)
         other=snapshot('https://example.org/other','Another page. '*10)
@@ -80,10 +82,13 @@ class EvidenceContracts(TestCase):
         with self.assertRaisesRegex(ToolArgumentValidationError,"^'fields' is a required property"):
             validate_tool_arguments('commulingo_pipeline_result',{'notes':'x'},schema=schema,risk_class='state')
 
-    def test_many_quotes_are_all_kept(self):
+    def test_many_passages_are_all_kept(self):
         source=snapshot('https://example.org/archive','Documented fact number one. '*100)
-        claim={'field':'body','claim':'fact','source_id':source['id'],'quote':'Documented fact number one.'}
-        result=locate_claim_quotes([claim]*40,{source['id']:source})
+        sources={source['id']:source}; handles=SourceHandles(sources)
+        _,labels=label_passages('S1',source['body'])
+        shown={l:(a,b,source['body'][a:b]) for l,(a,b) in labels.items()}
+        claim={'field':'body','claim':'fact','passages':['S1@0']}
+        result=resolve_passages([claim]*40,shown,handles,sources)
         self.assertEqual(len(result),40)
 
     def test_valid_draft_survives_downstream_error_and_repairs_follow_the_current_draft(self):

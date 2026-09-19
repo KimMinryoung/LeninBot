@@ -214,7 +214,7 @@ N 5건의 실체: Britannica 봇 확인 페이지(acmeism), 저자 명단 주장
 ## 4.6 인용 지지 게이트 (구현 2026-09-19)
 
 `commulingo_pipeline/citation_gate.py`, registry 항목 `commulingo_citation_support`. 조사 단계 `finish`에서
-`locate_claim_quotes` 직후 이번 호출의 claim마다 Jev에 `{field, claim, source_url, excerpt}`를 주고
+`resolve_passages` 직후 이번 호출의 claim마다 Jev에 `{field, claim, source_url, excerpt}`를 주고
 `support` choice + `specific`·`boilerplate` noul을 받는다(동시 8, claim당 ~$0.00002).
 `unrelated/contradicts` conf ≥ `thresholds.reject`(0.85) 또는 `boilerplate` ≥ 0.9면 결과 호출을 거절하고
 해당 claim만 지목한 메시지("다른 인용·다른 출처·claim 삭제")를 돌려준다. 판정 수치(support·confidence·specific·
@@ -242,7 +242,7 @@ diplomat 0.65(오답)였다 — 문턱값 0.80이면 29/30. 보수적으로 0.85
 
 ## 4.8 독립 검토 인용 게이트 — shadow (구현 2026-09-19)
 
-검토자의 `checks[].quote`는 `resolve_review_checks`가 원문에서 위치를 확인하지만, 그 인용이 `finding`(이 인용이 무엇을
+검토자의 `checks[].quote`는 `resolve_review_checks`가 표시된 문단 라벨로 원문에서 붙이지만, 그 문단이 `finding`(이 인용이 무엇을
 확인하는지 적은 한국어 문장)을 실제로 담는지는 아무도 보지 않았다. `citation_gate.check_review_checks`가 조사 게이트와
 같은 질문(finding↔quote)을 Jev(registry `commulingo_review_citation_support`)에 묻고, 판정은 각 check의 `citation_check`와
 review artifact metrics의 `review_citation_*`에 남는다. 훅은 `make_handlers(..., gate=review_gate(usage))` — 결정이 box에 들어가기 전에
@@ -369,6 +369,27 @@ accept 0.7 미만이고 작성 모델이 값을 줬으면 그 값을 남긴다. 
 - `research_spelling_proofread`: 최근 30일 호출 0건. 보류.
 - 남음: vector_search 청크 선별(러시아어 청크 관련성 기준선 필요), 웹챗·A2A 스크리닝(shadow), 도구 인자 위험 게이트
   (shadow), Telegram 태스크 완료 검증 보조. 각각 같은 형식(표본·정답·기존·Jev)의 기준선 먼저.
+
+## 4.13 tool gateway 로그 검토 (2026-09-19~20)
+
+14일 `tool_audit_log` 43,951행: 도구 호출의 94%가 CommuLingo 파이프라인(curator 26.8k·reviewer 13.8k), `fetch_url` 9,750·
+`wiki_get` 6,619·`web_search` 4,100. 거절·오류 약 4,000건(9%)은 대부분 schema·프롬프트 문제(`'fields' is a required property`,
+`'notes'` 불허, em dash 66건/3일, `placeholder` reason)라 Jev 대상이 아니다.
+
+- **검토 인용문 거절(하루 159건, 09-19)** — 검토 레인의 접기 매칭에 접두 폴백이 없고 오류가 check 번호를 안 알려 결정 전체가 4~5회
+  재제출됐다(Postyshev 9개 check 중 2개만 exact 실패, 40자 접두면 통과). 코드 버그였고, 이어 운영자 결정으로 **복사·매칭 자체를 폐기**:
+  표시할 때 문단마다 라벨(`S2@12303`/`R…@offset`)을 붙이고 claim·check는 라벨만 인용한다(`evidence.label_passages`·`resolve_passages`,
+  `review_policy.review_source`·`resolve_review_checks`). Jev도 문자열도 필요 없다. 그 전에 잰 "Jev 근거 위치 판정" 기준선(저장 claim 40·
+  check 40, 창 ~1,500자, 대조군 = 같은 job의 다른 페이지, 2회 $0.16): 정답 창 top-1 73~100%·top-3 95~100%, 정답 P 중앙값 0.93~0.95,
+  오답 페이지 오채택(P≥0.7) 10~25%, 요청당 352ms — 결과는 `logs/commulingo/evidence_locator_baseline_2026-09-19*.json`(로컬). 라벨 방식이
+  채택돼 구현하지 않았다.
+- **페이징 사냥** — fetch 호출의 21%·wiki_get의 24%가 offset>0, 같은 scope·URL 3페이지 이상이 862건(fetch 호출의 40%, 회당 4.7s + LLM 라운드),
+  인용 발췌의 15%가 10,000자 이후. 후보(미착수): 첫 fetch 때 저장된 전체 본문을 창으로 잘라 Jev에 "대상·조사 필드에 관한 사실을 담는가"를
+  묻고 top-k offset 색인을 도구 결과에 덧붙이기(본문은 숨기지 않음). 기준선은 위 결과가 대용(진술 없이 대상만 줄 때는 재측정 필요).
+- **검색 결과 선별** — 검토당 fetch URL 5.8개 중 인용 3.1개(47% 미인용), 검색은 제공자 순서 그대로 표시. 후보(미착수): `web_search` 래퍼에서
+  hit마다 3단계 score를 shadow로 기록하고 1주 뒤 fetch·인용과 join.
+- 로그상 볼륨이 없어 미룸: discover 중복 정렬(이름 포함 쌍 10건, create 23건/14일), 웹챗 스크리닝(web_search 158/14일), vector_search 선별(54),
+  도구 인자 게이트(execute 2), task_verifier(주 293라운드 $0.32).
 
 ## 5. 롤아웃 단계 (각 단계 시작 전 승인)
 

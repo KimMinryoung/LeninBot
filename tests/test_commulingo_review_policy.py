@@ -14,7 +14,7 @@ sys.path.insert(0,'/home/grass/leninbot')
 import runtime_tools, telegram
 runtime_tools.__path__.insert(0,str(ROOT/'runtime_tools'))
 telegram.__path__.insert(0,str(ROOT/'telegram'))
-from runtime_tools.commulingo_review_policy import validate_decision
+from runtime_tools.commulingo_review_policy import validate_decision, resolve_review_checks
 from telegram.commulingo_review import cmd_commulingo_review
 spec=importlib.util.spec_from_file_location('reviewer_test_module',ROOT/'scripts/commulingo_person_reviewer.py')
 worker=importlib.util.module_from_spec(spec);spec.loader.exec_module(worker)
@@ -23,6 +23,9 @@ QUOTE='The archived register identifies two distinct people with different birth
 PROPOSAL={'source_refs':[SOURCE],'risks':['identity_uncertain']}
 DECISION={'decision':'approve','reason':'원본 기록의 생년과 직책을 대조하여 동명이인임을 확인했습니다.',
     'resolved_risks':['identity_uncertain'],'checks':[{'citation':SOURCE,'source':SOURCE,'quote':QUOTE,'finding':'서로 다른 인물임을 확인'}]}
+from runtime_tools.commulingo_review_policy import review_source as _review_source
+LABEL=f"{_review_source(SOURCE,QUOTE,{})[0]}@0"   # the label the wrapper shows for QUOTE fetched at offset 0
+SUBMITTED={**DECISION,'checks':[{'citation':SOURCE,'passages':[LABEL],'finding':'서로 다른 인물임을 확인'}]}
 
 class PolicyTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
@@ -42,10 +45,12 @@ class PolicyTests(unittest.IsolatedAsyncioTestCase):
         threaded.start()
         self.addCleanup(threaded.stop)
 
-    def test_only_retrieved_quotes_resolving_risks_can_approve(self):
+    def test_only_retrieved_passages_resolving_risks_can_approve(self):
         self.assertEqual(validate_decision(DECISION,PROPOSAL,{SOURCE:QUOTE}),DECISION)
-        for fetched in ({},{SOURCE:'search result snippet'}):
-            with self.assertRaises(ValueError):validate_decision(DECISION,PROPOSAL,fetched)
+        # A check cites labels of paragraphs shown in this review; with nothing retrieved no check resolves.
+        with self.assertRaisesRegex(ValueError,'no check could be verified'):resolve_review_checks(SUBMITTED,PROPOSAL,{})
+        snapshots={}; _review_source(SOURCE,QUOTE,snapshots)
+        self.assertEqual(resolve_review_checks(SUBMITTED,PROPOSAL,snapshots)['checks'],DECISION['checks'])
         for change in ({'resolved_risks':[]},{'checks':[]}):
             with self.assertRaises(ValueError):validate_decision({**DECISION,**change},PROPOSAL,{SOURCE:QUOTE})
         # Relaxed 2026-09-17: approval no longer needs a check per cited reference
@@ -61,13 +66,16 @@ class PolicyTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(ValueError,'boolean'):
             validate_decision({**DECISION,'needs_research':'false'},PROPOSAL,{SOURCE:QUOTE})
 
-    def test_many_checks_are_valid_but_every_quote_is_still_verified(self):
-        checks=[dict(DECISION['checks'][0]) for _ in range(63)]
+    def test_many_checks_are_valid_and_an_unshown_label_drops_only_its_check(self):
+        snapshots={}; _review_source(SOURCE,QUOTE,snapshots)
+        checks=[dict(SUBMITTED['checks'][0]) for _ in range(63)]
         value={**DECISION,'checks':checks}
-        self.assertEqual(validate_decision(value,PROPOSAL,{SOURCE:QUOTE}),value)
-        checks[-1]['quote']='An invented quotation that never appeared in this source.'
-        with self.assertRaises(ValueError):
-            validate_decision(value,PROPOSAL,{SOURCE:QUOTE})
+        resolved=resolve_review_checks(value,PROPOSAL,snapshots)
+        self.assertEqual(len(resolved['checks']),63)
+        self.assertEqual(validate_decision(resolved,PROPOSAL,{SOURCE:QUOTE}),resolved)
+        checks[-1]['passages']=['R0123456789abcdef@0']
+        resolved=resolve_review_checks(value,PROPOSAL,snapshots)
+        self.assertEqual((len(resolved['checks']),resolved['dropped_checks'][0]['check']),(62,63))
 
     def test_failed_coverage_reports_exact_missing_identifiers(self):
         with self.assertRaisesRegex(ValueError, 'identity_uncertain'):
@@ -76,19 +84,21 @@ class PolicyTests(unittest.IsolatedAsyncioTestCase):
     def test_uncertainty_can_escalate_without_inventing_evidence(self):
         value={**DECISION,'decision':'escalate','checks':[]}
         validate_decision(value,PROPOSAL,{})
-    def test_quote_errors_identify_the_check_and_repair(self):
-        for quote, message in [('Short title', 'check 2: quote has 11 normalized characters'),
-                               ('A fabricated quotation that does not occur.', 'check 2: quote must occur')]:
-            value = copy.deepcopy(DECISION)
-            value['checks'].append({**value['checks'][0], 'quote':quote})
-            with self.assertRaisesRegex(ValueError,message):
-                validate_decision(value,PROPOSAL,{SOURCE:QUOTE})
+    def test_passage_errors_identify_the_check(self):
+        snapshots={}; sid,_=_review_source(SOURCE,QUOTE+'\nShort title',snapshots)
+        for label, reason in [(f'{sid}@{len(QUOTE)+1}', 'cited passage is shorter than 20 characters'),
+                              (f'{sid}@7', f'passage label not shown in this review: {sid}@7')]:
+            value = copy.deepcopy(SUBMITTED)
+            value['checks'].append({**value['checks'][0], 'passages':[label]})
+            value['checks'][0]['passages']=[f'{sid}@0']
+            resolved=resolve_review_checks(value,PROPOSAL,snapshots)
+            self.assertEqual(resolved['dropped_checks'],[{'check':2,'labels':[label],'reason':reason}])
+            self.assertEqual(resolved['checks'][0]['quote'],QUOTE)
     def test_revision_requires_independently_retrieved_evidence(self):
         value={**DECISION,'decision':'revise'}
         self.assertEqual(validate_decision(value,PROPOSAL,{SOURCE:QUOTE}),value)
-        for bad in ({}, {SOURCE:'unrelated text'}):
-            with self.assertRaises(ValueError):
-                validate_decision(value,PROPOSAL,bad)
+        with self.assertRaisesRegex(ValueError,'no check could be verified'):
+            resolve_review_checks({**SUBMITTED,'decision':'revise'},PROPOSAL,{})
         with self.assertRaises(ValueError):
             validate_decision({**value,'checks':[]},PROPOSAL,{SOURCE:QUOTE})
 
@@ -123,9 +133,11 @@ class PolicyTests(unittest.IsolatedAsyncioTestCase):
         await handlers['fetch_url'](url=SOURCE)
         self.assertEqual(fetched,{})
         handlers=worker.make_handlers({'fetch_url':AsyncMock(return_value=f'<external source="url:{SOURCE}">\n{QUOTE}\n</external>')},PROPOSAL,fetched,box)
-        await handlers['fetch_url'](url=SOURCE)
-        await handlers['commulingo_review_decision'](**DECISION)
+        shown=await handlers['fetch_url'](url=SOURCE)
+        self.assertIn(f'<external source="url:{SOURCE}">\n[{LABEL}] {QUOTE}\n</external>',shown)
+        await handlers['commulingo_review_decision'](**SUBMITTED)
         self.assertEqual(box['decision'],'approve')
+        self.assertEqual((box['checks'][0]['source'],box['checks'][0]['quote']),(SOURCE,QUOTE))
     async def test_decision_gate_annotates_or_bounces_before_boxing(self):
         from tool_gateway.results import ToolRejection
         async def annotate(value):
@@ -133,7 +145,7 @@ class PolicyTests(unittest.IsolatedAsyncioTestCase):
         box,fetched={},{}
         handlers=worker.make_handlers({'fetch_url':AsyncMock(return_value=f'<external source="url:{SOURCE}">\n{QUOTE}\n</external>')},PROPOSAL,fetched,box,gate=annotate)
         await handlers['fetch_url'](url=SOURCE)
-        await handlers['commulingo_review_decision'](**DECISION)
+        await handlers['commulingo_review_decision'](**SUBMITTED)
         self.assertEqual(box['checks'][0]['citation_check'],{'support':'supports'})
         async def bounce(value):
             raise ValueError('citation check failed for one check')
@@ -141,7 +153,7 @@ class PolicyTests(unittest.IsolatedAsyncioTestCase):
         handlers=worker.make_handlers({'fetch_url':AsyncMock(return_value=f'<external source="url:{SOURCE}">\n{QUOTE}\n</external>')},PROPOSAL,fetched,box,gate=bounce)
         await handlers['fetch_url'](url=SOURCE)
         with self.assertRaisesRegex(ToolRejection,'citation check failed'):
-            await handlers['commulingo_review_decision'](**DECISION)
+            await handlers['commulingo_review_decision'](**SUBMITTED)
         self.assertEqual(box,{})
     async def test_real_runner_context_and_typed_terminal_without_network(self):
         import db

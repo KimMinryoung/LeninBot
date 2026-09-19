@@ -1,7 +1,7 @@
 """Citation-support gate: does each located excerpt actually support its claim?
 
-locate_claim_quotes proves a quote exists in a source; nothing proved it says
-what the claim asserts. On 2026-09-19, 5 of 30 sampled research claims that
+resolve_passages proves a cited passage was displayed from a source; nothing
+proved it says what the claim asserts. On 2026-09-19, 5 of 30 sampled research claims that
 had passed research, draft and independent review cited passages unrelated to
 the claim (a Britannica bot-check page, an interview paragraph for an author
 list, an aesthetics passage for a 1933 appointment). The reviewer verifies

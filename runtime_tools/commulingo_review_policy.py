@@ -2,8 +2,9 @@
 import re
 import json
 import hashlib
-import unicodedata
 from urllib.parse import urlsplit
+
+from commulingo_pipeline.evidence import LABEL, MAX_PASSAGES, label_passages
 
 DECISION_TOOL = {"name": "commulingo_review_decision", "description": "Submit one independently researched review decision; does not directly write dictionary content.",
     "input_schema": {"type": "object", "additionalProperties": False,
@@ -16,104 +17,41 @@ DECISION_TOOL = {"name": "commulingo_review_decision", "description": "Submit on
                 "properties": {
                     "citation": {"type": "string", "description": "Copy one COMPLETE suggestion.source_refs entry verbatim, including its URL and any annotation. Never shorten or rename it."},
                     "citation_id": {"type": "string", "pattern": "^S[1-9][0-9]*$", "description": "S1 is suggestion.source_refs[0], S2 is source_refs[1]."},
-                    "source_id": {"type": "string", "description": "Review source ID shown with text retrieved during this review (R...), or that source's URL."},
-                    "quote": {"type": "string", "minLength": 20, "maxLength": 1000, "description": "Contiguous passage copied exactly from that retrieved text, 20..1000 characters. No ellipsis or paraphrase."},
-                    "finding": {"type": "string", "description": "Your Korean explanation of what this quote verifies."},
+                    "passages": {"type": "array", "minItems": 1, "maxItems": MAX_PASSAGES,
+                                 "items": {"type": "string", "pattern": "^R[0-9a-f]{16}@[0-9]+$"},
+                                 "description": "The labels shown in brackets at the start of the retrieved paragraphs that verify this finding (for example R5c5d56d06d4d1f95@6933): one to three paragraphs of one retrieved source, copied exactly."},
+                    "finding": {"type": "string", "description": "Your Korean explanation of what those passages verify."},
                 },
-                "required": ["source_id", "quote", "finding"],
+                "required": ["passages", "finding"],
                 "oneOf": [{"required": ["citation"], "not": {"required": ["citation_id"]}}, {"required": ["citation_id"], "not": {"required": ["citation"]}}],
                 }},
         }, "required": ["decision", "reason", "resolved_risks", "checks"]}}
 
 
-# Characters that differ between a page and what a model types back from it:
-# typographic quotes and dashes, non-breaking and zero-width spaces, ellipsis.
-_FOLD = str.maketrans({
-    "\u2018": "'", "\u2019": "'", "\u201a": "'", "\u201b": "'", "\u2032": "'",
-    "\u201c": '"', "\u201d": '"', "\u201e": '"', "\u201f": '"', "\u00ab": '"', "\u00bb": '"',
-    "\u2010": "-", "\u2011": "-", "\u2012": "-", "\u2013": "-", "\u2014": "-", "\u2015": "-", "\u2212": "-",
-    "\u00a0": " ", "\u2009": " ", "\u202f": " ", "\u3000": " ",
-    "\u200b": "", "\u200c": "", "\u200d": "", "\ufeff": "", "\u00ad": "",
-    "\u2026": "...",
-})
+def review_source(url, body, snapshots, base=0):
+    """Register one fetched slice for this review and render it with passage labels.
 
-
-def normalize(text):
-    """Whitespace-collapsed, quote/dash-folded, case-folded text for matching.
-
-    Every substitution keeps two renderings of the same passage equal and
-    never makes different passages equal. Exact matching lost 63 reviews in
-    the week to 2026-09-19 to curly quotes, en dashes and NBSPs.
+    Returns (source_id, labelled text). ``base`` is the slice's offset in its
+    page so labels stay distinct across pages of one URL.
     """
-    return _fold_marks(re.sub(r"\s+", " ", str(text).translate(_FOLD)).strip().casefold())
-
-
-def _fold_marks(text):
-    """Drop combining marks (Russian Wikipedia stress accents: Собра́ние) that a model may or may not copy."""
-    decomposed = unicodedata.normalize("NFD", str(text))
-    return "".join(ch for ch in decomposed if not unicodedata.category(ch).startswith("M"))
-
-
-def locate(body, quote, min_prefix=None):
-    """(start, end) of quote in body under normalize(), in body's own offsets; None if absent."""
-    folded, index = [], []
-    pending_space = False
-    for i, ch in enumerate(str(body).translate(_FOLD)):
-        if unicodedata.category(ch).startswith("M"):
-            continue
-        if ch.isspace():
-            pending_space = bool(folded)
-            continue
-        if pending_space:
-            folded.append(" ")
-            index.append(i)
-            pending_space = False
-        for c in _fold_marks(ch.casefold()):
-            folded.append(c)
-            index.append(i)
-    needle = normalize(quote)
-    if not needle:
-        return None
-    haystack = "".join(folded)
-    at = haystack.find(needle)
-    # A model's copy usually goes wrong late (a dropped footnote marker, a
-    # rewritten bracket), so the longest matching prefix of at least
-    # min_prefix folded characters still pins the passage; the caller stores
-    # the source's own text at that place, never the model's copy.
-    while at < 0 and min_prefix and len(needle) > min_prefix:
-        needle = needle[:max(min_prefix, len(needle) - 20)].rstrip()
-        at = haystack.find(needle)
-    if at < 0:
-        return None
-    return index[at], index[at + len(needle) - 1] + 1
-
-
-def review_source(url, body, snapshots):
-    """Immutable source pages scoped to this review, never the author's cache."""
     source_id = "R" + hashlib.sha256((url + "\n" + body).encode()).hexdigest()[:16]
-    snapshots[source_id] = {"url": url, "body": body}
-    return source_id, body
+    text, passages = label_passages(source_id, body, base=base)
+    snapshots[source_id] = {"url": url, "body": body, "passages": passages}
+    return source_id, text
 
 
 def resolve_review_checks(value, proposal, snapshots):
-    """Expand citation IDs and locate each quote; returns the persistable decision.
+    """Expand citation IDs and turn passage labels into the persisted decision.
 
-    A check names a review source (its displayed R-id or URL) and copies a
-    passage; the passage is located with typography folded, in that source
-    first and then in any other source of this review, and persisted as the
-    exact text at that location. Nothing is counted or numbered.
-
-    A check whose source or passage cannot be found is dropped, not fatal: the
-    decision keeps the checks that did locate and records the dropped ones under
-    ``dropped_checks``. Only a decision with checks and none locatable is
-    refused. (One drifted copy among 9..39 checks bounced whole decisions 159
-    times on 2026-09-19; the reviewer could not tell which and resubmitted.)
+    A check cites the labels of paragraphs shown with retrieved text; the
+    runner already knows that text, so nothing is copied, matched or counted.
+    A check whose labels were not shown is dropped, not fatal: the decision
+    keeps the checks that resolve and records the rest under
+    ``dropped_checks``. Only a decision with checks and none resolvable is
+    refused.
     """
     from copy import deepcopy
     value = deepcopy(value)
-    by_url = {}
-    for sid, snap in snapshots.items():
-        by_url.setdefault(snap["url"], []).append(sid)
     kept, dropped = [], []
     for index, check in enumerate(value.get("checks", []), 1):
         if not isinstance(check, dict):
@@ -122,43 +60,41 @@ def resolve_review_checks(value, proposal, snapshots):
             identifier = check.pop("citation_id")
             match = re.fullmatch(r"S([1-9][0-9]*)", str(identifier))
             refs = proposal.get("source_refs") or []
-            index_ref = int(match[1]) - 1 if match else -1
-            if "citation" in check or not 0 <= index_ref < len(refs):
+            ref_index = int(match[1]) - 1 if match else -1
+            if "citation" in check or not 0 <= ref_index < len(refs):
                 raise ValueError(f"check {index}: citation_id must select an original source_refs entry; do not also supply citation")
-            check["citation"] = refs[index_ref]
-        if "source_id" in check:
-            named = check.pop("source_id")
-            quote = str(check.get("quote") or "")
-            candidates = [named] if named in snapshots else by_url.get(named, [])
-            if not candidates:
-                dropped.append({"check": index, "source_id": named, "quote": quote[:80], "reason": "source not retrieved in this review"})
-                continue
-            located = None
-            # Same prefix fallback as the research lane (evidence.locate_claim_quotes):
-            # a copy that drifts after 40 folded characters still pins the passage.
-            for sid in candidates + [s for s in snapshots if s not in candidates]:
-                span = locate(snapshots[sid]["body"], quote, min_prefix=40)
-                if span:
-                    located = (snapshots[sid], span)
-                    break
-            if not located:
-                dropped.append({"check": index, "source_id": named, "quote": quote[:80], "reason": "quote not found in retrieved text"})
-                continue
-            snapshot, (start, end) = located
-            body = snapshot["body"]
-            if end - start < len(quote):
-                # A prefix match ends where the copy drifted, possibly mid-word; persist
-                # through the end of that sentence (bounded) so the stored quote reads whole.
-                stop = re.search(r"[.!?…]+(?=\s|$)|\n", body[end:end + min(len(quote) + 50, 300)])
-                end = end + stop.end() if stop else end
-            check["source"] = snapshot["url"]
-            check["quote"] = body[start:end]
+            check["citation"] = refs[ref_index]
+        if "passages" not in check:
+            kept.append(check)   # already resolved (source and quote present)
+            continue
+        labels = [str(label) for label in (check.pop("passages") or [])]
+        spans, sids, missing = [], set(), []
+        for label in labels:
+            match = LABEL.match(label)
+            span = ((snapshots.get(match[1]) or {}).get("passages") or {}).get(label) if match else None
+            if span is None:
+                missing.append(label)
+            else:
+                sids.add(match[1]); spans.append(span)
+        if missing:
+            dropped.append({"check": index, "labels": labels, "reason": "passage label not shown in this review: " + ", ".join(missing)})
+            continue
+        if len(sids) > 1:
+            dropped.append({"check": index, "labels": labels, "reason": "passages from different sources"})
+            continue
+        snapshot = snapshots[sids.pop()]
+        quote = "\n".join(snapshot["body"][s:e] for s, e in sorted(spans))
+        if len(quote.strip()) < 20:
+            dropped.append({"check": index, "labels": labels, "reason": "cited passage is shorter than 20 characters"})
+            continue
+        check["source"] = snapshot["url"]
+        check["quote"] = quote
         kept.append(check)
     if dropped and not kept:
         available = "; ".join(f"{sid} ({snap['url']})" for sid, snap in snapshots.items()) or "none fetched yet"
-        heads = "; ".join(f"check {d['check']}: {d['reason']} ({d['quote'][:60]!r})" for d in dropped)
-        raise ValueError("no check could be verified — " + heads + ". Cite a review source_id shown with retrieved text "
-                         f"and copy 20..1000 characters exactly as displayed, without ellipsis. Available: {available}")
+        heads = "; ".join(f"check {d['check']}: {d['reason']}" for d in dropped)
+        raise ValueError("no check could be verified — " + heads + ". Cite passage labels exactly as shown in brackets "
+                         f"before the retrieved paragraphs. Sources retrieved in this review: {available}")
     value["checks"] = kept
     if dropped:
         value["dropped_checks"] = dropped
@@ -189,13 +125,10 @@ def validate_decision(value, proposal, fetched):
     for index, check in enumerate(checks, 1):
         if not isinstance(check, dict) or set(check) != {"citation", "source", "quote", "finding"} or any(not isinstance(v, str) or not v.strip() for v in check.values()):
             raise ValueError("each check needs citation, source, quote and finding")
-        quote = normalize(check["quote"])
         if not external_url(check["source"]):
             raise ValueError(f"check {index}: select an external source fetched during this review")
-        if len(quote) < 20:
-            raise ValueError(f"check {index}: quote has {len(quote)} normalized characters; at least 20 required. Copy a longer passage")
-        if quote not in normalize(fetched.get(check["source"], "")):
-            raise ValueError(f"check {index}: quote must occur in source text fetched during this review; copy it exactly from the displayed text")
+        if len(check["quote"].strip()) < 20:
+            raise ValueError(f"check {index}: the cited passage has fewer than 20 characters; cite the paragraph that states the fact")
     if decision in {"approve", "revise", "reject"} and not checks:
         raise ValueError("approve/revise/reject requires retrieved evidence; otherwise escalate")
     if decision == "approve":

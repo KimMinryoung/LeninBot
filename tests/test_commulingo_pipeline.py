@@ -1,4 +1,5 @@
 import asyncio
+import re
 from contextlib import contextmanager
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
@@ -32,28 +33,39 @@ class EvidenceTests(unittest.TestCase):
         same = snapshot(source['url'],source['body'])
         self.assertEqual(source['id'],same['id'])
 
-    def test_quotes_resolve_to_sentence_bounded_source_ranges(self):
-        from commulingo_pipeline.evidence import locate_claim_quotes
-        body = ('Intro sentence here. 그는 1917년에 입당했다 — «Правда» 편집부에서 일했다. '
+    def test_passage_labels_resolve_to_displayed_paragraphs(self):
+        from commulingo_pipeline.evidence import SourceHandles, label_passages, resolve_passages
+        body = ('Intro sentence here.\n그는 1917년에 입당했다 — «Правда» 편집부에서 일했다.\n\n'
                 'Later he was exiled to Siberia! Final sentence of the page.')
         source = snapshot('https://example.org/source', body)
         sources = {source['id']:source}
-        # Typographic quotes, dashes, spacing and case are folded; the excerpt is whole sentences.
-        claim = {'field':'bio','claim':'Joined in 1917','source_id':source['id'],
-                 'quote':'1917년에 입당했다 - "Правда" 편집부에서'}
-        [resolved] = locate_claim_quotes([claim], sources)
-        self.assertNotIn('quote', resolved)
+        handles = SourceHandles(sources)
+        text, labels = label_passages(handles.handle(source), body)
+        # Every non-blank line is one labelled paragraph; the label is the handle and the paragraph's offset.
+        self.assertEqual(list(labels), ['S1@0', 'S1@21', f'S1@{body.index("Later")}'])
+        self.assertTrue(text.startswith('[S1@0] Intro sentence here.\n[S1@21] 그는 1917년에'))
+        shown = {label:(start, end, body[start:end]) for label,(start,end) in labels.items()}
+        claim = {'field':'bio','claim':'Joined in 1917','passages':['S1@21']}
+        [resolved] = resolve_passages([claim], shown, handles, sources)
+        self.assertNotIn('passages', resolved)
         self.assertEqual(body[resolved['start']:resolved['end']], '그는 1917년에 입당했다 — «Правда» 편집부에서 일했다.')
         compiled = compile_evidence([resolved], sources, {'bio'})
         self.assertEqual(compiled[0]['excerpt'], '그는 1917년에 입당했다 — «Правда» 편집부에서 일했다.')
-        # A quote named under one source but found only in another of the job is filed there.
-        other = snapshot('https://example.org/other', 'Unrelated page. He was exiled to Siberia in 1930. End.')
+        # Several paragraphs of one source span from the first to the last; a label never shown, a label from
+        # another source in the same claim, and text that changed since display are refused by claim number.
+        [wide] = resolve_passages([{**claim,'passages':[f'S1@{body.index("Later")}','S1@21']}], shown, handles, sources)
+        self.assertEqual((wide['start'], wide['end']), (21, len(body)))
+        other = snapshot('https://example.org/other', 'Unrelated page.\nHe was exiled to Siberia in 1930.')
         sources[other['id']] = other
-        moved = locate_claim_quotes([{**claim,'quote':'exiled to Siberia in 1930'}], sources)[0]
-        self.assertEqual(moved['source_id'], other['id'])
-        for bad in ('too short', 'this passage is nowhere in any retrieved source text', 'Intro sentence... page'):
-            with self.assertRaisesRegex(ValueError, 'quote'):
-                locate_claim_quotes([{**claim,'quote':bad}], sources)
+        _, more = label_passages(handles.handle(other), other['body'])
+        shown.update({label:(start, end, other['body'][start:end]) for label,(start,end) in more.items()})
+        with self.assertRaisesRegex(ValueError, "claim 1: passage label 'S1@999' was not displayed"):
+            resolve_passages([{**claim,'passages':['S1@999']}], shown, handles, sources)
+        with self.assertRaisesRegex(ValueError, 'claim 2: passages must come from one source'):
+            resolve_passages([claim, {**claim,'passages':['S1@21','S2@16']}], shown, handles, sources)
+        shown['S1@21'] = (21, body.index('Later'), 'edited text that the source no longer shows')
+        with self.assertRaisesRegex(ValueError, 'changed since those passages were shown'):
+            resolve_passages([claim], shown, handles, sources)
 
     def test_exact_range_and_expiry(self):
         source = snapshot('https://example.org/source','A documented event happened in 1917.')
@@ -616,10 +628,12 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
         source=snapshot('https://example.org/history','A retrieved historical source with adequate context for the body.')
         store=Mock()
         store.job_sources.return_value={source['id']:source}
+        store.cached_source.return_value={'url':source['url'],'body':source['body']}
         async def model(**kwargs):
+            shown=await kwargs['read_wrap']('fetch_url',AsyncMock())(url=source['url'])
+            label=re.search(r'\[(S1@\d+)\]',shown)[1]
             value={'status':'ready','reason':'Verified history for the commissioned term.',
-                   'claims':[{'field':'history','claim':'Verified history','source_id':source['id'],
-                              'quote':'A retrieved historical source with adequate context'}]}
+                   'claims':[{'field':'history','claim':'Verified history','passages':[label]}]}
             schema=kwargs['tool']['input_schema']
             self.assertTrue(list(Draft202012Validator(schema).iter_errors(value)))
             value['claims'].append({**value['claims'][0],'field':'endYear'})
@@ -639,7 +653,7 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.next_stage,'draft')
         self.assertEqual(result.value['claims'][0]['field'],'body')
 
-    async def test_paginated_fetch_is_one_source_and_quotes_from_any_page_resolve(self):
+    async def test_paginated_fetch_is_one_source_and_labels_from_any_page_resolve(self):
         from commulingo_pipeline.stages import Research
         from commulingo_pipeline.engine import Usage
         store=Mock()
@@ -663,15 +677,14 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
                           'Investigating commissioned topics before returning a final artifact.'):
                 with self.assertRaisesRegex(ValueError,'probe or progress note'):
                     await kwargs['handler']({'status':'sources_unavailable','reason':probe,'claims':[]})
-            with self.assertRaisesRegex(ValueError,'unknown source_id.*S1 \\(https://example.org/article\\)'):
+            with self.assertRaisesRegex(ValueError,"claim 1: passage label 'S9@0' was not displayed"):
                 await kwargs['handler']({'status':'ready','reason':'Both pages support the body claim.',
-                    'claims':[{'field':'body','claim':'x','source_id':'S9','quote':'Second page continues here with'}]})
-            # A quote from page two cited under the handle (or the first page's stale persistent id) resolves.
-            stale=next(c.args[0]['id'] for c in store.save_source.call_args_list if c.args[0]['body']==page1)
-            for sid in ('S1', stale):
-                await kwargs['handler']({'status':'ready','reason':'Both pages support the body claim.',
-                    'claims':[{'field':'body','claim':'From page two','source_id':sid,
-                               'quote':'Second page continues here with more detail.'}]})
+                    'claims':[{'field':'body','claim':'x','passages':['S9@0']}]})
+            # Page two's paragraph carries a label at its offset in the merged text; citing it resolves.
+            label=re.search(r'\[(S1@\d+)\] Second page',second)[1]
+            self.assertEqual(label,f'S1@{len(page1)+1}')
+            await kwargs['handler']({'status':'ready','reason':'Both pages support the body claim.',
+                'claims':[{'field':'body','claim':'From page two','passages':[label]}]})
         job={'id':31,'kind':'term','action':'update','target':'fixture','topic':'history'}
         with patch('commulingo_pipeline.stages.service.call',return_value={'revision':'original'}), \
              patch('commulingo_pipeline.stages.model_call',side_effect=model):
@@ -679,7 +692,7 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
         [claim]=result.value['claims']
         merged=next(c.args[0] for c in store.save_source.call_args_list if c.args[0]['id']==claim['source_id'])
         self.assertTrue(merged['body'].startswith(page1) and merged['body'].endswith(page2))
-        self.assertEqual(merged['body'][claim['start']:claim['end']], 'Second page continues here with more detail.')
+        self.assertEqual(merged['body'][claim['start']:claim['end']], page2.strip())
 
     async def test_validate_bounce_runs_targeted_research_and_carries_claims(self):
         from commulingo_pipeline.stages import Research, TARGETED_RESEARCH_ROUNDS
@@ -687,6 +700,7 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
         source=snapshot('https://example.org/history','A retrieved historical source with adequate context for the body and the years.')
         store=Mock()
         store.job_sources.return_value={source['id']:source}
+        store.cached_source.return_value={'url':source['url'],'body':source['body']}
         previous={'field':'body','claim':'Verified body','source_id':source['id'],'start':0,'end':40}
         junk={'field':'body','claim':'placeholder','source_id':source['id'],'start':0,'end':240}
         seen={}
@@ -696,9 +710,9 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn('ONLY for: endYear',kwargs['prompt'])
             with self.assertRaisesRegex(ValueError,'missing evidence for endYear'):
                 await kwargs['handler']({'status':'ready','reason':'Nothing new found for the term.','claims':[]})
+            shown=await kwargs['read_wrap']('fetch_url',AsyncMock())(url=source['url'])
             await kwargs['handler']({'status':'ready','reason':'The source dates the end of the period.',
-                'claims':[{'field':'endYear','claim':'Ended in 1991','source_id':source['id'],
-                           'quote':source['body'][:40]}]})
+                'claims':[{'field':'endYear','claim':'Ended in 1991','passages':[re.search(r'\[(S1@\d+)\]',shown)[1]]}]})
         job={'id':31,'kind':'term','action':'update','target':'fixture','topic':'history'}
         artifacts=[{'stage':'research','value':{'claims':[previous,junk]}},
                    {'stage':'draft','value':{'rejected_draft':{}}},
