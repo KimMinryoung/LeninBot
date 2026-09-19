@@ -26,6 +26,19 @@ class RouteTaskJevTests(unittest.IsolatedAsyncioTestCase):
         p = patch.object(cr, "resolve", return_value=PROFILE)
         p.start(); self.addCleanup(p.stop)
 
+    def test_agent_criteria_come_from_routing_cards(self):
+        criteria = tools._agent_criteria(["programmer", "analyst"])
+        self.assertTrue(criteria["programmer"].startswith("Use for: "))
+        self.assertIn("political line", criteria["programmer"])
+        self.assertNotEqual(criteria["analyst"], "Use for: ")
+        self.assertEqual(tools._agent_criteria(["no_such_agent"])["no_such_agent"], "Use for: no_such_agent")
+
+    async def test_long_task_is_judged_on_its_head(self):
+        task = "fix the scheduler " * 2000
+        with patch.object(cr, "decide", AsyncMock(return_value=decision("programmer", 0.97))) as decide:
+            await tools._classify_route(task, None)
+        self.assertEqual(len(decide.await_args.args[1]["task"]), tools._ROUTING_TASK_MAX_CHARS)
+
     async def test_confident_decision_is_used_without_llm(self):
         with patch.object(cr, "decide", AsyncMock(return_value=decision("programmer", 0.97))) as decide, \
              patch.object(tools, "_classify_route_with_llm", AsyncMock()) as llm:

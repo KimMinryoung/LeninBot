@@ -334,7 +334,10 @@ class Store:
             if not cur.fetchone():
                 raise LostLease(str(job['id']))
             metrics = {k:v for k,v in (usage or {}).items() if k in
-                       {'total_cost','rounds_used','input_tokens','output_tokens','pipeline_cache_hits','provider_fallback'}}
+                       {'total_cost','rounds_used','input_tokens','output_tokens','pipeline_cache_hits','provider_fallback',
+                        # citation gates (citation_gate.py): research claims and review checks
+                        'citation_checks','citation_rejections','citation_unavailable',
+                        'review_citation_checks','review_citation_rejections','review_citation_unavailable'}}
             if (usage or {}).get('provider_fallback'):
                 # Later stages see the same sources; skip the provider that refused them.
                 cur.execute('''UPDATE commulingo_pipeline_jobs
