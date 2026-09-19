@@ -127,6 +127,10 @@ sortOrder는 절 도구와 같은 YYYYMM 키다.
 해당 ID를 필수로 요구한다. 관련 ID를 모르면 검색을 반복하지 않고 그 관계의 추가를 생략한다.
 인물 작성에는 현재 분류 ID·제목·설명을 미리 제공하고 group/groupId를 실제 ID의
 enum으로 제한한다. 역할 category/categoryId도 현재 역할 분류 ID·라벨을 제공하고 enum으로 제한한다. 분류명 추측으로 저장 단계의 외래키 오류를 반복하지 않는다.
+저장소에서만 검사되던 규칙 일부를 작성 schema로 끌어왔다: `years`는 `person-life-years.js`의 LIFE_YEARS를
+그대로 옮긴 `pattern`(도구 schema 공통), 신규 인물은 familyName 또는 givenName 필수, `sortOrder`는
+integer만(null은 저장소가 거절하므로 생략이 곧 append). 모델이 초안을 다 쓴 뒤 400으로 알게 되던 오류가
+작성 호출 안의 schema 거절로 바뀐다.
 목록 전체 교체와 부분 수정(aliases/aliasEdits, career/careerEdits, scenes/sceneEdits)은
 동시에 제출할 수 없도록 초안 schema에서 검사하여 같은 작성 호출에서 고친다.
 한영 본문 필드에는 schema 상한의 80%를 초안 목표로 제공한다(실제 검증 상한은 유지).

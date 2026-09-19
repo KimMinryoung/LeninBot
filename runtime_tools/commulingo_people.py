@@ -3002,6 +3002,12 @@ _BILINGUAL_TEXT_SCHEMA = {
 # here — never write one of these numbers anywhere else. The curator prompt
 # quoting one ceiling while the save enforced another is exactly how runs got
 # spent redrafting cards that were already written.
+# Mirror of frontend data/commulingo/person-life-years.js LIFE_YEARS, so a bad
+# years label fails schema validation in the writer's own call instead of as a
+# store 400 after the whole draft is written (a weekly bucket of rejections).
+_YEAR_PART = r"(?:\d{3,4}(?:/\d{3,4})?\??|\?)"
+_LIFE_YEARS_PATTERN = rf"^(?:$|(?:c\.\s*)?{_YEAR_PART}\s*[–-]\s*(?:{_YEAR_PART}(?: 이후)?)?$)"
+
 FIELD_LIMITS: dict[str, tuple[int, int]] = {
     "epithet": (60, 140),
     "bio": (380, 900),
@@ -3269,7 +3275,10 @@ _COMMULINGO_FIELD_SCHEMA = {
             "spelling with its diacritics."
         )},
         "cyrillicPatronymic": {"type": "string"},
-        "years": {"type": "string", "description": "Display range, e.g. 1878–1943."},
+        "years": {"type": "string", "pattern": _LIFE_YEARS_PATTERN, "description": (
+                "Life years as the store accepts them: 1878–1943; 1987– for a living person; ?– living with unknown "
+                "birth year; ?–? unknown; 1895?–1940 uncertain year; c. 1953–2001 approximate; 1917–1940 이후 when only "
+                "a last known year exists. Never 현재/present, no other words.")},
         "name": _BILINGUAL_TEXT_SCHEMA,
         "givenName": _BILINGUAL_TEXT_SCHEMA,
         "familyName": _BILINGUAL_TEXT_SCHEMA,

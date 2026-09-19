@@ -713,6 +713,37 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.value['fields']['groupId'],'foreign-statesmen')
         self.assertEqual(result.value['fields']['expectedRevision'],'original')
 
+    async def test_person_create_schema_carries_store_rules(self):
+        from commulingo_pipeline.stages import Draft
+        from commulingo_pipeline.engine import Usage
+        from jsonschema import Draft202012Validator
+        store=Mock()
+        source=snapshot('https://example.org/person','A documented life: born 1895, Soviet citizen of Russian origin, died 1940.')
+        store.sources.return_value={source['id']:source}
+        claims=[{'field':f,'claim':'Documented '+f,'source_id':source['id'],'start':0,'end':len(source['body'])}
+                for f in ('bio','years','citizenship','nationalOrigin','epithet')]
+        groups=[{'id':'bolshevik','title_ko':'볼셰비키','blurb_ko':'설명'}]
+        ran=[]
+        async def model(**kwargs):
+            ran.append(1)
+            v=Draft202012Validator(kwargs['tool']['input_schema'])
+            base={'groupId':'bolshevik','epithet':{'ko':'수식','en':'Epithet'},'bio':{'ko':['문장.'],'en':['Sentence.']},
+                  'career':[],'role':{'category':'bolshevik'},'citizenship':{'code':'soviet','label':{'ko':'소련','en':'Soviet'}},'nationalOrigin':{'code':'russia','label':{'ko':'러시아','en':'Russia'}},
+                  'familyName':{'ko':'성','en':'Family'}}
+            self.assertTrue(v.is_valid({'fields':{**base,'years':'1895?–1940'}}), list(v.iter_errors({'fields':{**base,'years':'1895?–1940'}})))
+            self.assertFalse(v.is_valid({'fields':{**base,'years':'1900–현재'}}))
+            self.assertFalse(v.is_valid({'fields':{**base,'sortOrder':None}}))
+            self.assertFalse(v.is_valid({'fields':{k:x for k,x in base.items() if k!='familyName'}}))
+            await kwargs['handler']({'fields':{**base,'years':'1895–1940'}})
+        with patch('runtime_tools.commulingo_people._list_groups',return_value=groups), \
+             patch('runtime_tools.commulingo_people._list_categories',return_value=[{'id':'bolshevik'}]), \
+             patch('commulingo_pipeline.stages.model_call',side_effect=model), patch('commulingo_pipeline.stages.service.call',return_value={}):
+            result=await Draft(store)({'id':3,'kind':'person','action':'create','topic':'basics','target':'new-person'},
+                [{'stage':'research','value':{'baseline':'','claims':claims}}],Usage(),.2)
+        self.assertTrue(ran)
+        self.assertEqual(result.value['fields']['years'],'1895–1940')
+        self.assertEqual(result.value['fields']['bio']['ko'],'문장.')
+
     async def test_enrichment_draft_cannot_reclassify_an_existing_person(self):
         from commulingo_pipeline.stages import Draft
         from commulingo_pipeline.engine import Usage

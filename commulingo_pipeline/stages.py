@@ -563,6 +563,14 @@ class Draft:
         for collection,edits in (('aliases','aliasEdits'),('career','careerEdits'),('scenes','sceneEdits')):
             if collection in schema['properties'] and edits in schema['properties']:
                 schema.setdefault('allOf',[]).append({'not':{'required':[collection,edits]}})
+        # Store rules the writer used to meet only as a 400 after drafting.
+        if job['kind']=='person' and job['action']=='create' and {'givenName','familyName'} <= set(schema['properties']):
+            schema.setdefault('allOf',[]).append({'anyOf':[{'required':['familyName']},{'required':['givenName']}],
+                'description':'a person needs a family or given name in both languages'})
+        if isinstance(schema['properties'].get('sortOrder'),dict) and 'null' in (schema['properties']['sortOrder'].get('type') or []):
+            # The store rejects null ("sortOrder must be an integer"); omission appends.
+            schema['properties']['sortOrder'] = {**schema['properties']['sortOrder'],'type':'integer',
+                'description':'Explicit position; omit the key to append.'}
         for field in ('evidence','expectedRevision','sources','confidence'):
             schema.get('properties',{}).pop(field,None)
         schema['required'] = [f for f in schema.get('required',[]) if f not in {'evidence','expectedRevision','sources'}]
