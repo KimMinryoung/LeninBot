@@ -311,7 +311,18 @@ def validate_tool_arguments(
             key=lambda error: list(error.absolute_path),
         )
         if errors:
-            raise ToolArgumentValidationError(_format_jsonschema_errors(errors))
+            message = _format_jsonschema_errors(errors)
+            if not args and executable_schema.get("required"):
+                # DeepSeek returns input {} when a tool call's argument JSON
+                # did not parse (a 3,700-token draft, 2026-09-19); "'fields'
+                # is a required property" then reads as a missing key, and the
+                # model resends the same broken JSON.
+                message = (
+                    "arguments arrived as an empty object, so the call's JSON was probably "
+                    "not parseable (unescaped quotes, an unterminated string): resend the same "
+                    "content as valid JSON. " + message
+                )
+            raise ToolArgumentValidationError(message)
 
     _validate_json_numbers(normalized)
 

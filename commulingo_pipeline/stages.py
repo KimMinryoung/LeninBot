@@ -345,6 +345,12 @@ class Research:
         if targeted:
             usage.tracker['targeted_research'] = sorted(required_support)
         async def finish(value):
+            # DeepSeek Flash issues a throwaway result call inside a batch of
+            # fetches ("reason": "placeholder", 12 times on 2026-09-19); the
+            # 20-character floor caught those, but a longer filler on a
+            # no-edit status would close the job.
+            if re.match(r'\W*(placeholder|todo|tbd|dummy|lorem)\b', str(value.get('reason','')), re.I):
+                raise ValueError('reason must state the actual judgement; a placeholder result is not recorded')
             missing = required_support - {c.get('field') for c in value.get('claims',[])}
             if value.get('status')=='ready' and missing:
                 raise ValueError('ready research must resolve missing evidence for ' + ', '.join(sorted(missing)) +
@@ -600,11 +606,15 @@ class Draft:
         # (commulingo_editorial_notes, read back as current.notes by the next
         # job on the entry): on 2026-09-19 a sections draft for Yezhov put the
         # plan for three section edits into heading/body and it went live.
-        tool = result_tool({'type':'object','additionalProperties':False,'properties':{'fields':schema,
-            'notes':{'type':'string','maxLength':4000,'description':'Working notes saved with the entry for its next '
+        notes_schema = {'type':'string','maxLength':4000,'description':'Working notes saved with the entry for its next '
                 'author, never published: what the research supports but this patch leaves out (e.g. further '
-                'sections with their sources), open questions, conflicts left unresolved.'}},
-            'required':['fields']})
+                'sections with their sources), open questions, conflicts left unresolved.'}
+        # Models put notes inside fields as often as beside it (49 of 1,083
+        # result calls on 2026-09-19 bounced on that alone); accept both and
+        # hoist, rather than spend a round teaching the placement.
+        schema['properties']['notes'] = {**notes_schema,'description':'Same as top-level notes; moved out of fields.'}
+        tool = result_tool({'type':'object','additionalProperties':False,'properties':{'fields':schema,
+            'notes':notes_schema},'required':['fields']})
         from .draft_repair import DraftRepair
         repairs = DraftRepair(tool)
         tool = repairs.tool
@@ -628,8 +638,9 @@ class Draft:
         async def prepare_and_validate(value):
             value = repairs.prepare(value)
             fields = deepcopy(value['fields'])
+            nested_notes = fields.pop('notes', None)
             join_sentences(fields, sentence_plan)
-            notes = (value.get('notes') or '').strip()
+            notes = (value.get('notes') or nested_notes or '').strip()
             original = (job.get('payload') or {}).get('original_proposal') or {}
             if section and original and fields.get('slug')!=(original.get('patch_json') or {}).get('slug'):
                 raise ValueError('correction must retain the original section slug')

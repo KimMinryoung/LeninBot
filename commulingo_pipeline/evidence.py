@@ -103,6 +103,15 @@ class SourceHandles:
                 available = ', '.join(f'{handle}: chunks 0..{(len(sources[sid]["body"])-1)//SOURCE_CHUNK_CHARS}'
                     for handle,sid in self.ids.items() if sources.get(sid,{}).get('body'))
                 raise ValueError('unknown source_id; retrieve or use an available source: ' + available)
+            # A persistent ID names one snapshot, but every display of a URL
+            # numbers chunks over its current merged text, so a model that
+            # kept the ID from an earlier fetch and cites chunks it read after
+            # a later page (Lyushkov, 2026-09-19: chunks 397..421 under the
+            # 0..219 snapshot) means the current one. Earlier snapshots are
+            # prefixes of it, so the numbering is the same either way.
+            current = sources.get(self.ids.get(self.by_url.get(source['url'])))
+            if current and current.get('body') and current['body'].startswith(source['body']):
+                source_id = current['id']
             result.append({**claim, 'source_id':source_id})
         return result
 

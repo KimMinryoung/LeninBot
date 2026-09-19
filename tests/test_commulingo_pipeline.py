@@ -804,8 +804,9 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
                 await kwargs['handler']({'fields':{'slug':'cult','heading':{'ko':'니콜라이 예조프','en':'Cult'},'body':prose}})
             with self.assertRaisesRegex(ValueError,'minLength|too short'):
                 await kwargs['handler']({'fields':{'slug':'cult','heading':heading,'body':{'ko':'섹션','en':'Section'}}})
-            await kwargs['handler']({'fields':{'slug':'cult-and-erasure','heading':heading,'body':prose,'sortOrder':193707},
-                                     'notes':"also supported: correction of 'fall-trial-no-rehabilitation' dates"})
+            # notes nested inside fields is accepted and hoisted, not bounced.
+            await kwargs['handler']({'fields':{'slug':'cult-and-erasure','heading':heading,'body':prose,'sortOrder':193707,
+                                     'notes':"also supported: correction of 'fall-trial-no-rehabilitation' dates"}})
         job={'id':5432,'kind':'person','action':'update','topic':'enrichment','target':'yezhov',
              'payload':{'topics':['bio','sections'],'remaining_topics':['sections']}}
         with patch('commulingo_pipeline.stages.model_call',side_effect=model), \
@@ -813,7 +814,7 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
             result=await Draft(store)(job,[{'stage':'research','value':{'baseline':'v1','claims':[],
                 'current':{'revision':'v1','name':{'ko':'니콜라이 예조프','en':'Nikolai Yezhov'},
                            'sections':[{'slug':'fall-trial-no-rehabilitation'}]}}}],Usage(),.2)
-        self.assertEqual(seen['props'],{'slug','heading','body','sortOrder'})
+        self.assertEqual(seen['props'],{'slug','heading','body','sortOrder','notes'})
         self.assertEqual((result.value['target'],result.value['action']),('person_section','create'))
         self.assertEqual(result.value['fields']['sortOrder'],193707)
         self.assertIn('fall-trial',result.value['notes'])

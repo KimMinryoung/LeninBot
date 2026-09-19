@@ -35,6 +35,16 @@ class EvidenceContracts(TestCase):
         later=snapshot('https://example.org/archive','Documented fact. '*80+'Appended page.')
         self.assertEqual(handles.handle(later),'S1')
         self.assertEqual(handles.ids['S1'],later['id'])
+        # A stale persistent ID with chunk numbers from the merged display
+        # resolves to the current snapshot instead of failing its range check.
+        sources[later['id']]=later
+        stale=handles.resolve([{'source_id':source['id'],'field':'body','claim':'fact','chunks':[5]}],sources)
+        self.assertEqual(stale[0]['source_id'],later['id'])
+        self.assertEqual(resolve_claim_chunks(stale,sources)[0]['start'],5*240)
+        # A different page of the same URL that is not a prefix keeps its own id.
+        page2=snapshot('https://example.org/archive','Unrelated second page. '*20)
+        sources[page2['id']]=page2
+        self.assertEqual(handles.resolve([{'source_id':page2['id'],'chunks':[0]}],sources)[0]['source_id'],page2['id'])
 
     def test_pages_of_one_url_merge_into_one_numbering(self):
         from commulingo_pipeline.evidence import SourcePages, SOURCE_CHUNK_CHARS
@@ -59,6 +69,14 @@ class EvidenceContracts(TestCase):
         self.assertEqual([m['url'] for m in merged],['https://example.org/p'])
         self.assertTrue(merged[0]['body'].startswith('page one. ') and merged[0]['body'].endswith('page two. '))
         self.assertIs(seeded.current['https://example.org/q'],single)
+
+    def test_empty_arguments_are_explained_as_unparsed_json(self):
+        from tool_gateway.validation import validate_tool_arguments, ToolArgumentValidationError
+        schema={'type':'object','properties':{'fields':{'type':'object'}},'required':['fields']}
+        with self.assertRaisesRegex(ToolArgumentValidationError,'empty object.*not parseable.*fields'):
+            validate_tool_arguments('commulingo_pipeline_result',{},schema=schema,risk_class='state')
+        with self.assertRaisesRegex(ToolArgumentValidationError,"^'fields' is a required property"):
+            validate_tool_arguments('commulingo_pipeline_result',{'notes':'x'},schema=schema,risk_class='state')
 
     def test_expanded_ranges_preserve_all_evidence_above_old_limit(self):
         source=snapshot('https://example.org/archive','Documented fact. '*100)
