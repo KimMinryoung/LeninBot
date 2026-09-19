@@ -75,6 +75,15 @@ class ParticleRepair(unittest.TestCase):
         self.assertIn('<h3><a class="note-ref" id="ref-1" href="#note-1">[1]</a></h3>'.replace("<h3>", "<h3>제6조 "), html)
         self.assertIn('href="#ref-1"', html)
 
+    def test_heading_ids_come_from_spec_rules(self):
+        spec = {"title": "t"}
+        docs = [{"id": "d", "titleKo": "d", "heading": False, "offset": 0,
+                 "headingIds": [{"match": r"^제(\d+)조", "id": r"art-\1"}],
+                 "blocks": [{"tag": "h4", "lines": ["Article 5"]}, {"tag": "h4", "lines": ["Preamble"]}]}]
+        html = assemble(spec, docs, {0: ["제5조"], 1: ["전문"]})
+        self.assertIn('<h3 id="art-5">제5조</h3>', html)
+        self.assertIn("<h3>전문</h3>", html)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1516,7 +1516,17 @@ def assemble(spec: dict, docs: list[dict], translated: dict[int, list[str]]) -> 
             if tag in ("h1", "h2", "h3", "h4"):
                 # Treaties footnote article headings too (NATO's Article 6),
                 # so a heading's [n] is linked like prose.
-                out.append(f"<{tag}>{link_refs(_esc(' '.join(lines)))}</{tag}>")
+                heading = " ".join(lines)
+                # A stable id lets the manifest's anchored aliases (NATO 5조)
+                # link straight to the article; the reader otherwise numbers
+                # headings sec-N in document order, which shifts on any edit.
+                attr = ""
+                for rule in doc.get("headingIds") or []:
+                    m = re.match(rule["match"], heading)
+                    if m:
+                        attr = f' id="{_esc(m.expand(rule["id"]))}"'
+                        break
+                out.append(f"<{tag}{attr}>{link_refs(_esc(heading))}</{tag}>")
             elif tag == "blockquote":
                 inner = "".join(f"<p>{link_refs(_esc(ln))}</p>" for ln in lines)
                 out.append(f"<blockquote>{inner}</blockquote>")
