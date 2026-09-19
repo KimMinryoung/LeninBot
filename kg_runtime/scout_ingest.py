@@ -37,6 +37,53 @@ Output ONLY the group id, nothing else.
 """
 
 
+FACT_FILTER_FEATURE = "scout_kg_fact_filter"
+FACT_FILTER_CANDIDATES = 12   # lines judged per report
+FACT_FILTER_KEEP = 7          # facts stored per episode
+_FACT_INSTRUCTIONS = (
+    "This line reports a fact about the outside world (a news event, a figure, an organisation, a statement by a "
+    "public actor, a development in politics, economy or technology) that is worth storing in a knowledge base. "
+    "It is NOT a note about the agent's own procedure: mailbox state, UID numbers, what was saved or skipped, "
+    "timestamps of checks, reasoning about how to proceed, or table headers."
+)
+
+
+def _filter_fact_lines(task_content: str, lines: list[str]) -> tuple[list[str], dict]:
+    """Keep the lines a System One judgement says report a fact about the world.
+
+    Scout reports are mostly mailbox bookkeeping ("INBOX 최고 UID 345로 변동
+    없음", "Let me reconsider…"); on 2026-09-19, 92 of 100 sampled lines were
+    that, and all of them were being written to the knowledge graph as facts.
+    One decision per report asks a noul per line (registry
+    ``scout_kg_fact_filter``, threshold ``thresholds.keep``). When the model is
+    unavailable every line is kept, as before, so an outage never drops news.
+    Returns (kept lines, summary for logs/metrics).
+    """
+    candidates = [line for line in lines if line.strip()][:FACT_FILTER_CANDIDATES]
+    if not candidates:
+        return [], {"judged": 0, "kept": 0, "unavailable": False}
+    from llm.call_registry import decide_sync, resolve
+
+    profile = resolve(FACT_FILTER_FEATURE)
+    extra = profile.extra or {}
+    if not extra.get("enabled", True):
+        return candidates[:FACT_FILTER_KEEP], {"judged": 0, "kept": len(candidates[:FACT_FILTER_KEEP]), "unavailable": False}
+    keep = float((extra.get("thresholds") or {}).get("keep", 0.8))
+    state = {"task": (task_content or "").strip()[:300],
+             "lines": {f"line_{i + 1}": line[:600] for i, line in enumerate(candidates)}}
+    questions = {f"line_{i + 1}": {"type": "noul", "instructions": f"Regarding line_{i + 1}: " + _FACT_INSTRUCTIONS}
+                 for i in range(len(candidates))}
+    decision = decide_sync(FACT_FILTER_FEATURE, state, questions)
+    if decision is None:
+        logger.warning("[Scout→KG] fact filter unavailable; keeping all %d lines", len(candidates))
+        return candidates[:FACT_FILTER_KEEP], {"judged": 0, "kept": len(candidates[:FACT_FILTER_KEEP]), "unavailable": True}
+    scored = [(decision.noul(f"line_{i + 1}") or 0.0, line) for i, line in enumerate(candidates)]
+    kept = [line for p, line in scored if p >= keep][:FACT_FILTER_KEEP]
+    logger.info("[Scout→KG] fact filter kept %d/%d lines (threshold %.2f)", len(kept), len(candidates), keep)
+    return kept, {"judged": len(candidates), "kept": len(kept), "unavailable": False,
+                  "scores": [round(p, 2) for p, _ in scored]}
+
+
 def _classify_group_id(task_content: str, findings: str) -> str:
     """Classify a scout report into a KG group via the LLM call registry.
 
@@ -111,10 +158,6 @@ def process_scout_report_to_kg(
             lines = report.split("\n")
             findings_section = "\n".join(lines[2:10]) if len(lines) > 2 else report[:1000]
 
-        # Determine group_id with a light LLM call (keyword substring matching
-        # misrouted anything containing "ai"/"정책" etc.)
-        group_id = _classify_group_id(task_content, findings_section)
-
         # Build factual content: bullet points from findings
         content_lines = []
         for line in findings_section.split("\n"):
@@ -135,8 +178,16 @@ def process_scout_report_to_kg(
         if not content_lines:
             return {"status": "skip", "message": "No factual content extracted"}
 
-        # Limit to 5-7 key facts
-        content_lines = content_lines[:7]
+        # Keep only lines that state a fact about the world (fact filter); a
+        # report that is all bookkeeping — most mailbox briefings — writes no
+        # episode at all instead of a process log dressed as facts.
+        content_lines, filter_summary = _filter_fact_lines(task_content, content_lines)
+        if not content_lines:
+            return {"status": "skip", "message": "No factual content after fact filter", "fact_filter": filter_summary}
+
+        # Determine group_id with a light LLM call over the kept facts (keyword
+        # substring matching misrouted anything containing "ai"/"정책" etc.)
+        group_id = _classify_group_id(task_content, "\n".join(f"- {line}" for line in content_lines))
 
         # Build episode content
         ts = datetime.now(KST).strftime("%Y-%m-%d %H:%M KST")
@@ -170,6 +221,7 @@ def process_scout_report_to_kg(
                 "message": result["message"],
                 "group_id": group_id,
                 "facts_count": len(content_lines),
+                "fact_filter": filter_summary,
             }
         else:
             logger.warning("[Scout→KG] Failed to save: %s", result.get("message"))

@@ -354,6 +354,15 @@
     "thresholds": {"reject": 0.85, "boilerplate": 0.9},
     "note": "CommuLingo 독립 검토 인용 게이트(commulingo_pipeline/citation_gate.py::check_review_checks): 검토자의 checks[].quote가 finding이 확인한다고 말하는 사실을 실제로 담는지 Jev choice(supports/contradicts/unrelated)+noul(specific, boilerplate)로 판정. 판정 수치는 각 check의 citation_check에, 집계는 review artifact metrics의 review_citation_*에 남는다. 2026-09-19 기준선(저장된 검토 40건): 무관 인용 2건을 오탐 0으로 검출(conf 0.98·0.83). 2026-09-19 사용자 지시로 처음부터 enforce=true. enforce=true면 고신뢰 unrelated/contradicts 또는 boilerplate 인용을 가진 결정 호출을 거절해 검토자가 그 check만 고치게 한다."
     },
+  "scout_kg_fact_filter": {
+    "provider": "openrouter",
+    "model": "typesafe/jev-1.13",
+    "timeout": 15,
+    "kind": "system_one",
+    "enabled": true,
+    "thresholds": {"keep": 0.8},
+    "note": "scout 보고서→KG 저장 전 사실 필터(kg_runtime/scout_ingest.py::_filter_fact_lines): 추출된 줄(최대 12)마다 noul '외부 세계에 대한 사실인가(메일함 UID·처리 절차·추론 메모가 아닌가)'를 한 요청으로 묻고 thresholds.keep 이상만 최대 7줄 저장, 남는 줄이 없으면 episode를 쓰지 않는다. 판정 불가 시 전부 유지(기존 동작). 2026-09-19 기준선(실제 scout 보고서 30건 100줄): 절차 줄 92건 전부 p≤0.11, 실제 뉴스 사실 6건 p≥0.85, 제목·표 행은 0.1~0.83. 보고서당 ~$0.00004. dev_docs/jev_system_one_adoption.md 4.10"
+    },
   "task_routing_decision": {
     "provider": "openrouter",
     "model": "typesafe/jev-1.13",

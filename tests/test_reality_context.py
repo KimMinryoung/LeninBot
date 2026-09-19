@@ -74,6 +74,7 @@ class RuntimeContextTests(unittest.TestCase):
     def test_scout_write_is_derived_and_keeps_report_reference(self):
         from kg_runtime.scout_ingest import process_scout_report_to_kg
         with patch('kg_runtime.scout_ingest._classify_group_id', return_value='economy'), \
+             patch('kg_runtime.scout_ingest._filter_fact_lines', side_effect=lambda task, lines: (lines, {})), \
              patch('kg_runtime.scout_ingest.add_kg_episode', return_value={'status': 'ok', 'message': 'stored'}) as write:
             result = process_scout_report_to_kg(report='## Findings\n- claim https://example.org/source',
                                        task_content='research', task_id=12)
