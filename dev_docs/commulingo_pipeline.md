@@ -124,7 +124,9 @@ reason이 probe·placeholder·진행 메모("Investigating … before returning"
 집계(`citation_checks`·`citation_rejections`·`citation_unavailable`)는 research artifact의 `metrics`에 남는다.
 독립 검토에도 같은 게이트가 있다(`check_review_checks`, registry `commulingo_review_citation_support`): 검토자의
 `checks[].quote`가 `finding`이 확인한다고 적은 사실을 담는지 판정해 각 check의 `citation_check`와 review artifact
-`metrics`의 `review_citation_*`에 남긴다. 훅은 `make_handlers(..., gate=)`로 결정이 기록되기 전에 돈다. 저장된 검토
+`metrics`의 `review_citation_*`에 남긴다. 훅은 `make_handlers(..., gate=review_gate(usage))`로 결정이 기록되기 전에 돌며 파이프라인 검토와 검토 타이머의
+독립 검토(`scripts/commulingo_person_reviewer.py`) 양쪽에 걸린다. 승인 메모에 넣는 checks에서는 판정 수치를
+뺀다(`review_note_checks`). 저장된 검토
 40건 기준선에서 무관 인용 2건을 오탐 없이 잡았고(4.8), **현재 `enforce=false`(기록만)** — enforce로 바꾸면 고신뢰
 무관·반박 인용을 가진 결정 호출을 그 check만 지목해 거절한다.
 작성기는 제한된

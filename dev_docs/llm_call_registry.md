@@ -40,8 +40,9 @@ TypeSafe Jev는 텍스트를 생성하지 않고 typed 판정을 돌려주는 �
 - 감사: `check_llm_call` → 호출 → `record_llm_call`. OpenRouter가 `usage.cost`를 주면 그 값을, 없으면
   gateway의 `SYSTEM_ONE_PRICING`(입력 $0.042/M, 출력 0)으로 추정. 실패는 status=error 행 하나.
 - 실패(`4xx/5xx`, 전송 오류, 질문 형식 오류, 비-System One 항목)는 예외 없이 `decision=None`/`error_kind`로
-  돌아오고 콜사이트는 기존 경로(LLM·기본 라벨)를 유지한다. 429·5xx·전송 오류는 한 번 더 시도한다(Retry-After
-  존중, 최대 2초 대기; 항목 `retries`로 조정, 기본 1). `async decide()`의 바깥 timeout은 재시도까지 포함한다.
+  돌아오고 콜사이트는 기존 경로(LLM·기본 라벨)를 유지한다. 429·5xx·연결 거부/끊김은 한 번 더 시도한다(Retry-After
+  존중, 최대 2초 대기; 항목 `retries`로 조정, 기본 1). 읽기 타임아웃은 재시도하지 않는다 — 첫 요청이 이미 처리됐을
+  수 있고 게이트가 단계를 두 배로 세우게 된다. `async decide()`의 바깥 timeout은 항목의 시도 수 전체를 덮는다.
 - 현재 항목: `system_one_smoke`, `commulingo_citation_support`(enforce), `commulingo_review_citation_support`(shadow),
   `task_routing_decision`. 게이트 항목의 `enabled`/`enforce`/`thresholds`는 핫리로드된다.
 - 스모크: `venv/bin/python scripts/smoke_jev.py` (항목 `system_one_smoke`). 프록시에 credential이 없을 때

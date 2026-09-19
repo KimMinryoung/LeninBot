@@ -160,8 +160,8 @@ conf < lo        → 행동하지 않음, 현재 폴백
   한국어 교정 판정 noul 0.17/0.72(방향 정확), 라우팅 choice confidence 0.99. 응답 model `typesafe/jev-1.13-20260917`.
 - 프록시 credential 교체 완료(2026-09-19 11:35 프록시 재시작, `/health` providers_without_key 없음). 모든 판정 호출은
   프록시 경유이며 감사 행은 oneshot(토큰·비용)과 proxy(전송) 두 줄이 남고 비용은 oneshot 행에만 있다.
-- 재시도: 429·5xx·전송 오류는 `decide_detailed`가 한 번 더 시도한다(Retry-After 존중, 최대 2초 대기; 항목의
-  `retries`로 조정, 0이면 없음). 실패 행은 시도마다 남는다. 이유 — None 한 번의 대가가 크다(게이트는 미검사 통과,
+- 재시도: 429·5xx·연결 거부/끊김은 `decide_detailed`가 한 번 더 시도한다(Retry-After 존중, 최대 2초 대기; 항목의
+  `retries`로 조정, 0이면 없음; 읽기 타임아웃은 제외). 실패 행은 시도마다 남는다. 이유 — None 한 번의 대가가 크다(게이트는 미검사 통과,
   라우팅은 4배 느린 DeepSeek 폴백).
 
 ## 4.5 실데이터 기준선 비교 (2026-09-19, 총 $0.015)
@@ -229,8 +229,9 @@ diplomat 0.65(오답)였다 — 문턱값 0.80이면 29/30. 보수적으로 0.85
 검토자의 `checks[].quote`는 `resolve_review_checks`가 원문에서 위치를 확인하지만, 그 인용이 `finding`(이 인용이 무엇을
 확인하는지 적은 한국어 문장)을 실제로 담는지는 아무도 보지 않았다. `citation_gate.check_review_checks`가 조사 게이트와
 같은 질문(finding↔quote)을 Jev(registry `commulingo_review_citation_support`)에 묻고, 판정은 각 check의 `citation_check`와
-review artifact metrics의 `review_citation_*`에 남는다. 훅은 `make_handlers(..., gate=)` — 결정이 box에 들어가기 전에
-돌아 enforce로 바꾸면 그 check만 지목한 ToolRejection으로 검토자에게 되돌아간다. **배포 상태: `enforce=false`**(기록만).
+review artifact metrics의 `review_citation_*`에 남는다. 훅은 `make_handlers(..., gate=review_gate(usage))` — 결정이 box에 들어가기 전에
+돌아 enforce로 바꾸면 그 check만 지목한 ToolRejection으로 검토자에게 되돌아간다. 파이프라인 검토와 검토 타이머의
+독립 검토 양쪽에 걸리고, 승인 메모의 checks에서는 판정 수치를 뺀다. **배포 상태: `enforce=false`**(기록만).
 
 **기준선 — 저장된 검토 결정 40건에서 check 하나씩 무작위 추출(최근 21일), 정답은 finding과 quote를 직접 대조**
 

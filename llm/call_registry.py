@@ -650,6 +650,28 @@ _DECISION_RETRY_PAUSE = 0.5      # seconds when the provider names no Retry-Afte
 _DECISION_RETRY_PAUSE_MAX = 2.0
 
 
+def _decision_attempts(profile: CallSiteProfile) -> int:
+    """Total attempts for a decision: 1 + the entry's ``retries`` (default 1).
+    A malformed value keeps the default rather than breaking the call site."""
+    try:
+        retries = int((profile.extra or {}).get("retries", _DECISION_RETRIES))
+    except (TypeError, ValueError):
+        retries = _DECISION_RETRIES
+    return 1 + max(0, retries)
+
+
+def _decision_retryable(exc: Exception, kind: str) -> bool:
+    """Rate limits, 5xx and refused/dropped connections are retried; a read
+    timeout is not — the provider may have served the first request, and a
+    second wait would double the stall a gate imposes on its stage."""
+    name = type(exc).__name__.lower()
+    if "timeout" in name or isinstance(exc, TimeoutError):
+        return False
+    # httpx.ConnectError / ConnectionError are not counted as "transport" by
+    # _error_kind's name check ("connection"), so match the shorter stem here.
+    return kind in {"rate_limit", "server", "transport"} or "connect" in name
+
+
 @dataclass(frozen=True)
 class Decision:
     """Typed answers from one System One call, keyed as the questions were.
@@ -800,7 +822,7 @@ def decide_detailed(feature: str, state, questions: dict, *, label: str | None =
     # stalls its stage). A None answer costs the caller more than the retry:
     # the citation gate passes the claim unchecked and route_task falls back
     # to a chat model four times slower. ``retries`` in the entry overrides.
-    attempts = 1 + max(0, int((profile.extra or {}).get("retries", _DECISION_RETRIES)))
+    attempts = _decision_attempts(profile)
     for attempt in range(1, attempts + 1):
         started = time.monotonic()
         try:
@@ -815,7 +837,7 @@ def decide_detailed(feature: str, state, questions: dict, *, label: str | None =
                             model=profile.model, label=label, status="error", error_excerpt=str(exc),
                             latency_ms=int((time.monotonic() - started) * 1000), estimate_cost=False)
             result = DecisionResult(error_kind=kind, error=str(exc), retry_after=retry_after)
-            if attempt == attempts or not result.retryable:
+            if attempt == attempts or not _decision_retryable(exc, kind):
                 return result
             time.sleep(min(retry_after or _DECISION_RETRY_PAUSE, _DECISION_RETRY_PAUSE_MAX))
     usage = payload.get("usage") or {}
@@ -841,12 +863,12 @@ def decide_sync(feature: str, state, questions: dict, **defaults) -> Decision | 
 
 
 async def decide(feature: str, state, questions: dict, **defaults) -> Decision | None:
-    """Async wrapper around decide_sync with the profile timeout enforced.
-
-    The outer timeout covers the retry as well: one call, one pause, one
-    retry all fit inside timeout*2 plus the pause cap."""
+    """Async wrapper around decide_detailed (in a thread) returning only the
+    decision; the outer timeout covers every attempt the entry allows plus
+    the pauses between them, so a retry is never cancelled half-way."""
     profile = resolve(feature, **defaults)
-    budget = profile.timeout * (1 + _DECISION_RETRIES) + _DECISION_RETRY_PAUSE_MAX * _DECISION_RETRIES + 5
+    attempts = _decision_attempts(profile)
+    budget = profile.timeout * attempts + _DECISION_RETRY_PAUSE_MAX * (attempts - 1) + 5
     try:
         result = await asyncio.wait_for(
             asyncio.to_thread(decide_detailed, feature, state, questions, profile=profile, **defaults),

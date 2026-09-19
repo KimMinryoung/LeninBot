@@ -158,8 +158,8 @@ def annotate(claims, checks):
     return out
 
 
-async def _judge(feature, questions, items, *, key, state, skip, usage=None, decide=None, cache=None,
-                 tracker_prefix='', describe=None, noun='claim'):
+async def _judge(feature, questions, items, *, key, state, skip, describe, usage=None, decide=None, cache=None,
+                 tracker_prefix='', noun='claim'):
     """Shared core: one check per item, index-aligned; raises when enforce is on
     and a verdict is a confident rejection. ``skip(item)`` names why an item
     cannot be judged (None to judge it), ``describe(i, item)`` labels it in
@@ -174,9 +174,6 @@ async def _judge(feature, questions, items, *, key, state, skip, usage=None, dec
     gate = asyncio.Semaphore(CONCURRENCY)
 
     async def one(item):
-        k = key(item)
-        if k in cache:
-            return cache[k]
         reason = skip(item)
         if reason:
             return {'support': None, 'error': reason}
@@ -184,10 +181,21 @@ async def _judge(feature, questions, items, *, key, state, skip, usage=None, dec
             decision = await decide(feature, state(item), questions)
         if decision is None:
             return {'support': None, 'error': 'decision unavailable'}
-        cache[k] = verdict(decision, conf['thresholds'], item.get('stance') or 'supports')
-        return cache[k]
+        return verdict(decision, conf['thresholds'], item.get('stance') or 'supports')
 
-    checks = list(await asyncio.gather(*(one(item) for item in items)))
+    # One paid decision per distinct item: duplicates within the batch share
+    # the first item's task, and anything already judged comes from the cache.
+    pending = {}
+    for item in items:
+        k = key(item)
+        if k not in cache and k not in pending:
+            pending[k] = asyncio.ensure_future(one(item))
+    for k, task in pending.items():
+        result = await task
+        if result.get('support') is not None:
+            cache[k] = result
+        pending[k] = result
+    checks = [cache.get(key(item)) or pending[key(item)] for item in items]
     if usage is not None:
         tracker = usage.tracker
         tracker[f'{tracker_prefix}citation_checks'] = tracker.get(f'{tracker_prefix}citation_checks', 0) + len(checks)
@@ -224,6 +232,18 @@ async def check_claims(claims, sources, *, usage=None, decide=None, cache=None):
                         state=lambda claim: claim_state(claim, sources.get(claim.get('source_id')) or {}),
                         usage=usage, decide=decide, cache=cache,
                         describe=lambda i, c: f'claim {i + 1} ({c.get("field")}, {str(c.get("claim"))[:120]!r})')
+
+
+def review_gate(usage=None, cache=None):
+    """The decision hook for make_handlers(gate=): judge the decision's checks
+    and return it with each verdict attached. One per review run so resubmitted
+    checks reuse their verdicts. ``usage`` needs a ``tracker`` dict."""
+    cache = cache if cache is not None else {}
+
+    async def gate(value):
+        checks = value.get('checks', [])
+        return {**value, 'checks': annotate(checks, await check_review_checks(checks, usage=usage, cache=cache))}
+    return gate
 
 
 async def check_review_checks(checks, *, usage=None, decide=None, cache=None):

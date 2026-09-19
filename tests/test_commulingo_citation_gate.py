@@ -154,6 +154,33 @@ class CitationGateTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(ValueError, r"one check; the other checks are fine(.|\n)*check 2 \('1938년 처형 확인'\)"):
             await check_review_checks(checks, decide=decide)
 
+    async def test_duplicate_items_in_one_batch_share_one_decision(self):
+        calls = []
+        async def decide(feature, state, questions):
+            calls.append(state['claim'])
+            return decision('supports', 0.9)
+        checks = await check_claims([self.claims[0], self.claims[0], self.claims[1]], self.sources, decide=decide)
+        self.assertEqual(calls, ['Born 1904', 'Executed in 1938'])
+        self.assertEqual([c['support'] for c in checks], ['supports'] * 3)
+
+    async def test_review_gate_factory_annotates_the_decision(self):
+        from commulingo_pipeline.citation_gate import review_gate
+        citation_gate.settings.return_value = {**SETTINGS, 'enforce': False}
+        value = {'decision': 'approve', 'checks': [{'source': 's', 'quote': 'q' * 20, 'finding': 'f'}]}
+        async def decide(feature, state, questions):
+            return decision('supports', 0.93)
+        usage = Usage()
+        with patch('llm.call_registry.decide', decide):
+            out = await review_gate(usage)(value)
+        self.assertEqual(out['checks'][0]['citation_check']['support'], 'supports')
+        self.assertNotIn('citation_check', value['checks'][0])
+        self.assertEqual(usage.tracker['review_citation_checks'], 1)
+
+    def test_review_note_checks_drop_verdict_numbers(self):
+        from commulingo_pipeline.stages import review_note_checks
+        checks = [{'citation': 'c', 'quote': 'q', 'finding': 'f', 'citation_check': {'support': 'supports'}}, 'odd']
+        self.assertEqual(review_note_checks(checks), [{'citation': 'c', 'quote': 'q', 'finding': 'f'}, 'odd'])
+
     def test_annotate_puts_compact_check_on_claim_without_reject_text(self):
         from commulingo_pipeline.citation_gate import annotate
         checks = [verdict(decision('unrelated', 0.99), SETTINGS['thresholds']), {'support': None, 'error': 'x'}]

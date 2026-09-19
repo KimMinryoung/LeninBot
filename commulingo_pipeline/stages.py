@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 
 from .engine import Result
 from .evidence import snapshot, compile_evidence, locate_claim_quotes, SourceHandles, SourcePages
-from .citation_gate import check_claims, check_review_checks, annotate as annotate_citations
+from .citation_gate import check_claims, review_gate, annotate as annotate_citations
 from . import service
 from .bundles import work_topics, advance
 
@@ -759,6 +759,12 @@ class Draft:
         return Result(box,'validate')
 
 
+def review_note_checks(checks):
+    """Checks as the editorial note shows them: the citation gate's verdict
+    numbers stay in the artifact, not in the suggestion history."""
+    return [{k:v for k,v in c.items() if k!='citation_check'} if isinstance(c,dict) else c for c in checks]
+
+
 def prior_reviews(artifacts):
     """Earlier revise verdicts of the current bundle, trimmed to what a re-review must confirm."""
     reviews = []
@@ -821,16 +827,11 @@ class Review:
         proposal['risks'] = review_risks(proposal,current)
         previous_reviews = prior_reviews(artifacts)
         fetched, box = {}, {}
-        citation_cache = {}
-        async def gate(value):
-            # The reviewer's own quotes get the research claims' question: does
-            # the passage say what the finding claims it verifies? Verdicts ride
-            # on each check; a confident miss bounces the decision only when the
-            # review gate's registry entry says enforce (citation_gate).
-            checks = value.get('checks', [])
-            judged = await check_review_checks(checks, usage=usage, cache=citation_cache)
-            return {**value, 'checks': annotate_citations(checks, judged)}
-        handlers = make_handlers({k:TOOL_HANDLERS[k] for k in READS},proposal,fetched,box,gate=gate)
+        # The reviewer's own quotes get the research claims' question: does the
+        # passage say what the finding claims it verifies? Verdicts ride on each
+        # check; a confident miss bounces the decision only when the review
+        # gate's registry entry says enforce (citation_gate.review_gate).
+        handlers = make_handlers({k:TOOL_HANDLERS[k] for k in READS},proposal,fetched,box,gate=review_gate(usage))
         async def finish(value):
             return await handlers[DECISION_TOOL['name']](**value)
         convergence = ('' if not previous_reviews else
@@ -924,7 +925,7 @@ async def submit(job, artifacts, usage, budget):
     try:
         result = await asyncio.to_thread(service.call,{'command':'review','target':draft.get('target',job['kind']),
             'suggestionId':receipt['suggestionId'],'approve':True,
-            'note':decision['reason']+'\n'+json.dumps(decision['checks'],ensure_ascii=False),
+            'note':decision['reason']+'\n'+json.dumps(review_note_checks(decision['checks']),ensure_ascii=False),
             'idempotencyKey':key+':approve'})
     except ValueError as exc:
         if 'revision_conflict' not in str(exc):

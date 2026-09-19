@@ -137,6 +137,27 @@ class DecideTests(unittest.TestCase):
         self.assertEqual(post.call_count, 1)
         sleep.assert_not_called()
 
+    def test_read_timeout_is_not_retried_but_connection_errors_are(self):
+        import httpx
+        with mock.patch("httpx.post", side_effect=httpx.ReadTimeout("slow")) as post, \
+             mock.patch.object(cr.time, "sleep") as sleep:
+            result = cr.decide_detailed("t", "s", QUESTIONS, profile=_profile())
+        self.assertEqual((result.error_kind, post.call_count), ("transport", 1))
+        sleep.assert_not_called()
+        with mock.patch("httpx.post", side_effect=[httpx.ConnectError("refused"), _Resp(200, PAYLOAD)]) as post, \
+             mock.patch.object(cr.time, "sleep"):
+            self.assertIsNotNone(cr.decide_detailed("t", "s", QUESTIONS, profile=_profile()).decision)
+        self.assertEqual(post.call_count, 2)
+
+    def test_attempts_follow_the_entry_and_survive_bad_values(self):
+        self.assertEqual(cr._decision_attempts(_profile()), 2)
+        self.assertEqual(cr._decision_attempts(cr.CallSiteProfile(feature="t", provider="openrouter", model="m",
+                                                                  extra={"retries": 3})), 4)
+        self.assertEqual(cr._decision_attempts(cr.CallSiteProfile(feature="t", provider="openrouter", model="m",
+                                                                  extra={"retries": "one"})), 2)
+        self.assertEqual(cr._decision_attempts(cr.CallSiteProfile(feature="t", provider="openrouter", model="m",
+                                                                  extra={"retries": None})), 2)
+
     def test_registry_entry_can_disable_retries(self):
         profile = cr.CallSiteProfile(feature="t", provider="openrouter", model="typesafe/jev-1.13",
                                      timeout=5.0, extra={"retries": 0})
