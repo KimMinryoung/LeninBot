@@ -338,6 +338,8 @@ class Store:
                         # citation gates (citation_gate.py): research claims and review checks
                         'citation_checks','citation_rejections','citation_unavailable',
                         'review_citation_checks','review_citation_rejections','review_citation_unavailable',
+                        # search-hit triage, shadow (search_triage.py): per-hit verdicts for the later join
+                        'search_triage','search_triage_calls','search_triage_unavailable',
                         'classification'}}
             if (usage or {}).get('provider_fallback'):
                 # Later stages see the same sources; skip the provider that refused them.

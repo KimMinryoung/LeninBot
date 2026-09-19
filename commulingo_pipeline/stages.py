@@ -305,8 +305,14 @@ class Research:
                 await asyncio.to_thread(self.store.link_source,job['id'],merged['id'])
                 sources[merged['id']] = merged
             return display(merged, span)
+        from .search_triage import shadow as search_shadow, search_target
+        triage = search_shadow(search_target(job['kind'], job['target'], current, job.get('topic')), usage)
         def wrap(name, call):
             async def fetched(**kwargs):
+                if name == 'web_search':
+                    raw = await call(**kwargs)
+                    await triage(str(raw))   # shadow: recorded on the tracker, shown unchanged
+                    return raw
                 if name in {'fetch_url','wiki_get'}:
                     cached = await asyncio.to_thread(self.store.cached_source,name,kwargs)
                     if cached:
@@ -958,7 +964,9 @@ class Review:
         # passage say what the finding claims it verifies? Verdicts ride on each
         # check; a confident miss bounces the decision only when the review
         # gate's registry entry says enforce (citation_gate.review_gate).
-        handlers = make_handlers({k:TOOL_HANDLERS[k] for k in READS},proposal,fetched,box,gate=review_gate(usage))
+        from .search_triage import shadow as search_shadow, search_target
+        handlers = make_handlers({k:TOOL_HANDLERS[k] for k in READS},proposal,fetched,box,gate=review_gate(usage),
+                                 triage=search_shadow(search_target(job['kind'], job['target'], current, job.get('topic')), usage))
         async def finish(value):
             return await handlers[DECISION_TOOL['name']](**value)
         convergence = ('' if not previous_reviews else

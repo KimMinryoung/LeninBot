@@ -52,9 +52,10 @@ def invalidated(row, current):
     return None
 
 
-def make_handlers(read_handlers, proposal, fetched, box, gate=None):
+def make_handlers(read_handlers, proposal, fetched, box, gate=None, triage=None):
     """``gate(value)`` (async) may annotate the resolved decision or raise
-    ValueError to send it back to the reviewer before it is boxed."""
+    ValueError to send it back to the reviewer before it is boxed.
+    ``triage(text)`` (async) sees each rendered web_search result (shadow)."""
     from tool_gateway.results import ToolRejection
     handlers = {}
     snapshots = {}
@@ -63,6 +64,8 @@ def make_handlers(read_handlers, proposal, fetched, box, gate=None):
             async def wrapped(**kwargs):
                 result = await call(**kwargs)
                 text = str(result)
+                if tool_name == 'web_search' and triage is not None:
+                    await triage(text)
                 body = re.search(r'<external source="[^"]*">\n(.*)\n</external>', text, re.S)
                 if tool_name in {'fetch_url','wiki_get'} and body and len(body[1])>20:
                     urls = [kwargs.get('url')] if tool_name=='fetch_url' else re.findall(r'https?://[^\s<>\]"\)]+', text[:1000])
@@ -107,7 +110,10 @@ async def research(row, current, tracker):
     from types import SimpleNamespace
     from commulingo_pipeline.citation_gate import review_gate
     fetched,box = {},{}
-    handlers = make_handlers(read_handlers,row,fetched,box,gate=review_gate(SimpleNamespace(tracker=tracker)))
+    from commulingo_pipeline.search_triage import shadow as search_shadow, search_target
+    usage = SimpleNamespace(tracker=tracker)
+    handlers = make_handlers(read_handlers,row,fetched,box,gate=review_gate(usage),
+                             triage=search_shadow(search_target(row.get('target_type','person'),row.get('target_id'),current),usage))
     task = {'suggestion': row, 'current_person': current}
     context = new_run_context(interface='autonomous', agent_name=spec.name, is_owner=True,
         scope_type='maintenance_job',scope_id=f"commulingo_review:{row['id']}")

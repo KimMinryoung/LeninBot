@@ -386,8 +386,13 @@ accept 0.7 미만이고 작성 모델이 값을 줬으면 그 값을 남긴다. 
 - **페이징 사냥** — fetch 호출의 21%·wiki_get의 24%가 offset>0, 같은 scope·URL 3페이지 이상이 862건(fetch 호출의 40%, 회당 4.7s + LLM 라운드),
   인용 발췌의 15%가 10,000자 이후. 후보(미착수): 첫 fetch 때 저장된 전체 본문을 창으로 잘라 Jev에 "대상·조사 필드에 관한 사실을 담는가"를
   묻고 top-k offset 색인을 도구 결과에 덧붙이기(본문은 숨기지 않음). 기준선은 위 결과가 대용(진술 없이 대상만 줄 때는 재측정 필요).
-- **검색 결과 선별** — 검토당 fetch URL 5.8개 중 인용 3.1개(47% 미인용), 검색은 제공자 순서 그대로 표시. 후보(미착수): `web_search` 래퍼에서
-  hit마다 3단계 score를 shadow로 기록하고 1주 뒤 fetch·인용과 join.
+- **검색 결과 선별(shadow, 2026-09-20 적용)** — 검토당 fetch URL 5.8개 중 인용 3.1개(47% 미인용), 검색은 제공자 순서 그대로 표시.
+  `commulingo_pipeline/search_triage.py`(registry `commulingo_search_triage`): 조사 `wrap`·검토 `make_handlers(triage=)`가 `web_search`
+  결과의 hit(제목·URL·요약, ≤10)을 한 요청으로 Jev에 주고 hit마다 choice [directly/possibly/unrelated] "대상 항목을 직접 다루는가"를 받아
+  usage tracker `search_triage`(artifact metrics)에 `{url, verdict, confidence}`로만 기록한다 — 표시는 그대로. 판정 실패·예외는 검색을
+  건드리지 않는다(`search_triage_unavailable`). 1주 뒤 평가 쿼리: research/review artifact metrics의 search_triage를 같은 scope의
+  `tool_audit_log` fetch_url URL과 artifact의 인용 URL(claims→sources, checks[].source)에 join해 verdict별 fetch율·인용율 표. directly의
+  인용율이 unrelated의 2배 이상이면 렌더링에 표기·정렬을 넣고, 아니면 끈다.
 - 로그상 볼륨이 없어 미룸: discover 중복 정렬(이름 포함 쌍 10건, create 23건/14일), 웹챗 스크리닝(web_search 158/14일), vector_search 선별(54),
   도구 인자 게이트(execute 2), task_verifier(주 293라운드 $0.32).
 
