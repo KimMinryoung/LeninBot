@@ -35,6 +35,14 @@ class ClassifyTests(unittest.TestCase):
         self.assertEqual(state['bio_ko'], '첫 문장. 둘째 문장.')
         self.assertEqual(state['career'], ['헝가리 사회주의노동자당 제1서기 (1956–1988)'])
         self.assertEqual(state['citizenship'], 'hungary')
+        # Labels only (the writer's schema has no codes): the state still names the nation and carries moment/fate.
+        labels = cc.state_from_fields({**FIELDS, 'citizenship': {'label': {'ko': '헝가리', 'en': 'Hungary'}},
+                                       'nationalOrigin': {'label': {'ko': '헝가리인', 'en': 'Hungarian'}},
+                                       'moment': {'ko': ['1956년 소련군 진주 뒤 집권.'], 'en': ['Took power in 1956.']},
+                                       'fate': {'label': {'ko': '자연사', 'en': 'Natural causes'}}})
+        self.assertEqual((labels['citizenship'], labels['national_origin']), ('Hungary', 'Hungarian'))
+        self.assertEqual(labels['moment_ko'], '1956년 소련군 진주 뒤 집권.')
+        self.assertEqual(labels['fate'], ' · 자연사')
 
     def test_non_soviet_person_gets_categories_only_and_fill_replaces_writer_values(self):
         seen = {}
@@ -99,8 +107,10 @@ class ClassifyTermTests(unittest.TestCase):
         p = patch('llm.call_registry.resolve', return_value=TERM_PROFILE); p.start(); self.addCleanup(p.stop)
 
     def test_term_state_and_rules_in_criteria(self):
-        state = cc.term_state(TERM)
+        state = cc.term_state({**TERM, 'aliases': {'ko': ['군사공산주의'], 'en': ['military communism']}, 'parentId': 'nep'})
         self.assertEqual(state['definition']['ko'], '내전기 경제 체제.')
+        self.assertEqual(state['aliases'], ['군사공산주의', 'military communism'])
+        self.assertEqual(state['parent_term'], 'nep')
         self.assertEqual(state['period'], '1918–1921')
         criteria = cc.term_questions(TERM_CATS)['category']['criteria']
         self.assertIn('Soviet planning', criteria['economy'])
@@ -149,6 +159,7 @@ class ClassifyCodesTests(unittest.TestCase):
         self.assertEqual(seen['feature'], cc.CODES_FEATURE)
         self.assertEqual(seen['questions'], {'citizenship', 'fate'})
         self.assertEqual(seen['state']['fate_claims'][0]['excerpt'], 'погиб в Дайрэне')
+        self.assertIn('bio_ko', seen['state'])
         filled = cc.fill_person_codes(CARD, codes)
         self.assertEqual(filled['citizenship']['code'], 'soviet')
         self.assertEqual(filled['fate']['kind'], 'murdered')

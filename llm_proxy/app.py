@@ -143,6 +143,9 @@ BILLING_PROVIDERS: dict[str, dict] = {
 _STRIP_REQUEST = {
     "host", "content-length", "connection", "keep-alive", "transfer-encoding",
     "authorization", "x-api-key", "x-goog-api-key",
+    # Internal call-site name, read into the audit row above; providers never
+    # need it and it leaked feature names upstream until 2026-09-19.
+    "x-llm-caller",
 }
 _STRIP_RESPONSE = {
     "content-length", "connection", "keep-alive", "transfer-encoding",

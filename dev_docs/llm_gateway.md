@@ -30,7 +30,7 @@ LLM 버전으로, 같은 패턴을 따른다: 단일 관문 + 이중 싱크 감�
 쓰는 한 자동으로 seam을 지난다. 그 밖의 직접 SDK 호출은 만들지 말 것.
 `bot_config`의 SDK 객체는 애드혹 직접 사용도 놓치지 않도록 `AuditedAsyncAnthropic`/
 `AuditedAsyncOpenAI`로 감싸지만, 툴 루프 요청은 `with_audit_owner(..., "loop")`로 소유자를
-표시한다. 래퍼는 caller 헤더·DeepSeek thinking 기본값은 그대로 주입하면서 자체
+표시한다(2026-09-19부터 프록시는 `x-llm-caller`를 감사 행에만 쓰고 상류 제공자에게는 전달하지 않는다). 래퍼는 caller 헤더·DeepSeek thinking 기본값은 그대로 주입하면서 자체
 `external_sdk` 정책/비용 행만 생략하고, `LoopState.add_cost`가 유일한 과금 행을 쓴다.
 따라서 같은 비스트리밍 응답이 `external_sdk`와 `loop`에 중복 집계되지 않는다.
 

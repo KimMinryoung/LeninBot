@@ -125,10 +125,13 @@ def term_state(fields: dict) -> dict:
         text = (value or {}).get(lang) if isinstance(value, dict) else value
         return " ".join(text) if isinstance(text, list) else str(text or "")
     period = fields.get("period")
+    aliases = fields.get("aliases") or {}
     return {"term": {"ko": _text(fields.get("term"), "ko"), "en": _text(fields.get("term"), "en")},
+            "aliases": (aliases.get("ko") or []) + (aliases.get("en") or []) if isinstance(aliases, dict) else aliases,
+            "parent_term": fields.get("parentId"),
             "definition": {"ko": joined(fields.get("definition"), "ko"), "en": joined(fields.get("definition"), "en")},
             "period": _text(period, "ko") if isinstance(period, dict) else period,
-            "body_ko": joined(fields.get("body"), "ko")[:1200]}
+            "body_ko": joined(fields.get("body"), "ko")[:1500], "body_en": joined(fields.get("body"), "en")[:800]}
 
 
 def classify_term(fields: dict, *, categories=None, decide=None) -> dict | None:
@@ -214,7 +217,9 @@ def person_code_questions(fields: dict, citizenship_codes, origin_codes=()) -> d
 def person_code_state(fields: dict, claims: dict | None) -> dict:
     """Labels the writer wrote plus the research excerpts for those fields."""
     claims = claims or {}
-    return {"name": state_from_fields(fields)["name"], "years": fields.get("years"),
+    card = state_from_fields(fields)
+    return {"name": card["name"], "years": fields.get("years"), "epithet": card["epithet"],
+            "bio_ko": card["bio_ko"][:1200], "moment_ko": card["moment_ko"],
             "citizenship_label": (fields.get("citizenship") or {}).get("label"),
             "citizenship_claims": claims.get("citizenship", [])[:4],
             "origin_label": (fields.get("nationalOrigin") or {}).get("label"),
@@ -328,10 +333,16 @@ def state_from_fields(fields: dict) -> dict:
         name = {lang: " ".join(p for p in (_text(fields.get("givenName"), lang), _text(fields.get("familyName"), lang)) if p)
                 for lang in ("ko", "en")}
     career = fields.get("career") or []
+    origin = fields.get("nationalOrigin") or fields.get("origin") or {}
+    fate = fields.get("fate") or {}
     return {"name": _text(name, "ko") or _text(name, "en"), "years": fields.get("years"),
-            "citizenship": (fields.get("citizenship") or {}).get("code"), "epithet": _text(fields.get("epithet"), "ko"),
+            "citizenship": (fields.get("citizenship") or {}).get("code") or _text((fields.get("citizenship") or {}).get("label"), "en"),
+            "national_origin": origin.get("code") or _text(origin.get("label"), "en"),
+            "epithet": _text(fields.get("epithet"), "ko"),
             "career": [f"{_text(c.get('r'), 'ko')} ({c.get('y')})" for c in career if isinstance(c, dict)],
-            "bio_ko": joined(fields.get("bio"), "ko"), "bio_en": joined(fields.get("bio"), "en")}
+            "bio_ko": joined(fields.get("bio"), "ko"), "bio_en": joined(fields.get("bio"), "en"),
+            "moment_ko": joined(fields.get("moment"), "ko"),
+            "fate": (fate.get("kind") or "") + (" · " + _text(fate.get("label"), "ko") if fate.get("label") else "")}
 
 
 def load_catalogs() -> tuple[list[dict], list[dict], list[dict]]:
@@ -359,7 +370,7 @@ def classify_person(fields: dict, *, catalogs=None, decide=None) -> dict | None:
     if not groups or not categories:
         return None
     state = state_from_fields(fields)
-    soviet = offices_allowed(state["citizenship"])
+    soviet = offices_allowed((fields.get("citizenship") or {}).get("code"))
     result = (decide or decide_detailed)(FEATURE, state, build_questions(groups, offices, categories, soviet),
                                          label="person-classification")
     decision = result.decision
