@@ -454,6 +454,12 @@ class Draft:
             schema = {'type':'object','additionalProperties':False,
                       'properties':{k:deepcopy(properties[k]) for k in ('slug','heading','body')},
                       'required':['slug','heading','body']}
+            schema['properties']['slug']['description'] = ('Kebab-case id of this section\'s own topic, e.g. '
+                'party-apparatus-rise; never the person id. Reuse an existing slug only to rewrite that section.')
+            # Without a key the shared store sorts a new section first (0). The
+            # section tool's chronological key applies here too.
+            schema['properties']['sortOrder'] = {'type':'integer',
+                'description':properties['sort_order']['description']}
         groups, role_categories = [], []
         if job['kind']=='person' and not section:
             from runtime_tools.commulingo_people import _list_groups, _list_categories
@@ -500,7 +506,13 @@ class Draft:
         prose_budgets = {field:{lang:{'draft_target':int(part['maxLength']*.8),'hard_limit':part['maxLength']}
             for lang,part in schema['properties'].get(field,{}).get('properties',{}).items() if part.get('maxLength')}
             for field in ('bio','moment','definition','body','heading','epithet') if field in schema['properties']}
-        tool = result_tool({'type':'object','additionalProperties':False,'properties':{'fields':schema},'required':['fields']})
+        # Planning and scope remarks have a home outside the published fields:
+        # on 2026-09-19 a sections draft for Yezhov put its work plan into
+        # heading/body and it went live as a section.
+        tool = result_tool({'type':'object','additionalProperties':False,'properties':{'fields':schema,
+            'notes':{'type':'string','description':'Author notes for the pipeline record only, never published: '
+                'scope decisions, what the research supports but this patch leaves out, open questions.'}},
+            'required':['fields']})
         from .draft_repair import DraftRepair
         repairs = DraftRepair(tool)
         tool = repairs.tool
@@ -524,9 +536,13 @@ class Draft:
         async def prepare_and_validate(value):
             value = repairs.prepare(value)
             fields = value['fields']
+            notes = (value.get('notes') or '').strip()
             original = (job.get('payload') or {}).get('original_proposal') or {}
             if section and original and fields.get('slug')!=(original.get('patch_json') or {}).get('slug'):
                 raise ValueError('correction must retain the original section slug')
+            if section and fields.get('slug')==job['target']:
+                raise ValueError('slug names the section topic, not the person; a section is one reader-facing '
+                                 'topic, and a plan for several edits belongs in notes')
             if job['kind']=='term':
                 drop_unchanged_term_facts(fields,research.get('current') or {},job['action'])
             if not fields:
@@ -541,6 +557,8 @@ class Draft:
             if section:
                 exists = any(s['slug']==fields['slug'] for s in (research.get('current') or {}).get('sections',[]))
                 candidate.update(target='person_section',action='update' if exists else 'create')
+            if notes:
+                candidate['notes'] = notes
             prose_error = prose_problem(fields)
             if prose_error:
                 raise ValueError(prose_error)
@@ -575,7 +593,13 @@ class Draft:
             return bounded
         prompt = ('DRAFT ONLY: use verified research to improve the current commissioned topics in one patch. Finish with '
             'commulingo_pipeline_result. The runner supplies evidence and revision. '
-            'Write bilingual equivalent claims; do not fill space or add facts beyond the research. '
+            'Every field in fields is published to readers as written; remarks about the task, the research or '
+            'edits you would make elsewhere go in notes, never in a heading, body or bio. '
+            + ('This result is ONE section: slug names its topic, heading and body are the section text itself. '
+               'If the research supports more than one section or a correction of an existing one, write the '
+               'single most important as this section and list the rest in notes; they are commissioned separately. '
+               'Give sortOrder as the chronological key of the period the section opens on.\n' if section else '')
+            +             'Write bilingual equivalent claims; do not fill space or add facts beyond the research. '
             'For people, choose group/groupId from person_groups using their descriptions, not title alone. '
             'Choose role.category from role_categories; do not invent category or office IDs. '
             'Use the supplied current snapshot. At most three targeted dictionary lookups are available; '
@@ -616,9 +640,9 @@ def prior_reviews(artifacts):
 
 
 def prose_problem(fields):
-    from runtime_tools.commulingo_people import _em_dash_problem, _script_leak_problem, _contains_north_korea
+    from runtime_tools.commulingo_people import _em_dash_problem, _script_leak_problem, _meta_prose_problem, _contains_north_korea
     prose = {k:v for k,v in fields.items() if k not in {'evidence','sources'}}
-    return '; '.join(e for e in (_em_dash_problem(prose), _script_leak_problem(prose),
+    return '; '.join(e for e in (_em_dash_problem(prose), _script_leak_problem(prose), _meta_prose_problem(prose),
         'Use 조선민주주의인민공화국 or 조선 in Korean text' if _contains_north_korea(prose) else None) if e)
 
 
@@ -676,6 +700,9 @@ class Review:
             'already read without objecting. ')
         await model_call(spec=spec,prompt='Independently verify every changed claim, bilingual equivalence, '
             'identity and source support. Do not approve merely because quotations occur in a source. '
+            'The patch is published to readers exactly as written: revise a heading, body or bio that is a '
+            'work plan, a list of intended edits or commentary on the draft instead of dictionary prose, '
+            'however accurate its facts. '
             + convergence + '\n'
             +stage_evidence({'suggestion':proposal,'current_person':current,'previous_reviews':previous_reviews}),
             tool=DECISION_TOOL,handler=finish,reads=READS,usage=usage,budget=budget,

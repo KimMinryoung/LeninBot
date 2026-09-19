@@ -701,6 +701,48 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
                 [{'stage':'research','value':{'baseline':'v1','claims':[],'current':{'revision':'v1','role':{}}}}],Usage(),.2)
             self.assertTrue({'role','groupId'} <= seen['props'])
 
+    async def test_section_draft_rejects_work_plan_and_keeps_notes_internal(self):
+        # Job 5432 (2026-09-19): research supported three section edits, the
+        # tool takes one section, and the author's plan went live as a section.
+        from commulingo_pipeline.stages import Draft, prose_problem
+        from commulingo_pipeline.engine import Usage
+        store=Mock()
+        store.sources.return_value={}
+        prose={'ko':'1937년 7월 예조프는 레닌 훈장을 받았고 1941년 1월 24일 모든 훈장을 박탈당했다.',
+               'en':'In July 1937 Yezhov received the Order of Lenin; a decree of 24 January 1941 stripped him of all awards.'}
+        heading={'ko':'숭배와 말소','en':'Cult and erasure'}
+        seen={}
+        async def model(**kwargs):
+            schema=kwargs['tool']['input_schema']
+            seen['props']=set(schema['properties']['fields']['properties'])
+            self.assertIn('notes',schema['properties'])
+            self.assertIn('ONE section',kwargs['prompt'])
+            plan={'slug':'yezhov','heading':{'ko':'구획 개정: 정정과 신설 구획 둘','en':'Sections revision: corrections and two new sections'},
+                  'body':{'ko':"과제 항목은 'sections'다. 1. 'fall-trial-no-rehabilitation' 구획 본문 교체",
+                          'en':"The commissioned topic is 'sections'. 1. replace section body 'fall-trial-no-rehabilitation'"}}
+            with self.assertRaisesRegex(ValueError,'not the person'):
+                await kwargs['handler']({'fields':plan})
+            with self.assertRaisesRegex(ValueError,'work plan'):
+                await kwargs['handler']({'fields':{**plan,'slug':'sections-revision'}})
+            await kwargs['handler']({'fields':{'slug':'cult-and-erasure','heading':heading,'body':prose,'sortOrder':193707},
+                                     'notes':"also supported: correction of 'fall-trial-no-rehabilitation' dates"})
+        job={'id':5432,'kind':'person','action':'update','topic':'enrichment','target':'yezhov',
+             'payload':{'topics':['bio','sections'],'remaining_topics':['sections']}}
+        with patch('commulingo_pipeline.stages.model_call',side_effect=model), \
+             patch('commulingo_pipeline.stages.service.call',return_value={}) as validate:
+            result=await Draft(store)(job,[{'stage':'research','value':{'baseline':'v1','claims':[],
+                'current':{'revision':'v1','sections':[{'slug':'fall-trial-no-rehabilitation'}]}}}],Usage(),.2)
+        self.assertEqual(seen['props'],{'slug','heading','body','sortOrder'})
+        self.assertEqual((result.value['target'],result.value['action']),('person_section','create'))
+        self.assertEqual(result.value['fields']['sortOrder'],193707)
+        self.assertIn('fall-trial',result.value['notes'])
+        self.assertNotIn('notes',validate.call_args.args[0]['fields'])
+        self.assertFalse(prose_problem(result.value['fields']))
+        self.assertIn('work plan',prose_problem({'body':{'en':"This draft adds section 'x'."}}))
+        # Ordinary historical uses of section/draft/구획 stay allowed.
+        self.assertFalse(prose_problem({'body':{'en':"The NKVD 3rd Special Section handled arrests; the 1936 draft constitution was revised.",
+                                                'ko':'행정 구획을 개편했고 1936년 헌법 초안은 그가 검토했다.'}}))
+
     async def test_submission_replay_uses_identical_receipt_keys(self):
         from commulingo_pipeline.stages import submit
         from commulingo_pipeline.engine import Usage

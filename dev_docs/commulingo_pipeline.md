@@ -105,6 +105,12 @@ metrics의 `provider_fallback`으로 식별한다. 다른 오류는 그대로 es
 작성기는 제한된
 초안 도구와 사전 조회만 받는다. 실행기가 20~6000자의 원문 인용과 기준 revision을 붙인다.
 작성 모델에는 evidence/revision을 수정하는 인자가 없다. 인물 상세 절도 같은 경로를 사용한다.
+인물 상세 절 초안은 절 하나(slug·heading·body·sortOrder)만 받는다. 조사가 여러 절이나 기존 절 정정을
+뒷받침하면 가장 중요한 절 하나를 쓰고 나머지는 결과 도구의 `notes`에 적는다. `notes`는 draft artifact에만
+남고 공개 필드로 전달되지 않는다. slug가 인물 id와 같거나 heading/body가 작업 계획 문구
+(`'slug' 구획`, `구획 추가/교체`, `commissioned topic`, `replace section` 등)를 담으면 작성·validate 단계에서
+거절하고, 독립 검토에도 사실이 맞더라도 작업 계획은 revise하라고 지시한다. 2026-09-19 예조프 작업(5432)이
+절 셋의 계획을 절 하나로 제출해 공개된 사고의 재발 방지다. sortOrder는 절 도구와 같은 YYYYMM 키다.
 작성 단계의 사전 조회는 get_person/get_term/get_office/get_event/get_sections만 도구 schema에 노출하며
 최대 세 번으로 제한한다. 목록 탐색이나 검색 action을 먼저 보여준 뒤 거절하지 않는다.
 검색 전용 q/group_id/status/limit 인자와 설명도 작성 schema에서 제외하고, 각 get action에

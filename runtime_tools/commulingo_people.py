@@ -1432,6 +1432,57 @@ def _script_leak_problem(patch: dict) -> str | None:
     return None
 
 
+# Author commentary about the editing task itself, which no reader-facing field
+# may carry. Kept narrow: a quoted slug next to 구획/section, or the stock
+# phrases of a work plan, never ordinary words such as "section" or "draft".
+_META_PROSE_PATTERNS = (
+    re.compile(r"'[a-z0-9][a-z0-9-]*' 구획"),
+    re.compile(r"구획(?:을|의)? (?:추가|신설|교체|개정)|신설 구획|구획 본문 교체|구획 개정"),
+    re.compile(r"과제 항목|작성 계획|(?:제시된|공급된|주어진) 조사 자료"),
+    re.compile(r"\bsections? '[a-z0-9][a-z0-9-]*'", re.I),
+    re.compile(r"\bthis (?:draft|patch|proposal|commission) (?:adds|corrects|covers|keeps|preserves|"
+               r"removes|replaces|retains|updates|uses)\b", re.I),
+    re.compile(r"\bcommissioned topics?\b|\bsupplied research\b|\bsections? revision\b", re.I),
+    re.compile(r"\b(?:add|replace|correct)(?:s|ed|ing)? (?:the |a |an )?(?:existing |new )?section", re.I),
+)
+
+
+def _meta_prose_problem(patch: dict) -> str | None:
+    """Reject a work plan written where the public page expects prose.
+
+    On 2026-09-19 pipeline job 5432 had research supporting one correction and
+    two new sections for Yezhov, but the section draft tool takes one section.
+    The author submitted its plan as that section ("구획 개정: 정정과 신설 구획
+    둘" / "1. replace section body 'fall-trial-no-rehabilitation' ..."), the
+    reviewer verified the dates in the plan and approved it, and the page showed
+    the plan to readers. Notes about the task belong in the draft's `notes`.
+    """
+    def walk(node, path):
+        if isinstance(node, str):
+            yield path, node
+        elif isinstance(node, dict):
+            for key, value in node.items():
+                yield from walk(value, f"{path}.{key}" if path else str(key))
+        elif isinstance(node, (list, tuple)):
+            for item in node:
+                yield from walk(item, path)
+    for field, text in walk(patch, ""):
+        if field.split(".")[0] in {"slug", "sources", "citations", "evidence", "expectedRevision", "expected_revision"}:
+            continue
+        for pattern in _META_PROSE_PATTERNS:
+            hit = pattern.search(text)
+            if hit:
+                start = max(0, hit.start() - 40)
+                return (
+                    f"Error: '{field}' reads as a work plan, not dictionary prose: "
+                    f"…{text[start:hit.end() + 40]}… heading and body are shown to "
+                    "readers as they are. Put planning, scope and process remarks in "
+                    "notes (or leave them out) and write the section content itself: "
+                    "one topic, in 한다체 Korean and fluent English."
+                )
+    return None
+
+
 def _parse_life_years(label: str) -> tuple[int | None, int | None]:
     m = re.match(r"^(\d{3,4})[–-](\d{3,4})$", label or "")
     if not m:
@@ -1795,6 +1846,9 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
     script_leak = _script_leak_problem(patch)
     if script_leak:
         return script_leak
+    meta = _meta_prose_problem(patch)
+    if meta:
+        return meta
     variants = _find_name_variants(patch)
     if variants:
         fixes = "; ".join(f"'{v}' → '{c}'" for v, c in variants)
@@ -2907,7 +2961,7 @@ def _run_edit(target_type: str, action: str, target_id: str, patch: dict,
         from commulingo_pipeline.config import load
         if load()['term_editorial_service']:
             prose = {k:v for k,v in patch.items() if k not in {'evidence','sources'}}
-            problems = [p for p in (_em_dash_problem(prose),_script_leak_problem(prose),
+            problems = [p for p in (_em_dash_problem(prose),_script_leak_problem(prose),_meta_prose_problem(prose),
                 "Error: use 조선민주주의인민공화국 or 조선" if _contains_north_korea(prose) else None) if p]
             if problems:
                 return '; '.join(problems)
