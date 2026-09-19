@@ -75,6 +75,97 @@ OFFICE_RULES = {
 }
 
 
+TERM_FEATURE = "commulingo_term_classification"
+# Topic-first: a French Revolution faction is "factions", a foreign camp is
+# "repression"; "international" is relations between states and the world
+# movement; "contemporary" is present-day capitalism. Against the 1,086 stored
+# terms (themselves writer-chosen) this agreed 813/1,086, 628/714 at conf ≥0.85.
+TERM_RULES = {
+    "theory": "Ideologies, doctrines, -isms, concepts, theoretical and historiographical terms of Marxism, socialism and "
+              "their critics.",
+    "economy": "Economic policies, institutions, campaigns and economic concepts — Soviet planning as well as monetary and "
+               "industrial policy anywhere and in any era.",
+    "party-state": "Party and state organs, offices, congresses, constitutions, military commands and political events of a "
+                   "state or party (Soviet, Russian, or a revolutionary state abroad such as revolutionary France).",
+    "factions": "Intra-party factions, oppositions, platforms and line struggles, in any party.",
+    "repression": "Terror, security organs, camps, trials, repressive laws, censorship and rehabilitation, in any state.",
+    "nationalities": "Nationalities policy, ethnic questions, deportations, republic and minority statuses.",
+    "culture": "Culture, education, science and technology, arts, media and everyday life.",
+    "international": "Relations BETWEEN states and the world movement: diplomacy, treaties, wars and campaigns between "
+                     "states, international organizations and payment systems, foreign communist parties, liberation "
+                     "fronts and the Cold War order.",
+    "korea": "Korean politics, economy and society, any era.",
+    "contemporary": "Present-day capitalism since the 1990s: today's labour, finance, technology, AI, platforms, climate "
+                    "and policy debates.",
+}
+
+
+def load_term_categories() -> list[dict]:
+    """Rows of commulingo_term_categories, or the built-in fallback pairs."""
+    try:
+        from db import query
+        rows = query("SELECT id, label_ko, label_en FROM commulingo_term_categories ORDER BY sort_order, id") or []
+    except Exception as exc:  # no DB in this process: keep the tool usable
+        logger.warning("term categories unavailable for classification (%s); using the built-in list", exc)
+        rows = []
+    if not rows:
+        from runtime_tools.commulingo_people import _TERM_CATEGORY_FALLBACK
+        rows = [{"id": slug, "label_ko": slug, "label_en": label} for slug, label in _TERM_CATEGORY_FALLBACK]
+    return rows
+
+
+def term_questions(categories: list[dict]) -> dict:
+    return {"category": {"type": "choice", "instructions": "Which glossary category does this term belong to?",
+                         "criteria": {c["id"]: f"{c['label_en']} / {c['label_ko']}. {TERM_RULES.get(c['id'], '')}"
+                                      for c in categories}}}
+
+
+def term_state(fields: dict) -> dict:
+    def joined(value, lang):
+        text = (value or {}).get(lang) if isinstance(value, dict) else value
+        return " ".join(text) if isinstance(text, list) else str(text or "")
+    period = fields.get("period")
+    return {"term": {"ko": _text(fields.get("term"), "ko"), "en": _text(fields.get("term"), "en")},
+            "definition": {"ko": joined(fields.get("definition"), "ko"), "en": joined(fields.get("definition"), "en")},
+            "period": _text(period, "ko") if isinstance(period, dict) else period,
+            "body_ko": joined(fields.get("body"), "ko")[:1200]}
+
+
+def classify_term(fields: dict, *, categories=None, decide=None) -> dict | None:
+    """{"category", "confidence", "low_confidence", "model"} for a drafted term, or None when unavailable."""
+    from llm.call_registry import decide_detailed, resolve
+
+    profile = resolve(TERM_FEATURE)
+    extra = profile.extra or {}
+    if not extra.get("enabled", True):
+        return None
+    accept = float((extra.get("thresholds") or {}).get("accept", DEFAULT_ACCEPT))
+    categories = categories or load_term_categories()
+    result = (decide or decide_detailed)(TERM_FEATURE, term_state(fields), term_questions(categories),
+                                         label="term-classification")
+    decision = result.decision
+    if decision is None:
+        logger.warning("term classification unavailable: %s", result.error)
+        return None
+    category = decision.choice("category")
+    if category not in {c["id"] for c in categories}:
+        return None
+    conf = round(decision.confidence("category") or 0.0, 3)
+    return {"category": category, "confidence": conf, "low_confidence": conf < accept, "model": decision.model}
+
+
+def fill_term_category(fields: dict, classification: dict | None) -> dict:
+    """The classifier's category unless it is unavailable or unsure and the
+    writer named one; a writer's value is otherwise replaced."""
+    out = dict(fields)
+    if classification is None:
+        return out
+    if classification["low_confidence"] and out.get("category"):
+        return out
+    out["category"] = classification["category"]
+    return out
+
+
 def offices_allowed(citizenship_code: str | None) -> bool:
     return (citizenship_code or "") in SOVIET_CITIZENSHIP | SOVIET_SUCCESSORS
 

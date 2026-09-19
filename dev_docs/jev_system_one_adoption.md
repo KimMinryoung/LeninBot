@@ -332,6 +332,11 @@ international-revolutionary 0.94), 이반 파블로프(생리학자)가 `theoris
 불가면 작성 모델에 직접 지정 요구). 라이브 확인: 카다르 → international-revolutionary 1.0 / bloc-reform-leader 0.47(플래그),
 쿠나예프 → thaw 0.9 / nationalities-federal 0.96. 감사 스크립트는 같은 criteria를 import한다.
 
+**용어 category (2026-09-19).** 같은 방식으로 `classify_term`을 용어 create(월 2,924건)에 넣었다. 저장 용어 1,086건 기준선 —
+라벨만 813·지역 우선 규칙 746·주제 우선 규칙 813(채택; conf ≥0.85 628/714, ≥0.95 521/565). 저장값이 작성 모델의 선택이라
+서로 모순되는 사례가 많아(포옹 전술=당·국가 기구, RD-107 엔진=현대 자본주의) 75%는 관행 재현율이지 정확도 상한이 아니다.
+accept 0.7 미만이고 작성 모델이 값을 줬으면 그 값을 남긴다. 라이브: 프로드날로크 → economy, 헬싱키 최종의정서 → international.
+
 ## 4.12 남은 후보와 관찰 포인트
 
 - 조사 게이트 실데이터 첫 7건(12:06~12:35): 173 claim, unrelated 4건 전부 conf 0.12~0.62의 "일부 지지"(긴 복합 문장의

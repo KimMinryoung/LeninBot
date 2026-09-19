@@ -79,3 +79,46 @@ class ClassifyTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+TERM_CATS = [{'id': 'theory', 'label_ko': '이념·이론', 'label_en': 'Ideology and theory'},
+             {'id': 'economy', 'label_ko': '경제·계획', 'label_en': 'Economy and planning'}]
+TERM_PROFILE = CallSiteProfile(feature=cc.TERM_FEATURE, provider='openrouter', model='typesafe/jev-1.13',
+                               extra={'thresholds': {'accept': 0.7}})
+TERM = {'term': {'ko': '전시 공산주의', 'en': 'War communism'}, 'period': {'ko': '1918–1921', 'en': '1918–1921'},
+        'definition': {'ko': ['내전기 경제 체제.'], 'en': ['Civil-war economic system.']}, 'body': {'ko': '본문', 'en': 'Body'}}
+
+
+def term_result(category, conf):
+    return DecisionResult(decision=Decision(answers={
+        'category': {'choice': category, 'confidence': conf, 'probabilities': {category: conf}}}, model='typesafe/jev-test'))
+
+
+class ClassifyTermTests(unittest.TestCase):
+    def setUp(self):
+        p = patch('llm.call_registry.resolve', return_value=TERM_PROFILE); p.start(); self.addCleanup(p.stop)
+
+    def test_term_state_and_rules_in_criteria(self):
+        state = cc.term_state(TERM)
+        self.assertEqual(state['definition']['ko'], '내전기 경제 체제.')
+        self.assertEqual(state['period'], '1918–1921')
+        criteria = cc.term_questions(TERM_CATS)['category']['criteria']
+        self.assertIn('Soviet planning', criteria['economy'])
+
+    def test_confident_category_replaces_writer_value_and_unsure_keeps_it(self):
+        def decide(feature, state, questions, label=None):
+            self.assertEqual(feature, cc.TERM_FEATURE)
+            return term_result('economy', 0.93)
+        out = cc.classify_term(TERM, categories=TERM_CATS, decide=decide)
+        self.assertEqual((out['category'], out['low_confidence']), ('economy', False))
+        self.assertEqual(cc.fill_term_category({**TERM, 'category': 'theory'}, out)['category'], 'economy')
+        unsure = cc.classify_term(TERM, categories=TERM_CATS, decide=lambda *a, **k: term_result('economy', 0.4))
+        self.assertTrue(unsure['low_confidence'])
+        self.assertEqual(cc.fill_term_category({**TERM, 'category': 'theory'}, unsure)['category'], 'theory')
+        self.assertEqual(cc.fill_term_category(TERM, unsure)['category'], 'economy')
+
+    def test_unavailable_or_unknown_category_is_none(self):
+        self.assertIsNone(cc.classify_term(TERM, categories=TERM_CATS,
+                                           decide=lambda *a, **k: DecisionResult(error_kind='server', error='503')))
+        self.assertIsNone(cc.classify_term(TERM, categories=TERM_CATS, decide=lambda *a, **k: term_result('nope', 0.9)))
+        self.assertEqual(cc.fill_term_category({**TERM, 'category': 'theory'}, None)['category'], 'theory')

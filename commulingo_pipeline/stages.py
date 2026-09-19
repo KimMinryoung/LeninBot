@@ -601,6 +601,11 @@ class Draft:
                     for field in ('group','groupId'):
                         schema['properties'].pop(field,None)
                 schema['required'] = [f for f in schema.get('required',[]) if f in schema['properties']]
+        classify_term = None
+        if job['kind']=='term' and job['action']=='create':
+            # Same arrangement for a term's category (commulingo_classify.classify_term).
+            from runtime_tools.commulingo_classify import classify_term
+            schema['required'] = [f for f in schema.get('required',[]) if f!='category']
         for collection,edits in (('aliases','aliasEdits'),('career','careerEdits'),('scenes','sceneEdits')):
             if collection in schema['properties'] and edits in schema['properties']:
                 schema.setdefault('allOf',[]).append({'not':{'required':[collection,edits]}})
@@ -684,6 +689,14 @@ class Draft:
                     raise ValueError('heading repeats the person\'s name; name the phase or theme this section covers')
             if job['kind']=='term':
                 drop_unchanged_term_facts(fields,research.get('current') or {},job['action'])
+            if classify_term is not None:
+                from runtime_tools.commulingo_classify import fill_term_category
+                classification = await asyncio.to_thread(classify_term, fields)
+                if classification is None and not fields.get('category'):
+                    raise ValueError('automatic category assignment is unavailable; supply category in this draft')
+                fields = fill_term_category(fields, classification)
+                if classification:
+                    usage.tracker['classification'] = {'category':classification['confidence'],'low_confidence':classification['low_confidence']}
             if not fields:
                 raise ValueError('empty edit')
             if groups and any(fields[f] not in group_ids for f in ('group','groupId') if f in fields):
@@ -749,6 +762,7 @@ class Draft:
                'single most important as this section and list the rest in notes with their sources; the entry is '
                'commissioned again for them. Give sortOrder as the chronological key of the period the section opens on.\n' if section else '')
             +             'Write bilingual equivalent claims; do not fill space or add facts beyond the research. '
+            + ('For a new term, omit category: the runner assigns it from the definition after the draft. ' if classify_term is not None else '')
             + ('For a new person, omit groupId and role: the runner assigns them from the card after the draft. '
                if classify is not None else
                'For people, choose group/groupId from person_groups using their descriptions, not title alone. '

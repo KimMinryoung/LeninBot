@@ -218,6 +218,9 @@ max_length_continuations로 실제 도구 루프에 전달한다. 응답당 8,00
 `reviewFlags: identity_uncertain`을 붙여 독립 검토자가 확인하게 하고, 판정 불가(None)면 작성 모델에 직접 지정을 요구한다.
 파이프라인 초안 단계(`stages.Draft`)와 `commulingo_person_create` 도구 양쪽이 같은 함수를 쓰며, 초안 프롬프트에서는 그룹·카테고리
 카탈로그가 빠진다. update에서는 기존 분류가 잠겨 있으므로 해당 없음. `enabled=false`면 예전처럼 작성 모델이 고른다.
+용어 create의 `category`(10종)도 같다: `classify_term`(registry `commulingo_term_classification`)이 term·정의·기간·본문으로 고르고,
+confidence가 0.7 미만인데 작성 모델이 값을 줬으면 그 값을 남긴다. 저장된 용어 1,086건(작성 모델이 고른 값)과의 일치는 813,
+conf ≥0.85에서 628/714 — 저장값 자체의 일관성이 낮아 정확도 상한이 아니라 관행 재현율이다.
 
 **감사.** `scripts/commulingo_classification_audit.py`가 인물 전원의 groupId·role을 Jev(System One)로 재판정해 저장값과 다른
 고신뢰 건을 `logs/commulingo/person_classification_audit_<날짜>.md`로 뽑는다(쓰기 없음, 인물당 ~$0.00012). criteria에는

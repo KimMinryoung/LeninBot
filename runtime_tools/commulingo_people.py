@@ -2903,6 +2903,12 @@ def _public_page(target_type: str, target_id: str) -> str:
 
 def _run_edit(target_type: str, action: str, target_id: str, patch: dict,
               sources: list[str], confidence: float | None) -> str:
+    if target_type=='term' and action=='create' and not patch.get('category'):
+        from runtime_tools.commulingo_classify import classify_term, fill_term_category
+        classification = classify_term(patch)
+        if classification is None:
+            return f"Error: automatic category assignment is unavailable right now; supply category yourself ({_TERM_CATEGORY_HINT})."
+        patch = fill_term_category(patch, classification)
     if target_type=='term':
         from commulingo_pipeline.config import load
         if load()['term_editorial_service']:
@@ -4060,7 +4066,8 @@ def _term_write_tool(name: str, action: str) -> dict:
                 },
                 "fields": _narrow_fields_schema(
                     _TERM_NARROW_KEYS if creating else _TERM_UPDATE_NARROW_KEYS,
-                    required=("term", "definition", "aliases", "period", "category") if creating else (),
+                    # category is assigned by the runner (commulingo_classify) when omitted
+                    required=("term", "definition", "aliases", "period") if creating else (),
                 ),
                 "citations": _CITATIONS_SCHEMA,
                 "confidence": {"type": "number", "minimum": 0, "maximum": 1},
