@@ -127,7 +127,7 @@ security_gateway/policy.py에 state로 등록하며 소유자와 commulingo_revi
 허용한다. 테스트는 handler 직호출 대신 실제 dispatcher를 거쳐 차단 재발을 검사한다. 검토 실행기는 검증된 판단을
 기존 JS 공통 승인 서비스로 전달한다. Telegram 명령도 같은 서비스를 사용한다.
 
-- 검토기는 checks[].citation_id(S1=source_refs[0])와 자신이 가져온 source_id 및 line_start/line_end로 원문 범위를 고른다. 실행기가 원문 인용을 추출하고 기존 citation/source/quote/finding 형식으로 저장한다. 긴 원문 행은 표시할 때만 240자 단위로 나누며 추출한 인용에는 번호나 추가 개행을 넣지 않는다. 원문은 현재 검토에서 직접 가져온 것만 인정하며 기존 정확한 문자열 형식도 지원한다. resolved_risks는 risks 식별자만 담고 설명은 reason/finding에 쓴다.
+- 검토기는 checks[].citation_id(S1=source_refs[0])와 자신이 가져온 source_id(R…, 또는 그 URL), 그리고 가져온 원문에서 **그대로 복사한 인용문(20~1000자)**을 낸다. 실행기가 인용문을 굽은 따옴표·줄표·공백·대소문자를 접어 찾고(지정 출처에 없으면 이 검토에서 가져온 다른 출처도 찾는다) 그 자리의 원문 그대로를 citation/source/quote/finding 형식으로 저장한다. 행 번호 체계(line_start/line_end, 240자 표시 분할)는 2026-09-19에 폐기했다 — 주당 87건이 「인용이 원문에 없음」, 76건이 행 범위 오류로 떨어졌다. 원문은 현재 검토에서 직접 가져온 것만 인정한다. resolved_risks는 risks 식별자만 담고 설명은 reason/finding에 쓴다.
 - 승인: 새로 가져온 원문에 실제로 있는 인용, 모든 제안 출처의 확인, 검토 사유의 해소,
   위키백과 밖의 근거가 필요하다. 검색 요약·작성자가 적은 인용만으로 승인하지 않는다.
 - 수정 요청(`revise`): 검토기가 직접 확인한 근거로 고칠 수 있는 사실 오류·확정 과잉·한영 불일치를 특정하면 작성기로 되돌린다. 출처별 생몰연도 이설은 병기하고 옥사와 처형을 구분한다.

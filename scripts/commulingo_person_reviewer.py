@@ -66,11 +66,9 @@ def make_handlers(read_handlers, proposal, fetched, box):
                     urls = [kwargs.get('url')] if tool_name=='fetch_url' else re.findall(r'https?://[^\s<>\]"\)]+', text[:1000])
                     for url in urls:
                         if isinstance(url,str) and external_url(url):
-                            # Keep previously selected ranges valid throughout the review.
                             fetched[url] = fetched.get(url, '') + '\n' + body[1]
-                            source_id, numbered = review_source(url, body[1], snapshots)
-                            text = text[:body.start(1)] + numbered + text[body.end(1):]
-                            return f'Review source_id={source_id}; select inclusive line_start/line_end.\n' + text
+                            source_id, _ = review_source(url, body[1], snapshots)
+                            return f'Review source_id={source_id}; cite it with a quote copied exactly from the text below.\n' + text
                 return result
             return wrapped
         handlers[name] = wrap(name,handler)

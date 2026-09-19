@@ -50,15 +50,15 @@ reject when the proposal is unsuitable or harmful and has no useful supported co
 escalate only when evidence or identity remains insufficient for a safe correction.
 Escalate means internal hold without publication. No case is sent to a human for verification.
 Do not infer truth from confidence scores, citation presence, or the fact that an author wrote it.
-Prefer checks with citation_id (S1=source_refs[0], S2=source_refs[1]), source_id returned
-by your own fetch_url/wiki_get, inclusive line_start/line_end, and a Korean finding.
-The runner extracts the exact quote. Select only the lines that support your finding.
+Each check has citation_id (S1=source_refs[0], S2=source_refs[1]) or citation, the source_id
+returned by your own fetch_url/wiki_get (R...), a quote of 20..1000 characters copied exactly from
+that retrieved text, and a Korean finding. The runner locates the quote; do not paraphrase,
+abbreviate with an ellipsis, or count lines or characters. Quote only what supports your finding.
 EVERY check, including an additional independent source, must have citation_id or citation.
 That field identifies the ORIGINAL proposal reference being checked; source_id identifies
 the source you independently retrieved. They can refer to different URLs. For example:
-{"citation_id":"S1","source_id":"R...","line_start":1,"line_end":2,"finding":"교차 검증 결과"}.
-The alternative legacy format names its original citation, the fetched source URL, an exact short quotation
-from that fetched text, and a Korean finding. For approval, include the checks that verify the
+{"citation_id":"S1","source_id":"R...","quote":"...exact passage...","finding":"교차 검증 결과"}.
+For approval, include the checks that verify the
 changed claims and list every resolved risk; covering every cited reference is not required. checks[].citation MUST copy the COMPLETE original source_refs
 string verbatim, including its URL and annotation; a replacement label is invalid.
 resolved_risks MUST contain the exact strings from suggestion.risks, without suffixes or

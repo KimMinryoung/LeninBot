@@ -14,19 +14,14 @@ DECISION_TOOL = {"name": "commulingo_review_decision", "description": "Submit on
             "checks": {"type": "array", "items": {"type": "object", "additionalProperties": False,
                 "properties": {
                     "citation": {"type": "string", "description": "Copy one COMPLETE suggestion.source_refs entry verbatim, including its URL and any annotation. Never shorten or rename it."},
-                    "source": {"type": "string", "description": "URL whose text you actually retrieved during this review."},
-                    "quote": {"type": "string", "description": "Exact contiguous quotation from the retrieved body, at least 20 characters. No ellipsis or paraphrase."},
-                    "finding": {"type": "string", "description": "Your Korean explanation of what this quote verifies."},
                     "citation_id": {"type": "string", "pattern": "^S[1-9][0-9]*$", "description": "S1 is suggestion.source_refs[0], S2 is source_refs[1]."},
-                    "source_id": {"type": "string", "description": "Exact review source ID returned by fetch_url/wiki_get."},
-                    "line_start": {"type": "integer", "minimum": 1},
-                    "line_end": {"type": "integer", "minimum": 1},
+                    "source_id": {"type": "string", "description": "Review source ID shown with text retrieved during this review (R...), or that source's URL."},
+                    "quote": {"type": "string", "minLength": 20, "maxLength": 1000, "description": "Contiguous passage copied exactly from that retrieved text, 20..1000 characters. No ellipsis or paraphrase."},
+                    "finding": {"type": "string", "description": "Your Korean explanation of what this quote verifies."},
                 },
-                "required": ["finding"],
-                "allOf": [
-                    {"oneOf": [{"required": ["citation"], "not": {"required": ["citation_id"]}}, {"required": ["citation_id"], "not": {"required": ["citation"]}}]},
-                    {"oneOf": [{"required": ["source", "quote"], "not": {"required": ["source_id"]}}, {"required": ["source_id", "line_start", "line_end"], "not": {"anyOf": [{"required": ["source"]}, {"required": ["quote"]}]}}]},
-                ]}},
+                "required": ["source_id", "quote", "finding"],
+                "oneOf": [{"required": ["citation"], "not": {"required": ["citation_id"]}}, {"required": ["citation_id"], "not": {"required": ["citation"]}}],
+                }},
         }, "required": ["decision", "reason", "resolved_risks", "checks"]}}
 
 
@@ -79,19 +74,23 @@ def locate(body, quote):
 def review_source(url, body, snapshots):
     """Immutable source pages scoped to this review, never the author's cache."""
     source_id = "R" + hashlib.sha256((url + "\n" + body).encode()).hexdigest()[:16]
-    # Some extractors emit an entire page on one line. Display bounded chunks
-    # while preserving every original character for exact quote reconstruction.
-    lines = [line[i:i+240] for line in body.splitlines(keepends=True)
-             for i in range(0, len(line), 240)]
-    snapshots[source_id] = {"url": url, "lines": lines}
-    numbered = "\n".join(f"{i}: {line.rstrip()}" for i, line in enumerate(snapshots[source_id]["lines"], 1))
-    return source_id, numbered
+    snapshots[source_id] = {"url": url, "body": body}
+    return source_id, body
 
 
 def resolve_review_checks(value, proposal, snapshots):
-    """Expand explicit IDs/ranges into the legacy, persistable decision contract."""
+    """Expand citation IDs and locate each quote; returns the persistable decision.
+
+    A check names a review source (its displayed R-id or URL) and copies a
+    passage; the passage is located with typography folded, in that source
+    first and then in any other source of this review, and persisted as the
+    exact text at that location. Nothing is counted or numbered.
+    """
     from copy import deepcopy
     value = deepcopy(value)
+    by_url = {}
+    for sid, snap in snapshots.items():
+        by_url.setdefault(snap["url"], []).append(sid)
     for check in value.get("checks", []):
         if not isinstance(check, dict):
             raise ValueError("each check must be an object")
@@ -104,20 +103,24 @@ def resolve_review_checks(value, proposal, snapshots):
                 raise ValueError("citation_id must select an original source_refs entry; do not also supply citation")
             check["citation"] = refs[index]
         if "source_id" in check:
-            snapshot = snapshots.get(check.pop("source_id"))
-            start, end = check.pop("line_start", None), check.pop("line_end", None)
-            if (not snapshot or type(start) is not int or type(end) is not int
-                    or not 1 <= start <= end <= len(snapshot["lines"])):
-                available = "; ".join(f"{sid} lines 1..{len(snap['lines'])} ({snap['url']})"
-                                      for sid, snap in snapshots.items()) or "none fetched yet"
-                raise ValueError("select an existing review source_id and valid inclusive line_start/line_end. "
-                                 f"Available review sources: {available}")
-            if "source" in check or "quote" in check:
-                raise ValueError("use a source range or literal source/quote, not both")
+            named = check.pop("source_id")
+            candidates = [named] if named in snapshots else by_url.get(named, [])
+            if not candidates:
+                available = "; ".join(f"{sid} ({snap['url']})" for sid, snap in snapshots.items()) or "none fetched yet"
+                raise ValueError(f"select a review source_id shown with text retrieved during this review. Available: {available}")
+            quote = str(check.get("quote") or "")
+            located = None
+            for sid in candidates + [s for s in snapshots if s not in candidates]:
+                span = locate(snapshots[sid]["body"], quote)
+                if span:
+                    located = (snapshots[sid], span)
+                    break
+            if not located:
+                raise ValueError("quote not found in the retrieved text of that source (or any other fetched in this "
+                                 "review): copy 20..1000 characters exactly as displayed, without ellipsis")
+            snapshot, (start, end) = located
             check["source"] = snapshot["url"]
-            check["quote"] = "".join(snapshot["lines"][start-1:end])
-            if len(check["quote"]) > 6000:
-                raise ValueError("select a narrower source range (at most 6000 characters)")
+            check["quote"] = snapshot["body"][start:end]
     return value
 
 
@@ -149,9 +152,9 @@ def validate_decision(value, proposal, fetched):
         if not external_url(check["source"]):
             raise ValueError(f"check {index}: select an external source fetched during this review")
         if len(quote) < 20:
-            raise ValueError(f"check {index}: quote has {len(quote)} normalized characters; at least 20 required. Select a wider source range")
+            raise ValueError(f"check {index}: quote has {len(quote)} normalized characters; at least 20 required. Copy a longer passage")
         if quote not in normalize(fetched.get(check["source"], "")):
-            raise ValueError(f"check {index}: quote must occur in source text fetched during this review; select source_id and its displayed line range")
+            raise ValueError(f"check {index}: quote must occur in source text fetched during this review; copy it exactly from the displayed text")
     if decision in {"approve", "revise", "reject"} and not checks:
         raise ValueError("approve/revise/reject requires retrieved evidence; otherwise escalate")
     if decision == "approve":

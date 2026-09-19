@@ -48,29 +48,37 @@ class EfficiencyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(submitted['evidence'][0]['source'],citation)
         self.assertNotIn('source_id',submitted['evidence'][0])
 
-    def test_review_ranges_only_select_original_text(self):
-        body = 'The original archive records the birth and the subsequent appointment.\nAnother paragraph.'
+    def test_review_quotes_are_located_in_retrieved_text(self):
+        body = 'The original archive records the birth — and the “subsequent” appointment.\nAnother paragraph.'
         url = 'https://archive.example/person'
         snapshots = {}
         source_id, display = review_source(url, body, snapshots)
+        self.assertEqual(display, body)   # no numbering, no slicing
         proposal = {'source_refs':[url+' — biography'], 'risks':[]}
         decision = {'decision':'approve','reason':'Original evidence substantiates the proposed facts.',
             'resolved_risks':[], 'checks':[{'citation_id':'S1','source_id':source_id,
-                'line_start':1,'line_end':1,'finding':'The appointment is documented.'}]}
+                'quote':'records the birth - and the "subsequent" appointment','finding':'The appointment is documented.'}]}
         validate_tool_arguments('commulingo_review_decision', decision,
                                 schema=DECISION_TOOL['input_schema'], risk_class='state')
         resolved = resolve_review_checks(decision, proposal, snapshots)
-        self.assertEqual(resolved['checks'][0]['quote'], body.splitlines(keepends=True)[0])
+        self.assertEqual(resolved['checks'][0]['quote'], 'records the birth — and the “subsequent” appointment')
+        self.assertEqual(resolved['checks'][0]['source'], url)
+        self.assertEqual(resolved['checks'][0]['citation'], url+' — biography')
         self.assertEqual(validate_decision(resolved, proposal, {url:body}), resolved)
-        self.assertIn('1: The original', display)
+        # The URL names the source too; an unknown id lists what was fetched; a missing quote is refused.
+        by_url = deepcopy(decision); by_url['checks'][0]['source_id'] = url
+        self.assertEqual(resolve_review_checks(by_url, proposal, snapshots)['checks'][0]['source'], url)
         with self.assertRaises(ValueError): resolve_review_checks(decision, proposal, {})
+        unknown = deepcopy(decision); unknown['checks'][0]['source_id']='R0000'
+        with self.assertRaises(ValueError) as rejected: resolve_review_checks(unknown, proposal, snapshots)
+        self.assertIn(f'{source_id} ({url})', str(rejected.exception))
+        absent = deepcopy(decision); absent['checks'][0]['quote']='this passage was never retrieved in the review'
+        with self.assertRaisesRegex(ValueError, 'quote not found'): resolve_review_checks(absent, proposal, snapshots)
         with self.assertRaises(ValueError): validate_decision(resolved, proposal, {})
-        invalid = deepcopy(decision); invalid['checks'][0]['line_end']=100
-        with self.assertRaises(ValueError) as rejected: resolve_review_checks(invalid, proposal, snapshots)
-        # The rejection names the usable sources so the next attempt needs no re-fetch.
-        self.assertIn(f'{source_id} lines 1..2 ({url})', str(rejected.exception))
-        # Numbering and chunk boundaries do not become source evidence.
-        _, _ = review_source(url, 'x'*500, snapshots)
+        # A quote named under one source but present in another fetched source is filed there.
+        other_id, _ = review_source('https://other.example/page', 'Different page. Exiled to Siberia in 1930 by decree.', snapshots)
+        moved = deepcopy(decision); moved['checks'][0]['quote']='Exiled to Siberia in 1930 by decree'
+        self.assertEqual(resolve_review_checks(moved, proposal, snapshots)['checks'][0]['source'], 'https://other.example/page')
 
     def test_repair_revalidates_full_payload_and_binds_revision(self):
         schema = {'type':'object','additionalProperties':False,'properties':{
