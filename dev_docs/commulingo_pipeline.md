@@ -117,7 +117,7 @@ reason이 probe·placeholder·진행 메모("Investigating … before returning"
 90일 미뤘다. 원문 일치·만료·20~6000자 인용 검증은 유지한다.
 추출문에 PostgreSQL text가 수용하지 않는 NUL이 있으면 U+FFFD로 바꾼 뒤 hash와 범위를 계산한다.
 인용 위치 확인 뒤 **인용 지지 게이트**(`citation_gate.py`, registry `commulingo_citation_support`, Jev)가 claim마다
-발췌가 주장을 뒷받침하는지 판정한다(2026-09-19). 고신뢰 unrelated/contradicts 또는 봇 확인·동의 안내 같은 boilerplate
+발췌가 주장을 뒷받침하는지 판정한다(2026-09-19; 선택지 supports/partially_supports/contradicts/unrelated — partially_supports는 복합 주장의 일부만 덮는 발췌로 통과·기록만). 고신뢰 unrelated/contradicts 또는 봇 확인·동의 안내 같은 boilerplate
 발췌는 결과 호출을 거절해 그 claim만 고치게 하고, 판정 수치는 각 claim의 `citation_check`에 남는다(거절 문구는 저장하지 않음). 반박 출처(`stance: disputes`)는 `contradicts`가 정상이다.
 `enforce=false`로 shadow, `enabled=false`로 중단, 판정 모델 불가 시 통과. 표본 30쌍 중 조사·검토를 모두 통과한 무관 인용
 5건(Britannica 봇 페이지 포함)을 오탐 없이 3건 즉시·2건 유보로 가려냈다(`dev_docs/jev_system_one_adoption.md` 4.5).

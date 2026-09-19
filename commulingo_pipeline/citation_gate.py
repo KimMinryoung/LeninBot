@@ -38,14 +38,21 @@ DEFAULT_THRESHOLDS = {'reject': 0.85, 'boilerplate': 0.9}
 MAX_EXCERPT_CHARS = 3000
 CONCURRENCY = 8
 
+# 'partially_supports' (2026-09-19) is a passing outcome: on real data most
+# confident-looking 'unrelated' verdicts were long compound claims whose
+# excerpt covered only part, and a Choice is a relative distribution, so
+# without the option that probability leaked into 'unrelated'. Naming it
+# keeps 'unrelated' for excerpts that truly cover none of the claim.
 QUESTIONS = {
     'support': {
         'type': 'choice',
         'instructions': 'Does the quoted source excerpt support the claim made for the field?',
         'criteria': {
             'supports': 'The excerpt states the facts the claim asserts (dates, names, events, roles may be paraphrased).',
+            'partially_supports': 'The excerpt states some of the facts the claim asserts but is silent on others '
+                                  '(a compound claim only part of which the excerpt covers).',
             'contradicts': 'The excerpt states something incompatible with the claim.',
-            'unrelated': 'The excerpt does not speak to what the claim asserts.',
+            'unrelated': 'The excerpt does not speak to any of the facts the claim asserts.',
         },
     },
     'specific': {
@@ -69,8 +76,10 @@ REVIEW_QUESTIONS = {
         'criteria': {
             'supports': 'The passage states the facts the finding says it verifies (names, dates, events, roles may be '
                         'paraphrased or translated).',
+            'partially_supports': 'The passage states some of the facts the finding says it verifies but is silent on '
+                                  'others (a compound finding only part of which the passage covers).',
             'contradicts': 'The passage states something incompatible with the finding.',
-            'unrelated': 'The passage does not speak to what the finding says it verifies.',
+            'unrelated': 'The passage does not speak to any of the facts the finding says it verifies.',
         },
     },
     'specific': {

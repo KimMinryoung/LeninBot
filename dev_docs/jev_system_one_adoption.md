@@ -168,6 +168,14 @@ conf < lo        → 행동하지 않음, 현재 폴백
   바꿔 스모크 3/3 확인, 이어 Jev 항목 9개 전부 전환. 감사 행은 `provider=typesafe model=jev-1.13.0`(응답 model이 고정
   ID 그대로라 OpenRouter의 날짜 스냅샷 표기가 사라진다). OpenRouter 라우트·`OPENROUTER_API_KEY`는 예비로 남겨 두며,
   `provider`만 되돌리면 폴백된다. 비용 동일.
+- **인용 게이트 `partially_supports` 옵션(2026-09-19 저녁)**: 실데이터에서 unrelated 판정 대부분이 긴 복합 claim의 "일부 지지"
+  (conf <0.65)였고, Choice는 상대 분포라 그 확률이 unrelated로 샜다(공식 jaggedness "구조적 불변식 없음"·"문자 그대로 읽음").
+  선택지를 명명해 통과·기록 결과로 두고 unrelated는 "어느 사실도 다루지 않음"으로 좁혔다. 조사·검토 게이트 모두 적용. 30쌍
+  표본 재측정은 보류(표본이 스크립트화돼 있지 않음) — `citation_check` 분포에서 partially_supports 비율과 unrelated 고신뢰
+  건수를 관찰한다. 같은 문서 검토에서 나온 다음 후보(미착수): 인물 분류 years를 코드가 시대 버킷(`age_in_1917/1953`,
+  기간별 성인 연수)으로 변환해 state에 넣기(jaggedness "날짜 비교는 코드에서"; 시대 경계 불일치 54건의 원인 후보 —
+  `logs/commulingo/person_classification_audit_2026-09-19.json`의 `group_boundary` id 목록으로 재측정 가능), 같은 발췌 공유 claim의
+  1요청 fan-out, KG 임베딩 후보쌍의 3단계 Score 정렬(entity_alignment 쿡북).
 - 재시도: 429·5xx·연결 거부/끊김은 `decide_detailed`가 한 번 더 시도한다(Retry-After 존중, 최대 2초 대기; 항목의
   `retries`로 조정, 0이면 없음; 읽기 타임아웃은 제외). 실패 행은 시도마다 남는다. 이유 — None 한 번의 대가가 크다(게이트는 미검사 통과,
   라우팅은 4배 느린 DeepSeek 폴백).

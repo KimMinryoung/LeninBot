@@ -57,6 +57,16 @@ class CitationGateTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('claim 1', message)
         self.assertEqual(usage.tracker['citation_rejections'], 1)
 
+    async def test_confident_partial_support_passes_and_is_recorded(self):
+        async def decide(feature, state, questions):
+            self.assertIn('partially_supports', questions['support']['criteria'])
+            return decision('partially_supports', 0.97)
+        usage = Usage()
+        checks = await check_claims(self.claims, self.sources, usage=usage, decide=decide)
+        self.assertEqual([c['support'] for c in checks], ['partially_supports', 'partially_supports'])
+        self.assertTrue(all('reject' not in c for c in checks))
+        self.assertNotIn('citation_rejections', usage.tracker)
+
     async def test_low_confidence_unrelated_passes(self):
         async def decide(feature, state, questions):
             return decision('unrelated', 0.41)
