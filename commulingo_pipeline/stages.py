@@ -685,6 +685,61 @@ class Draft:
                     return 'Revision changed: recorded for fresh research.'
                 raise ValueError(repairs.feedback(str(exc))) from exc
 
+        excerpts = {}
+        if classify_codes is not None or classify is not None:
+            # Research excerpts by field for the classifiers (commulingo_classify):
+            # the codes read their own fields, group/role read bio/career/moment/years.
+            for c in claims:
+                if c.get('source_id') in sources:
+                    body = sources[c['source_id']].get('body') or ''
+                    excerpts.setdefault(c['field'],[]).append({'claim':c.get('claim'),'excerpt':body[c.get('start',0):c.get('end',0)][:1500]})
+        class_memo = {}
+        CLASSIFIED_KEYS = ('name','givenName','familyName','years','epithet','career','bio','moment','citizenship','nationalOrigin',
+                           'origin','fate','term','definition','period','body','aliases','parentId')
+
+        async def assign_classification(fields):
+            """Runner-assigned closed-set fields (commulingo_classify); memoised on
+            the inputs so repairs elsewhere in the draft do not re-judge."""
+            if classify_term is None and classify_codes is None and classify is None:
+                return fields
+            key = json.dumps({k:fields.get(k) for k in CLASSIFIED_KEYS if k in fields}, sort_keys=True, ensure_ascii=False, default=str)
+            if key in class_memo:
+                verdicts = class_memo[key]
+            else:
+                verdicts = {}
+                if classify_term is not None:
+                    verdicts['term'] = await asyncio.to_thread(classify_term, fields)
+                    if verdicts['term'] is None:
+                        raise ClassificationUnavailable('term category')
+                staged = fields
+                if classify_codes is not None and any(isinstance(fields.get(k),dict) for k in ('citizenship','nationalOrigin','fate')):
+                    from runtime_tools.commulingo_classify import fill_person_codes, missing_person_codes
+                    verdicts['codes'] = await asyncio.to_thread(classify_codes, fields, claims=excerpts)
+                    staged = fill_person_codes(fields, verdicts['codes'])
+                    if missing_person_codes(staged):
+                        raise ClassificationUnavailable('person codes')
+                if classify is not None:
+                    verdicts['person'] = await asyncio.to_thread(classify, staged, catalogs=catalogs, claims=excerpts)
+                    if verdicts['person'] is None:
+                        raise ClassificationUnavailable('person group/role')
+                class_memo[key] = verdicts
+            info = usage.tracker.setdefault('classification',{})
+            if verdicts.get('term'):
+                from runtime_tools.commulingo_classify import fill_term_category
+                fields = fill_term_category(fields, verdicts['term'])
+                info.update({'category':verdicts['term']['confidence'],'low_confidence':verdicts['term']['low_confidence']})
+            if verdicts.get('codes'):
+                from runtime_tools.commulingo_classify import fill_person_codes
+                fields = fill_person_codes(fields, verdicts['codes'])
+                judged = {k:v for k,v in verdicts['codes'].items() if isinstance(v,dict)}
+                info.update({'codes':{k:v['confidence'] for k,v in judged.items()},
+                             'codes_low_confidence':sorted(k for k,v in judged.items() if v['low_confidence'])})
+            if verdicts.get('person'):
+                from runtime_tools.commulingo_classify import fill_classification
+                fields = fill_classification(fields, verdicts['person'])
+                info.update({**verdicts['person']['confidence'],'low_confidence':verdicts['person']['low_confidence']})
+            return fields
+
         async def prepare_and_validate(value):
             value = repairs.prepare(value)
             fields = deepcopy(value['fields'])
@@ -707,48 +762,17 @@ class Draft:
                     raise ValueError('heading repeats the person\'s name; name the phase or theme this section covers')
             if job['kind']=='term':
                 drop_unchanged_term_facts(fields,research.get('current') or {},job['action'])
-            if classify_term is not None:
-                from runtime_tools.commulingo_classify import fill_term_category
-                classification = await asyncio.to_thread(classify_term, fields)
-                if classification is None:
-                    raise ClassificationUnavailable('term category')
-                fields = fill_term_category(fields, classification)
-                if classification:
-                    usage.tracker.setdefault('classification',{}).update(
-                        {'category':classification['confidence'],'low_confidence':classification['low_confidence']})
             if not fields:
                 raise ValueError('empty edit')
             if groups and any(fields[f] not in group_ids for f in ('group','groupId') if f in fields):
                 raise ValueError('select group/groupId from the supplied person group catalog')
-            excerpts = {}
-            if classify_codes is not None or classify is not None:
-                # Research excerpts by field for the classifiers (commulingo_classify):
-                # the codes read their own fields, group/role read bio/career/moment/years.
-                for c in claims:
-                    if c.get('source_id') in sources:
-                        body = sources[c['source_id']].get('body') or ''
-                        excerpts.setdefault(c['field'],[]).append({'claim':c.get('claim'),'excerpt':body[c.get('start',0):c.get('end',0)][:1500]})
-            if classify_codes is not None:
-                from runtime_tools.commulingo_classify import fill_person_codes, missing_person_codes
-                if missing_person_codes(fields) or any(isinstance(fields.get(k),dict) for k in ('citizenship','nationalOrigin','fate')):
-                    codes = await asyncio.to_thread(classify_codes, fields, claims=excerpts)
-                    fields = fill_person_codes(fields, codes)
-                    if missing_person_codes(fields):
-                        raise ClassificationUnavailable('person codes')
-                    if codes:
-                        judged = {k:v for k,v in codes.items() if isinstance(v,dict)}
-                        usage.tracker.setdefault('classification',{}).update(
-                            {'codes':{k:v['confidence'] for k,v in judged.items()},
-                             'codes_low_confidence':sorted(k for k,v in judged.items() if v['low_confidence'])})
-            if classify is not None:
-                from runtime_tools.commulingo_classify import fill_classification
-                classification = await asyncio.to_thread(classify, fields, catalogs=catalogs, claims=excerpts)
-                if classification is None:
-                    raise ClassificationUnavailable('person group/role')
-                fields = fill_classification(fields, classification)
-                if classification:
-                    usage.tracker.setdefault('classification',{}).update(
-                        {**classification['confidence'],'low_confidence':classification['low_confidence']})
+            prose_error = prose_problem(fields)
+            if prose_error:
+                raise ValueError(prose_error)
+            # Classification runs last among the local checks so a length or
+            # prose bounce never spends a decision, and a resubmission whose
+            # classified inputs did not change reuses the earlier verdicts.
+            fields = await assign_classification(fields)
             evidence = compile_evidence([c for c in claims if c['field'] in fields],sources,set(fields))
             fields['evidence'] = evidence
             if job['action']=='update':
@@ -758,9 +782,6 @@ class Draft:
                 candidate.update(target='person_section',action='update' if exists else 'create')
             if notes:
                 candidate['notes'] = notes
-            prose_error = prose_problem(fields)
-            if prose_error:
-                raise ValueError(prose_error)
             usage.tracker['preflight_checks'] = usage.tracker.get('preflight_checks',0) + 1
             await asyncio.to_thread(service.call, {'command':'validate', **write_request(job,candidate)})
             usage.tracker['preflight_passed'] = True
