@@ -93,6 +93,45 @@ class CitationGateTests(unittest.IsolatedAsyncioTestCase):
             raise AssertionError('must not be called')
         self.assertEqual(await check_claims(self.claims, self.sources, decide=decide), [])
 
+    async def test_disputing_claim_may_cite_a_contradicting_source(self):
+        disputing = [{**self.claims[0], 'stance': 'disputes'}]
+        async def decide(feature, state, questions):
+            return decision('contradicts', 0.99)
+        [check] = await check_claims(disputing, self.sources, decide=decide)
+        self.assertNotIn('reject', check)
+        async def unrelated(feature, state, questions):
+            return decision('unrelated', 0.99)
+        with self.assertRaisesRegex(ValueError, 'judged unrelated'):
+            await check_claims(disputing, self.sources, decide=unrelated)
+
+    async def test_cache_keeps_verdicts_for_unchanged_claims(self):
+        calls = []
+        async def decide(feature, state, questions):
+            calls.append(state['claim'])
+            return decision('unrelated', 0.99) if state['claim'] == 'Executed in 1938' else decision('supports', 0.9)
+        cache = {}
+        with self.assertRaises(ValueError):
+            await check_claims(self.claims, self.sources, decide=decide, cache=cache)
+        # The model fixes claim 2 and resubmits claim 1 unchanged: only the new claim is judged.
+        fixed = [self.claims[0], {**self.claims[1], 'claim': 'Chaired the Council', 'start': 46, 'end': 70}]
+        async def decide2(feature, state, questions):
+            calls.append(state['claim'])
+            return decision('supports', 0.95)
+        checks = await check_claims(fixed, self.sources, decide=decide2, cache=cache)
+        self.assertEqual(calls, ['Born 1904', 'Executed in 1938', 'Chaired the Council'])
+        self.assertEqual([c['support'] for c in checks], ['supports', 'supports'])
+
+    def test_annotate_puts_compact_check_on_claim_without_reject_text(self):
+        from commulingo_pipeline.citation_gate import annotate
+        checks = [verdict(decision('unrelated', 0.99), SETTINGS['thresholds']), {'support': None, 'error': 'x'}]
+        annotated = annotate(self.claims, checks)
+        self.assertEqual(annotated[0]['citation_check'],
+                         {'support': 'unrelated', 'confidence': 0.99, 'specific': 0.9, 'boilerplate': 0.0})
+        self.assertNotIn('reject', str(annotated[0]))
+        self.assertNotIn('model', annotated[0]['citation_check'])
+        self.assertNotIn('citation_check', annotated[1])
+        self.assertEqual(annotate(self.claims, []), self.claims)
+
     def test_verdict_rounds_and_thresholds(self):
         check = verdict(decision('contradicts', 0.851234), SETTINGS['thresholds'])
         self.assertEqual(check['confidence'], 0.851)

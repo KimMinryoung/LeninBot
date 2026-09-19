@@ -188,7 +188,7 @@ N 5건의 실체: Britannica 봇 확인 페이지(acmeism), 저자 명단 주장
 | 30건 비용 | $0.0082 | $0.0030 |
 | 자신감 표시 | 텍스트 "medium"(전부 동일) | 수치 confidence |
 
-둘이 같이 틀린 1건("정치노선 보강" = 프롬프트 파일 수정)은 criteria에 규칙을 적으면 잡히는 유형. 표본이 30건이라 교체 전 shadow 일주일.
+둘이 같이 틀린 1건("정치노선 보강" = 프롬프트 파일 수정)은 criteria에 규칙을 적으면 잡히는 유형(4.7에서 반영). 표본이 30건이라 shadow 대신 **confidence 게이트 + DeepSeek 폴백**으로 배포하고(4.7), 감사 로그로 일주일 관찰한다.
 
 ## 4.6 인용 지지 게이트 (구현 2026-09-19)
 
@@ -196,9 +196,14 @@ N 5건의 실체: Britannica 봇 확인 페이지(acmeism), 저자 명단 주장
 `locate_claim_quotes` 직후 이번 호출의 claim마다 Jev에 `{field, claim, source_url, excerpt}`를 주고
 `support` choice + `specific`·`boilerplate` noul을 받는다(동시 8, claim당 ~$0.00002).
 `unrelated/contradicts` conf ≥ `thresholds.reject`(0.85) 또는 `boilerplate` ≥ 0.9면 결과 호출을 거절하고
-해당 claim만 지목한 메시지("다른 인용·다른 출처·claim 삭제")를 돌려준다. 전 claim의 판정은 research artifact
-`citation_checks`에 기록(보정용). `enforce=false`면 기록만(shadow), `enabled=false`면 호출 없음, 판정 불가(None)는
-통과+`citation_unavailable` 집계. 위 30쌍에 실행하면 정확히 N 3건(고신뢰)만 거절되고 Britannica 페이지는 boilerplate로 잡힌다.
+해당 claim만 지목한 메시지("다른 인용·다른 출처·claim 삭제")를 돌려준다. 판정 수치(support·confidence·specific·
+boilerplate)는 각 claim에 `citation_check`로 붙어 artifact에 저장된다 — claim과 함께 움직이므로 targeted research의
+carried claims와 섞여도 어긋나지 않고, 거절 문구·모델명은 붙이지 않는다(research artifact가 draft 프롬프트로 전달되므로
+shadow 모드의 "claim 삭제" 문구가 작성기를 흔들면 안 된다). 결과 핸들러당 판정 캐시가 있어 고치지 않고 재제출한 claim은
+다시 판정하지 않는다(거절 메시지의 "나머지는 그대로 재제출 가능"을 코드가 보장). `stance: disputes` claim은 반박 출처를
+인용하는 것이 정상이므로 `contradicts`는 통과, `unrelated`만 결함. `enforce=false`면 기록만(shadow), `enabled=false`면
+호출 없음, 판정 불가(None)는 통과+`citation_unavailable` 집계. **배포 상태: `enforce=true`** — 기준선에서 오탐 0이었기
+때문. 위 30쌍에 실행하면 정확히 N 3건(고신뢰)만 거절되고 Britannica 페이지는 boilerplate로 잡힌다.
 
 ## 4.7 태스크 라우팅 1차 분류기 (구현 2026-09-19)
 

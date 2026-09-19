@@ -68,9 +68,15 @@ def claim_state(claim, source):
             'excerpt': excerpt[:MAX_EXCERPT_CHARS]}
 
 
-def verdict(decision, thresholds):
-    """One claim's recorded check, with the rejection reason when confident."""
+def verdict(decision, thresholds, stance='supports'):
+    """One claim's recorded check, with the rejection reason when confident.
+
+    A claim filed with stance "disputes" cites a source that contradicts it
+    on purpose (research collects conflicting sources too), so for it only
+    an unrelated excerpt is a defect.
+    """
     support, confidence = decision.choice('support'), decision.confidence('support') or 0.0
+    failing = ('unrelated',) if stance == 'disputes' else ('unrelated', 'contradicts')
     boilerplate = decision.noul('boilerplate') or 0.0
     check = {'support': support, 'confidence': round(confidence, 3),
              'specific': round(decision.noul('specific') or 0.0, 3), 'boilerplate': round(boilerplate, 3),
@@ -79,21 +85,51 @@ def verdict(decision, thresholds):
         check['reject'] = ('the quoted text is a site access check, consent notice or other boilerplate, not '
                            'article content; that source could not be read here — fetch it another way or cite '
                            'a different source')
-    elif support in ('unrelated', 'contradicts') and confidence >= thresholds['reject']:
+    elif support in failing and confidence >= thresholds['reject']:
         check['reject'] = (f'the quoted passage is judged {support} to the claim (confidence {confidence:.2f}); '
                            'quote a passage that states the claimed facts (names, dates, figures), cite another '
                            'source, or drop the claim')
     return check
 
 
-async def check_claims(claims, sources, *, usage=None, decide=None):
+RECORDED = ('support', 'confidence', 'specific', 'boilerplate')
+
+
+def claim_key(claim):
+    return (claim.get('field'), claim.get('claim'), claim.get('source_id'), claim.get('start'), claim.get('end'),
+            claim.get('stance') or 'supports')
+
+
+def annotate(claims, checks):
+    """Copy of ``claims`` with each judged claim carrying its compact check.
+
+    The numbers ride on the claim itself so they stay aligned with it through
+    merge_claims and into the stored artifact; the rejection text and model
+    name stay out, because the research artifact is forwarded into the draft
+    prompt and a stale "drop the claim" there would steer the drafter.
+    """
+    out = []
+    for i, claim in enumerate(claims):
+        # A disabled gate returns no checks at all; a claim it could not judge
+        # returns support=None. Either way the claim is stored as it came.
+        check = checks[i] if i < len(checks) else None
+        if not check or check.get('support') is None:
+            out.append(claim)
+            continue
+        out.append({**claim, 'citation_check': {k: check[k] for k in RECORDED}})
+    return out
+
+
+async def check_claims(claims, sources, *, usage=None, decide=None, cache=None):
     """Judge every located claim; return the checks, raising ValueError on confident failures.
 
     ``claims`` carry start/end offsets from locate_claim_quotes. Returns one
-    check per claim (index-aligned); a claim the model could not judge gets
-    {'support': None}. Raises only when enforce is on and at least one claim
-    is confidently unsupported — the message names each such claim so the
-    model can fix exactly those.
+    check per claim (index-aligned with the input); a claim the model could
+    not judge gets {'support': None}. Raises only when enforce is on and at
+    least one claim is confidently unsupported — the message names each such
+    claim so the model can fix exactly those. ``cache`` (one dict per result
+    handler) makes that promise hold: a claim resubmitted unchanged keeps the
+    verdict it already received instead of being judged again.
     """
     conf = settings()
     if not conf['enabled'] or not claims:
@@ -101,9 +137,13 @@ async def check_claims(claims, sources, *, usage=None, decide=None):
     if decide is None:
         from llm.call_registry import decide as registry_decide
         decide = registry_decide
+    cache = cache if cache is not None else {}
     gate = asyncio.Semaphore(CONCURRENCY)
 
     async def one(claim):
+        key = claim_key(claim)
+        if key in cache:
+            return cache[key]
         source = sources.get(claim.get('source_id')) or {}
         if not source.get('body'):
             return {'support': None, 'error': 'source body unavailable'}
@@ -111,7 +151,8 @@ async def check_claims(claims, sources, *, usage=None, decide=None):
             decision = await decide(FEATURE, claim_state(claim, source), QUESTIONS)
         if decision is None:
             return {'support': None, 'error': 'decision unavailable'}
-        return verdict(decision, conf['thresholds'])
+        cache[key] = verdict(decision, conf['thresholds'], claim.get('stance') or 'supports')
+        return cache[key]
 
     checks = list(await asyncio.gather(*(one(c) for c in claims)))
     if usage is not None:
