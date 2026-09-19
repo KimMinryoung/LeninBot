@@ -156,9 +156,10 @@ async def review_research_document(*, document: str, notes: str = "") -> dict:
     except Exception as exc:
         logger.warning("Research publication review unavailable: %s", exc)
         verdict = _unverified("review_unavailable", f"Independent review unavailable: {type(exc).__name__}: {exc}")
+    # The document itself is not copied: the staged draft backup and DB hold it,
+    # and the SHA-256 ties this receipt to that exact text.
     receipt = {
         **verdict, "document_sha256": hashlib.sha256(document.encode()).hexdigest(),
-        "document": document,
         "reviewed_at": datetime.now(timezone.utc).isoformat(), "evidence": evidence, "usage": usage,
     }
     if final_text:

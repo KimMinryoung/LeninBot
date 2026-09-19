@@ -144,6 +144,7 @@ def test_review_exception_saved_as_unverified(monkeypatch, tmp_path):
     assert result["verdict"] == "UNVERIFIED" and result["failure_kind"] == "review_unavailable"
     stored = json.loads(next(tmp_path.glob("*.json")).read_text())
     assert stored["document_sha256"] == hashlib.sha256(BODY.encode()).hexdigest()
+    assert "document" not in stored
 
 
 def test_review_does_not_replace_author_context(monkeypatch, tmp_path):

@@ -265,8 +265,8 @@ ends without a verdict, times out, or fails is UNVERIFIED with a `failure_kind`
 (`no_verdict`, `review_unavailable`, `receipt_unavailable`) and cannot authorize
 publication. `ToolFailure` guidance then tells the author to retry the same call
 unchanged; only a real REVISE/UNVERIFIED verdict directs them to the findings and
-`edit_staged`. No human approval is introduced. Each attempt stores the exact
-candidate, SHA-256, verdict, provider/model, cost, source evidence (references, hashes,
+`edit_staged`. No human approval is introduced. Each attempt stores the candidate's
+SHA-256 (not its text), verdict, provider/model, cost, source evidence (references, hashes,
 bounded excerpts) and, when no verdict was recorded, the final prose, under ignored
 `data/publication_drafts/research_reviews/`; the author is not asked to read the
 receipt. PASS applies only to the
