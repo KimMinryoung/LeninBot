@@ -708,8 +708,8 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
         from commulingo_pipeline.engine import Usage
         store=Mock()
         store.sources.return_value={}
-        prose={'ko':'1937년 7월 예조프는 레닌 훈장을 받았고 1941년 1월 24일 모든 훈장을 박탈당했다.',
-               'en':'In July 1937 Yezhov received the Order of Lenin; a decree of 24 January 1941 stripped him of all awards.'}
+        prose={'ko':'1937년 7월 예조프는 레닌 훈장을 받았고 1941년 1월 24일 모든 훈장을 박탈당했다. '*4,
+               'en':'In July 1937 Yezhov received the Order of Lenin; a decree of 24 January 1941 stripped him of all awards. '*4}
         heading={'ko':'숭배와 말소','en':'Cult and erasure'}
         seen={}
         async def model(**kwargs):
@@ -718,12 +718,16 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn('notes',schema['properties'])
             self.assertIn('ONE section',kwargs['prompt'])
             plan={'slug':'yezhov','heading':{'ko':'구획 개정: 정정과 신설 구획 둘','en':'Sections revision: corrections and two new sections'},
-                  'body':{'ko':"과제 항목은 'sections'다. 1. 'fall-trial-no-rehabilitation' 구획 본문 교체",
-                          'en':"The commissioned topic is 'sections'. 1. replace section body 'fall-trial-no-rehabilitation'"}}
+                  'body':{'ko':"과제 항목은 'sections'다. 1. 'fall-trial-no-rehabilitation' 구획 본문 교체: "+prose['ko'],
+                          'en':"The commissioned topic is 'sections'. 1. replace section body 'fall-trial-no-rehabilitation': "+prose['en']}}
             with self.assertRaisesRegex(ValueError,'not the person'):
                 await kwargs['handler']({'fields':plan})
             with self.assertRaisesRegex(ValueError,'work plan'):
                 await kwargs['handler']({'fields':{**plan,'slug':'sections-revision'}})
+            with self.assertRaisesRegex(ValueError,"person's name"):
+                await kwargs['handler']({'fields':{'slug':'cult','heading':{'ko':'니콜라이 예조프','en':'Cult'},'body':prose}})
+            with self.assertRaisesRegex(ValueError,'minLength|too short'):
+                await kwargs['handler']({'fields':{'slug':'cult','heading':heading,'body':{'ko':'섹션','en':'Section'}}})
             await kwargs['handler']({'fields':{'slug':'cult-and-erasure','heading':heading,'body':prose,'sortOrder':193707},
                                      'notes':"also supported: correction of 'fall-trial-no-rehabilitation' dates"})
         job={'id':5432,'kind':'person','action':'update','topic':'enrichment','target':'yezhov',
@@ -731,7 +735,8 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
         with patch('commulingo_pipeline.stages.model_call',side_effect=model), \
              patch('commulingo_pipeline.stages.service.call',return_value={}) as validate:
             result=await Draft(store)(job,[{'stage':'research','value':{'baseline':'v1','claims':[],
-                'current':{'revision':'v1','sections':[{'slug':'fall-trial-no-rehabilitation'}]}}}],Usage(),.2)
+                'current':{'revision':'v1','name':{'ko':'니콜라이 예조프','en':'Nikolai Yezhov'},
+                           'sections':[{'slug':'fall-trial-no-rehabilitation'}]}}}],Usage(),.2)
         self.assertEqual(seen['props'],{'slug','heading','body','sortOrder'})
         self.assertEqual((result.value['target'],result.value['action']),('person_section','create'))
         self.assertEqual(result.value['fields']['sortOrder'],193707)

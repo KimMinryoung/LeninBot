@@ -460,6 +460,10 @@ class Draft:
             # section tool's chronological key applies here too.
             schema['properties']['sortOrder'] = {'type':'integer',
                 'description':properties['sort_order']['description']}
+            # A placeholder ("섹션") or a heading repeated as the body passed the
+            # ceiling-only schema; the section target starts at 350 Korean characters.
+            for lang,floor in (('ko',200),('en',300)):
+                schema['properties']['body']['properties'][lang]['minLength'] = floor
         groups, role_categories = [], []
         if job['kind']=='person' and not section:
             from runtime_tools.commulingo_people import _list_groups, _list_categories
@@ -540,9 +544,17 @@ class Draft:
             original = (job.get('payload') or {}).get('original_proposal') or {}
             if section and original and fields.get('slug')!=(original.get('patch_json') or {}).get('slug'):
                 raise ValueError('correction must retain the original section slug')
-            if section and fields.get('slug')==job['target']:
-                raise ValueError('slug names the section topic, not the person; a section is one reader-facing '
-                                 'topic, and a plan for several edits belongs in notes')
+            if section:
+                current = research.get('current') or {}
+                exists = any(s['slug']==fields['slug'] for s in current.get('sections',[]))
+                if fields.get('slug')==job['target'] and not exists:
+                    raise ValueError('slug names the section topic, not the person; a section is one reader-facing '
+                                     'topic, and a plan for several edits belongs in notes')
+                name = current.get('name') or {}
+                heading = fields.get('heading') or {}
+                if any(isinstance(name.get(lang),str) and heading.get(lang) and
+                       heading[lang].strip().casefold()==name[lang].strip().casefold() for lang in ('ko','en')):
+                    raise ValueError('heading repeats the person\'s name; name the phase or theme this section covers')
             if job['kind']=='term':
                 drop_unchanged_term_facts(fields,research.get('current') or {},job['action'])
             if not fields:
@@ -555,7 +567,6 @@ class Draft:
                 fields['expectedRevision'] = research['baseline']
             candidate = {'fields':fields,'sources':list(dict.fromkeys(e['source'] for e in evidence))}
             if section:
-                exists = any(s['slug']==fields['slug'] for s in (research.get('current') or {}).get('sections',[]))
                 candidate.update(target='person_section',action='update' if exists else 'create')
             if notes:
                 candidate['notes'] = notes
