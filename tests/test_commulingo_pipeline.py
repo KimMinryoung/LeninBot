@@ -275,6 +275,13 @@ class BatchTests(unittest.IsolatedAsyncioTestCase):
 
 
 class EngineTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        # The citation gate is a paid System One call; these stage tests are
+        # about the research contract, so the gate is stubbed (its own tests
+        # live in test_commulingo_citation_gate.py).
+        gate = patch('commulingo_pipeline.stages.check_claims', AsyncMock(return_value=[]))
+        gate.start(); self.addCleanup(gate.stop)
+
     async def test_explicit_gap_contract_is_single_requested_entry(self):
         from commulingo_pipeline.stages import Discover
         from commulingo_pipeline.engine import Usage

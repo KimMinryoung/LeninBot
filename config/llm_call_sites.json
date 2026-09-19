@@ -333,5 +333,24 @@
     "timeout": 20,
     "kind": "system_one",
     "note": "TypeSafe Jev(System One 판정 모델) 스모크·shadow 평가용. scripts/smoke_jev.py 전용. decide()/decide_sync() 진입점(텍스트 생성 아님). 2026-09-19 OpenRouter Decisions 경로(/api/alpha/decisions, $0.042/M 입력, 출력 무료)로 등록 — 직접 API는 대기열. 승인 후 provider=typesafe, model=jev-1.13.0으로 전환. 문턱값 튜닝 뒤에는 버전 고정 유지. dev_docs/jev_system_one_adoption.md"
+    },
+  "commulingo_citation_support": {
+    "provider": "openrouter",
+    "model": "typesafe/jev-1.13",
+    "timeout": 20,
+    "kind": "system_one",
+    "enabled": true,
+    "enforce": true,
+    "thresholds": {"reject": 0.85, "boilerplate": 0.9},
+    "note": "CommuLingo 조사 단계 인용 지지 게이트(commulingo_pipeline/citation_gate.py): 위치 확인된 인용 발췌가 주장을 실제로 뒷받침하는지 Jev choice(supports/contradicts/unrelated)+noul(specific, boilerplate)로 판정. confidence≥thresholds.reject의 unrelated/contradicts 또는 boilerplate≥thresholds.boilerplate는 결과 호출을 거절해 모델이 인용을 고치게 함. enforce=false면 기록만(shadow), enabled=false면 호출 안 함. 판정 실패(None)는 기록만 하고 통과. 2026-09-19 기준선: 실제 30쌍 중 N 5건을 오탐 0으로 5/5 unrelated(3건 고신뢰), 대조군 29/29. claim당 ~$0.00002."
+    },
+  "task_routing_decision": {
+    "provider": "openrouter",
+    "model": "typesafe/jev-1.13",
+    "timeout": 10,
+    "kind": "system_one",
+    "enabled": true,
+    "thresholds": {"accept": 0.85},
+    "note": "route_task의 1차 분류기(self_runtime/tools.py::_classify_route_with_jev). 에이전트 choice(criteria=_AGENT_ROUTING_CARDS)+routing_class choice+needs_identifier noul. agent confidence≥thresholds.accept면 그 결과를 쓰고, 아니면 기존 task_routing_advisor(DeepSeek)로 폴백하며 Jev 판독은 system_one_hint로 첨부. enabled=false면 바로 DeepSeek. 2026-09-19 기준선(실제 위임 30건): Jev 28/30·372ms·$0.0001/건 vs DeepSeek 26/30·1,556ms·$0.0003/건."
   }
 }

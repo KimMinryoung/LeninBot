@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 
 from .engine import Result
 from .evidence import snapshot, compile_evidence, locate_claim_quotes, SourceHandles, SourcePages
+from .citation_gate import check_claims, annotate as annotate_citations
 from . import service
 from .bundles import work_topics, advance
 
@@ -353,6 +354,7 @@ class Research:
         targeted = bool(carried)
         if targeted:
             usage.tracker['targeted_research'] = sorted(required_support)
+        citation_cache = {}
         async def finish(value):
             # DeepSeek Flash issues throwaway result calls: "placeholder" inside
             # a batch of fetches (12 times on 2026-09-19), and worse, ones long
@@ -371,6 +373,11 @@ class Research:
             if invalid:
                 raise ValueError('claims.field must name a writable field, not a commissioned topic: ' + ', '.join(sorted(str(f) for f in invalid)))
             claims = locate_claim_quotes(handles.resolve(value['claims'], sources), sources)
+            # A located quote exists; the gate asks whether it says what the
+            # claim asserts (citation_gate). Only this call's claims are judged
+            # — carried-over claims keep the check they got when made — and
+            # each verdict rides on its claim so the two never drift apart.
+            claims = annotate_citations(claims, await check_claims(claims, sources, usage=usage, cache=citation_cache))
             if targeted:
                 claims = merge_claims(carried,claims)
             value = {**value, 'claims': claims}
