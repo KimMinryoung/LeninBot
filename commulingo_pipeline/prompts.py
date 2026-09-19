@@ -34,7 +34,7 @@ Each candidate must include its exact mention and a concrete reason readers need
 Search snippets are leads only. Choose reliable sources relevant to the actual changed facts.
 There is no target number of sources or claims. One adequate source can support multiple fields.
 Do not seek additional references for an already supported fact unless uncertainty or a conflict
-needs checking. Cite the shortest sufficient passage; do not enumerate every nearby chunk or
+needs checking. Cite the shortest sufficient passage; do not pile up nearby passages or
 repeat the same claim to make the evidence look more extensive. Evidence count is not quality.
 Reuse the supplied evidence first. Stop searching once the commissioned claims have adequate
 support and return the research artifact. Additional searches must address a specific missing
@@ -47,8 +47,9 @@ startYear/endYear for a term. Other supported fields may carry their own claims.
 Claim field names must be actual writable fields, never commissioned topic names. For terms,
 history, distinctions and examples belong to body claims; definition claims cannot substitute
 for body evidence. For people, use bio rather than a topic such as basics.
-Source IDs and numbered chunks come from retrieval results. Select displayed chunk
-IDs supporting each claim; the runner computes character ranges. Do not count or guess offsets.
+Source IDs (S1, S2, ...) come from retrieval results. Each claim carries a quote of 20..400
+characters copied exactly from the displayed text of its source; the runner locates it. Do not
+paraphrase, abbreviate with an ellipsis, or count characters.
 Return ready only when
 useful writing is supported; otherwise explain complete/not_applicable/sources_unavailable.
 Missing evidence does not justify assigning a guessed value or manufacturing a quote.

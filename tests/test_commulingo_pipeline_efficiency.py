@@ -3,7 +3,7 @@ from unittest import IsolatedAsyncioTestCase, TestCase
 from unittest.mock import AsyncMock, Mock, patch
 
 from commulingo_pipeline.draft_repair import DraftRepair
-from commulingo_pipeline.evidence import SourceHandles, snapshot, resolve_claim_chunks
+from commulingo_pipeline.evidence import SourceHandles, snapshot, locate_claim_quotes
 from commulingo_pipeline.engine import Engine, Result, Usage
 from commulingo_pipeline.stages import Draft, validate
 from scripts.commulingo_write_session import draft_id
@@ -18,36 +18,35 @@ class EvidenceContracts(TestCase):
         with self.assertRaises(ValidationError):
             schema_validate({'kind':'unknown','label':{'ko':'미확정','en':'Unknown'}},schema)
 
-    def test_short_and_legacy_ids_roundtrip_and_unknown_has_ranges(self):
+    def test_short_and_legacy_ids_roundtrip_and_unknown_lists_sources(self):
         source=snapshot('https://example.org/archive','Documented fact. '*80)
         sources={source['id']:source}
         handles=SourceHandles(sources)
+        claim={'field':'body','claim':'fact','quote':'Documented fact. Documented fact.'}
         for name in ('S1',source['id']):
-            result=handles.resolve([{'source_id':name,'field':'body','claim':'fact','chunks':[0]}],sources)
+            result=handles.resolve([{**claim,'source_id':name}],sources)
             self.assertEqual(result[0]['source_id'],source['id'])
-            self.assertEqual(resolve_claim_chunks(result,sources)[0]['start'],0)
-        with self.assertRaisesRegex(ValueError,'S1: chunks 0..'):
+            self.assertEqual(locate_claim_quotes(result,sources)[0]['start'],0)
+        with self.assertRaisesRegex(ValueError,r'S1 \(https://example.org/archive\)'):
             handles.resolve([{'source_id':'S99'}],sources)
         other=snapshot('https://example.org/other','Another page. '*10)
         self.assertEqual(handles.handle(other),'S2')
         self.assertEqual(handles.handle(source),'S1')
-        # A later snapshot of the same URL keeps the handle and becomes its current target.
+        # A later snapshot of the same URL keeps the handle and becomes its current target,
+        # and a stale persistent ID resolves to it.
         later=snapshot('https://example.org/archive','Documented fact. '*80+'Appended page.')
         self.assertEqual(handles.handle(later),'S1')
         self.assertEqual(handles.ids['S1'],later['id'])
-        # A stale persistent ID with chunk numbers from the merged display
-        # resolves to the current snapshot instead of failing its range check.
         sources[later['id']]=later
-        stale=handles.resolve([{'source_id':source['id'],'field':'body','claim':'fact','chunks':[5]}],sources)
+        stale=handles.resolve([{**claim,'source_id':source['id']}],sources)
         self.assertEqual(stale[0]['source_id'],later['id'])
-        self.assertEqual(resolve_claim_chunks(stale,sources)[0]['start'],5*240)
         # A different page of the same URL that is not a prefix keeps its own id.
         page2=snapshot('https://example.org/archive','Unrelated second page. '*20)
         sources[page2['id']]=page2
-        self.assertEqual(handles.resolve([{'source_id':page2['id'],'chunks':[0]}],sources)[0]['source_id'],page2['id'])
+        self.assertEqual(handles.resolve([{'source_id':page2['id']}],sources)[0]['source_id'],page2['id'])
 
-    def test_pages_of_one_url_merge_into_one_numbering(self):
-        from commulingo_pipeline.evidence import SourcePages, SOURCE_CHUNK_CHARS
+    def test_pages_of_one_url_merge_into_one_snapshot(self):
+        from commulingo_pipeline.evidence import SourcePages
         pages=SourcePages()
         first,span1,created=pages.absorb('https://example.org/long','A'*600)
         self.assertTrue(created); self.assertEqual(span1,(0,600))
@@ -55,7 +54,6 @@ class EvidenceContracts(TestCase):
         self.assertTrue(created)
         self.assertEqual(span2,(601,1101))
         self.assertEqual(second['body'],'A'*600+'\n'+'B'*500)
-        self.assertEqual(span2[0]//SOURCE_CHUNK_CHARS,2,'page 2 starts in chunk 2, not at chunk 0')
         again,span_again,created=pages.absorb('https://example.org/long','A'*600)
         self.assertFalse(created); self.assertIs(again,second); self.assertEqual(span_again,span1)
         # Snapshots a job already holds for one URL are merged oldest first.
@@ -78,12 +76,11 @@ class EvidenceContracts(TestCase):
         with self.assertRaisesRegex(ToolArgumentValidationError,"^'fields' is a required property"):
             validate_tool_arguments('commulingo_pipeline_result',{'notes':'x'},schema=schema,risk_class='state')
 
-    def test_expanded_ranges_preserve_all_evidence_above_old_limit(self):
-        source=snapshot('https://example.org/archive','Documented fact. '*100)
-        claim={'field':'body','claim':'fact','source_id':source['id'],'chunks':[0,2]}
-        result=resolve_claim_chunks([claim]*32,{source['id']:source})
-        self.assertEqual(len(result),64)
-        self.assertEqual({(c['start'],c['end']) for c in result},{(0,240),(480,720)})
+    def test_many_quotes_are_all_kept(self):
+        source=snapshot('https://example.org/archive','Documented fact number one. '*100)
+        claim={'field':'body','claim':'fact','source_id':source['id'],'quote':'Documented fact number one.'}
+        result=locate_claim_quotes([claim]*40,{source['id']:source})
+        self.assertEqual(len(result),40)
 
     def test_valid_draft_survives_downstream_error_and_repairs_follow_the_current_draft(self):
         repair=DraftRepair({'name':'draft','input_schema':{'type':'object','properties':{

@@ -1,32 +1,59 @@
 """Content-addressed source snapshots and exact, bounded claim citations."""
 import hashlib
+import re
 from datetime import datetime, timedelta, timezone
 
-SOURCE_CHUNK_CHARS = 240
+# A cited passage is stored with the sentences around it so the excerpt a
+# reviewer reads is prose, not a tile cut mid-word. Bounded so one quote
+# cannot pull in a whole page.
+EXCERPT_CONTEXT = 300
+_SENTENCE_END = re.compile(r'[.!?。]["\')\]]?\s|\n')
 
 
-def resolve_claim_chunks(claims, sources):
-    """Translate displayed chunk IDs to exact offsets; never ask a model to count."""
+def excerpt_window(body, start, end):
+    """Widen (start, end) to the sentence boundaries around it, within EXCERPT_CONTEXT."""
+    lo = max(0, start - EXCERPT_CONTEXT)
+    before = list(_SENTENCE_END.finditer(body, lo, start))
+    if before:
+        start = before[-1].end()
+    # From end-1 so a quote that ends on its own full stop closes there.
+    after = _SENTENCE_END.search(body, max(start, end - 1), min(len(body), end + EXCERPT_CONTEXT))
+    if after:
+        end = after.start() + 1 if body[after.start()] != '\n' else after.start()
+    return start, min(end, len(body))
+
+
+def locate_claim_quotes(claims, sources):
+    """Find each claim's verbatim quote and replace it with exact offsets.
+
+    The model copies a passage; the runner finds it (typographic quotes,
+    dashes, spacing and case folded) in the named source, or failing that in
+    any retrieved source of the job, and never asks the model to count.
+    """
+    from runtime_tools.commulingo_review_policy import locate
     resolved = []
     for claim in claims:
         source = sources.get(claim.get('source_id'))
         if not source or not source.get('body'):
             raise ValueError('unknown source_id; use an ID from a retrieved source')
-        chunks = claim.get('chunks', [claim['chunk']] if 'chunk' in claim else [])
-        count = (len(source['body']) + SOURCE_CHUNK_CHARS - 1) // SOURCE_CHUNK_CHARS
-        if not chunks or any(type(n) is not int or n < 0 or n >= count for n in chunks):
-            raise ValueError(f'Use displayed chunk IDs in 0..{count-1} for source {source["id"]}')
-        groups = []
-        for chunk in sorted(set(chunks)):
-            if groups and chunk == groups[-1][-1] + 1:
-                groups[-1].append(chunk)
-            else:
-                groups.append([chunk])
-        for group in groups:
-            value = {k:v for k,v in claim.items() if k not in {'chunks','chunk'}}
-            value.update(start=group[0]*SOURCE_CHUNK_CHARS,
-                         end=min(len(source['body']), (group[-1]+1)*SOURCE_CHUNK_CHARS))
-            resolved.append(value)
+        quote = str(claim.get('quote') or '').strip()
+        if len(quote) < 20:
+            raise ValueError('quote must copy at least 20 characters verbatim from the displayed source text')
+        found = locate(source['body'], quote)
+        if found is None:
+            for other in sources.values():
+                if other is not source and other.get('body'):
+                    found = locate(other['body'], quote)
+                    if found:
+                        source = other
+                        break
+        if found is None:
+            raise ValueError(f'quote not found in {claim.get("source_id")} or any retrieved source: copy 20..400 '
+                             'characters exactly as displayed (no ellipsis, no paraphrase)')
+        start, end = excerpt_window(source['body'], *found)
+        value = {k: v for k, v in claim.items() if k != 'quote'}
+        value.update(source_id=source['id'], start=start, end=end)
+        resolved.append(value)
     return resolved
 
 
@@ -71,14 +98,10 @@ def compile_evidence(claims, sources, changed_fields):
 class SourceHandles:
     """Attempt-local short names, one per URL.
 
-    A page fetched in several offsets used to be several snapshots with
-    separate handles and chunk numbering that restarted at 0 on each; the
-    model then cited page 2's chunk numbers under page 1's handle. 68 of the
-    71 jobs with chunk-ID rejections in the week to 2026-09-19 had such a
-    URL. Now a URL has one handle whose current snapshot is the merged text
-    of every page fetched (see SourcePages); older snapshots stay in the
-    job's source map so carried-over claims still compile, and any
-    persistent ID remains accepted.
+    A URL has one handle whose current snapshot is the merged text of every
+    page fetched (see SourcePages); older snapshots stay in the job's source
+    map so carried-over claims still compile, and a persistent ID is still
+    accepted and mapped to the URL's current snapshot.
     """
     def __init__(self, sources):
         self.ids = {}      # handle -> current source id
@@ -100,15 +123,12 @@ class SourceHandles:
             source_id = self.ids.get(claim.get('source_id'), claim.get('source_id'))
             source = sources.get(source_id)
             if not source or not source.get('body'):
-                available = ', '.join(f'{handle}: chunks 0..{(len(sources[sid]["body"])-1)//SOURCE_CHUNK_CHARS}'
+                available = ', '.join(f'{handle} ({sources[sid]["url"]})'
                     for handle,sid in self.ids.items() if sources.get(sid,{}).get('body'))
                 raise ValueError('unknown source_id; retrieve or use an available source: ' + available)
-            # A persistent ID names one snapshot, but every display of a URL
-            # numbers chunks over its current merged text, so a model that
-            # kept the ID from an earlier fetch and cites chunks it read after
-            # a later page (Lyushkov, 2026-09-19: chunks 397..421 under the
-            # 0..219 snapshot) means the current one. Earlier snapshots are
-            # prefixes of it, so the numbering is the same either way.
+            # A persistent ID names one snapshot; a model that kept it from an
+            # earlier fetch means the URL's current merged text, of which the
+            # earlier snapshot is a prefix.
             current = sources.get(self.ids.get(self.by_url.get(source['url'])))
             if current and current.get('body') and current['body'].startswith(source['body']):
                 source_id = current['id']
@@ -120,9 +140,9 @@ class SourcePages:
     """One growing snapshot per URL within a research attempt.
 
     absorb(url, page) returns the merged snapshot and the character span the
-    page occupies in it, so a paginated fetch is displayed as chunks a..b of
-    one continuous numbering. Pages are identified by content hash, never by
-    text search, so re-fetching the same offset changes nothing.
+    page occupies in it. Pages are identified by content hash, so re-fetching
+    the same offset changes nothing, and a quote from any page is found in
+    the one snapshot.
     """
     def __init__(self):
         self.current = {}   # url -> merged snapshot

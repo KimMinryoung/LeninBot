@@ -32,23 +32,28 @@ class EvidenceTests(unittest.TestCase):
         same = snapshot(source['url'],source['body'])
         self.assertEqual(source['id'],same['id'])
 
-    def test_displayed_chunks_resolve_to_exact_unicode_source_ranges(self):
-        from commulingo_pipeline.evidence import resolve_claim_chunks
-        source = snapshot('https://example.org/source', '한글 근거 ' * 100)
-        claim = {'field':'bio','claim':'Supported fact','source_id':source['id'],'chunks':[1,2]}
-        resolved = resolve_claim_chunks([claim], {source['id']:source})
-        self.assertEqual(resolved[0]['start'],240)
-        self.assertEqual(resolved[0]['end'],len(source['body']))
-        compiled = compile_evidence(resolved,{source['id']:source},{'bio'})
-        self.assertEqual(compiled[0]['excerpt'],source['body'][240:])
-        separate = resolve_claim_chunks([{**claim,'chunks':[0,2]}],{source['id']:source})
-        self.assertEqual([(c['start'],c['end']) for c in separate],[(0,240),(480,600)])
-        singular = {k:v for k,v in claim.items() if k!='chunks'}
-        singular['chunk']=1
-        self.assertEqual(resolve_claim_chunks([singular],{source['id']:source})[0]['start'],240)
-        for invalid in ([99], [-1], [True], []):
-            with self.assertRaises(ValueError):
-                resolve_claim_chunks([{**claim,'chunks':invalid}],{source['id']:source})
+    def test_quotes_resolve_to_sentence_bounded_source_ranges(self):
+        from commulingo_pipeline.evidence import locate_claim_quotes
+        body = ('Intro sentence here. 그는 1917년에 입당했다 — «Правда» 편집부에서 일했다. '
+                'Later he was exiled to Siberia! Final sentence of the page.')
+        source = snapshot('https://example.org/source', body)
+        sources = {source['id']:source}
+        # Typographic quotes, dashes, spacing and case are folded; the excerpt is whole sentences.
+        claim = {'field':'bio','claim':'Joined in 1917','source_id':source['id'],
+                 'quote':'1917년에 입당했다 - "Правда" 편집부에서'}
+        [resolved] = locate_claim_quotes([claim], sources)
+        self.assertNotIn('quote', resolved)
+        self.assertEqual(body[resolved['start']:resolved['end']], '그는 1917년에 입당했다 — «Правда» 편집부에서 일했다.')
+        compiled = compile_evidence([resolved], sources, {'bio'})
+        self.assertEqual(compiled[0]['excerpt'], '그는 1917년에 입당했다 — «Правда» 편집부에서 일했다.')
+        # A quote named under one source but found only in another of the job is filed there.
+        other = snapshot('https://example.org/other', 'Unrelated page. He was exiled to Siberia in 1930. End.')
+        sources[other['id']] = other
+        moved = locate_claim_quotes([{**claim,'quote':'exiled to Siberia in 1930'}], sources)[0]
+        self.assertEqual(moved['source_id'], other['id'])
+        for bad in ('too short', 'this passage is nowhere in any retrieved source text', 'Intro sentence... page'):
+            with self.assertRaisesRegex(ValueError, 'quote'):
+                locate_claim_quotes([{**claim,'quote':bad}], sources)
 
     def test_exact_range_and_expiry(self):
         source = snapshot('https://example.org/source','A documented event happened in 1917.')
@@ -606,7 +611,8 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
         store.job_sources.return_value={source['id']:source}
         async def model(**kwargs):
             value={'status':'ready','reason':'Verified history for the commissioned term.',
-                   'claims':[{'field':'history','claim':'Verified history','source_id':source['id'],'chunk':0}]}
+                   'claims':[{'field':'history','claim':'Verified history','source_id':source['id'],
+                              'quote':'A retrieved historical source with adequate context'}]}
             schema=kwargs['tool']['input_schema']
             self.assertTrue(list(Draft202012Validator(schema).iter_errors(value)))
             value['claims'].append({**value['claims'][0],'field':'endYear'})
@@ -626,43 +632,47 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.next_stage,'draft')
         self.assertEqual(result.value['claims'][0]['field'],'body')
 
-    async def test_paginated_fetch_is_one_source_with_continuous_chunks(self):
+    async def test_paginated_fetch_is_one_source_and_quotes_from_any_page_resolve(self):
         from commulingo_pipeline.stages import Research
         from commulingo_pipeline.engine import Usage
         store=Mock()
         store.job_sources.return_value={}
         store.cached_source.return_value=None
-        page1='First page of the article. '*12   # 324 chars -> chunks 0..1
-        page2='Second page continues here. '*12
+        page1='First page of the article, sentence one. '*8
+        page2='Second page continues here with more detail. '*8
+        seen={}
         async def fetch(**kwargs):
             return f'<external source="web">\n{page1 if kwargs["offset"]==0 else page2}\n</external>'
-        seen={}
         async def model(**kwargs):
             fetch_url=kwargs['read_wrap']('fetch_url',fetch)
             first=await fetch_url(url='https://example.org/article',max_chars=400,offset=0)
             second=await fetch_url(url='https://example.org/article',max_chars=400,offset=400)
             self.assertIn('Source ID: S1',first); self.assertIn('Source ID: S1',second)
-            self.assertIn('Chunks 0..1 of 0..1',first)
-            self.assertIn('Chunks 1..2 of 0..2',second)      # page 2 numbering continues, never restarts
-            self.assertIn('[chunk 2] ',second); self.assertNotIn('[chunk 0]',second)
+            self.assertNotIn('Persistent ID',first); self.assertNotIn('[chunk',first)
+            self.assertIn(f'Characters {len(page1)+1}..{len(page1)+1+len(page2)} of',second)
             seen['saved']=[c.args[0]['url'] for c in store.save_source.call_args_list]
             # Throwaway calls that passed the length floor closed jobs for 90 days (#42, #120).
             for probe in ('Probe only — not a real submission, checking the tool.',
                           'Investigating commissioned topics before returning a final artifact.'):
                 with self.assertRaisesRegex(ValueError,'probe or progress note'):
                     await kwargs['handler']({'status':'sources_unavailable','reason':probe,'claims':[]})
-            # The persistent ID of the first page's snapshot with merged chunk numbers still resolves.
+            with self.assertRaisesRegex(ValueError,'unknown source_id.*S1 \\(https://example.org/article\\)'):
+                await kwargs['handler']({'status':'ready','reason':'Both pages support the body claim.',
+                    'claims':[{'field':'body','claim':'x','source_id':'S9','quote':'Second page continues here with'}]})
+            # A quote from page two cited under the handle (or the first page's stale persistent id) resolves.
             stale=next(c.args[0]['id'] for c in store.save_source.call_args_list if c.args[0]['body']==page1)
-            await kwargs['handler']({'status':'ready','reason':'Both pages support the body claim.',
-                'claims':[{'field':'body','claim':'From page two','source_id':stale,'chunks':[2]}]})
+            for sid in ('S1', stale):
+                await kwargs['handler']({'status':'ready','reason':'Both pages support the body claim.',
+                    'claims':[{'field':'body','claim':'From page two','source_id':sid,
+                               'quote':'Second page continues here with more detail.'}]})
         job={'id':31,'kind':'term','action':'update','target':'fixture','topic':'history'}
         with patch('commulingo_pipeline.stages.service.call',return_value={'revision':'original'}), \
              patch('commulingo_pipeline.stages.model_call',side_effect=model):
             result=await Research(store)(job,[],Usage(),.2)
         [claim]=result.value['claims']
-        self.assertEqual((claim['start'],claim['end']),(480,len(page1)+1+len(page2)))
         merged=next(c.args[0] for c in store.save_source.call_args_list if c.args[0]['id']==claim['source_id'])
         self.assertTrue(merged['body'].startswith(page1) and merged['body'].endswith(page2))
+        self.assertEqual(merged['body'][claim['start']:claim['end']], 'Second page continues here with more detail.')
 
     async def test_validate_bounce_runs_targeted_research_and_carries_claims(self):
         from commulingo_pipeline.stages import Research, TARGETED_RESEARCH_ROUNDS
@@ -679,7 +689,8 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaisesRegex(ValueError,'missing evidence for endYear'):
                 await kwargs['handler']({'status':'ready','reason':'Nothing new found for the term.','claims':[]})
             await kwargs['handler']({'status':'ready','reason':'The source dates the end of the period.',
-                'claims':[{'field':'endYear','claim':'Ended in 1991','source_id':source['id'],'chunk':0}]})
+                'claims':[{'field':'endYear','claim':'Ended in 1991','source_id':source['id'],
+                           'quote':source['body'][:40]}]})
         job={'id':31,'kind':'term','action':'update','target':'fixture','topic':'history'}
         artifacts=[{'stage':'research','value':{'claims':[previous]}},
                    {'stage':'draft','value':{'rejected_draft':{}}},
