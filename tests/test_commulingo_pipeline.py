@@ -681,6 +681,7 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
         store=Mock()
         store.job_sources.return_value={source['id']:source}
         previous={'field':'body','claim':'Verified body','source_id':source['id'],'start':0,'end':40}
+        junk={'field':'body','claim':'placeholder','source_id':source['id'],'start':0,'end':240}
         seen={}
         async def model(**kwargs):
             seen.update(kwargs)
@@ -692,7 +693,7 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
                 'claims':[{'field':'endYear','claim':'Ended in 1991','source_id':source['id'],
                            'quote':source['body'][:40]}]})
         job={'id':31,'kind':'term','action':'update','target':'fixture','topic':'history'}
-        artifacts=[{'stage':'research','value':{'claims':[previous]}},
+        artifacts=[{'stage':'research','value':{'claims':[previous,junk]}},
                    {'stage':'draft','value':{'rejected_draft':{}}},
                    {'stage':'validate','value':{'error':'400: evidence required for endYear'}}]
         usage=Usage()

@@ -134,6 +134,16 @@ def drop_unchanged_term_facts(fields, current, action):
 
 TARGETED_RESEARCH_ROUNDS = 6
 
+# Throwaway text a model submits while probing the tool. Such a reason closed
+# jobs as sources_unavailable (#42, #120), and such a claim carried over into
+# every later attempt of #120.
+PROBE_RE = re.compile(r'\W*(placeholder|probe|test|testing|checking|investigating|interim|in progress|'
+                      r'todo|tbd|dummy|lorem)\b', re.I)
+
+
+def is_probe(text):
+    return bool(PROBE_RE.match(str(text or ''))) or 'not a real submission' in str(text or '').lower()
+
 
 def carried_claims(claims, sources, fields):
     """Earlier research claims that can still be compiled: writable field, live source.
@@ -148,7 +158,8 @@ def carried_claims(claims, sources, fields):
         source = sources.get(claim.get('source_id'))
         if not source or not source.get('body') or source['expires_at'] <= now:
             return None
-        if claim.get('field') in fields and type(claim.get('start')) is int and type(claim.get('end')) is int:
+        if (claim.get('field') in fields and type(claim.get('start')) is int and type(claim.get('end')) is int
+                and not is_probe(claim.get('claim'))):
             kept.append(claim)
     return kept
 
@@ -349,11 +360,9 @@ class Research:
             # (afgantsy #42) and "Investigating commissioned topics before
             # returning a final artifact" (#120) each closed a job as
             # sources_unavailable for 90 days.
-            reason = str(value.get('reason',''))
-            if re.match(r'\W*(placeholder|probe|test|testing|checking|investigating|interim|in progress|'
-                        r'todo|tbd|dummy|lorem)\b', reason, re.I) or re.search(r'not a real submission', reason, re.I):
-                raise ValueError('reason must state the actual judgement; a probe or progress note is not a result. '
-                                 'Call commulingo_pipeline_result once, when the research is finished.')
+            if is_probe(value.get('reason')) or any(is_probe(c.get('claim')) for c in value.get('claims',[])):
+                raise ValueError('reason and claims must state the actual judgement; a probe or progress note is '
+                                 'not a result. Call commulingo_pipeline_result once, when the research is finished.')
             missing = required_support - {c.get('field') for c in value.get('claims',[])}
             if value.get('status')=='ready' and missing:
                 raise ValueError('ready research must resolve missing evidence for ' + ', '.join(sorted(missing)) +
