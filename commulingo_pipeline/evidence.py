@@ -26,12 +26,23 @@ def resolve_claim_chunks(claims, sources):
         if claim.get('quote') is not None:
             quote = str(claim['quote'])
             span = locate(source['body'], quote) if len(quote.strip()) >= QUOTE_CHARS[0] else None
+            if not span and len(quote.strip()) >= QUOTE_CHARS[0]:
+                # A paginated page is several snapshots of one URL, and the
+                # model often names the first page's handle while quoting the
+                # second. The quote itself identifies the passage: accept it
+                # from another snapshot of the same job when it is unambiguous.
+                found = [(other, hit) for other in sources.values()
+                         if other is not source and other.get('body') and (hit := locate(other['body'], quote))]
+                same_url = [f for f in found if f[0]['url'] == source['url']]
+                found = same_url or found
+                if found and len({f[0]['url'] for f in found}) == 1:
+                    source, span = found[0]
             if not span:
                 raise ValueError(f'quote not found in source {source["id"]}: copy {QUOTE_CHARS[0]}..{QUOTE_CHARS[1]} '
                                  'characters verbatim from its displayed text (no ellipsis or paraphrase), '
                                  'or cite displayed chunk IDs instead')
             value = {k:v for k,v in claim.items() if k not in {'quote','chunks','chunk'}}
-            value.update(start=span[0], end=span[1])
+            value.update(source_id=source['id'], start=span[0], end=span[1])
             resolved.append(value)
             continue
         chunks = claim.get('chunks', [claim['chunk']] if 'chunk' in claim else [])

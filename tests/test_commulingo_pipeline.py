@@ -62,6 +62,15 @@ class EvidenceTests(unittest.TestCase):
         self.assertEqual(compiled[0]['excerpt'], body[claim['start']:claim['end']])
         with self.assertRaisesRegex(ValueError,'quote not found'):
             resolve_claim_chunks([{'field':'body','claim':'x','source_id':source['id'],'quote':'этой фразы в источнике нет вовсе'}],{source['id']:source})
+        # A quote from page 2 of the same URL, filed under page 1's handle, resolves to page 2.
+        page2 = snapshot('https://example.org/yezhov', 'Second page: 24 апреля 1939 года Ежовым было написано заявление с признанием.')
+        other = snapshot('https://example.org/elsewhere', 'Unrelated page that also says 24 апреля 1939 года Ежовым было написано заявление с признанием.')
+        [moved] = resolve_claim_chunks([{'field':'body','claim':'x','source_id':source['id'],'quote':'24 апреля 1939 года Ежовым было написано заявление'}],
+                                       {source['id']:source, page2['id']:page2, other['id']:other})
+        self.assertEqual(moved['source_id'], page2['id'])
+        with self.assertRaisesRegex(ValueError,'quote not found'):
+            resolve_claim_chunks([{'field':'body','claim':'x','source_id':source['id'],'quote':'24 апреля 1939 года Ежовым было написано заявление'}],
+                                 {source['id']:source, other['id']:other, snapshot('https://example.org/third','Third: 24 апреля 1939 года Ежовым было написано заявление.')['id']:snapshot('https://example.org/third','Third: 24 апреля 1939 года Ежовым было написано заявление.')})
         with self.assertRaisesRegex(ValueError,'quote not found'):
             resolve_claim_chunks([{'field':'body','claim':'x','source_id':source['id'],'quote':'6 февраля'}],{source['id']:source})
 
