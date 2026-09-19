@@ -319,6 +319,13 @@ international-revolutionary 0.94), 이반 파블로프(생리학자)가 `theoris
 | 관직 간 경계 | 89 | 공화국 제1서기의 nationalities-federal ↔ party-leadership |
 | 그 밖의 카테고리 겹침 | 77 | 사회주의권 지도자↔비소련 혁명가 등 |
 
+**적용 결과와 확정 규칙 (2026-09-19, 운영자 승인·결정).** 편집 서비스 제출→승인으로 104명 정정(규칙 위반 12, 비소련 인물 그룹 이동
+63, 그룹 오류 12, 역할 오류 26, 사하로프 관직 1; 보고서 9절). 운영자가 확정한 규칙 — 다음 감사의 criteria에 넣을 것:
+공화국 제1서기·공화국 정부 수반은 `nationalities-federal`, 지방·주 서기와 콤소몰·중앙위 서기는 `party-secretariat-cadres`(Jev의
+`party-leadership` 판정은 이 규칙을 모르는 것); `ideology-propaganda`는 친소련 이데올로그 관직(반체제 출판 활동은 해당 없음);
+레닌은 `party-leadership`; `head-of-government`·카메네프 comintern·톰스키/루주타크 economic-management·에이헤 agriculture는
+애매하므로 Jev 불일치만으로 옮기지 않는다. 비소련 국적 인물은 소련 시대 그룹에 두지 않는다(그룹 정의대로).
+
 ## 4.12 남은 후보와 관찰 포인트
 
 - 조사 게이트 실데이터 첫 7건(12:06~12:35): 173 claim, unrelated 4건 전부 conf 0.12~0.62의 "일부 지지"(긴 복합 문장의
