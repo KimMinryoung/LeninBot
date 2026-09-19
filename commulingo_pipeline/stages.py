@@ -816,12 +816,29 @@ class Review:
                 unchanged += 1
             box['reviewed_content_hash'] = fingerprint
             if unchanged >= MAX_UNCHANGED_REVIEW_REVISIONS:
+                await self.leave_note(job, artifacts, 'revise (held)', box.get('reason',''))
                 return Result({**box,'hold_reason':'same draft remained unchanged after two correction attempts'},'complete','escalated')
             # Legacy decisions without a routing hint retain the conservative research path.
             return Result(box,'research' if box.get('needs_research',True) else 'draft')
         # Unresolved material stays in the internal artifact store, without a human handoff.
+        if box['decision']!='approve':
+            await self.leave_note(job, artifacts, box['decision'], box.get('reason',''))
         return Result(box,'submit' if box['decision']=='approve' else 'complete',
                       'ready' if box['decision']=='approve' else 'escalated' if box['decision']=='escalate' else 'complete')
+
+    async def leave_note(self, job, artifacts, decision, reason):
+        """A job that ends without publishing tells the entry's next author why.
+
+        The verdict used to live only in this job's review artifact, so the next
+        commission on the same person re-ran into the same unresolved conflict.
+        """
+        text = f'검토 {decision} (작업 {job["id"]}, {work_topics(job)}): {reason.strip()}'[:4000]
+        try:
+            await asyncio.to_thread(service.call,{'command':'note','target':job['kind'],'id':job['target'],
+                'note':text,'changedBy':'commulingo-pipeline-reviewer','jobRef':f'job {job["id"]} review',
+                'idempotencyKey':f'pipeline:{job["id"]}:{len(artifacts)}:review-note'})
+        except Exception as exc:  # the verdict itself is already persisted as an artifact
+            logging.getLogger(__name__).warning('review note not saved for %s: %s', job['target'], exc)
 
 
 

@@ -510,7 +510,13 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
                  patch('commulingo_pipeline.stages.model_call',side_effect=model):
                 result=await Review()(job,artifacts+previous,Usage(),.2)
             self.assertEqual((result.next_stage,result.status),expected)
-            self.assertEqual([c.args[0]['command'] for c in rpc.call_args_list],['read'])
+            # A terminal non-approval leaves the verdict with the entry for its next author.
+            commands=[c.args[0]['command'] for c in rpc.call_args_list]
+            self.assertEqual(commands,['read','note'] if decision in ('escalate','reject') else ['read'])
+            if decision in ('escalate','reject'):
+                note=rpc.call_args_list[1].args[0]
+                self.assertIn(f'검토 {decision}',note['note']); self.assertIn('Verified feedback',note['note'])
+                self.assertEqual(note['idempotencyKey'],f"pipeline:{job['id']}:{len(artifacts)+count}:review-note")
         # Old lifetime counters do not reject a corrected draft.
         job['payload']={'review_revisions':20}
         decision='revise'
