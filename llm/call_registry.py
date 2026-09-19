@@ -22,6 +22,8 @@ Two ways to consume the registry:
                                     KG/graphiti model selection, writer critic)
   - generate(feature, prompt)     → run the call through the shared executor
     generate_sync(feature, prompt)  (gemini / deepseek / openai / claude)
+  - decide(feature, state, questions) → System One (Jev) typed decision via
+    decide_sync(...)                  openrouter / typesafe, never text
 
 Executor calls pass through the LLM gateway (llm/gateway.py): policy check
 before the request, spend/usage audit after. Third-party model-only clients
@@ -80,6 +82,21 @@ _PROVIDER_CONNECTIONS = {
         "credential": "GEMINI_API_KEY",
         "direct_base": None,
         "proxy_path": "gemini",
+    },
+    # System One (Jev) decision transports — see decide(). OpenRouter serves
+    # Jev without the TypeSafe waitlist; the direct-base env override exists so
+    # an approved smoke run can bypass the proxy before its credential lands.
+    "openrouter": {
+        "credential": "OPENROUTER_API_KEY",
+        "direct_base": "https://openrouter.ai",
+        "direct_base_env": "OPENROUTER_BASE_URL",
+        "proxy_path": "openrouter",
+    },
+    "typesafe": {
+        "credential": "TYPESAFE_API_KEY",
+        "direct_base": "https://api.typesafe.ai",
+        "direct_base_env": "TYPESAFE_BASE_URL",
+        "proxy_path": "typesafe",
     },
 }
 
@@ -611,4 +628,202 @@ async def generate(feature: str, prompt: str, *, system: str | None = None, **de
         )
     except asyncio.TimeoutError:
         logger.warning("[llm-registry] %s timed out after %.0fs", feature, profile.timeout + 5)
+        return None
+
+
+# ── System One decisions (TypeSafe Jev) ─────────────────────────────
+#
+# Jev is not a chat model: it takes program state plus typed questions and
+# returns calibrated decisions, never text. It therefore has its own entry
+# point instead of an _EXECUTORS row — generate() callers expect a string.
+# Registry entries for it use provider "openrouter" (Decisions route, no
+# waitlist) or "typesafe" (direct API); the body and answers are the same on
+# both, only the path differs. dev_docs/jev_system_one_adoption.md.
+
+_DECISION_PATHS = {
+    "openrouter": "/api/alpha/decisions",
+    "typesafe": "/v1/systemone",
+}
+_QUESTION_TYPES = ("noul", "choice", "score")
+
+
+@dataclass(frozen=True)
+class Decision:
+    """Typed answers from one System One call, keyed as the questions were.
+
+    Each value is the provider's answer object: noul → {"noul": p};
+    choice → {"choice", "probabilities", "confidence"}; score → {"score",
+    "legend", "probabilities", "confidence"}. The accessors below return
+    None for a missing key so a caller can fall back without try/except.
+    """
+
+    answers: dict
+    model: str
+    usage: dict = field(default_factory=dict)
+    latency_ms: int = 0
+    cost_usd: float | None = None
+
+    def noul(self, key: str) -> float | None:
+        answer = self.answers.get(key) or {}
+        value = answer.get("noul")
+        return float(value) if value is not None else None
+
+    def choice(self, key: str) -> str | None:
+        return (self.answers.get(key) or {}).get("choice")
+
+    def score(self, key: str) -> float | None:
+        value = (self.answers.get(key) or {}).get("score")
+        return float(value) if value is not None else None
+
+    def confidence(self, key: str) -> float | None:
+        value = (self.answers.get(key) or {}).get("confidence")
+        return float(value) if value is not None else None
+
+    def probabilities(self, key: str) -> dict:
+        return dict((self.answers.get(key) or {}).get("probabilities") or {})
+
+
+@dataclass(frozen=True)
+class DecisionResult:
+    decision: Decision | None = None
+    error_kind: str | None = None
+    error: str | None = None
+    retry_after: float | None = None
+
+    @property
+    def retryable(self) -> bool:
+        return self.error_kind in {"rate_limit", "transport", "server"}
+
+
+def _validate_questions(questions: dict) -> None:
+    if not isinstance(questions, dict) or not questions:
+        raise ValueError("questions must be a non-empty dict keyed by answer name")
+    for key, q in questions.items():
+        if not isinstance(q, dict) or q.get("type") not in _QUESTION_TYPES:
+            raise ValueError(f"question {key!r}: type must be one of {_QUESTION_TYPES}")
+        if not str(q.get("instructions") or "").strip():
+            raise ValueError(f"question {key!r}: instructions required")
+        criteria = q.get("criteria")
+        if q["type"] == "choice" and not (isinstance(criteria, dict) and 2 <= len(criteria) <= 255):
+            raise ValueError(f"question {key!r}: choice needs a criteria dict of 2..255 options")
+        if q["type"] == "score" and not (isinstance(criteria, list) and 2 <= len(criteria) <= 10):
+            raise ValueError(f"question {key!r}: score needs 2..10 ordered criteria levels")
+
+
+def _stringify_criteria(questions: dict) -> dict:
+    """OpenRouter validates instructions/criteria values as strings, while the
+    direct API also accepts JSON structure. Encode nested values so one
+    question definition works on both routes."""
+    out = {}
+    for key, q in questions.items():
+        q = dict(q)
+        criteria = q.get("criteria")
+        if isinstance(criteria, dict):
+            q["criteria"] = {k: v if isinstance(v, str) else json.dumps(v, ensure_ascii=False)
+                             for k, v in criteria.items()}
+        elif isinstance(criteria, list):
+            q["criteria"] = [v if isinstance(v, str) else json.dumps(v, ensure_ascii=False)
+                             for v in criteria]
+        out[key] = q
+    return out
+
+
+class DecisionHTTPError(RuntimeError):
+    def __init__(self, status_code: int, body: str):
+        self.status_code = status_code
+        super().__init__(f"HTTP {status_code}: {body[:300]}")
+
+
+def _post_decision(p: CallSiteProfile, state, questions: dict) -> tuple[dict, int]:
+    import httpx
+
+    connection = resolve_provider_connection(p.provider)
+    url = f"{connection.base_url}{_DECISION_PATHS[p.provider]}"
+    headers = {
+        "Authorization": f"Bearer {connection.api_key}",
+        "Content-Type": "application/json",
+        "x-llm-caller": p.feature,
+    }
+    body = {"model": p.model, "state": state, "questions": _stringify_criteria(questions)}
+    started = time.monotonic()
+    response = httpx.post(url, headers=headers, json=body, timeout=p.timeout)
+    latency_ms = int((time.monotonic() - started) * 1000)
+    if response.status_code >= 400:
+        raise DecisionHTTPError(response.status_code, response.text)
+    payload = response.json()
+    if not isinstance(payload, dict) or not isinstance(payload.get("answers"), dict):
+        raise RuntimeError(f"decision response without answers: {str(payload)[:200]}")
+    return payload, latency_ms
+
+
+def decide_detailed(feature: str, state, questions: dict, *, label: str | None = None,
+                    profile: CallSiteProfile | None = None, **defaults) -> DecisionResult:
+    """Audited System One call. Never raises for provider failures — the
+    caller keeps its own fallback (existing LLM path, default label, skip).
+
+    ``state`` is a string or JSON-serialisable structure holding only the
+    fields the questions need; ``questions`` maps answer keys to
+    {"type": "noul"|"choice"|"score", "instructions": str, "criteria": ...}.
+    Cost comes from the provider when it reports one (OpenRouter usage.cost),
+    else from the gateway pricing table.
+    """
+    from llm.gateway import LLMGatewayDenied, check_llm_call, record_llm_call
+
+    profile = profile or resolve(feature, **defaults)
+    if profile.provider not in _DECISION_PATHS or not profile.model:
+        return DecisionResult(error_kind="configuration",
+                              error=f"feature {feature!r} is not a System One call site "
+                                    f"(provider={profile.provider!r}, model={profile.model!r})")
+    try:
+        _validate_questions(questions)
+    except ValueError as exc:
+        return DecisionResult(error_kind="configuration", error=str(exc))
+    try:
+        check_llm_call(surface="oneshot", caller=feature, provider=profile.provider, model=profile.model)
+    except LLMGatewayDenied as exc:
+        return DecisionResult(error_kind="policy", error=str(exc))
+    started = time.monotonic()
+    try:
+        payload, latency_ms = _post_decision(profile, state, questions)
+    except Exception as exc:
+        kind = _error_kind(exc)
+        retry_after = None
+        logger.warning("[llm-registry] %s (%s/%s) decision failed: %s",
+                       feature, profile.provider, profile.model, exc)
+        record_llm_call(surface="oneshot", caller=feature, provider=profile.provider,
+                        model=profile.model, label=label, status="error", error_excerpt=str(exc),
+                        latency_ms=int((time.monotonic() - started) * 1000), estimate_cost=False)
+        return DecisionResult(error_kind=kind, error=str(exc), retry_after=retry_after)
+    usage = payload.get("usage") or {}
+    tokens_in = int(usage.get("input_tokens") or 0)
+    tokens_out = int(usage.get("output_tokens") or 0)
+    reported_cost = usage.get("cost")
+    cost = float(reported_cost) if isinstance(reported_cost, (int, float)) else None
+    served_model = str(payload.get("model") or profile.model)
+    record_llm_call(surface="oneshot", caller=feature, provider=profile.provider,
+                    model=served_model, label=label, tokens_in=tokens_in, tokens_out=tokens_out,
+                    cost_usd=cost, latency_ms=latency_ms)
+    if cost is None:
+        from llm.gateway import estimate_cost_usd
+        cost = estimate_cost_usd(served_model, tokens_in=tokens_in, tokens_out=tokens_out)
+    return DecisionResult(decision=Decision(
+        answers=payload["answers"], model=served_model, usage=dict(usage),
+        latency_ms=latency_ms, cost_usd=cost))
+
+
+def decide_sync(feature: str, state, questions: dict, **defaults) -> Decision | None:
+    """System One decision or None when unavailable (see decide_detailed)."""
+    return decide_detailed(feature, state, questions, **defaults).decision
+
+
+async def decide(feature: str, state, questions: dict, **defaults) -> Decision | None:
+    """Async wrapper around decide_sync with the profile timeout enforced."""
+    profile = resolve(feature, **defaults)
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(decide_sync, feature, state, questions, **defaults),
+            timeout=profile.timeout + 5,
+        )
+    except asyncio.TimeoutError:
+        logger.warning("[llm-registry] %s decision timed out after %.0fs", feature, profile.timeout + 5)
         return None

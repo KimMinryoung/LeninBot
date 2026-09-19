@@ -239,8 +239,11 @@ direct endpoint override에는 실제 provider key가 필요해 placeholder가 �
 전송되지 않는다.
 
 라우트: `/{provider}/{path}` → upstream `/{path}`. provider는 anthropic / deepseek /
-moonshot / openai / gemini다. KG와 Writer도 각각 공용 gemini/anthropic route와 key를
-사용한다. `/health`는 모든 route에 쓸 키가 있을 때만 200, 아니면 503이다.
+moonshot / openai / gemini / openrouter / typesafe다. KG와 Writer도 각각 공용 gemini/anthropic route와 key를
+사용한다. `openrouter`(`openrouter_api_key`)와 `typesafe`(`typesafe_api_key`)는 2026-09-19 Jev System One
+판정 경로로 추가했다(`llm_call_registry.md`의 `decide()`); `typesafe`는 직접 API 대기열이 풀릴 때까지
+credential이 없으므로 `PROVIDERS` 항목에 `optional: True`를 두어 `/health`에서 제외한다.
+`/health`는 optional이 아닌 모든 route에 쓸 키가 있을 때만 200, 아니면 503이다.
 proxy unit의 `ExecStartPost=wait_llm_proxy_ready.py`가 200까지 기다리므로 소비 unit의
 `Wants/After=leninbot-llm-proxy.service`는 실제 readiness 뒤 시작을 보장한다.
 

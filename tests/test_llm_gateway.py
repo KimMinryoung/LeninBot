@@ -412,7 +412,8 @@ class TestProxyPolicyGate(unittest.TestCase):
         # Unmapped routes are their own policy names.
         for route in PROVIDERS:
             name = POLICY_PROVIDER.get(route, route)
-            self.assertIn(name, {"claude", "kimi", "deepseek", "openai", "gemini"})
+            self.assertIn(name, {"claude", "kimi", "deepseek", "openai", "gemini",
+                                 "openrouter", "typesafe"})
 
     def test_each_proxy_provider_has_exactly_one_credential(self):
         from llm_proxy.app import PROVIDERS

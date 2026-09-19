@@ -94,6 +94,16 @@ PROVIDERS: dict[str, dict] = {
                "auth": ("bearer",)},
     "gemini": {"upstream": "https://generativelanguage.googleapis.com", "secret": "GEMINI_API_KEY",
                "auth": ("x-goog-api-key",)},
+    # OpenRouter carries TypeSafe's Jev (System One decisions, /api/alpha/decisions)
+    # while the direct TypeSafe API is waitlisted; its credential is a normal
+    # bearer key, and its chat routes stay reachable through the same prefix.
+    "openrouter": {"upstream": "https://openrouter.ai", "secret": "OPENROUTER_API_KEY",
+                   "auth": ("bearer",)},
+    # Direct TypeSafe API: waitlisted as of 2026-09-19, so no credential is
+    # mounted yet. "optional" keeps /health (which gates every consumer's
+    # startup) from reporting not_ready over a route nothing calls.
+    "typesafe": {"upstream": "https://api.typesafe.ai", "secret": "TYPESAFE_API_KEY",
+                 "auth": ("bearer",), "optional": True},
 }
 
 # Billing reads are deliberately NOT added as passthrough providers.  The
@@ -378,7 +388,8 @@ async def relay_and_record(
 @app.get("/health")
 async def health():
     missing = [
-        name for name, cfg in PROVIDERS.items() if not _credential(cfg["secret"])
+        name for name, cfg in PROVIDERS.items()
+        if not cfg.get("optional") and not _credential(cfg["secret"])
     ]
     payload = {
         "status": "ok" if not missing else "not_ready",
