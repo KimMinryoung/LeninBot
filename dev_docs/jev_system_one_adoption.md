@@ -337,6 +337,11 @@ international-revolutionary 0.94), 이반 파블로프(생리학자)가 `theoris
 서로 모순되는 사례가 많아(포옹 전술=당·국가 기구, RD-107 엔진=현대 자본주의) 75%는 관행 재현율이지 정확도 상한이 아니다.
 accept 0.7 미만이고 작성 모델이 값을 줬으면 그 값을 남긴다. 라이브: 프로드날로크 → economy, 헬싱키 최종의정서 → international.
 
+**등록 API의 코드 필드 (2026-09-19).** `citizenship.code`·`fate.kind`를 `classify_person_codes`가 라벨 + 조사 claim 발췌로 채운다.
+기준선(최근 인물 초안 60건, 정답 = 작성 모델이 고른 값): citizenship 50/50, fate 32/35(conf ≥0.7 30/33; 불일치에는 claim 없는
+초안의 natural을 Jev가 unconfirmed로 본 건이 있어 Jev 쪽이 맞음), nationalOrigin 42/49(유대계→israel 같은 오류라 **미채택**,
+작성 모델 유지). 생존 인물 fate는 호출 없이 빈 kind. 등록 API에서 작성 모델이 고르던 닫힌 집합은 이제 nationalOrigin.code 하나다.
+
 ## 4.12 남은 후보와 관찰 포인트
 
 - 조사 게이트 실데이터 첫 7건(12:06~12:35): 173 claim, unrelated 4건 전부 conf 0.12~0.62의 "일부 지지"(긴 복합 문장의

@@ -122,3 +122,68 @@ class ClassifyTermTests(unittest.TestCase):
                                            decide=lambda *a, **k: DecisionResult(error_kind='server', error='503')))
         self.assertIsNone(cc.classify_term(TERM, categories=TERM_CATS, decide=lambda *a, **k: term_result('nope', 0.9)))
         self.assertEqual(cc.fill_term_category({**TERM, 'category': 'theory'}, None)['category'], 'theory')
+
+
+CODES_PROFILE = CallSiteProfile(feature=cc.CODES_FEATURE, provider='openrouter', model='typesafe/jev-1.13',
+                                extra={'thresholds': {'accept': 0.7}})
+CARD = {'name': {'ko': '류시코프', 'en': 'Lyushkov'}, 'years': '1900–1945',
+        'citizenship': {'label': {'ko': '소련', 'en': 'Soviet Union'}},
+        'fate': {'label': {'ko': '다롄에서 사망, 정황 미확인', 'en': 'Dalian, 1945; circumstances unconfirmed'}}}
+
+
+def codes_result(**answers):
+    return DecisionResult(decision=Decision(answers={
+        k: {'choice': c, 'confidence': p, 'probabilities': {c: p}} for k, (c, p) in answers.items()}, model='typesafe/jev-test'))
+
+
+class ClassifyCodesTests(unittest.TestCase):
+    def setUp(self):
+        p = patch('llm.call_registry.resolve', return_value=CODES_PROFILE); p.start(); self.addCleanup(p.stop)
+
+    def test_labels_and_claims_feed_one_request_and_fill_both_codes(self):
+        seen = {}
+        def decide(feature, state, questions, label=None):
+            seen.update(feature=feature, state=state, questions=set(questions))
+            return codes_result(citizenship=('soviet', 0.99), fate=('murdered', 0.86))
+        claims = {'fate': [{'claim': 'Killed by Soviet fire in Dalian', 'excerpt': 'погиб в Дайрэне'}]}
+        codes = cc.classify_person_codes(CARD, claims=claims, decide=decide)
+        self.assertEqual(seen['feature'], cc.CODES_FEATURE)
+        self.assertEqual(seen['questions'], {'citizenship', 'fate'})
+        self.assertEqual(seen['state']['fate_claims'][0]['excerpt'], 'погиб в Дайрэне')
+        filled = cc.fill_person_codes(CARD, codes)
+        self.assertEqual(filled['citizenship']['code'], 'soviet')
+        self.assertEqual(filled['fate']['kind'], 'murdered')
+        self.assertEqual(cc.missing_person_codes(filled), [])
+        self.assertEqual(cc.missing_person_codes(CARD), ['citizenship.code', 'fate.kind'])
+
+    def test_unconfirmed_maps_to_empty_kind_and_unsure_yields_to_writer(self):
+        def decide(feature, state, questions, label=None):
+            return codes_result(citizenship=('russia', 0.4), fate=('unconfirmed', 0.9))
+        codes = cc.classify_person_codes(CARD, decide=decide)
+        self.assertEqual(codes['fate']['kind'], '')
+        writer = {**CARD, 'citizenship': {**CARD['citizenship'], 'code': 'soviet'}}
+        filled = cc.fill_person_codes(writer, codes)
+        self.assertEqual(filled['citizenship']['code'], 'soviet')   # unsure → writer's value kept
+        self.assertEqual(cc.fill_person_codes(CARD, codes)['citizenship']['code'], 'russia')  # nothing to yield to
+        self.assertEqual(filled['fate']['kind'], '')
+
+    def test_living_person_gets_empty_fate_without_asking_about_it(self):
+        def decide(feature, state, questions, label=None):
+            self.assertEqual(set(questions), {'citizenship'})
+            return codes_result(citizenship=('hungary', 0.95))
+        codes = cc.classify_person_codes({**CARD, 'years': '1963–'}, decide=decide)
+        self.assertEqual(codes['fate'], {'kind': '', 'confidence': 1.0, 'low_confidence': False})
+        self.assertEqual(codes['citizenship']['code'], 'hungary')
+
+    def test_unavailable_model_leaves_codes_missing(self):
+        codes = cc.classify_person_codes(CARD, decide=lambda *a, **k: DecisionResult(error_kind='server', error='503'))
+        self.assertIsNone(codes)
+        self.assertEqual(cc.missing_person_codes(cc.fill_person_codes(CARD, codes)), ['citizenship.code', 'fate.kind'])
+
+    def test_create_tool_schema_no_longer_requires_the_codes(self):
+        from runtime_tools.commulingo_people import COMMULINGO_PERSON_CREATE_TOOL, _NATIONALITY_SCHEMA
+        props = COMMULINGO_PERSON_CREATE_TOOL['input_schema']['properties']['fields']['properties']
+        self.assertEqual(props['citizenship']['required'], ['label'])
+        self.assertEqual(props['fate']['required'], ['label'])
+        self.assertEqual(props['nationalOrigin']['required'], ['code', 'label'])
+        self.assertEqual(_NATIONALITY_SCHEMA['required'], ['code', 'label'])  # shared object untouched

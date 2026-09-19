@@ -166,6 +166,116 @@ def fill_term_category(fields: dict, classification: dict | None) -> dict:
     return out
 
 
+CODES_FEATURE = "commulingo_person_codes"
+FATE_CRITERIA = {
+    "unconfirmed": "not stated, disputed, unknown, or the person is still living",
+    "executed": "executed after a sentence or purge",
+    "assassinated": "assassinated by an attacker",
+    "murdered": "murdered outside a judicial process",
+    "killed": "killed in war or action",
+    "suicide": "died by suicide",
+    "deposed": "removed from power and lived on",
+    "exile": "died in exile or emigration",
+    "natural": "died a natural death (illness, old age)",
+}
+# nationalOrigin stays with the writer: on the 2026-09-19 baseline Jev matched
+# the writer's origin code only 42/49 (a Jewish background became "israel").
+
+
+def _living(years) -> bool:
+    return str(years or "").strip().endswith("–")
+
+
+def person_code_questions(fields: dict, citizenship_codes) -> dict:
+    """One question per code the card carries without a value: the
+    citizenship object's code and the fate object's kind."""
+    questions = {}
+    if isinstance(fields.get("citizenship"), dict):
+        questions["citizenship"] = {
+            "type": "choice", "criteria": {c: c for c in citizenship_codes},
+            "instructions": "Which state code matches the citizenship label and the source excerpts? soviet for Soviet "
+                            "citizens; the state of most of the person's public life."}
+    if isinstance(fields.get("fate"), dict) and not _living(fields.get("years")):
+        questions["fate"] = {
+            "type": "choice", "criteria": FATE_CRITERIA,
+            "instructions": "How did this person's life or career end, according to the fate label and the source excerpts?"}
+    return questions
+
+
+def person_code_state(fields: dict, claims: dict | None) -> dict:
+    """Labels the writer wrote plus the research excerpts for those fields."""
+    claims = claims or {}
+    return {"name": state_from_fields(fields)["name"], "years": fields.get("years"),
+            "citizenship_label": (fields.get("citizenship") or {}).get("label"),
+            "citizenship_claims": claims.get("citizenship", [])[:4],
+            "fate_label": (fields.get("fate") or {}).get("label"),
+            "fate_claims": claims.get("fate", [])[:4]}
+
+
+def classify_person_codes(fields: dict, *, claims: dict | None = None, decide=None) -> dict | None:
+    """{"citizenship": {"code", "confidence", "low_confidence"}, "fate": {"kind", ...}} for the code
+    objects present on the card, or None when the model is unavailable. A living
+    person's fate is the empty kind without a call. ``claims`` maps field name to
+    [{"claim", "excerpt"}] from the research artifact."""
+    from llm.call_registry import decide_detailed, resolve
+    from runtime_tools.commulingo_people import _NATIONALITY_CODES
+
+    profile = resolve(CODES_FEATURE)
+    extra = profile.extra or {}
+    if not extra.get("enabled", True):
+        return None
+    accept = float((extra.get("thresholds") or {}).get("accept", DEFAULT_ACCEPT))
+    out = {}
+    if isinstance(fields.get("fate"), dict) and _living(fields.get("years")):
+        out["fate"] = {"kind": "", "confidence": 1.0, "low_confidence": False}
+    questions = person_code_questions(fields, sorted(_NATIONALITY_CODES))
+    if not questions:
+        return out
+    result = (decide or decide_detailed)(CODES_FEATURE, person_code_state(fields, claims), questions,
+                                         label="person-codes")
+    decision = result.decision
+    if decision is None:
+        logger.warning("person code classification unavailable: %s", result.error)
+        return None
+    if "citizenship" in questions and decision.choice("citizenship") in _NATIONALITY_CODES:
+        conf = round(decision.confidence("citizenship") or 0.0, 3)
+        out["citizenship"] = {"code": decision.choice("citizenship"), "confidence": conf, "low_confidence": conf < accept}
+    if "fate" in questions and decision.choice("fate") in FATE_CRITERIA:
+        conf = round(decision.confidence("fate") or 0.0, 3)
+        kind = decision.choice("fate")
+        out["fate"] = {"kind": "" if kind == "unconfirmed" else kind, "confidence": conf, "low_confidence": conf < accept}
+    out["model"] = decision.model
+    return out
+
+
+def fill_person_codes(fields: dict, codes: dict | None) -> dict:
+    """Copy of ``fields`` with citizenship.code / fate.kind set from the
+    classification; an unsure classification yields to a writer's value."""
+    out = dict(fields)
+    if not codes:
+        return out
+    for field, key in (("citizenship", "code"), ("fate", "kind")):
+        judged = codes.get(field)
+        if not judged or not isinstance(out.get(field), dict):
+            continue
+        obj = dict(out[field])
+        if judged["low_confidence"] and obj.get(key) not in (None,):
+            continue
+        obj[key] = judged[key]
+        out[field] = obj
+    return out
+
+
+def missing_person_codes(fields: dict) -> list[str]:
+    """Code objects on the card that still lack their code/kind."""
+    missing = []
+    if isinstance(fields.get("citizenship"), dict) and not fields["citizenship"].get("code"):
+        missing.append("citizenship.code")
+    if isinstance(fields.get("fate"), dict) and fields["fate"].get("kind") is None:
+        missing.append("fate.kind")
+    return missing
+
+
 def offices_allowed(citizenship_code: str | None) -> bool:
     return (citizenship_code or "") in SOVIET_CITIZENSHIP | SOVIET_SUCCESSORS
 

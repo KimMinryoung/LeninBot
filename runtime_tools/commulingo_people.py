@@ -28,6 +28,7 @@ Person writes and approvals use its shared Admin store through private local RPC
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
 import json
 import logging
 import os
@@ -2936,6 +2937,15 @@ def _run_edit(target_type: str, action: str, target_id: str, patch: dict,
         if isinstance(fields.get("role"), dict) and "categoryId" in fields["role"]:
             fields["role"] = {**fields["role"], "category": fields["role"]["categoryId"]}
             fields["role"].pop("categoryId")
+        if target_type == "person":
+            from runtime_tools.commulingo_classify import classify_person_codes, fill_person_codes, missing_person_codes
+            if missing_person_codes(fields):
+                codes = classify_person_codes(fields)
+                fields = fill_person_codes(fields, codes)
+                still = missing_person_codes(fields)
+                if still:
+                    return ("Error: automatic code assignment is unavailable right now; supply "
+                            + " and ".join(still) + " yourself.")
         if target_type == "person" and action == "create" and not (fields.get("groupId") and fields.get("role")):
             from runtime_tools.commulingo_classify import classify_person, fill_classification
             classification = classify_person(fields)
@@ -3824,6 +3834,15 @@ def _person_write_tool(name: str, action: str) -> dict:
     required_fields = (
         "epithet", "bio", "career", "citizenship", "nationalOrigin", "evidence",
     ) if action == "create" else ("expectedRevision", "evidence")
+    fields_schema = _narrow_fields_schema(field_keys, required=required_fields)
+    # The runner assigns citizenship.code and fate.kind from the labels
+    # (commulingo_classify.classify_person_codes); the writer writes the label
+    # and may still name the code. Copy the shared objects before relaxing them.
+    for key, code in (("citizenship", "code"), ("fate", "kind")):
+        if key in fields_schema["properties"]:
+            relaxed = deepcopy(fields_schema["properties"][key])
+            relaxed["required"] = [r for r in relaxed.get("required", []) if r != code]
+            fields_schema["properties"][key] = relaxed
     return {
         "name": name,
         "description": (
@@ -3831,6 +3850,7 @@ def _person_write_tool(name: str, action: str) -> dict:
             "citations are a separate top-level argument. Public text is bilingual {ko,en}. "
             "Put evidence and reviewFlags INSIDE fields. expectedRevision and collection edits are update-only. "
             "On create, omit groupId and role: the runner classifies the person from the card. "
+            "Write citizenship and fate as labels; their code/kind may be omitted, the runner assigns them. "
             "Read the record and reference lists first. On create, citizenship and "
             "nationalOrigin require evidence; if unknown, research or defer registration, never guess. Soviet and Yugoslav codes are citizenship-only. Preserve mixed ancestry in labels. "
             "nationalOrigin means national/ethnic "
@@ -3847,7 +3867,7 @@ def _person_write_tool(name: str, action: str) -> dict:
             "additionalProperties": False,
             "properties": {
                 "person_id": {"type": "string", "description": "Existing id or new lowercase kebab-case slug."},
-                "fields": _narrow_fields_schema(field_keys, required=required_fields),
+                "fields": fields_schema,
                 "citations": _CITATIONS_SCHEMA,
                 "confidence": {"type": "number", "minimum": 0, "maximum": 1},
             },

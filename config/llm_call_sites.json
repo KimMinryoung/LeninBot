@@ -381,6 +381,15 @@
     "thresholds": {"accept": 0.7},
     "note": "용어 등록 시 category 자동 배정(runtime_tools/commulingo_classify.py::classify_term). 작성 모델은 category를 내지 않고 실행기가 term·정의·기간·본문으로 Jev choice(10종)를 받아 채운다. confidence<thresholds.accept이고 작성 모델이 값을 줬으면 그 값 유지, 판정 불가면 직접 지정 요구. 2026-09-19 기준선(저장 용어 1,086건, 작성 모델이 고른 값이라 일관성 낮음): 일치 813, conf≥0.85 628/714, ≥0.95 521/565. 용어당 ~$0.00007. dev_docs/commulingo_editorial.md"
     },
+  "commulingo_person_codes": {
+    "provider": "openrouter",
+    "model": "typesafe/jev-1.13",
+    "timeout": 20,
+    "kind": "system_one",
+    "enabled": true,
+    "thresholds": {"accept": 0.7},
+    "note": "인물 등록·수정 시 citizenship.code(국가 코드 ~190종)와 fate.kind(9종) 자동 배정(runtime_tools/commulingo_classify.py::classify_person_codes). 작성 모델은 라벨 문장만 쓰고 실행기가 라벨+조사 claim 발췌(파이프라인) 또는 라벨만(도구)으로 Jev choice를 받아 코드를 채운다. 생존 인물의 fate는 호출 없이 빈 kind. confidence<accept이고 작성 모델이 값을 줬으면 그 값 유지, 판정 불가면 직접 지정 요구. nationalOrigin.code는 작성 모델이 계속 고른다(기준선 42/49, 유대계→israel 오류). 2026-09-19 기준선(최근 초안 60건): citizenship 50/50, fate 32/35. dev_docs/commulingo_editorial.md"
+    },
   "commulingo_classification_audit": {
     "provider": "openrouter",
     "model": "typesafe/jev-1.13",

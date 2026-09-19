@@ -601,6 +601,16 @@ class Draft:
                     for field in ('group','groupId'):
                         schema['properties'].pop(field,None)
                 schema['required'] = [f for f in schema.get('required',[]) if f in schema['properties']]
+        classify_codes = None
+        if job['kind']=='person' and not section:
+            # citizenship.code and fate.kind come from the labels plus the research
+            # excerpts (commulingo_classify.classify_person_codes); the writer
+            # writes the labels and may still name a code.
+            from runtime_tools.commulingo_classify import classify_person_codes
+            classify_codes = classify_person_codes
+            for key,code in (('citizenship','code'),('fate','kind')):
+                if key in schema['properties'] and isinstance(schema['properties'][key],dict):
+                    schema['properties'][key]['required'] = [r for r in schema['properties'][key].get('required',[]) if r!=code]
         classify_term = None
         if job['kind']=='term' and job['action']=='create':
             # Same arrangement for a term's category (commulingo_classify.classify_term).
@@ -701,6 +711,21 @@ class Draft:
                 raise ValueError('empty edit')
             if groups and any(fields[f] not in group_ids for f in ('group','groupId') if f in fields):
                 raise ValueError('select group/groupId from the supplied person group catalog')
+            if classify_codes is not None:
+                from runtime_tools.commulingo_classify import fill_person_codes, missing_person_codes
+                if missing_person_codes(fields) or any(isinstance(fields.get(k),dict) for k in ('citizenship','fate')):
+                    excerpts = {}
+                    for c in claims:
+                        if c.get('field') in ('citizenship','fate') and c.get('source_id') in sources:
+                            body = sources[c['source_id']].get('body') or ''
+                            excerpts.setdefault(c['field'],[]).append({'claim':c.get('claim'),'excerpt':body[c.get('start',0):c.get('end',0)][:1500]})
+                    codes = await asyncio.to_thread(classify_codes, fields, claims=excerpts)
+                    fields = fill_person_codes(fields, codes)
+                    still = missing_person_codes(fields)
+                    if still:
+                        raise ValueError('automatic code assignment is unavailable; supply ' + ' and '.join(still) + ' in this draft')
+                    if codes:
+                        usage.tracker.setdefault('classification',{})['codes'] = {k:v['confidence'] for k,v in codes.items() if isinstance(v,dict)}
             if classify is not None:
                 from runtime_tools.commulingo_classify import fill_classification
                 classification = await asyncio.to_thread(classify, fields, catalogs=catalogs)
@@ -763,6 +788,8 @@ class Draft:
                'commissioned again for them. Give sortOrder as the chronological key of the period the section opens on.\n' if section else '')
             +             'Write bilingual equivalent claims; do not fill space or add facts beyond the research. '
             + ('For a new term, omit category: the runner assigns it from the definition after the draft. ' if classify_term is not None else '')
+            + ('Write citizenship and fate as labels only; the runner assigns citizenship.code and fate.kind from the '
+               'labels and the research. ' if classify_codes is not None else '')
             + ('For a new person, omit groupId and role: the runner assigns them from the card after the draft. '
                if classify is not None else
                'For people, choose group/groupId from person_groups using their descriptions, not title alone. '

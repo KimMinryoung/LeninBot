@@ -218,7 +218,11 @@ max_length_continuations로 실제 도구 루프에 전달한다. 응답당 8,00
 `reviewFlags: identity_uncertain`을 붙여 독립 검토자가 확인하게 하고, 판정 불가(None)면 작성 모델에 직접 지정을 요구한다.
 파이프라인 초안 단계(`stages.Draft`)와 `commulingo_person_create` 도구 양쪽이 같은 함수를 쓰며, 초안 프롬프트에서는 그룹·카테고리
 카탈로그가 빠진다. update에서는 기존 분류가 잠겨 있으므로 해당 없음. `enabled=false`면 예전처럼 작성 모델이 고른다.
-용어 create의 `category`(10종)도 같다: `classify_term`(registry `commulingo_term_classification`)이 term·정의·기간·본문으로 고르고,
+`citizenship.code`(국가 코드)와 `fate.kind`도 실행기가 채운다(`classify_person_codes`, registry `commulingo_person_codes`,
+create·update 모두): 작성 모델은 라벨 문장만 쓰고, 파이프라인은 라벨 + 해당 필드의 조사 claim 발췌를, 도구 경로는 라벨만 Jev에
+준다. 생존 인물(`years`가 `–`로 끝남)의 fate는 호출 없이 빈 kind. 기준선(최근 초안 60건): citizenship 50/50, fate 32/35 —
+불일치 3건 중 claim 없는 초안에서 작성 모델이 natural로 적은 것을 Jev가 unconfirmed로 본 것이 포함된다. `nationalOrigin.code`는
+작성 모델이 계속 고른다(42/49, 유대계 배경을 israel로 고르는 오류). 용어 create의 `category`(10종)도 같다: `classify_term`(registry `commulingo_term_classification`)이 term·정의·기간·본문으로 고르고,
 confidence가 0.7 미만인데 작성 모델이 값을 줬으면 그 값을 남긴다. 저장된 용어 1,086건(작성 모델이 고른 값)과의 일치는 813,
 conf ≥0.85에서 628/714 — 저장값 자체의 일관성이 낮아 정확도 상한이 아니라 관행 재현율이다.
 
