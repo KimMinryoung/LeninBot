@@ -441,6 +441,11 @@ def roleplay_state(action: str, changes: dict | None = None, reason: str = "", *
         elif alias in INTERVAL_ALIASES:
             interval_conditions = interval_conditions or extra.pop(alias)
             warnings.append(f"{alias}는 interval_conditions로 해석함")
+    if isinstance(changes, dict) and isinstance(changes.get("metric_reasons"), dict):
+        inner_reasons = dict(changes).pop("metric_reasons")
+        changes = {k: v for k, v in changes.items() if k != "metric_reasons"}
+        metric_reasons = {**inner_reasons, **(metric_reasons if isinstance(metric_reasons, dict) else {})}
+        warnings.append("changes 안의 metric_reasons는 최상위 인자로 옮겨 적용함")
     changes, inner_reason, injury_upserts = _normalize_changes(changes, extra, warnings)
     if extra:
         raise ValueError(f"Unknown argument(s) {sorted(extra)}. Accepted: action, changes, reason, expected_revision, temporal, interval_conditions, person_updates, person_review, adjustment, event_id, metric_reasons, event_type")
@@ -511,6 +516,9 @@ def roleplay_state(action: str, changes: dict | None = None, reason: str = "", *
                 interval_state["conditions_initialized"] = True
             base = interpret_clock(interval_state, temporal, advance)
             base["recent_events"] = (before["recent_events"] + [event_id])[-100:]
+            if (base.get("last_calculation") or {}).get("threat_relieved"):
+                warnings.append(f"현장에 아무도 없는 {base['last_calculation']['to_minute'] - base['last_calculation']['from_minute']}분의 휴식·수면 구간이라 "
+                                f"위협 {interval_state['threat']}은 uncertain으로 계산·저장함. 방문·호출 예고 같은 실제 위협이 이어지면 changes.threat로 되돌리고 그 근거를 reason에 적음")
             if "injuries" in changes:
                 changes["injuries"] = reconcile_injuries(interval_state["injuries"], base["injuries"], changes["injuries"])
         elif action == "reset":

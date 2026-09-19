@@ -26,15 +26,57 @@ class DynamicsTests(unittest.TestCase):
 
     def test_injury_trends_and_threat_adaptation(self):
         injury = {'id': 'arm', 'description': '팔 부상', 'severity': 2, 'trend': 'stable', 'treated': False}
-        self.assertEqual(advance(self.initial(injuries=[injury]), 120, '두 시간')['pain'], 40)
+        # Pain above the floor (8 for this wound) is acute and halves every two resting hours.
+        stable = advance(self.initial(injuries=[injury]), 120, '두 시간')['pain']
+        self.assertEqual(stable, 24)
         injury['trend'] = 'worsening'
-        self.assertEqual(advance(self.initial(injuries=[injury]), 120, '두 시간')['pain'], 42)
+        worse = advance(self.initial(injuries=[injury]), 120, '두 시간')['pain']
+        self.assertAlmostEqual(worse, stable + 2, delta=0.3)  # +1/h drift on top of the decay
         injury['treated'] = True
-        self.assertEqual(advance(self.initial(injuries=[injury]), 120, '두 시간')['pain'], 41)
+        treated = advance(self.initial(injuries=[injury]), 120, '두 시간')['pain']
+        self.assertLess(treated, worse)
         injury['trend'] = 'recovering'
-        self.assertEqual(advance(self.initial(injuries=[injury]), 120, '두 시간')['pain'], 39)
-        self.assertEqual(advance(self.initial(threat='safe'), 120, '두 시간')['tension'], 38)
-        self.assertEqual(advance(self.initial(threat='threatening'), 120, '두 시간')['tension'], 62)
+        self.assertLess(advance(self.initial(injuries=[injury]), 120, '두 시간')['pain'], treated)
+        self.assertEqual(advance(self.initial(threat='safe', participants=['x']), 120, '두 시간')['tension'], 38)
+        self.assertEqual(advance(self.initial(threat='threatening', participants=['x']), 120, '두 시간')['tension'], 62)
+
+    def test_acute_pain_subsides_by_activity(self):
+        wounds = [{'id': 'cheek', 'description': '뺨 타박', 'severity': 1, 'trend': 'stable', 'treated': False},
+                  {'id': 'glute', 'description': '볼기 멍', 'severity': 2, 'trend': 'stable', 'treated': True}]
+        floor = 9.76  # noisy-or of 4 and 6
+        beaten = self.initial(pain=68, injuries=wounds, participants=['guard'])
+        # A night of poor sleep after a beating brings pain back close to what the wounds imply.
+        night = advance({**beaten, 'activity': 'sleep', 'sleep_quality': 'poor', 'participants': []}, 450, '밤')
+        self.assertLess(night['pain'], floor + 5)
+        self.assertGreaterEqual(night['pain'], floor)
+        # Rest halves the excess every two hours; light activity every three; exertion holds it.
+        self.assertAlmostEqual(advance(beaten, 120, '두 시간 휴식')['pain'], floor + (68 - floor) / 2, delta=0.01)
+        self.assertAlmostEqual(advance({**beaten, 'activity': 'light'}, 180, '세 시간')['pain'], floor + (68 - floor) / 2 + 0.9, delta=0.2)  # plus 0.3/h of movement
+        self.assertEqual(advance({**beaten, 'activity': 'strenuous'}, 60, '강요')['pain'], 68 + 1.5 * 3)
+        # Decay never goes below the floor, and a floor-level pain stays put under stable wounds.
+        self.assertEqual(advance(self.initial(pain=floor, injuries=wounds), 600, '열 시간')['pain'], floor)
+        # Long passages are stepped hourly, so a drain keyed to pain > 60 stops once pain has eased.
+        stepped = advance({**beaten, 'threat': 'uncertain', 'resolve': 40, 'clarity': 60, 'humiliation': 50}, 480, '여덟 시간')
+        self.assertGreater(stepped['resolve'], 40 - 8 + 0.5 * 8 - 3)  # at most a few hours of the pain drain
+        self.assertEqual(stepped['last_calculation']['from_minute'], 0)
+        self.assertEqual(stepped['last_calculation']['before']['pain'], 68)
+
+    def test_alone_at_rest_relieves_threat(self):
+        mental = dict(resolve=11, clarity=58, humiliation=100)
+        alone = self.initial(threat='threatening', activity='sleep', sleep_quality='poor', pain=45, participants=[], **mental)
+        night = advance(alone, 448, '홀로 보낸 밤')
+        self.assertEqual(night['threat'], 'uncertain')
+        self.assertTrue(night['last_calculation']['threat_relieved'])
+        self.assertEqual(night['last_calculation']['conditions']['threat'], 'uncertain')
+        self.assertGreater(night['resolve'], 11)  # no threat drain while nobody is there
+        self.assertEqual(night['calm_minutes'], 448)
+        # Someone present, a short absence, or an interval of exertion keeps the threat as given.
+        with_guard = advance({**alone, 'participants': ['guard']}, 448, '간수와 밤')
+        self.assertEqual((with_guard['threat'], with_guard['resolve']), ('threatening', 0))
+        self.assertFalse(with_guard['last_calculation']['threat_relieved'])
+        self.assertEqual(advance(alone, 45, '잠깐')['threat'], 'threatening')
+        self.assertEqual(advance({**alone, 'activity': 'strenuous'}, 120, '강요')['threat'], 'threatening')
+        self.assertEqual(advance({**alone, 'threat': 'immediate', 'activity': 'rest'}, 60, '혼자 휴식')['threat'], 'uncertain')
 
     def test_pain_floor_and_healing_timeline(self):
         from runtime_tools.roleplay_dynamics import injury_pain_floor, progress_injuries, carry_injury_progress
@@ -140,15 +182,18 @@ class DynamicsTests(unittest.TestCase):
         self.assertEqual((safe_rest['resolve'], safe_rest['clarity'], safe_rest['humiliation']), (52, 51, 49.5))
         coerced = advance(self.initial(threat='immediate', activity='strenuous', fatigue=75, pain=65, **mental), 60, '강요 한 시간')
         self.assertEqual((coerced['resolve'], coerced['clarity'], coerced['humiliation']), (45, 47, 50))
+        # Hourly steps thin the second hour's gain a little (see _diminish), so two hours fall just short of 2x.
         slept = advance(self.initial(activity='sleep', sleep_quality='good', threat='uncertain', **mental), 120, '두 시간 숙면')
-        self.assertEqual((slept['resolve'], slept['clarity']), (53, 60))
+        self.assertAlmostEqual(slept['resolve'], 53, delta=0.1)
+        self.assertAlmostEqual(slept['clarity'], 60, delta=0.7)
         poor = advance(self.initial(activity='sleep', sleep_quality='poor', threat='uncertain', **mental), 120, '두 시간 선잠')
-        self.assertEqual((poor['resolve'], poor['clarity']), (51, 52))
+        self.assertAlmostEqual(poor['resolve'], 51, delta=0.1)
+        self.assertAlmostEqual(poor['clarity'], 52, delta=0.1)
         # Unset mental values stay unset; physical drift is unaffected by them.
         unset = advance(self.initial(threat='immediate'), 60, '정신 수치 미설정')
         self.assertIsNone(unset['resolve'])
         self.assertEqual(unset['hunger'], 33)
-        bounded = advance(self.initial(resolve=1, clarity=99, activity='sleep', sleep_quality='good', threat='immediate'), 120, '경계값')
+        bounded = advance(self.initial(resolve=1, clarity=99, activity='sleep', sleep_quality='good', threat='immediate', participants=['x']), 120, '경계값')
         self.assertEqual(bounded['resolve'], 0)
         self.assertEqual(bounded['clarity'], 99)  # drift never lifts a mind past the ceiling
         # Recovery thins out near the ceiling: a resolute mind gains little from a quiet hour.
@@ -304,6 +349,20 @@ class StateTransactionTests(unittest.TestCase):
         self.assertEqual(state['injuries'][0]['progress_minutes'], 0)
         self.assertEqual(result['last_calculation']['injury_changes'], [{'id': 'burn', 'from': 2, 'to': 1}])
         self.assertEqual(result['pain_floor'], 3)
+
+    def test_alone_interval_warning_and_inner_metric_reasons(self):
+        temporal = {'relation': 'current', 'certainty': 'estimated', 'operation': 'advance', 'elapsed_minutes': 448,
+                    'source_quote': '밤을 넘겼다', 'interpretation': '홀로 보낸 밤'}
+        result = json.loads(memory.roleplay_state('time', reason='밤', expected_revision=1, event_id='night', temporal=temporal,
+                            interval_conditions={'activity': 'sleep', 'sleep_quality': 'poor', 'threat': 'threatening'},
+                            person_updates=[], person_review='없음'))
+        self.assertEqual(memory.load_state(1)['threat'], 'uncertain')
+        self.assertTrue(any('uncertain으로 계산' in w for w in result['warnings']))
+        result = json.loads(memory.roleplay_state('update', {'pain': 30, 'metric_reasons': {'pain': '뺨을 맞음'}}, '구타',
+                                                  expected_revision=2, adjustment='event', event_id='slap'))
+        self.assertEqual(memory.load_state(1)['pain'], 30)
+        self.assertTrue(any('metric_reasons' in w for w in result['warnings']))
+        self.assertEqual(json.loads(memory.roleplay_state('history'))[0]['metric_reasons'], {'pain': '뺨을 맞음'})
 
     def test_tension_event_resets_calm(self):
         temporal = {'relation': 'current', 'certainty': 'explicit', 'operation': 'advance', 'elapsed_minutes': 600,

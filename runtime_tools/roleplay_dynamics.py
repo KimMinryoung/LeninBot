@@ -33,6 +33,17 @@ MOVEMENT_PAIN = {"rest": 0, "sleep": 0, "light": 0.1, "moderate": 0.5, "strenuou
 HEALING_STEP = {True: 1440, False: 2880}
 WORSENING_STEP = {True: 2880, False: 1440}
 PAIN_HINDERS_REST = 50  # at or above this, rest and sleep recover half the fatigue
+# Pain above the floor the wounds imply is acute (a blow, a struggle) and subsides
+# on its own: it halves every N hours by activity, never during exertion.
+ACUTE_PAIN_HALF_LIFE_HOURS = {"rest": 2.0, "sleep": 2.0, "light": 3.0, "moderate": 6.0, "strenuous": None}
+# Long passages are computed in steps so thresholds crossed inside them (pain
+# easing below 60, an isolation stage starting, calm hours piling up) count.
+CALCULATION_STEP_MINUTES = 60
+# Resting or sleeping with nobody present for at least this long means the
+# threat is not in the room: threatening/immediate compute as uncertain and the
+# stored threat eases too (a visitor's return is a tension event, then a new threat).
+ALONE_THREAT_RELIEF_MINUTES = 60
+ALONE_THREAT_RELIEF_ACTIVITIES = ("rest", "sleep")
 # Solitary confinement: hours without anyone present accumulate; a visit of
 # 30 minutes or more breaks the streak, a shorter one (a meal pushed through
 # the door) only takes a few hours off it. Effects add to the other drifts.
@@ -237,8 +248,50 @@ def advance(state, target_minute, time_basis):
         raise ValueError("Time cannot be calculated until activity, sleep_quality, threat and injuries are all set for this scene: pass all four in interval_conditions (or set them with update first)")
     if not isinstance(time_basis, str) or not 1 <= len(time_basis.strip()) <= 300:
         raise ValueError("Explain the fictional elapsed time in time_basis (1–300 characters)")
+    minutes = target_minute - start
+    threat_relieved = (not state.get("participants") and minutes >= ALONE_THREAT_RELIEF_MINUTES
+                       and state["activity"] in ALONE_THREAT_RELIEF_ACTIVITIES
+                       and state["threat"] in ("threatening", "immediate"))
+    conditions = {k: deepcopy(state[k]) for k in ("activity", "sleep_quality", "threat", "injuries")}
+    if threat_relieved:
+        conditions["threat"] = "uncertain"
     result = deepcopy(state)
-    hours = (target_minute - start) / 60
+    result["threat"] = conditions["threat"]
+    injury_changes = []
+    targets, tension_targets = [], []
+    cursor = start
+    while cursor < target_minute:
+        step_end = min(target_minute, cursor + CALCULATION_STEP_MINUTES)
+        result, step_changes, target = _step(result, step_end - cursor)
+        injury_changes.extend(step_changes)
+        tension_targets.append(target)
+        cursor = step_end
+    result.update(scene_minute=target_minute, last_calculated_minute=target_minute, time_basis=time_basis.strip())
+    result["last_calculation"] = {
+        "from_minute": start, "to_minute": target_minute, "basis": time_basis.strip(),
+        "conditions": conditions,
+        "before": {k: state[k] for k in METRICS}, "after": {k: result[k] for k in METRICS},
+        "pain_floor": injury_pain_floor(state["injuries"]), "tension_target": tension_targets[-1],
+        "injury_changes": _merge_injury_changes(injury_changes),
+        "isolation_stage": (isolation_stage(state.get("isolation_minutes", 0)) or {}).get("label"),
+        "healed": [c["id"] for c in _merge_injury_changes(injury_changes) if c["to"] == 0],
+        "threat_relieved": threat_relieved,
+    }
+    return result
+
+
+def _merge_injury_changes(changes):
+    merged = {}
+    for change in changes:
+        entry = merged.setdefault(change["id"], {"id": change["id"], "from": change["from"], "to": change["to"]})
+        entry["to"] = change["to"]
+    return [c for c in merged.values() if c["from"] != c["to"]]
+
+
+def _step(state, minutes):
+    """One calculation step from the conditions at its start; returns (state, injury changes, tension target)."""
+    result = deepcopy(state)
+    hours = minutes / 60
     activity = state["activity"]
     pain = state["pain"]
     fatigue_rate = ACTIVITIES[activity]
@@ -254,30 +307,23 @@ def advance(state, target_minute, time_basis):
     elif pain < floor:
         pain_delta = min(floor - pain, max(pain_rate, PAIN_FLOOR_APPROACH) * hours)
     else:
-        pain_delta = max(floor - pain, pain_rate * hours)
+        half_life = ACUTE_PAIN_HALF_LIFE_HOURS[activity]
+        acute = (pain - floor) * (0.5 ** (hours / half_life) if half_life else 1)
+        pain_delta = max(floor, floor + acute + pain_rate * hours) - pain
     tension = state["tension"]
     target = tension_target(state)
     tension_delta = 0 if tension is None else max(-6 * hours, min(6 * hours, target - tension))
     calm = state["threat"] in ("safe", "uncertain")
-    result["calm_minutes"] = state.get("calm_minutes", 0) + (target_minute - start) if calm else 0
-    result["isolation_minutes"] = isolation_after(state, target_minute - start)
+    result["calm_minutes"] = state.get("calm_minutes", 0) + minutes if calm else 0
+    result["isolation_minutes"] = isolation_after(state, minutes)
     deltas = {"hunger": 3 * hours, "fatigue": fatigue_rate * hours,
               "pain": pain_delta, "tension": tension_delta}
     deltas.update({k: v * hours for k, v in mental_rates(state).items()})
     for key, delta in deltas.items():
         if state[key] is not None:
             result[key] = round(max(0, min(100, state[key] + delta)), 4)
-    result["injuries"], injury_changes = progress_injuries(state["injuries"], target_minute - start)
-    result.update(scene_minute=target_minute, last_calculated_minute=target_minute, time_basis=time_basis.strip())
-    result["last_calculation"] = {
-        "from_minute": start, "to_minute": target_minute, "basis": time_basis.strip(),
-        "conditions": {k: deepcopy(state[k]) for k in ("activity", "sleep_quality", "threat", "injuries")},
-        "before": {k: state[k] for k in METRICS}, "after": {k: result[k] for k in METRICS},
-        "pain_floor": floor, "tension_target": target, "injury_changes": injury_changes,
-        "isolation_stage": (isolation_stage(state.get("isolation_minutes", 0)) or {}).get("label"),
-        "healed": [c["id"] for c in injury_changes if c["to"] == 0],
-    }
-    return result
+    result["injuries"], injury_changes = progress_injuries(state["injuries"], minutes)
+    return result, injury_changes, target
 
 
 CONDITION_SCHEMA = {
