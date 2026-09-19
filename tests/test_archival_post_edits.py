@@ -65,6 +65,16 @@ class ParticleRepair(unittest.TestCase):
         html = assemble(spec, docs, {0: ["소비에트 소유즈와 세계"]})
         self.assertIn("소비에트 연방과 세계", html)
 
+    def test_heading_note_refs_are_linked_like_prose(self):
+        spec = {"title": "t"}
+        docs = [{"id": "d", "titleKo": "d", "heading": False, "offset": 0,
+                 "blocks": [{"tag": "h4", "lines": ["Article 6 [1]"]}]},
+                {"id": "n", "titleKo": "주석", "notes": True, "offset": 1,
+                 "blocks": [{"tag": "p", "lines": ["1. note"]}]}]
+        html = assemble(spec, docs, {0: ["제6조 [1]"], 1: ["1. 주석"]})
+        self.assertIn('<h3><a class="note-ref" id="ref-1" href="#note-1">[1]</a></h3>'.replace("<h3>", "<h3>제6조 "), html)
+        self.assertIn('href="#ref-1"', html)
+
 
 if __name__ == "__main__":
     unittest.main()

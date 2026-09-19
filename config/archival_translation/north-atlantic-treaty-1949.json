@@ -1,0 +1,106 @@
+{
+  "id": "north-atlantic-treaty-1949",
+  "title": "북대서양 조약 — 워싱턴 조약 전문 (1949년 4월 4일)",
+  "byline": "벨기에·캐나다·덴마크·프랑스·아이슬란드·이탈리아·룩셈부르크·네덜란드·노르웨이·포르투갈·영국·미국",
+  "bylineNote": "1949년 4월 4일 워싱턴 서명, 1949년 8월 24일 발효",
+  "sourceLang": "en",
+  "headnote": [
+    "1949년 4월 4일 워싱턴에서 열두 나라가 서명한 북대서양 조약(워싱턴 조약)의 전문이다. 열네 개 조로 된 짧은 문서로, 나토라는 기구는 제9조가 세운 이사회에서 자라났다. 제4조는 어느 당사국이든 위협을 느끼면 협의를 요구할 수 있게 하고, 제5조는 한 나라에 대한 무력 공격을 전체에 대한 공격으로 간주하되 각국이 「필요하다고 판단하는 행동」을 취한다고 정하여 자동 참전을 규정하지는 않는다. 제5조가 발동된 것은 2001년 9월 11일 이후 단 한 번이며, 제4조 협의는 2003년 튀르키예의 요청부터 2022년 러시아의 우크라이나 침공 직후까지 여러 차례 있었다. 1955년 바르샤바 조약 제4조의 상호원조 조항은 이 조약 제5조를 본뜬 것이다."
+  ],
+  "bibliography": [
+    "원제: The North Atlantic Treaty, Washington D.C., 4 April 1949. 영어·프랑스어 정본 동등(제14조)",
+    "번역 저본: 나토 공식 웹사이트(nato.int) 「Official texts」 전자판. 나토가 단 각주 세 개(그리스·튀르키예 가입 의정서에 따른 제6조 개정, 알제리 조항의 실효, 발효일)를 함께 옮겼다. 국가 간 공식 문서로 저작권 보호 대상이 아니다"
+  ],
+  "output": "/home/grass/frontend/data/commulingo/docs/north-atlantic-treaty-1949.html",
+  "glossary": {
+    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
+    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "extra": {
+      "North Atlantic Treaty": "북대서양 조약",
+      "Charter of the United Nations": "국제연합 헌장",
+      "United Nations": "국제연합",
+      "Security Council": "안전보장이사회",
+      "the Parties": "당사국",
+      "Parties": "당사국",
+      "Party": "당사국",
+      "armed attack": "무력 공격",
+      "collective defence": "집단방위",
+      "individual or collective self-defence": "개별적 또는 집단적 자위",
+      "North Atlantic area": "북대서양 지역",
+      "Council": "이사회",
+      "defence committee": "방위위원회",
+      "instrument of accession": "가입서",
+      "instruments of ratification": "비준서",
+      "notice of denunciation": "탈퇴 통고",
+      "Tropic of Cancer": "북회귀선",
+      "Algerian Departments of France": "프랑스의 알제리 도(道)",
+      "North Atlantic Council": "북대서양이사회",
+      "Protocol to the North Atlantic Treaty on the accession of Greece and Turkey": "그리스와 튀르키예의 가입에 관한 북대서양 조약 의정서",
+      "Greece": "그리스",
+      "Turkey": "튀르키예",
+      "Belgium": "벨기에",
+      "Canada": "캐나다",
+      "France": "프랑스",
+      "Luxembourg": "룩셈부르크",
+      "the Netherlands": "네덜란드",
+      "United Kingdom": "영국",
+      "United States of America": "미합중국",
+      "United States": "미합중국",
+      "Government of the United States of America": "미합중국 정부",
+      "Mediterranean Sea": "지중해",
+      "Europe": "유럽",
+      "North America": "북아메리카"
+    }
+  },
+  "allowedCyrillic": [],
+  "postEdits": {
+    "원칙에 대한 신의,": "원칙에 대한 신념,",
+    "국제 평화와 안보": "국제 평화와 안전",
+    "당사국 중 어느 한 국가의 의견으로 당사국 중 어느 국가의": "당사국 중 어느 한 나라가 보기에 당사국 중 어느 나라의"
+  },
+  "quotes": "curly",
+  "documents": [
+    {
+      "id": "treaty",
+      "titleKo": "북대서양 조약 (1949년 4월 4일)",
+      "heading": false,
+      "band": 0,
+      "source": {
+        "format": "html",
+        "selector": "div#treaty",
+        "path": "/home/grass/frontend/docs/north-atlantic-treaty-1949-prepared.html",
+        "sha256": "0d2db1b7664779db4be3f483ef9249f4f0ca3586895d8d63557332085d5a506c"
+      },
+      "blocks": [
+        0,
+        32
+      ],
+      "startsWith": "The Parties to this Treaty reaffirm",
+      "endsWith": "transmitted by that Government to the Governments of other signatories.",
+      "tagMap": {
+        "h4": "h2"
+      },
+      "register": "한다체. 국가 간 조약문이다. '~한다/~이다'로 옮기고 경어체를 쓰지 않는다. 표기 규칙: (1) 조 제목 「Article N」은 「제N조」로만 옮긴다(예: Article 5 → 제5조). 제목에 붙은 각주 번호 [1]은 「제6조 [1]」처럼 뒤에 둔다. (2) 「The Parties」는 「당사국」으로 통일하고 「each of them」은 「각 당사국」으로 옮긴다. (3) 「shall be considered an attack against them all」은 「전체에 대한 공격으로 간주한다」로, 「such action as it deems necessary, including the use of armed force」는 「무력의 사용을 포함하여 자국이 필요하다고 판단하는 행동」으로 옮겨 원문의 조건적 성격을 지킨다. (4) 전문(preamble)의 세 문단은 원문 문단 단위를 지키고 「They are determined to …」는 「당사국은 …할 것을 결의한다」처럼 옮긴다. (5) 본문 속 각주 번호 [1] [2] [3]은 대괄호 숫자 그대로 둔다."
+    },
+    {
+      "id": "footnotes",
+      "titleKo": "주석",
+      "notes": true,
+      "band": 1,
+      "source": {
+        "format": "html",
+        "selector": "div#footnotes",
+        "path": "/home/grass/frontend/docs/north-atlantic-treaty-1949-prepared.html",
+        "sha256": "0d2db1b7664779db4be3f483ef9249f4f0ca3586895d8d63557332085d5a506c"
+      },
+      "blocks": [
+        0,
+        3
+      ],
+      "startsWith": "1. The definition of the territories",
+      "endsWith": "after the deposition of the ratifications of all signatory states.",
+      "register": "한다체. 나토가 조약문에 단 편집 주석 세 개다. 각 항목은 원문의 번호 「1. 」 「2. 」 「3. 」으로 시작하게 그대로 옮긴다. 날짜는 「1951년 10월 22일」 형식으로 쓴다."
+    }
+  ],
+  "frozen": "2026-09-19 번역·postEdits 재조립 후 CommuLingo 참고 문헌에 발행(manifest 등록). 수정 시 공개본과 assembly snapshot을 확인한 뒤 잠금을 해제할 것."
+}

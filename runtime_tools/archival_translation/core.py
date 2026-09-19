@@ -1514,7 +1514,9 @@ def assemble(spec: dict, docs: list[dict], translated: dict[int, list[str]]) -> 
                 out.append("</ul>")
                 in_list = False
             if tag in ("h1", "h2", "h3", "h4"):
-                out.append(f"<{tag}>{_esc(' '.join(lines))}</{tag}>")
+                # Treaties footnote article headings too (NATO's Article 6),
+                # so a heading's [n] is linked like prose.
+                out.append(f"<{tag}>{link_refs(_esc(' '.join(lines)))}</{tag}>")
             elif tag == "blockquote":
                 inner = "".join(f"<p>{link_refs(_esc(ln))}</p>" for ln in lines)
                 out.append(f"<blockquote>{inner}</blockquote>")
