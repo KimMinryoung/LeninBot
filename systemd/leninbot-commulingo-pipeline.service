@@ -13,5 +13,10 @@ LoadCredentialEncrypted=neo4j_password:/etc/credstore.encrypted/neo4j_password.c
 LoadCredentialEncrypted=db_password:/etc/credstore.encrypted/db_password.cred
 ExecStart=/home/grass/leninbot/venv/bin/python /home/grass/leninbot/scripts/commulingo_pipeline.py tick
 TimeoutStartSec=1950
+# 2026-09-19: a runaway source-snapshot merge drove one tick to 9 GB anon-rss
+# and stalled the whole host (no swap) before the global OOM killer acted.
+# A batch that needs more than this is broken; kill the tick, not the server.
+MemoryHigh=2G
+MemoryMax=3G
 StandardOutput=journal
 StandardError=journal

@@ -140,33 +140,54 @@ class SourceHandles:
         return result
 
 
+# A URL's merged snapshot may not exceed this many characters. A whole
+# Wikipedia article is under 600k; anything larger is a runaway merge, not a
+# source. Job 2523 (kosygin) reached a 453 MB snapshot on 2026-09-19 and the
+# research process was OOM-killed at 9 GB anon-rss, taking the host down once.
+MAX_SNAPSHOT_CHARS = 2_000_000
+
+
 class SourcePages:
     """One growing snapshot per URL within a research attempt.
 
     absorb(url, page) returns the merged snapshot and the character span the
     page occupies in it. Pages are identified by content hash, so re-fetching
     the same offset changes nothing, and a quote from any page is found in
-    the one snapshot.
+    the one snapshot. A page that already lies inside the snapshot, or that
+    is itself an earlier merge of it, never gets appended again: seeding a
+    retry from the job's stored snapshots (each attempt's merge is stored
+    beside the pages it was built from) used to concatenate every earlier
+    merge onto the next, so the snapshot grew geometrically per attempt.
     """
     def __init__(self):
         self.current = {}   # url -> merged snapshot
         self.spans = {}     # url -> {page hash: (start, end)}
 
     def seed(self, sources):
-        """Merge the snapshots a job already holds for a URL, oldest first."""
+        """Merge the snapshots a job already holds for a URL, oldest first.
+
+        Returns only snapshots that this seeding actually changed, so an
+        unchanged job stores nothing new.
+        """
         merged = []
         by_url = {}
         for source in sorted((s for s in sources.values() if s.get('body')),
                              key=lambda s: str(s.get('fetched_at') or '')):
+            if len(source['body']) > MAX_SNAPSHOT_CHARS:
+                logger.warning('skipping oversize stored snapshot %s (%d chars) for %s',
+                               source.get('id', '?')[:16], len(source['body']), source['url'])
+                continue
             by_url.setdefault(source['url'], []).append(source)
         for url, pages in by_url.items():
             if len(pages) == 1:
                 self.current[url] = pages[0]
                 self.spans[url] = {pages[0]['content_hash']: (0, len(pages[0]['body']))}
                 continue
+            known = {page['id'] for page in pages}
             for page in pages:
-                snapshot_, span, created = self.absorb(url, page['body'])
-            merged.append(self.current[url])
+                self.absorb(url, page['body'])
+            if self.current[url]['id'] not in known:
+                merged.append(self.current[url])
         return merged
 
     def absorb(self, url, body):
@@ -179,6 +200,22 @@ class SourcePages:
             spans[digest] = (0, len(body))
         elif digest in spans:
             return current, spans[digest], False
+        elif body.startswith(current['body']):
+            # An earlier merge that already extends the current text: adopt
+            # it whole. Existing spans stay valid because the prefix is kept.
+            merged = snapshot(url, body)
+            spans[digest] = (0, len(body))
+        elif (at := current['body'].find(body)) >= 0:
+            # Already inside the snapshot (an earlier partial merge, or a page
+            # re-fetched with different surrounding whitespace).
+            spans[digest] = (at, at + len(body))
+            return current, spans[digest], False
+        elif len(current['body']) + 1 + len(body) > MAX_SNAPSHOT_CHARS:
+            logger.warning('snapshot for %s would exceed %d chars; restarting from the new page',
+                           url, MAX_SNAPSHOT_CHARS)
+            merged = snapshot(url, body)
+            spans.clear()
+            spans[digest] = (0, len(body))
         else:
             offset = len(current['body']) + 1
             merged = snapshot(url, current['body'] + '\n' + body)

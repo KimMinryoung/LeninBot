@@ -519,9 +519,16 @@ class Store:
                 VALUES (%s,%s) ON CONFLICT DO NOTHING''', (job_id, source_id))
 
     def job_sources(self, job_id):
+        """The job's snapshots. An oversize body (a runaway merge, see
+        evidence.MAX_SNAPSHOT_CHARS) comes back with body=NULL so it is never
+        loaded into the process; job 2523 held 1.3 GB of such rows."""
+        from .evidence import MAX_SNAPSHOT_CHARS
         with self.transaction() as cur:
-            cur.execute('''SELECT s.* FROM commulingo_pipeline_sources s
-                JOIN commulingo_pipeline_job_sources j ON j.source_id=s.id WHERE j.job_id=%s''', (job_id,))
+            cur.execute('''SELECT s.id, s.url, s.content_hash, s.fetched_at, s.expires_at,
+                    CASE WHEN length(s.body) > %s THEN NULL ELSE s.body END AS body
+                FROM commulingo_pipeline_sources s
+                JOIN commulingo_pipeline_job_sources j ON j.source_id=s.id WHERE j.job_id=%s''',
+                (MAX_SNAPSHOT_CHARS, job_id))
             return {row['id']: row for row in cur.fetchall()}
 
     def cached_source(self, tool, args):
