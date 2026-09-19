@@ -625,8 +625,9 @@ async def _review_before_public_write(document: str, notes: str | None) -> str:
             )
         else:
             guidance = (
-                "Address the reviewer's reason and issues: fix the body with edit_staged where a finding "
-                "warrants it, or supply the missing sources, then retry publication. "
+                "Address the reviewer's reason and issues where a finding warrants it (edit_staged for a "
+                "staged draft; for a public document resubmit the corrected full body with edit_public), "
+                "then retry the same action. "
                 "Do not treat your own fact_check_notes as a review PASS."
             )
         return ToolFailure(

@@ -144,7 +144,7 @@ def test_review_exception_saved_as_unverified(monkeypatch, tmp_path):
     assert result["verdict"] == "UNVERIFIED" and result["failure_kind"] == "review_unavailable"
     stored = json.loads(next(tmp_path.glob("*.json")).read_text())
     assert stored["document_sha256"] == hashlib.sha256(BODY.encode()).hexdigest()
-    assert "document" not in stored
+    assert stored["document"] == BODY  # blocked candidates are kept; PASS text lives in the DB
 
 
 def test_review_does_not_replace_author_context(monkeypatch, tmp_path):
@@ -186,7 +186,10 @@ VERDICT = review.VERDICT_TOOL["name"]
 
 
 def test_reviewer_surface_records_verdict_and_evidence(monkeypatch):
+    kw_seen = {}
+
     async def chat(messages, **kw):
+        kw_seen.update(kw)
         assert {t["name"] for t in kw["extra_tools"]} == {"fetch_url", VERDICT}
         assert set(kw["extra_handlers"]) == {"fetch_url", VERDICT}
         assert kw["terminal_tools"] == kw["finalization_tools"] == [VERDICT] and kw["terminal_required"]
@@ -203,6 +206,7 @@ def test_reviewer_surface_records_verdict_and_evidence(monkeypatch):
     assert verdict == {"verdict": "PASS", "reason": "Source checked", "issues": []}
     assert usage == {"provider": "deepseek", "model": "fake-low", "total_cost": 0.01, "rounds_used": 2}
     assert final_text == ""
+    assert "older version" in kw_seen["system_prompt"]
     assert evidence[0]["sha256"] == hashlib.sha256(b"Observed source text").hexdigest()
 
 
