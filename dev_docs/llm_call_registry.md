@@ -29,7 +29,8 @@ TypeSafe Jev는 텍스트를 생성하지 않고 typed 판정을 돌려주는 �
 
 - 항목: `{"provider": "openrouter"|"typesafe", "model": "typesafe/jev-1.13"|"jev-1.13.0", "timeout", "kind": "system_one", "note"}`.
   `openrouter`는 `POST /api/alpha/decisions`, `typesafe`는 `POST /v1/systemone` — body·answers는 동일.
-  현재 직접 API는 대기열이라 `openrouter`만 실제로 쓴다. `kind`는 표시용이며 실행은 provider가 결정한다.
+  2026-09-19 16:39부터 모든 Jev 항목은 `typesafe`(직접 API, `jev-1.13.0` 고정)다; `openrouter`는 예비 경로로 코드와
+  프록시 라우트에 남아 있다. `kind`는 표시용이며 실행은 provider가 결정한다.
 - `decide_detailed(feature, state, questions, label=) → DecisionResult`, `decide_sync(...) → Decision | None`,
   `async decide(...)`. `state`는 문자열 또는 JSON 구조(질문에 필요한 필드만), `questions`는
   `{key: {"type": "noul"|"choice"|"score", "instructions": str, "criteria": dict|list}}`.
@@ -46,7 +47,8 @@ TypeSafe Jev는 텍스트를 생성하지 않고 typed 판정을 돌려주는 �
 - 현재 항목: `system_one_smoke`, `commulingo_citation_support`(enforce), `commulingo_review_citation_support`(enforce),
   `task_routing_decision`. 게이트 항목의 `enabled`/`enforce`/`thresholds`는 핫리로드된다.
 - 스모크: `venv/bin/python scripts/smoke_jev.py` (항목 `system_one_smoke`). 프록시에 credential이 없을 때
-  승인된 1회 직접 실행은 `OPENROUTER_BASE_URL=https://openrouter.ai OPENROUTER_API_KEY=… ` env로.
+  승인된 1회 프록시 우회 실행은 `TYPESAFE_BASE_URL=https://api.typesafe.ai TYPESAFE_API_KEY=… ` env로
+  (OpenRouter 예비 경로는 `OPENROUTER_BASE_URL`/`OPENROUTER_API_KEY`).
 
 원샷 executor의 endpoint와 credential은 공개 함수
 `resolve_provider_connection(provider)`가 한 번에 해석한다. 이 함수는 direct mode에서는

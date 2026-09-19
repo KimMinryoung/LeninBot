@@ -6,11 +6,12 @@ cost. Every call is audited like any other one-shot call (llm_audit_log).
 
     venv/bin/python scripts/smoke_jev.py
 
-Before the proxy carries the OpenRouter credential, an approved run can go
-direct with the key in the environment (never on the command line history
-of a shared shell):
+The registry entry points at the direct TypeSafe API since 2026-09-19
+(provider ``typesafe``, model ``jev-1.13.0``); OpenRouter's Decisions route
+remains a standby. An approved run can bypass the proxy with the key in the
+environment (never on the command line history of a shared shell):
 
-    OPENROUTER_BASE_URL=https://openrouter.ai OPENROUTER_API_KEY=... \\
+    TYPESAFE_BASE_URL=https://api.typesafe.ai TYPESAFE_API_KEY=... \\
         venv/bin/python scripts/smoke_jev.py
 
 The samples exercise the shapes the adoption plan needs first: a Korean

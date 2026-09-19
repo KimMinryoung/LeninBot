@@ -44,10 +44,13 @@ LLM이 아니다 — 텍스트를 생성하지 않고, **상태(state)를 넣으
 
 이 프로젝트의 판정 대상은 대부분 **한국어·러시아어**다. 마지막 두 항목이 도입 여부를 결정한다.
 
-## 1.1 접근 경로 — 직접 API는 대기열, 호스팅 경로 셋
+## 1.1 접근 경로 — 직접 API(현재)와 호스팅 경로 셋
 
-직접 API(`console.typesafe.ai`)는 2026-09-19 기준 early access 대기열이다(사용자 신청 2026-09-19).
-대기열 없이 같은 모델을 쓰는 경로가 셋 있고, 조사 결과는 다음과 같다.
+**현재 운영 경로는 직접 API다** (`POST https://api.typesafe.ai/v1/systemone`, Bearer `TYPESAFE_API_KEY`, 모델 `jev-1.13.0`
+버전 고정; 별칭 `jev-latest`/`jev-preview`는 릴리스 때 이동하므로 문턱값 튜닝을 지키려면 쓰지 않는다. 한도 250k tok/s·1,200 rpm,
+64k 컨텍스트, state+최장 질문 32k. 2026-09-19 16:37 키 마운트, 같은 날 16:39 `scripts/smoke_jev.py` 3/3, 336~730ms, 판정은 OpenRouter
+때와 같은 방향 — 교정 noul 0.13/0.73, 라우팅 conf 0.99, 인용 supports 1.0). 아래는 직접 API가 early access 대기열이던
+같은 날 오전에 조사한 우회 경로들이며, OpenRouter는 이날 오전~오후 실제 운영 경로였다(기준선 4.5~4.9의 표본은 이 경로로 측정).
 
 | 경로 | 호출 | 모델 ID | 가격 | 컨텍스트 | 비고 |
 |---|---|---|---|---|---|
@@ -58,7 +61,7 @@ LLM이 아니다 — 텍스트를 생성하지 않고, **상태(state)를 넣으
 기타: AI/ML API가 제공한다는 언급이 있으나 미확인. 비공식 파이썬 클라이언트 `jevclient`, 공식
 `system-one-adapter`(LLM으로 Jev 흉내내는 비교용 어댑터)가 있으나 우리는 registry executor로 직접 HTTP를 친다.
 
-**권장: shadow 평가는 OpenRouter로 시작.** 이유 — (1) native와 body·응답이 같아 `decide()` executor를
+**(당시 판단) shadow 평가는 OpenRouter로 시작.** 이유 — (1) native와 body·응답이 같아 `decide()` executor를
 한 번 짜고 base URL만 바꾸면 승인 후 직접 API로 전환된다, (2) `jev-1.13` 버전 고정이 되어 문턱값 튜닝이
 유효하다, (3) 가격이 native와 같고 공개돼 있어 `gateway.estimate_cost_usd`에 바로 넣을 수 있다.
 Cloudflare는 계정이 있다는 장점이 있지만 봉투 형식이 다르고 alias만 있고 가격이 불투명해 2순위.
@@ -160,6 +163,11 @@ conf < lo        → 행동하지 않음, 현재 폴백
   한국어 교정 판정 noul 0.17/0.72(방향 정확), 라우팅 choice confidence 0.99. 응답 model `typesafe/jev-1.13-20260917`.
 - 프록시 credential 교체 완료(2026-09-19 11:35 프록시 재시작, `/health` providers_without_key 없음). 모든 판정 호출은
   프록시 경유이며 감사 행은 oneshot(토큰·비용)과 proxy(전송) 두 줄이 남고 비용은 oneshot 행에만 있다.
+- **직접 API 전환(2026-09-19 16:39)**: `TYPESAFE_API_KEY`를 credstore에 추가하고 드롭인 재생성·프록시 재시작. 프록시
+  `typesafe` 라우트로 `GET /v1/models`(무료) 인증 확인 뒤 `system_one_smoke`를 `provider=typesafe, model=jev-1.13.0`으로
+  바꿔 스모크 3/3 확인, 이어 Jev 항목 9개 전부 전환. 감사 행은 `provider=typesafe model=jev-1.13.0`(응답 model이 고정
+  ID 그대로라 OpenRouter의 날짜 스냅샷 표기가 사라진다). OpenRouter 라우트·`OPENROUTER_API_KEY`는 예비로 남겨 두며,
+  `provider`만 되돌리면 폴백된다. 비용 동일.
 - 재시도: 429·5xx·연결 거부/끊김은 `decide_detailed`가 한 번 더 시도한다(Retry-After 존중, 최대 2초 대기; 항목의
   `retries`로 조정, 0이면 없음; 읽기 타임아웃은 제외). 실패 행은 시도마다 남는다. 이유 — None 한 번의 대가가 크다(게이트는 미검사 통과,
   라우팅은 4배 느린 DeepSeek 폴백).
