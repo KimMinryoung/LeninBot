@@ -52,7 +52,9 @@ def invalidated(row, current):
     return None
 
 
-def make_handlers(read_handlers, proposal, fetched, box):
+def make_handlers(read_handlers, proposal, fetched, box, gate=None):
+    """``gate(value)`` (async) may annotate the resolved decision or raise
+    ValueError to send it back to the reviewer before it is boxed."""
     from tool_gateway.results import ToolRejection
     handlers = {}
     snapshots = {}
@@ -77,6 +79,8 @@ def make_handlers(read_handlers, proposal, fetched, box):
         try:
             value = resolve_review_checks(value, proposal, snapshots)
             validate_decision(value, proposal, fetched)
+            if gate is not None:
+                value = await gate(value)
         except ValueError as exc: raise ToolRejection(str(exc)) from exc
         box.update(value)
         return 'OK: review decision recorded; no dictionary write was made by this tool.'

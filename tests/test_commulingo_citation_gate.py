@@ -121,6 +121,39 @@ class CitationGateTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls, ['Born 1904', 'Executed in 1938', 'Chaired the Council'])
         self.assertEqual([c['support'] for c in checks], ['supports', 'supports'])
 
+    async def test_review_checks_use_finding_and_quote_and_record_under_review_prefix(self):
+        from commulingo_pipeline.citation_gate import check_review_checks
+        checks = [{'citation': 'c', 'source': 'https://example.org/a', 'quote': 'Kosygin was born in 1904.',
+                   'finding': '1904년 출생 확인'},
+                  {'citation': 'c', 'source': 'https://example.org/a', 'quote': 'He chaired the Council.',
+                   'finding': '1938년 처형 확인'},
+                  {'citation': 'c', 'finding': 'quote missing'}]
+        seen = []
+        async def decide(feature, state, questions):
+            seen.append((feature, state))
+            self.assertEqual(set(state), {'finding', 'quote', 'source_url'})
+            self.assertEqual(set(questions), {'support', 'specific', 'boilerplate'})
+            self.assertIn('finding', questions['support']['instructions'])
+            return decision('unrelated', 0.98) if state['finding'].startswith('1938') else decision('supports', 0.95)
+        citation_gate.settings.return_value = {**SETTINGS, 'enforce': False}
+        usage = Usage()
+        judged = await check_review_checks(checks, usage=usage, decide=decide)
+        self.assertEqual([f for f, _ in seen], ['commulingo_review_citation_support'] * 2)
+        self.assertEqual([c['support'] for c in judged], ['supports', 'unrelated', None])
+        self.assertTrue(judged[1].get('reject'))
+        self.assertEqual(usage.tracker['review_citation_checks'], 3)
+        self.assertEqual(usage.tracker['review_citation_rejections'], 1)
+        self.assertEqual(usage.tracker['review_citation_unavailable'], 1)
+        self.assertNotIn('citation_checks', usage.tracker)
+        from commulingo_pipeline.citation_gate import annotate
+        annotated = annotate(checks, judged)
+        self.assertEqual(annotated[1]['citation_check']['support'], 'unrelated')
+        self.assertNotIn('citation_check', annotated[2])
+        # Enforce names the failing check with the check noun.
+        citation_gate.settings.return_value = dict(SETTINGS)
+        with self.assertRaisesRegex(ValueError, r"one check; the other checks are fine(.|\n)*check 2 \('1938년 처형 확인'\)"):
+            await check_review_checks(checks, decide=decide)
+
     def test_annotate_puts_compact_check_on_claim_without_reject_text(self):
         from commulingo_pipeline.citation_gate import annotate
         checks = [verdict(decision('unrelated', 0.99), SETTINGS['thresholds']), {'support': None, 'error': 'x'}]

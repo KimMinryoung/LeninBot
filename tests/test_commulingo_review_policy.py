@@ -126,6 +126,23 @@ class PolicyTests(unittest.IsolatedAsyncioTestCase):
         await handlers['fetch_url'](url=SOURCE)
         await handlers['commulingo_review_decision'](**DECISION)
         self.assertEqual(box['decision'],'approve')
+    async def test_decision_gate_annotates_or_bounces_before_boxing(self):
+        from tool_gateway.results import ToolRejection
+        async def annotate(value):
+            return {**value,'checks':[{**c,'citation_check':{'support':'supports'}} for c in value['checks']]}
+        box,fetched={},{}
+        handlers=worker.make_handlers({'fetch_url':AsyncMock(return_value=f'<external source="url:{SOURCE}">\n{QUOTE}\n</external>')},PROPOSAL,fetched,box,gate=annotate)
+        await handlers['fetch_url'](url=SOURCE)
+        await handlers['commulingo_review_decision'](**DECISION)
+        self.assertEqual(box['checks'][0]['citation_check'],{'support':'supports'})
+        async def bounce(value):
+            raise ValueError('citation check failed for one check')
+        box,fetched={},{}
+        handlers=worker.make_handlers({'fetch_url':AsyncMock(return_value=f'<external source="url:{SOURCE}">\n{QUOTE}\n</external>')},PROPOSAL,fetched,box,gate=bounce)
+        await handlers['fetch_url'](url=SOURCE)
+        with self.assertRaisesRegex(ToolRejection,'citation check failed'):
+            await handlers['commulingo_review_decision'](**DECISION)
+        self.assertEqual(box,{})
     async def test_real_runner_context_and_typed_terminal_without_network(self):
         import db
         with patch.object(db,'query',return_value=[]),patch.object(db,'query_one',return_value=None):

@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 
 from .engine import Result
 from .evidence import snapshot, compile_evidence, locate_claim_quotes, SourceHandles, SourcePages
-from .citation_gate import check_claims, annotate as annotate_citations
+from .citation_gate import check_claims, check_review_checks, annotate as annotate_citations
 from . import service
 from .bundles import work_topics, advance
 
@@ -821,7 +821,16 @@ class Review:
         proposal['risks'] = review_risks(proposal,current)
         previous_reviews = prior_reviews(artifacts)
         fetched, box = {}, {}
-        handlers = make_handlers({k:TOOL_HANDLERS[k] for k in READS},proposal,fetched,box)
+        citation_cache = {}
+        async def gate(value):
+            # The reviewer's own quotes get the research claims' question: does
+            # the passage say what the finding claims it verifies? Verdicts ride
+            # on each check; a confident miss bounces the decision only when the
+            # review gate's registry entry says enforce (citation_gate).
+            checks = value.get('checks', [])
+            judged = await check_review_checks(checks, usage=usage, cache=citation_cache)
+            return {**value, 'checks': annotate_citations(checks, judged)}
+        handlers = make_handlers({k:TOOL_HANDLERS[k] for k in READS},proposal,fetched,box,gate=gate)
         async def finish(value):
             return await handlers[DECISION_TOOL['name']](**value)
         convergence = ('' if not previous_reviews else
