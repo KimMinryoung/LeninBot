@@ -578,6 +578,8 @@ class Draft:
             # accepted for the outage path (classification unavailable).
             if job['action']=='create':
                 classify = classify_person
+                for field in ('group','groupId','role'):
+                    schema['properties'].pop(field,None)
                 schema['required'] = [f for f in schema.get('required',[]) if f not in {'group','groupId','role'}]
             group_ids = sorted({g['id'] for g in groups})
             for field in ('group','groupId'):
@@ -610,11 +612,13 @@ class Draft:
             classify_codes = classify_person_codes
             for key,code in (('citizenship','code'),('nationalOrigin','code'),('origin','code'),('fate','kind')):
                 if key in schema['properties'] and isinstance(schema['properties'][key],dict):
+                    schema['properties'][key].get('properties',{}).pop(code,None)
                     schema['properties'][key]['required'] = [r for r in schema['properties'][key].get('required',[]) if r!=code]
         classify_term = None
         if job['kind']=='term' and job['action']=='create':
             # Same arrangement for a term's category (commulingo_classify.classify_term).
             from runtime_tools.commulingo_classify import classify_term
+            schema['properties'].pop('category',None)
             schema['required'] = [f for f in schema.get('required',[]) if f!='category']
         for collection,edits in (('aliases','aliasEdits'),('career','careerEdits'),('scenes','sceneEdits')):
             if collection in schema['properties'] and edits in schema['properties']:
@@ -664,6 +668,10 @@ class Draft:
         async def finish(value):
             try:
                 return await prepare_and_validate(value)
+            except ClassificationUnavailable as exc:
+                box.clear()
+                box['classification_unavailable'] = str(exc)
+                return 'Draft received; the classification service is down, the job will retry later.'
             except ValueError as exc:
                 usage.tracker['preflight_failures'] = usage.tracker.get('preflight_failures',0) + 1
                 if missing_evidence(exc):
@@ -702,8 +710,8 @@ class Draft:
             if classify_term is not None:
                 from runtime_tools.commulingo_classify import fill_term_category
                 classification = await asyncio.to_thread(classify_term, fields)
-                if classification is None and not fields.get('category'):
-                    raise ValueError('automatic category assignment is unavailable; supply category in this draft')
+                if classification is None:
+                    raise ClassificationUnavailable('term category')
                 fields = fill_term_category(fields, classification)
                 if classification:
                     usage.tracker.setdefault('classification',{}).update(
@@ -722,9 +730,8 @@ class Draft:
                             excerpts.setdefault(c['field'],[]).append({'claim':c.get('claim'),'excerpt':body[c.get('start',0):c.get('end',0)][:1500]})
                     codes = await asyncio.to_thread(classify_codes, fields, claims=excerpts)
                     fields = fill_person_codes(fields, codes)
-                    still = missing_person_codes(fields)
-                    if still:
-                        raise ValueError('automatic code assignment is unavailable; supply ' + ' and '.join(still) + ' in this draft')
+                    if missing_person_codes(fields):
+                        raise ClassificationUnavailable('person codes')
                     if codes:
                         judged = {k:v for k,v in codes.items() if isinstance(v,dict)}
                         usage.tracker.setdefault('classification',{}).update(
@@ -733,9 +740,8 @@ class Draft:
             if classify is not None:
                 from runtime_tools.commulingo_classify import fill_classification
                 classification = await asyncio.to_thread(classify, fields, catalogs=catalogs)
-                if classification is None and not (fields.get('groupId') and fields.get('role')):
-                    raise ValueError('automatic classification is unavailable; supply groupId and role '
-                                     '(officeId or category) in this draft')
+                if classification is None:
+                    raise ClassificationUnavailable('person group/role')
                 fields = fill_classification(fields, classification)
                 if classification:
                     usage.tracker.setdefault('classification',{}).update(
@@ -790,10 +796,10 @@ class Draft:
                'single most important as this section and list the rest in notes with their sources; the entry is '
                'commissioned again for them. Give sortOrder as the chronological key of the period the section opens on.\n' if section else '')
             +             'Write bilingual equivalent claims; do not fill space or add facts beyond the research. '
-            + ('For a new term, omit category: the runner assigns it from the definition after the draft. ' if classify_term is not None else '')
-            + ('Write citizenship, nationalOrigin and fate as labels only; the runner assigns their code/kind from the '
-               'labels and the research. ' if classify_codes is not None else '')
-            + ('For a new person, omit groupId and role: the runner assigns them from the card after the draft. '
+            + ('The category is assigned automatically after the draft. ' if classify_term is not None else '')
+            + ('Write citizenship, nationalOrigin and fate as labels; their codes are assigned automatically. '
+               if classify_codes is not None else '')
+            + ('Group and role are assigned automatically after the draft. '
                if classify is not None else
                'For people, choose group/groupId from person_groups using their descriptions, not title alone. '
                'Choose role.category from role_categories; do not invent category or office IDs. ')
@@ -821,7 +827,16 @@ class Draft:
         await model_call(spec=spec,prompt=prompt,tool=tool,handler=finish,reads={'commulingo_people'},usage=usage,budget=budget,
                          read_wrap=wrap_lookup,read_tools={'commulingo_people':lookup_tool},
                          scope_id=f'commulingo_pipeline:{job.get("id")}:draft',max_rounds=DRAFT_ROUNDS,job=job)
+        if box.get('classification_unavailable'):
+            # Not a drafting failure: the engine defers the job and tries again
+            # (escalating after three attempts), rather than asking the writer
+            # to classify.
+            raise RuntimeError(f"classification service unavailable ({box['classification_unavailable']}); draft discarded")
         return Result(box,'validate')
+
+
+class ClassificationUnavailable(RuntimeError):
+    """The System One classifier could not answer; the draft is not the writer's to classify."""
 
 
 def classification_risks(artifacts):

@@ -11,12 +11,16 @@ from scripts.commulingo_write_session import draft_id
 
 class EvidenceContracts(TestCase):
     def test_uncertain_fate_has_a_supported_schema_value(self):
-        from runtime_tools.commulingo_people import COMMULINGO_PERSON_CREATE_TOOL
+        from runtime_tools.commulingo_people import COMMULINGO_PERSON_CREATE_TOOL, _COMMULINGO_FIELD_SCHEMA
         from jsonschema import validate as schema_validate, ValidationError
-        schema=COMMULINGO_PERSON_CREATE_TOOL['input_schema']['properties']['fields']['properties']['fate']
+        schema=_COMMULINGO_FIELD_SCHEMA['properties']['fate']
         schema_validate({'kind':'','label':{'ko':'사망 경위 미확정','en':'Circumstances unconfirmed'}},schema)
         with self.assertRaises(ValidationError):
             schema_validate({'kind':'unknown','label':{'ko':'미확정','en':'Unknown'}},schema)
+        # The writer's tool carries the label only; the runner assigns kind.
+        tool_fate=COMMULINGO_PERSON_CREATE_TOOL['input_schema']['properties']['fields']['properties']['fate']
+        self.assertNotIn('kind', tool_fate['properties'])
+        schema_validate({'label':{'ko':'사망 경위 미확정','en':'Circumstances unconfirmed'}},tool_fate)
 
     def test_short_and_legacy_ids_roundtrip_and_unknown_lists_sources(self):
         source=snapshot('https://example.org/archive','Documented fact. '*80)

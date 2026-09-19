@@ -2908,7 +2908,7 @@ def _run_edit(target_type: str, action: str, target_id: str, patch: dict,
         from runtime_tools.commulingo_classify import classify_term, fill_term_category
         classification = classify_term(patch)
         if classification is None:
-            return f"Error: automatic category assignment is unavailable right now; supply category yourself ({_TERM_CATEGORY_HINT})."
+            return "Error: the classification service is unavailable right now; retry this create later."
         patch = fill_term_category(patch, classification)
     if target_type=='term':
         from commulingo_pipeline.config import load
@@ -2942,16 +2942,13 @@ def _run_edit(target_type: str, action: str, target_id: str, patch: dict,
             if missing_person_codes(fields):
                 codes = classify_person_codes(fields)
                 fields = fill_person_codes(fields, codes)
-                still = missing_person_codes(fields)
-                if still:
-                    return ("Error: automatic code assignment is unavailable right now; supply "
-                            + " and ".join(still) + " yourself.")
+                if missing_person_codes(fields):
+                    return "Error: the classification service is unavailable right now; retry this write later."
         if target_type == "person" and action == "create" and not (fields.get("groupId") and fields.get("role")):
             from runtime_tools.commulingo_classify import classify_person, fill_classification
             classification = classify_person(fields)
             if classification is None:
-                return ("Error: automatic classification is unavailable right now; supply groupId and "
-                        "role (officeId or category) yourself for this create.")
+                return "Error: the classification service is unavailable right now; retry this create later."
             fields = fill_classification(fields, classification)
             if classification["low_confidence"]:
                 logger.info("person %s classified with low confidence: %s", target_id, classification["confidence"])
@@ -3829,28 +3826,32 @@ def _person_write_tool(name: str, action: str) -> dict:
     update_only = {'expectedRevision', 'aliasEdits', 'careerEdits', 'sceneEdits'}
     field_keys = tuple(key for key in _PERSON_NARROW_KEYS
                        if action != 'create' or key not in update_only)
-    # groupId and role are assigned by the runner (commulingo_classify) when
-    # the writer leaves them out; they stay accepted for an explicit choice.
+    # groupId and role are assigned by the runner (commulingo_classify): the
+    # model never classifies, so a create does not even carry the fields.
+    if action == "create":
+        field_keys = tuple(key for key in field_keys if key not in {"group", "groupId", "role"})
     required_fields = (
         "epithet", "bio", "career", "citizenship", "nationalOrigin", "evidence",
     ) if action == "create" else ("expectedRevision", "evidence")
     fields_schema = _narrow_fields_schema(field_keys, required=required_fields)
-    # The runner assigns citizenship.code and fate.kind from the labels
-    # (commulingo_classify.classify_person_codes); the writer writes the label
-    # and may still name the code. Copy the shared objects before relaxing them.
+    # The runner assigns citizenship.code, nationalOrigin.code and fate.kind
+    # from the labels (commulingo_classify.classify_person_codes); the model
+    # writes labels only, so the code keys leave the schema. Copy the shared
+    # objects before editing them.
     for key, code in (("citizenship", "code"), ("nationalOrigin", "code"), ("origin", "code"), ("fate", "kind")):
         if key in fields_schema["properties"]:
-            relaxed = deepcopy(fields_schema["properties"][key])
-            relaxed["required"] = [r for r in relaxed.get("required", []) if r != code]
-            fields_schema["properties"][key] = relaxed
+            stripped = deepcopy(fields_schema["properties"][key])
+            stripped["properties"].pop(code, None)
+            stripped["required"] = [r for r in stripped.get("required", []) if r != code]
+            fields_schema["properties"][key] = stripped
     return {
         "name": name,
         "description": (
             f"{action.title()} one CommuLingo person card. This tool accepts person fields only; "
             "citations are a separate top-level argument. Public text is bilingual {ko,en}. "
             "Put evidence and reviewFlags INSIDE fields. expectedRevision and collection edits are update-only. "
-            "On create, omit groupId and role: the runner classifies the person from the card. "
-            "Write citizenship, nationalOrigin and fate as labels; their code/kind may be omitted, the runner assigns them. "
+            "The runner classifies the card: group, role, and the citizenship/nationalOrigin/fate codes are assigned "
+            "automatically from the labels and text, so write labels only. "
             "Read the record and reference lists first. On create, citizenship and "
             "nationalOrigin require evidence; if unknown, research or defer registration, never guess. Soviet and Yugoslav codes are citizenship-only. Preserve mixed ancestry in labels. "
             "nationalOrigin means national/ethnic "
@@ -4085,8 +4086,8 @@ def _term_write_tool(name: str, action: str) -> dict:
                     ),
                 },
                 "fields": _narrow_fields_schema(
-                    _TERM_NARROW_KEYS if creating else _TERM_UPDATE_NARROW_KEYS,
-                    # category is assigned by the runner (commulingo_classify) when omitted
+                    tuple(k for k in _TERM_NARROW_KEYS if k != "category") if creating else _TERM_UPDATE_NARROW_KEYS,
+                    # category is assigned by the runner (commulingo_classify); the model never sees it on create
                     required=("term", "definition", "aliases", "period") if creating else (),
                 ),
                 "citations": _CITATIONS_SCHEMA,

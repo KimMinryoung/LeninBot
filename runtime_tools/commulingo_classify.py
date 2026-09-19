@@ -155,12 +155,9 @@ def classify_term(fields: dict, *, categories=None, decide=None) -> dict | None:
 
 
 def fill_term_category(fields: dict, classification: dict | None) -> dict:
-    """The classifier's category unless it is unavailable or unsure and the
-    writer named one; a writer's value is otherwise replaced."""
+    """The classifier's category; nothing to fall back on when it is unavailable."""
     out = dict(fields)
     if classification is None:
-        return out
-    if classification["low_confidence"] and out.get("category"):
         return out
     out["category"] = classification["category"]
     return out
@@ -266,8 +263,8 @@ def classify_person_codes(fields: dict, *, claims: dict | None = None, decide=No
 
 
 def fill_person_codes(fields: dict, codes: dict | None) -> dict:
-    """Copy of ``fields`` with citizenship.code / fate.kind set from the
-    classification; an unsure classification yields to a writer's value."""
+    """Copy of ``fields`` with citizenship.code / nationalOrigin.code / fate.kind
+    set from the classification."""
     out = dict(fields)
     if not codes:
         return out
@@ -276,8 +273,6 @@ def fill_person_codes(fields: dict, codes: dict | None) -> dict:
         if not judged or not isinstance(out.get(field), dict):
             continue
         obj = dict(out[field])
-        if judged["low_confidence"] and obj.get(key) not in (None,):
-            continue
         obj[key] = judged[key]
         out[field] = obj
     return out
@@ -381,13 +376,12 @@ def classify_person(fields: dict, *, catalogs=None, decide=None) -> dict | None:
 
 
 def fill_classification(fields: dict, classification: dict | None) -> dict:
-    """Copy of ``fields`` with the assigned group/role. The writer's own values
-    are kept when no classification came back, or when the classifier is unsure
-    and the writer named both — the same rule as terms and codes."""
+    """Copy of ``fields`` with the assigned group/role. The writer never
+    classifies: the schema it drafts against has no such fields, so a
+    classification that came back always lands, low confidence included
+    (the review stage gets that as a risk line)."""
     out = dict(fields)
     if classification is None:
-        return out
-    if classification.get("low_confidence") and (out.get("groupId") or out.get("group")) and out.get("role"):
         return out
     out.pop("group", None)
     out["groupId"] = classification["groupId"]

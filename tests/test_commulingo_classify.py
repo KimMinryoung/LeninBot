@@ -105,7 +105,7 @@ class ClassifyTermTests(unittest.TestCase):
         criteria = cc.term_questions(TERM_CATS)['category']['criteria']
         self.assertIn('Soviet planning', criteria['economy'])
 
-    def test_confident_category_replaces_writer_value_and_unsure_keeps_it(self):
+    def test_category_always_comes_from_the_classifier(self):
         def decide(feature, state, questions, label=None):
             self.assertEqual(feature, cc.TERM_FEATURE)
             return term_result('economy', 0.93)
@@ -114,7 +114,6 @@ class ClassifyTermTests(unittest.TestCase):
         self.assertEqual(cc.fill_term_category({**TERM, 'category': 'theory'}, out)['category'], 'economy')
         unsure = cc.classify_term(TERM, categories=TERM_CATS, decide=lambda *a, **k: term_result('economy', 0.4))
         self.assertTrue(unsure['low_confidence'])
-        self.assertEqual(cc.fill_term_category({**TERM, 'category': 'theory'}, unsure)['category'], 'theory')
         self.assertEqual(cc.fill_term_category(TERM, unsure)['category'], 'economy')
 
     def test_unavailable_or_unknown_category_is_none(self):
@@ -157,16 +156,14 @@ class ClassifyCodesTests(unittest.TestCase):
         self.assertEqual(cc.missing_person_codes(CARD), ['citizenship.code', 'fate.kind'])
         self.assertEqual(seen['questions'], {'citizenship', 'fate'})  # no nationalOrigin object on this card
 
-    def test_unconfirmed_maps_to_empty_kind_and_unsure_yields_to_writer(self):
+    def test_unconfirmed_maps_to_empty_kind_and_low_confidence_is_reported_not_deferred(self):
         def decide(feature, state, questions, label=None):
             return codes_result(citizenship=('russia', 0.4), fate=('unconfirmed', 0.9))
         codes = cc.classify_person_codes(CARD, decide=decide)
         self.assertEqual(codes['fate']['kind'], '')
-        writer = {**CARD, 'citizenship': {**CARD['citizenship'], 'code': 'soviet'}}
-        filled = cc.fill_person_codes(writer, codes)
-        self.assertEqual(filled['citizenship']['code'], 'soviet')   # unsure → writer's value kept
-        self.assertEqual(cc.fill_person_codes(CARD, codes)['citizenship']['code'], 'russia')  # nothing to yield to
-        self.assertEqual(filled['fate']['kind'], '')
+        self.assertTrue(codes['citizenship']['low_confidence'])
+        filled = cc.fill_person_codes(CARD, codes)
+        self.assertEqual((filled['citizenship']['code'], filled['fate']['kind']), ('russia', ''))
 
     def test_living_person_gets_empty_fate_without_asking_about_it(self):
         def decide(feature, state, questions, label=None):
@@ -184,9 +181,10 @@ class ClassifyCodesTests(unittest.TestCase):
     def test_create_tool_schema_no_longer_requires_the_codes(self):
         from runtime_tools.commulingo_people import COMMULINGO_PERSON_CREATE_TOOL, _NATIONALITY_SCHEMA
         props = COMMULINGO_PERSON_CREATE_TOOL['input_schema']['properties']['fields']['properties']
-        self.assertEqual(props['citizenship']['required'], ['label'])
-        self.assertEqual(props['fate']['required'], ['label'])
-        self.assertEqual(props['nationalOrigin']['required'], ['label'])
+        for key in ('citizenship', 'nationalOrigin', 'fate'):
+            self.assertEqual(props[key]['required'], ['label'])
+            self.assertEqual(set(props[key]['properties']), {'label'})
+        self.assertNotIn('groupId', props); self.assertNotIn('role', props)
         self.assertEqual(_NATIONALITY_SCHEMA['required'], ['code', 'label'])  # shared object untouched
 
     def test_origin_code_follows_the_background_rules(self):
@@ -215,8 +213,7 @@ class ReviewRiskTests(unittest.TestCase):
         self.assertEqual(classification_risks([{'stage':'draft','value':{},'metrics':{'classification':{'group':0.9,'role':0.9,'low_confidence':False}}}]), [])
         self.assertEqual(classification_risks([]), [])
 
-    def test_unsure_group_role_yields_to_a_complete_writer_choice(self):
+    def test_unsure_group_role_still_lands_and_is_left_to_the_reviewer(self):
         unsure = {'groupId': 'thaw', 'role': {'category': 'scholar'}, 'confidence': {'group': 0.5, 'role': 0.4}, 'low_confidence': True}
-        writer = {**FIELDS, 'groupId': 'international-revolutionary', 'role': {'category': 'socialist-bloc-leader'}}
-        self.assertEqual(cc.fill_classification(writer, unsure)['groupId'], 'international-revolutionary')
-        self.assertEqual(cc.fill_classification(FIELDS, unsure)['groupId'], 'thaw')
+        filled = cc.fill_classification({**FIELDS, 'groupId': 'stale', 'role': {'category': 'stale'}}, unsure)
+        self.assertEqual((filled['groupId'], filled['role']), ('thaw', {'category': 'scholar'}))

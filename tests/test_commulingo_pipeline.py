@@ -767,10 +767,15 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
         async def model(**kwargs):
             ran.append(1)
             v=Draft202012Validator(kwargs['tool']['input_schema'])
-            base={'groupId':'bolshevik','epithet':{'ko':'수식','en':'Epithet'},'bio':{'ko':['문장.'],'en':['Sentence.']},
-                  'career':[],'role':{'category':'bolshevik'},'citizenship':{'code':'soviet','label':{'ko':'소련','en':'Soviet'}},'nationalOrigin':{'code':'russia','label':{'ko':'러시아','en':'Russia'}},
+            props=kwargs['tool']['input_schema']['properties']['fields']['properties']
+            # The writer never classifies: no group/role, and the code keys are gone from the code objects.
+            self.assertFalse({'groupId','group','role'} & set(props))
+            self.assertNotIn('code', props['citizenship']['properties'])
+            base={'epithet':{'ko':'수식','en':'Epithet'},'bio':{'ko':['문장.'],'en':['Sentence.']},
+                  'career':[],'citizenship':{'label':{'ko':'소련','en':'Soviet'}},'nationalOrigin':{'label':{'ko':'러시아','en':'Russia'}},
                   'familyName':{'ko':'성','en':'Family'}}
             self.assertTrue(v.is_valid({'fields':{**base,'years':'1895?–1940'}}), list(v.iter_errors({'fields':{**base,'years':'1895?–1940'}})))
+            self.assertFalse(v.is_valid({'fields':{**base,'groupId':'bolshevik','years':'1895–1940'}}))
             self.assertFalse(v.is_valid({'fields':{**base,'years':'1900–현재'}}))
             self.assertFalse(v.is_valid({'fields':{**base,'sortOrder':None}}))
             self.assertFalse(v.is_valid({'fields':{k:x for k,x in base.items() if k!='familyName'}}))
@@ -778,13 +783,41 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
         with patch('runtime_tools.commulingo_people._list_groups',return_value=groups), \
              patch('runtime_tools.commulingo_people._list_categories',return_value=[{'id':'bolshevik'}]), \
              patch('runtime_tools.commulingo_people._list_offices',return_value=[]), \
-             patch('runtime_tools.commulingo_classify.classify_person',return_value=None), \
+             patch('runtime_tools.commulingo_classify.classify_person',return_value={'groupId':'bolshevik','role':{'category':'bolshevik'},
+                   'confidence':{'group':0.9,'role':0.8},'low_confidence':False}), \
+             patch('runtime_tools.commulingo_classify.classify_person_codes',return_value={'citizenship':{'code':'soviet','confidence':1.0,'low_confidence':False},
+                   'nationalOrigin':{'code':'russia','confidence':0.9,'low_confidence':False}}), \
              patch('commulingo_pipeline.stages.model_call',side_effect=model), patch('commulingo_pipeline.stages.service.call',return_value={}):
             result=await Draft(store)({'id':3,'kind':'person','action':'create','topic':'basics','target':'new-person'},
                 [{'stage':'research','value':{'baseline':'','claims':claims}}],Usage(),.2)
         self.assertTrue(ran)
         self.assertEqual(result.value['fields']['years'],'1895–1940')
         self.assertEqual(result.value['fields']['bio']['ko'],'문장.')
+        self.assertEqual((result.value['fields']['groupId'],result.value['fields']['role']),('bolshevik',{'category':'bolshevik'}))
+        self.assertEqual(result.value['fields']['citizenship']['code'],'soviet')
+
+    async def test_draft_defers_when_the_classifier_is_down_instead_of_asking_the_writer(self):
+        from commulingo_pipeline.stages import Draft
+        from commulingo_pipeline.engine import Usage
+        from commulingo_pipeline.evidence import snapshot
+        store=Mock()
+        source=snapshot('https://example.org/p','Documented fact. '*40)
+        store.sources.return_value={source['id']:source}
+        claims=[{'field':f,'claim':'x','source_id':source['id'],'start':0,'end':20} for f in ('bio','citizenship','nationalOrigin')]
+        replies=[]
+        async def model(**kwargs):
+            replies.append(await kwargs['handler']({'fields':{'epithet':{'ko':'수식','en':'Epithet'},'bio':{'ko':['문장.'],'en':['Sentence.']},
+                'career':[],'citizenship':{'label':{'ko':'소련','en':'Soviet'}},'nationalOrigin':{'label':{'ko':'러시아','en':'Russia'}},
+                'familyName':{'ko':'성','en':'Family'},'years':'1895–1940'}}))
+        with patch('runtime_tools.commulingo_people._list_groups',return_value=[{'id':'bolshevik','title_ko':'볼','blurb_ko':''}]), \
+             patch('runtime_tools.commulingo_people._list_categories',return_value=[{'id':'bolshevik'}]), \
+             patch('runtime_tools.commulingo_people._list_offices',return_value=[]), \
+             patch('runtime_tools.commulingo_classify.classify_person_codes',return_value=None), \
+             patch('commulingo_pipeline.stages.model_call',side_effect=model), patch('commulingo_pipeline.stages.service.call',return_value={}):
+            with self.assertRaisesRegex(RuntimeError,'classification service unavailable'):
+                await Draft(store)({'id':4,'kind':'person','action':'create','topic':'basics','target':'p'},
+                    [{'stage':'research','value':{'baseline':'','claims':claims}}],Usage(),.2)
+        self.assertIn('classification service is down', replies[0])
 
     async def test_enrichment_draft_cannot_reclassify_an_existing_person(self):
         from commulingo_pipeline.stages import Draft

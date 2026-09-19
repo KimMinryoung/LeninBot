@@ -212,21 +212,21 @@ max_length_continuations로 실제 도구 루프에 전달한다. 응답당 8,00
 ## 인물 분류 자동 배정과 감사
 
 **등록 시 자동 배정 (2026-09-19).** 인물 create의 `groupId`와 `role`은 작성 모델이 고르지 않는다. 도구 schema에서 두 필드는
-필수가 아니고(명시적 값은 여전히 받음), 실행기가 초안의 이름·생몰·국적·별칭·경력·bio를 state로 Jev(registry
+필수가 아니고(작성 모델에게는 보이지 않음), 실행기가 초안의 이름·생몰·국적·별칭·경력·bio를 state로 Jev(registry
 `commulingo_person_classification`, `runtime_tools/commulingo_classify.py`)에 choice 판정을 받아 채운다. 관직 선택지는 소련·후계국
-국적에만 제시하고 비소련 인물은 카테고리만 고른다. confidence가 `thresholds.accept`(0.7) 미만이면 작성 모델이 둘 다 명시한 경우 그 값을 두고, 아니면
-그래도 채우되 draft artifact `metrics.classification`에 수치가 남아 검토 단계가 `classification_low_confidence` /
+국적에만 제시하고 비소련 인물은 카테고리만 고른다. 작성 모델의 schema에는 이 필드들이 아예 없다(create 도구와 초안 schema에서 제거). confidence가 `thresholds.accept`(0.7)
+미만이어도 채우되 draft artifact `metrics.classification`에 수치가 남아 검토 단계가 `classification_low_confidence` /
 `code_low_confidence` 위험 항목으로 독립 검토자에게 확인을 요구한다(`stages.classification_risks`). 판정 불가(None)면
-작성 모델에 직접 지정을 요구한다.
+작성 모델에게 넘기지 않는다: 파이프라인은 초안을 버리고 작업을 미뤄 다음 tick에 재시도(3회 후 escalate), 도구는
+"나중에 다시" 오류를 돌려준다.
 파이프라인 초안 단계(`stages.Draft`)와 `commulingo_person_create` 도구 양쪽이 같은 함수를 쓰며, 초안 프롬프트에서는 그룹·카테고리
 카탈로그가 빠진다. update에서는 기존 분류가 잠겨 있으므로 해당 없음. `enabled=false`면 예전처럼 작성 모델이 고른다.
 `citizenship.code`(국가 코드)와 `fate.kind`도 실행기가 채운다(`classify_person_codes`, registry `commulingo_person_codes`,
-create·update 모두): 작성 모델은 라벨 문장만 쓰고, 파이프라인은 라벨 + 해당 필드의 조사 claim 발췌를, 도구 경로는 라벨만 Jev에
+create·update 모두, schema에서 code/kind 키 제거): 작성 모델은 라벨 문장만 쓰고, 파이프라인은 라벨 + 해당 필드의 조사 claim 발췌를, 도구 경로는 라벨만 Jev에
 준다. 생존 인물(`years`가 `–`로 끝남)의 fate는 호출 없이 빈 kind. 기준선(최근 초안 60건): citizenship 50/50, fate 32/35 —
 불일치 3건 중 claim 없는 초안에서 작성 모델이 natural로 적은 것을 Jev가 unconfirmed로 본 것이 포함된다. `nationalOrigin.code`도 채운다: 출신 규칙(민족·국가 배경이지 출생지·활동지·시민권이 아님, 유대계는 가족의 출신 국가이지
 israel이 아님, 비러시아 민족의 소련 관리는 그 민족)을 instructions에 적자 42/49 → 48/49가 됐고, 남은 1건은 작성 모델 라벨이
-출생지였던 것을 Jev가 0.49로 유보한 사례다. 이로써 등록 API의 닫힌 집합 필드는 전부 실행기가 채운다. 용어 create의 `category`(10종)도 같다: `classify_term`(registry `commulingo_term_classification`)이 term·정의·기간·본문으로 고르고,
-confidence가 0.7 미만인데 작성 모델이 값을 줬으면 그 값을 남긴다. 저장된 용어 1,086건(작성 모델이 고른 값)과의 일치는 813,
+출생지였던 것을 Jev가 0.49로 유보한 사례다. 이로써 등록 API의 닫힌 집합 필드는 전부 실행기가 채운다. 용어 create의 `category`(10종)도 같다: `classify_term`(registry `commulingo_term_classification`)이 term·정의·기간·본문으로 고른다. 저장된 용어 1,086건(작성 모델이 고른 값)과의 일치는 813,
 conf ≥0.85에서 628/714 — 저장값 자체의 일관성이 낮아 정확도 상한이 아니라 관행 재현율이다.
 
 **감사.** `scripts/commulingo_classification_audit.py`가 인물 전원의 groupId·role을 Jev(System One)로 재판정해 저장값과 다른
