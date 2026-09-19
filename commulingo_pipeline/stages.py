@@ -706,7 +706,8 @@ class Draft:
                     raise ValueError('automatic category assignment is unavailable; supply category in this draft')
                 fields = fill_term_category(fields, classification)
                 if classification:
-                    usage.tracker['classification'] = {'category':classification['confidence'],'low_confidence':classification['low_confidence']}
+                    usage.tracker.setdefault('classification',{}).update(
+                        {'category':classification['confidence'],'low_confidence':classification['low_confidence']})
             if not fields:
                 raise ValueError('empty edit')
             if groups and any(fields[f] not in group_ids for f in ('group','groupId') if f in fields):
@@ -725,7 +726,10 @@ class Draft:
                     if still:
                         raise ValueError('automatic code assignment is unavailable; supply ' + ' and '.join(still) + ' in this draft')
                     if codes:
-                        usage.tracker.setdefault('classification',{})['codes'] = {k:v['confidence'] for k,v in codes.items() if isinstance(v,dict)}
+                        judged = {k:v for k,v in codes.items() if isinstance(v,dict)}
+                        usage.tracker.setdefault('classification',{}).update(
+                            {'codes':{k:v['confidence'] for k,v in judged.items()},
+                             'codes_low_confidence':sorted(k for k,v in judged.items() if v['low_confidence'])})
             if classify is not None:
                 from runtime_tools.commulingo_classify import fill_classification
                 classification = await asyncio.to_thread(classify, fields, catalogs=catalogs)
@@ -734,9 +738,8 @@ class Draft:
                                      '(officeId or category) in this draft')
                 fields = fill_classification(fields, classification)
                 if classification:
-                    usage.tracker['classification'] = {**classification['confidence'],'low_confidence':classification['low_confidence']}
-                    if classification['low_confidence']:
-                        fields['reviewFlags'] = sorted(set(fields.get('reviewFlags') or []) | {'identity_uncertain'})
+                    usage.tracker.setdefault('classification',{}).update(
+                        {**classification['confidence'],'low_confidence':classification['low_confidence']})
             evidence = compile_evidence([c for c in claims if c['field'] in fields],sources,set(fields))
             fields['evidence'] = evidence
             if job['action']=='update':
@@ -821,6 +824,22 @@ class Draft:
         return Result(box,'validate')
 
 
+def classification_risks(artifacts):
+    """Risk lines for the reviewer when the runner assigned a classification
+    (group/role, term category, citizenship/origin/fate codes) below its
+    confidence threshold; the numbers live in the draft artifact's metrics."""
+    draft = next((a for a in reversed(artifacts) if a.get('stage')=='draft'), None)
+    info = ((draft or {}).get('metrics') or {}).get('classification') or {}
+    risks = []
+    if info.get('low_confidence'):
+        judged = {k:v for k,v in info.items() if k in ('group','role','category')}
+        risks.append('classification_low_confidence: ' + ', '.join(f'{k} {v:.2f}' for k,v in judged.items())
+                     + ' — confirm the assigned classification against the card')
+    for field in info.get('codes_low_confidence') or []:
+        risks.append(f'code_low_confidence: {field} {info.get("codes",{}).get(field,0):.2f} — confirm the code against the label and sources')
+    return risks
+
+
 def review_note_checks(checks):
     """Checks as the editorial note shows them: the citation gate's verdict
     numbers stay in the artifact, not in the suggestion history."""
@@ -886,7 +905,7 @@ class Review:
             return Result({'reason':'revision changed'},'research')
         proposal = {'target_type':draft.get('target',job['kind']),'action':draft.get('action',job['action']),'target_id':job['target'],
                     'patch_json':draft['fields'],'source_refs':draft['sources']}
-        proposal['risks'] = review_risks(proposal,current)
+        proposal['risks'] = review_risks(proposal,current) + classification_risks(artifacts)
         previous_reviews = prior_reviews(artifacts)
         fetched, box = {}, {}
         # The reviewer's own quotes get the research claims' question: does the

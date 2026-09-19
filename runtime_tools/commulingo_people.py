@@ -2954,7 +2954,7 @@ def _run_edit(target_type: str, action: str, target_id: str, patch: dict,
                         "role (officeId or category) yourself for this create.")
             fields = fill_classification(fields, classification)
             if classification["low_confidence"]:
-                fields["reviewFlags"] = sorted(set(fields.get("reviewFlags") or []) | {"identity_uncertain"})
+                logger.info("person %s classified with low confidence: %s", target_id, classification["confidence"])
         evidence_errors = _person_evidence_errors(fields, sources)
         if evidence_errors:
             return "Error: evidence validation: " + "; ".join(evidence_errors)

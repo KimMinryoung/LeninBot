@@ -200,3 +200,23 @@ class ClassifyCodesTests(unittest.TestCase):
         self.assertEqual(seen['state']['origin_claims'][0]['claim'], 'born to a Jewish family in Lwów')
         self.assertEqual(cc.fill_person_codes(card, codes)['nationalOrigin']['code'], 'poland')
         self.assertIn('nationalOrigin.code', cc.missing_person_codes(card))
+
+
+class ReviewRiskTests(unittest.TestCase):
+    def test_low_confidence_classification_becomes_a_review_risk(self):
+        from commulingo_pipeline.stages import classification_risks
+        artifacts = [{'stage':'research','value':{},'metrics':{}},
+                     {'stage':'draft','value':{},'metrics':{'classification':{'group':0.95,'role':0.41,'low_confidence':True,
+                                                                             'codes':{'citizenship':0.99,'fate':0.55},'codes_low_confidence':['fate']}}}]
+        risks = classification_risks(artifacts)
+        self.assertEqual(len(risks), 2)
+        self.assertIn('role 0.41', risks[0])
+        self.assertIn('fate 0.55', risks[1])
+        self.assertEqual(classification_risks([{'stage':'draft','value':{},'metrics':{'classification':{'group':0.9,'role':0.9,'low_confidence':False}}}]), [])
+        self.assertEqual(classification_risks([]), [])
+
+    def test_unsure_group_role_yields_to_a_complete_writer_choice(self):
+        unsure = {'groupId': 'thaw', 'role': {'category': 'scholar'}, 'confidence': {'group': 0.5, 'role': 0.4}, 'low_confidence': True}
+        writer = {**FIELDS, 'groupId': 'international-revolutionary', 'role': {'category': 'socialist-bloc-leader'}}
+        self.assertEqual(cc.fill_classification(writer, unsure)['groupId'], 'international-revolutionary')
+        self.assertEqual(cc.fill_classification(FIELDS, unsure)['groupId'], 'thaw')

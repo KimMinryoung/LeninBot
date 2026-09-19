@@ -214,8 +214,10 @@ max_length_continuations로 실제 도구 루프에 전달한다. 응답당 8,00
 **등록 시 자동 배정 (2026-09-19).** 인물 create의 `groupId`와 `role`은 작성 모델이 고르지 않는다. 도구 schema에서 두 필드는
 필수가 아니고(명시적 값은 여전히 받음), 실행기가 초안의 이름·생몰·국적·별칭·경력·bio를 state로 Jev(registry
 `commulingo_person_classification`, `runtime_tools/commulingo_classify.py`)에 choice 판정을 받아 채운다. 관직 선택지는 소련·후계국
-국적에만 제시하고 비소련 인물은 카테고리만 고른다. confidence가 `thresholds.accept`(0.7) 미만이면 그래도 채우되
-`reviewFlags: identity_uncertain`을 붙여 독립 검토자가 확인하게 하고, 판정 불가(None)면 작성 모델에 직접 지정을 요구한다.
+국적에만 제시하고 비소련 인물은 카테고리만 고른다. confidence가 `thresholds.accept`(0.7) 미만이면 작성 모델이 둘 다 명시한 경우 그 값을 두고, 아니면
+그래도 채우되 draft artifact `metrics.classification`에 수치가 남아 검토 단계가 `classification_low_confidence` /
+`code_low_confidence` 위험 항목으로 독립 검토자에게 확인을 요구한다(`stages.classification_risks`). 판정 불가(None)면
+작성 모델에 직접 지정을 요구한다.
 파이프라인 초안 단계(`stages.Draft`)와 `commulingo_person_create` 도구 양쪽이 같은 함수를 쓰며, 초안 프롬프트에서는 그룹·카테고리
 카탈로그가 빠진다. update에서는 기존 분류가 잠겨 있으므로 해당 없음. `enabled=false`면 예전처럼 작성 모델이 고른다.
 `citizenship.code`(국가 코드)와 `fate.kind`도 실행기가 채운다(`classify_person_codes`, registry `commulingo_person_codes`,

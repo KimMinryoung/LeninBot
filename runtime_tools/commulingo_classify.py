@@ -381,10 +381,13 @@ def classify_person(fields: dict, *, catalogs=None, decide=None) -> dict | None:
 
 
 def fill_classification(fields: dict, classification: dict | None) -> dict:
-    """Copy of ``fields`` with the assigned group/role; the writer's own values
-    are only kept when no classification came back."""
+    """Copy of ``fields`` with the assigned group/role. The writer's own values
+    are kept when no classification came back, or when the classifier is unsure
+    and the writer named both — the same rule as terms and codes."""
     out = dict(fields)
     if classification is None:
+        return out
+    if classification.get("low_confidence") and (out.get("groupId") or out.get("group")) and out.get("role"):
         return out
     out.pop("group", None)
     out["groupId"] = classification["groupId"]
