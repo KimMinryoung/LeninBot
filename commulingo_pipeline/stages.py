@@ -54,6 +54,63 @@ def write_request(job, draft):
 
 TERM_FACT_FIELDS = ('startYear','endYear','period')
 
+# Card prose the writer submits as sentences, not as one string. A model cannot
+# count characters: bio.ko/moment.ko/en/bio.en were 890 of 1,510 length
+# rejections in the week to 2026-09-19, typically shaved a few characters per
+# round (454 -> 395 -> 390 -> 387 against 380). It can count sentences and
+# remove one by index, so the schema asks for an array bounded by the field's
+# sentence budget and the runner joins it before the store sees it.
+SENTENCE_FIELDS = ('bio','moment','definition')
+
+
+def sentence_schema(schema):
+    """Rewrite SENTENCE_FIELDS in a draft schema to bounded sentence arrays.
+
+    Returns {field: {lang: (hard_limit, budget)}} for join_sentences.
+    """
+    from runtime_tools.commulingo_people import DENSE_SENTENCE_CHARS
+    plan = {}
+    for field in SENTENCE_FIELDS:
+        parts = (schema['properties'].get(field) or {}).get('properties') or {}
+        limits = {lang:part.get('maxLength') for lang,part in parts.items() if isinstance(part,dict)}
+        if not limits.get('ko') or not limits.get('en'):
+            continue
+        cost = dict(zip(('ko','en'),DENSE_SENTENCE_CHARS))
+        budget = max(1,min(limits[lang]//cost[lang] for lang in ('ko','en')))
+        plan[field] = {}
+        for lang in ('ko','en'):
+            limit = limits[lang]
+            per_sentence = limit if budget==1 else -(-limit*3//5)
+            parts[lang] = {'type':'array','minItems':1,'maxItems':budget,
+                'items':{'type':'string','minLength':1,'maxLength':per_sentence},
+                'description':(f'One sentence per item, at most {budget}; the runner joins them with a space. '
+                    f'The joined text must stay within {limit} characters (a dense sentence is about {cost[lang]}). '
+                    'Repair by removing or replacing one item by its index.')}
+            plan[field][lang] = (limit,budget)
+    return plan
+
+
+def join_sentences(fields, plan):
+    """Join sentence arrays in place; report the first joined field over its limit."""
+    for field,langs in plan.items():
+        value = fields.get(field)
+        if not isinstance(value,dict):
+            continue
+        for lang,(limit,budget) in langs.items():
+            sentences = value.get(lang)
+            if not isinstance(sentences,list):
+                continue
+            sentences = [str(s).strip() for s in sentences if str(s).strip()]
+            joined = ' '.join(sentences)
+            value[lang] = joined
+            if len(joined) > limit:
+                sizes = ', '.join(f'S{i} {len(s)}' for i,s in enumerate(sentences,1))
+                longest = max(range(len(sentences)),key=lambda i:len(sentences[i]))
+                raise ValueError(f"fields.{field}.{lang} joins to {len(joined)} characters, {len(joined)-limit} over the "
+                    f"{limit} limit (sentences: {sizes}). Remove one sentence of secondary detail "
+                    f"(e.g. {{path:'/fields/{field}/{lang}/{longest}', op:'remove'}}) or replace the longest with a "
+                    'shorter one; do not trim a few words at a time.')
+
 
 def drop_unchanged_term_facts(fields, current, action):
     """Remove year/period keys the draft merely echoed.
@@ -513,9 +570,12 @@ class Draft:
             if missing:
                 usage.tracker['preflight_failures'] = 1
                 return Result({'preflight_error':'evidence required for ' + ', supporting '.join(sorted(missing))},'validate')
+        sentence_plan = sentence_schema(schema)
         prose_budgets = {field:{lang:{'draft_target':int(part['maxLength']*.8),'hard_limit':part['maxLength']}
             for lang,part in schema['properties'].get(field,{}).get('properties',{}).items() if part.get('maxLength')}
-            for field in ('bio','moment','definition','body','heading','epithet') if field in schema['properties']}
+            for field in ('body','heading','epithet') if field in schema['properties']}
+        prose_budgets.update({field:{lang:{'sentences':budget,'hard_limit':limit} for lang,(limit,budget) in langs.items()}
+            for field,langs in sentence_plan.items()})
         # Planning and scope remarks have a home outside the published fields
         # (commulingo_editorial_notes, read back as current.notes by the next
         # job on the entry): on 2026-09-19 a sections draft for Yezhov put the
@@ -547,7 +607,8 @@ class Draft:
 
         async def prepare_and_validate(value):
             value = repairs.prepare(value)
-            fields = value['fields']
+            fields = deepcopy(value['fields'])
+            join_sentences(fields, sentence_plan)
             notes = (value.get('notes') or '').strip()
             original = (job.get('payload') or {}).get('original_proposal') or {}
             if section and original and fields.get('slug')!=(original.get('patch_json') or {}).get('slug'):
@@ -625,6 +686,8 @@ class Draft:
             'Look up only a known ID with get_person/get_sections (person_id), get_term (term_id), '
             'get_office (office_id), or get_event (event_id). Search actions and q are unavailable. '
             'do not browse lists or investigate unchanged relationships. Submit the first draft early to leave rounds for repair. '
+            'bio, moment and definition are arrays of sentences (one per item, within prose_budgets.sentences); '
+            'the runner joins them. Repair length by removing or replacing one sentence by index. '
             'Use prose_budgets draft targets to leave room below hard limits; no length quota is implied. '
             'If length is rejected, remove a whole optional clause or sentence and retain the key supported claims. '
             'Do not repeatedly shave a few characters or resubmit the same rejected text. '

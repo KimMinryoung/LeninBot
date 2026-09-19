@@ -125,6 +125,12 @@ enum으로 제한한다. 역할 category/categoryId도 현재 역할 분류 ID·
 목록 전체 교체와 부분 수정(aliases/aliasEdits, career/careerEdits, scenes/sceneEdits)은
 동시에 제출할 수 없도록 초안 schema에서 검사하여 같은 작성 호출에서 고친다.
 한영 본문 필드에는 schema 상한의 80%를 초안 목표로 제공한다(실제 검증 상한은 유지).
+bio·moment·definition은 문자열이 아니라 **문장 배열**로 받는다(`sentence_schema`): 항목 수 상한은
+`sentence_budget`과 같은 계산(ko·en 상한 ÷ 밀도 문장 비용), 항목당 길이 상한은 필드 상한의 60%
+(1문장 필드는 상한 그대로). 실행기가 공백으로 이어 붙여 저장소에 보내며, 이어 붙인 길이가 상한을
+넘으면 문장별 길이와 제거할 항목의 JSON pointer를 돌려준다. 모델은 글자 수를 세지 못하지만 문장은
+셀 수 있고 index로 제거할 수 있다: 2026-09-13~19 길이 거절 1,510건 중 890건이 이 세 필드였고 대개
+몇 글자씩 깎다 라운드를 소진했다. body·heading·epithet은 문자열 그대로다.
 길이 초과 시 핵심 주장을 보존하며 부차적 절·문장을 줄이고 몇 글자씩 반복 제출하지 않도록 안내한다.
 `DraftRepair`는 한 작성 호출 안에서 거절된 전체 초안을 보관하고 draft_id와 JSON pointer
 repairs로 실패 필드만 교체할 수 있게 한다. 입력 단계의 길이 제한은 로컬 초안 보관까지

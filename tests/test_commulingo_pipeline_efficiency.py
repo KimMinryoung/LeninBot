@@ -105,14 +105,14 @@ class DraftContracts(IsolatedAsyncioTestCase):
             self.assertEqual(kw['read_tools']['commulingo_people']['input_schema']['properties']['action']['enum'],
                 ['get_person','get_term','get_office','get_event','get_sections'])
             try:
-                await kw['handler']({'fields':{'definition':{'ko':'정의','en':'Definition'}}})
+                await kw['handler']({'fields':{'definition':{'ko':['정의'],'en':['Definition']}}})
             except ValueError as exc:
                 import re
                 current=re.search(r'draft_id=([a-f0-9]+)',str(exc))[1]
             else:
                 self.fail('invalid storage draft accepted')
             await kw['handler']({'draft_id':current,'repairs':[
-                {'op':'set','path':'/fields/definition/en','value':'Correct definition'}]})
+                {'op':'set','path':'/fields/definition/en/0','value':'Correct definition'}]})
         usage=Usage()
         with patch('commulingo_pipeline.stages.model_call',side_effect=model), patch('commulingo_pipeline.stages.service.call',rpc):
             result=await Draft(store)(job,artifacts,usage,.2)
@@ -126,7 +126,7 @@ class DraftContracts(IsolatedAsyncioTestCase):
     async def test_missing_evidence_preserves_draft_and_routes_to_research(self):
         store,job,artifacts=self.fixture()
         async def model(**kw):
-            await kw['handler']({'fields':{'definition':{'ko':'정의','en':'Definition'}}})
+            await kw['handler']({'fields':{'definition':{'ko':['정의'],'en':['Definition']}}})
         with patch('commulingo_pipeline.stages.model_call',side_effect=model), patch('commulingo_pipeline.stages.service.call',side_effect=ValueError('400: evidence required for body')):
             result=await Draft(store)(job,artifacts,Usage(),.2)
         self.assertIn('rejected_draft',result.value)
@@ -151,7 +151,7 @@ class BudgetDrainRegression(IsolatedAsyncioTestCase):
         store,job,artifacts=DraftContracts().fixture()
         artifacts[0]['value']['claims'] *= 63
         async def model(**kw):
-            await kw['handler']({'fields':{'definition':{'ko':'정의','en':'Definition'}}})
+            await kw['handler']({'fields':{'definition':{'ko':['정의'],'en':['Definition']}}})
         with patch('commulingo_pipeline.stages.model_call',side_effect=model) as call, patch('commulingo_pipeline.stages.service.call',return_value={}):
             result=await Draft(store)(job,artifacts,Usage(),.2)
         call.assert_called_once()
@@ -180,7 +180,7 @@ class StorageDraftContracts(IsolatedAsyncioTestCase):
         store=Mock()
         store.sources.return_value={source['id']:source}
         fields={'term':{'ko':'검증 용어 '+target,'en':'Test concept '+target},
-            'definition':{'ko':'문헌에 근거한 개념이다.','en':'A concept supported by the document.'},
+            'definition':{'ko':['문헌에 근거한 개념이다.'],'en':['A concept supported by the document.']},
             'period':{'ko':'역사적 개념','en':'Historical concept'},'category':'theory',
             'aliases':{'ko':[],'en':[]},'people':['missing-person-'+target]}
         async def model(**kw):

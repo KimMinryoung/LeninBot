@@ -412,10 +412,20 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(ToolRejection):
                 await lookup(action='get_term',term_id='fixture')
             self.assertEqual(call.await_count,3)
-            await kwargs['handler']({'fields':{'definition':{'ko':'검증한 정의','en':'Verified definition'}}})
+            # Card prose arrives as sentences; a plain string is not accepted.
+            definition = schema['definition']['properties']
+            self.assertEqual(definition['ko']['type'],'array')
+            self.assertEqual(definition['ko']['maxItems'],kwargs['prompt'].count('"sentences"') and definition['en']['maxItems'])
+            with self.assertRaises(ValueError):
+                await kwargs['handler']({'fields':{'definition':{'ko':'검증한 정의','en':'Verified definition'}}})
+            too_many = ['문장이다.']*(definition['ko']['maxItems']+1)
+            with self.assertRaises(ValueError):
+                await kwargs['handler']({'fields':{'definition':{'ko':too_many,'en':['Sentence.']}}})
+            await kwargs['handler']({'fields':{'definition':{'ko':['검증한 정의다.','문헌이 뒷받침한다.'],'en':['Verified definition.','The archive supports it.']}}})
         with patch('commulingo_pipeline.stages.model_call',side_effect=model), patch('commulingo_pipeline.stages.service.call',return_value={}):
             result = await Draft(store)({'kind':'term','action':'update','topic':'definition','target':'fixture'},
                 [{'stage':'research','value':{'claims':[claim],'baseline':'original-revision'}}],Usage(),.2)
+        self.assertEqual(result.value['fields']['definition'],{'ko':'검증한 정의다. 문헌이 뒷받침한다.','en':'Verified definition. The archive supports it.'})
         self.assertEqual(result.value['fields']['expectedRevision'],'original-revision')
         self.assertEqual(result.value['fields']['evidence'][0]['excerpt'],source['body'])
         self.assertEqual(result.next_stage,'validate')
@@ -443,7 +453,7 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
         store.sources.return_value = {source['id']:source}
         claim = {'field':'definition','claim':'Documented definition','source_id':source['id'],'start':0,'end':len(source['body'])}
         async def model(**kwargs):
-            await kwargs['handler']({'fields':{'definition':{'ko':'정의','en':'Definition'},'startYear':2023,'endYear':None}})
+            await kwargs['handler']({'fields':{'definition':{'ko':['정의'],'en':['Definition']},'startYear':2023,'endYear':None}})
         validate = Mock(return_value={})
         with patch('commulingo_pipeline.stages.model_call',side_effect=model), patch('commulingo_pipeline.stages.service.call',validate):
             result = await Draft(store)({'kind':'term','action':'update','topic':'definition','target':'fixture'},
@@ -666,7 +676,7 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(any(e.validator=='not' for e in errors))
             self.assertIn('분류의 실제 기준',kwargs['prompt'])
             self.assertIn('draft_target',kwargs['prompt'])
-            self.assertIn('720',kwargs['prompt'])
+            self.assertIn('"sentences": 4',kwargs['prompt'])
             with self.assertRaises(ValueError):
                 await kwargs['handler']({'fields':{'groupId':'people'}})
             await kwargs['handler']({'fields':{'groupId':'foreign-statesmen'}})
@@ -741,6 +751,24 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('fall-trial',result.value['notes'])
         self.assertNotIn('notes',validate.call_args.args[0]['fields'])
         self.assertFalse(prose_problem(result.value['fields']))
+
+    def test_joined_sentences_over_the_limit_name_the_sentence_to_drop(self):
+        from commulingo_pipeline.stages import sentence_schema, join_sentences
+        schema = {'properties':{'bio':{'properties':{'ko':{'type':'string','maxLength':380},'en':{'type':'string','maxLength':900}}},
+                                'moment':{'properties':{'ko':{'type':'string','maxLength':140},'en':{'type':'string','maxLength':300}}},
+                                'epithet':{'properties':{'ko':{'type':'string','maxLength':60},'en':{'type':'string','maxLength':140}}}}}
+        plan = sentence_schema(schema)
+        self.assertEqual(plan['bio']['ko'],(380,4))
+        self.assertEqual(plan['moment']['ko'],(140,1))
+        self.assertEqual(schema['properties']['bio']['properties']['ko']['maxItems'],4)
+        self.assertEqual(schema['properties']['moment']['properties']['ko']['items']['maxLength'],140)
+        self.assertEqual(schema['properties']['epithet']['properties']['ko'],{'type':'string','maxLength':60})
+        fields = {'bio':{'ko':['첫 문장이다.',' 둘째 문장이다. '],'en':'kept as is'},'moment':{'ko':['한 문장.'],'en':['One.']}}
+        join_sentences(fields,plan)
+        self.assertEqual(fields['bio'],{'ko':'첫 문장이다. 둘째 문장이다.','en':'kept as is'})
+        long = {'bio':{'ko':['가'*100,'나'*200,'다'*100],'en':['x']}}
+        with self.assertRaisesRegex(ValueError,r"22 over the 380 limit.*S2 200.*/fields/bio/ko/1"):
+            join_sentences(long,plan)
 
     async def test_submission_replay_uses_identical_receipt_keys(self):
         from commulingo_pipeline.stages import submit
