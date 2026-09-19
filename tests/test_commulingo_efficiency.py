@@ -73,7 +73,22 @@ class EfficiencyTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError) as rejected: resolve_review_checks(unknown, proposal, snapshots)
         self.assertIn(f'{source_id} ({url})', str(rejected.exception))
         absent = deepcopy(decision); absent['checks'][0]['quote']='this passage was never retrieved in the review'
-        with self.assertRaisesRegex(ValueError, 'quote not found'): resolve_review_checks(absent, proposal, snapshots)
+        with self.assertRaisesRegex(ValueError, 'no check could be verified.*check 1: quote not found'): resolve_review_checks(absent, proposal, snapshots)
+        # A copy that drifts after 40 folded characters (a dropped footnote marker, a rewritten
+        # bracket) still pins the passage and persists the source's own text through the sentence end.
+        drifted = deepcopy(decision); drifted['checks'][0]['quote']='The original archive records the birth - and the "subsequent" appointment.[12] Another sentence entirely'
+        self.assertEqual(resolve_review_checks(drifted, proposal, snapshots)['checks'][0]['quote'],
+                         'The original archive records the birth — and the “subsequent” appointment.')
+        # One unverifiable check among several is dropped and recorded; the decision survives
+        # and still validates with the checks that located.
+        partial = deepcopy(decision); partial['checks'] = decision['checks'] + [{'citation_id':'S1','source_id':source_id,
+            'quote':'The original archive was written by somebody else in a different century','finding':'x'},
+            {'citation_id':'S1','source_id':'R0000','quote':'Exiled to Siberia in 1930 by decree','finding':'y'}]
+        survived = resolve_review_checks(partial, proposal, snapshots)
+        self.assertEqual(len(survived['checks']), 1)
+        self.assertEqual([(d['check'], d['reason']) for d in survived['dropped_checks']],
+                         [(2, 'quote not found in retrieved text'), (3, 'source not retrieved in this review')])
+        self.assertEqual(validate_decision(survived, proposal, {url:body}), survived)
         with self.assertRaises(ValueError): validate_decision(resolved, proposal, {})
         # A quote named under one source but present in another fetched source is filed there.
         other_id, _ = review_source('https://other.example/page', 'Different page. Exiled to Siberia in 1930 by decree.', snapshots)

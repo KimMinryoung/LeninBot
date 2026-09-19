@@ -102,42 +102,66 @@ def resolve_review_checks(value, proposal, snapshots):
     passage; the passage is located with typography folded, in that source
     first and then in any other source of this review, and persisted as the
     exact text at that location. Nothing is counted or numbered.
+
+    A check whose source or passage cannot be found is dropped, not fatal: the
+    decision keeps the checks that did locate and records the dropped ones under
+    ``dropped_checks``. Only a decision with checks and none locatable is
+    refused. (One drifted copy among 9..39 checks bounced whole decisions 159
+    times on 2026-09-19; the reviewer could not tell which and resubmitted.)
     """
     from copy import deepcopy
     value = deepcopy(value)
     by_url = {}
     for sid, snap in snapshots.items():
         by_url.setdefault(snap["url"], []).append(sid)
-    for check in value.get("checks", []):
+    kept, dropped = [], []
+    for index, check in enumerate(value.get("checks", []), 1):
         if not isinstance(check, dict):
-            raise ValueError("each check must be an object")
+            raise ValueError(f"check {index}: each check must be an object")
         if "citation_id" in check:
             identifier = check.pop("citation_id")
             match = re.fullmatch(r"S([1-9][0-9]*)", str(identifier))
             refs = proposal.get("source_refs") or []
-            index = int(match[1]) - 1 if match else -1
-            if "citation" in check or not 0 <= index < len(refs):
-                raise ValueError("citation_id must select an original source_refs entry; do not also supply citation")
-            check["citation"] = refs[index]
+            index_ref = int(match[1]) - 1 if match else -1
+            if "citation" in check or not 0 <= index_ref < len(refs):
+                raise ValueError(f"check {index}: citation_id must select an original source_refs entry; do not also supply citation")
+            check["citation"] = refs[index_ref]
         if "source_id" in check:
             named = check.pop("source_id")
+            quote = str(check.get("quote") or "")
             candidates = [named] if named in snapshots else by_url.get(named, [])
             if not candidates:
-                available = "; ".join(f"{sid} ({snap['url']})" for sid, snap in snapshots.items()) or "none fetched yet"
-                raise ValueError(f"select a review source_id shown with text retrieved during this review. Available: {available}")
-            quote = str(check.get("quote") or "")
+                dropped.append({"check": index, "source_id": named, "quote": quote[:80], "reason": "source not retrieved in this review"})
+                continue
             located = None
+            # Same prefix fallback as the research lane (evidence.locate_claim_quotes):
+            # a copy that drifts after 40 folded characters still pins the passage.
             for sid in candidates + [s for s in snapshots if s not in candidates]:
-                span = locate(snapshots[sid]["body"], quote)
+                span = locate(snapshots[sid]["body"], quote, min_prefix=40)
                 if span:
                     located = (snapshots[sid], span)
                     break
             if not located:
-                raise ValueError("quote not found in the retrieved text of that source (or any other fetched in this "
-                                 "review): copy 20..1000 characters exactly as displayed, without ellipsis")
+                dropped.append({"check": index, "source_id": named, "quote": quote[:80], "reason": "quote not found in retrieved text"})
+                continue
             snapshot, (start, end) = located
+            body = snapshot["body"]
+            if end - start < len(quote):
+                # A prefix match ends where the copy drifted, possibly mid-word; persist
+                # through the end of that sentence (bounded) so the stored quote reads whole.
+                stop = re.search(r"[.!?…]+(?=\s|$)|\n", body[end:end + min(len(quote) + 50, 300)])
+                end = end + stop.end() if stop else end
             check["source"] = snapshot["url"]
-            check["quote"] = snapshot["body"][start:end]
+            check["quote"] = body[start:end]
+        kept.append(check)
+    if dropped and not kept:
+        available = "; ".join(f"{sid} ({snap['url']})" for sid, snap in snapshots.items()) or "none fetched yet"
+        heads = "; ".join(f"check {d['check']}: {d['reason']} ({d['quote'][:60]!r})" for d in dropped)
+        raise ValueError("no check could be verified — " + heads + ". Cite a review source_id shown with retrieved text "
+                         f"and copy 20..1000 characters exactly as displayed, without ellipsis. Available: {available}")
+    value["checks"] = kept
+    if dropped:
+        value["dropped_checks"] = dropped
     return value
 
 
@@ -149,7 +173,7 @@ def external_url(url):
 
 def validate_decision(value, proposal, fetched):
     required = {"decision", "reason", "resolved_risks", "checks"}
-    if not isinstance(value, dict) or not required.issubset(value) or set(value) - required - {"needs_research"}:
+    if not isinstance(value, dict) or not required.issubset(value) or set(value) - required - {"needs_research", "dropped_checks"}:
         raise ValueError("decision, reason, resolved_risks and checks required")
     if "needs_research" in value and type(value["needs_research"]) is not bool:
         raise ValueError("needs_research must be a boolean")

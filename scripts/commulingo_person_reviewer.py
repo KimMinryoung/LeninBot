@@ -83,7 +83,10 @@ def make_handlers(read_handlers, proposal, fetched, box, gate=None):
                 value = await gate(value)
         except ValueError as exc: raise ToolRejection(str(exc)) from exc
         box.update(value)
-        return 'OK: review decision recorded; no dictionary write was made by this tool.'
+        dropped = value.get('dropped_checks') or []
+        note = (f' {len(dropped)} check(s) could not be verified in retrieved text and were dropped: '
+                + '; '.join(f"check {d['check']} ({d['reason']})" for d in dropped) + '.') if dropped else ''
+        return 'OK: review decision recorded; no dictionary write was made by this tool.' + note
     handlers[DECISION_TOOL['name']] = decide
     return handlers
 
