@@ -280,7 +280,28 @@ A군 후보였으나 실제 scout 완료 태스크 30건(최근 90일 202건에�
 문턱값 0.8: 절차 줄 오저장 0, 사실 8건 중 7건 유지. 30건 보고서 중 사실이 하나라도 남는 것은 6건 — 나머지 24건은 episode를
 쓰지 않게 된다. 100줄 판정 비용 $0.0011(보고서당 ~$0.00004).
 
-## 4.11 남은 후보와 관찰 포인트
+## 4.11 평가 — CommuLingo 인물 분류 필드 자동 채우기 (2026-09-19, 미채택·후속 결정 대기)
+
+등록 API의 닫힌 집합 필드(`groupId` 9종, `role.category` 10종/`role.officeId` 16종, `fate.kind` 9종, `citizenship.code`·
+`nationalOrigin.code` 각 ~190종)를 작성 모델 대신 Jev가 채울 수 있는지, 저장된 인물 60명(무작위)의 bio_ko/bio_en·years·
+epithet만 state로 주고 저장값과 비교했다. 인물당 ~9k 토큰(대부분 criteria), 60명 $0.023.
+
+| 필드 | 저장값과 일치 | conf ≥0.85에서 일치 | 판단 |
+|---|---|---|---|
+| citizenship.code | 57/60 | 49/52 | 채울 수 있음. 불일치는 망명자(soviet↔russia)·체코슬로바키아↔체코 같은 경계 사례 |
+| nationalOrigin.code | 56/60 | 52/55 | 채울 수 있음. 불일치는 bio에 출신이 없을 때(belarus→russia) |
+| groupId | 45/60 | 36/39 | bio만으로는 부족. 시대 경계(bolshevik↔stalin-era↔thaw)는 편집 판단이고, "scholar"(이 역사를 연구한 사람) 기준을 과학자에게 잘못 적용 |
+| role | 36/60 | 25/34 | bio만으로는 부족. office↔category 선택과 party-leadership↔party-secretariat-cadres 같은 경계가 편집 판단 |
+| fate.kind | 37/60 | 24/27 | bio에 사망 경위가 없으면 unconfirmed → 저장값 natural과 어긋남. 조사 claim이 필요한 사실 |
+
+단, 고신뢰 불일치에는 **저장값이 틀린 것으로 보이는 사례**가 섞여 있다: 덩화(중국 인민해방군 장성)가 `stalin-era`(Jev:
+international-revolutionary 0.94), 이반 파블로프(생리학자)가 `theorist`(Jev: scholar 0.96), 앙드레 마르티가 `non-soviet-revolutionary`
+(Jev: comintern 1.0 — 코민테른 서기국원). 자동 채우기보다 **기존 2,341명 분류 감사**(고신뢰 불일치 목록을 큐레이터에게)와
+**신규 등록 초안의 분류 불일치 플래그**(작성 모델의 group/role과 Jev 고신뢰 판정이 다르면 검토자에게 확인 요청)가 먼저다.
+라벨(`label.ko/en`)은 혼혈·복수 배경을 보존하는 자유 서술이라 코드에서 파생할 수 없고, 코드만 Jev가 채우는 형태가 된다.
+`group`·`role`은 update에서 잠겨 있어 실제로 채워야 하는 것은 월 ~75건의 person create뿐이다.
+
+## 4.12 남은 후보와 관찰 포인트
 
 - 조사 게이트 실데이터 첫 7건(12:06~12:35): 173 claim, unrelated 4건 전부 conf 0.12~0.62의 "일부 지지"(긴 복합 문장의
   절 하나만 인용) → 거절 0. 기준선의 P군과 같은 양상. 복합 claim을 절 단위로 나누게 하거나 `partial` 선택지를 두는
