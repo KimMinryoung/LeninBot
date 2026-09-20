@@ -36,6 +36,34 @@ def store_mock():
 
 
 class SourceAndIssueTests(EditorCase):
+    async def test_unlabelled_cached_page_can_be_opened_and_restored(self):
+        page = snapshot(URL, BODY)
+        store = store_mock()
+        store.job_sources.return_value = {page['id']:page}
+        session = await Sources.load(store, JOB, Usage())
+        checkpoint = {}
+        async def save():
+            checkpoint['passages'] = deepcopy(session.passages.shown)
+        tool, read, _ = session.cached_tool(on_read=save)
+        from jsonschema import validate, ValidationError
+        validate({'source_id':page['id']}, tool['input_schema'])
+        validate({'passages':['P1']}, tool['input_schema'])
+        for args in ({}, {'source_id':page['id'],'passages':['P1']}):
+            with self.assertRaises(ValidationError):
+                validate(args, tool['input_schema'])
+        with self.assertRaisesRegex(ValueError, 'source_id.*Never guess P1'):
+            await read(passages=['P1'])
+        fetched_at, expires_at = page['fetched_at'], page['expires_at']
+        self.assertIn('[P1]', await read(source_id=page['id']))
+        restored = await Sources.load(store, JOB, Usage(), checkpoint)
+        _, reread, _ = restored.cached_tool()
+        self.assertIn(BODY, await reread(passages=['P1']))
+        self.assertEqual(restored.passages.shown, session.passages.shown)
+        self.assertEqual((page['fetched_at'],page['expires_at']), (fetched_at,expires_at))
+        page['expires_at'] = datetime.now(timezone.utc)-timedelta(seconds=1)
+        with self.assertRaisesRegex(ValueError, 'expired'):
+            await reread(source_id=page['id'])
+
     async def test_cached_passage_read_keeps_labels_and_rejects_expiry(self):
         page = snapshot(URL,BODY)
         session = Sources(store_mock(),JOB,Usage(),{page['id']:page})
@@ -112,6 +140,23 @@ class SourceAndIssueTests(EditorCase):
 
 
 class EditorTests(EditorCase):
+    async def test_cached_source_labels_are_checkpointed_before_first_draft(self):
+        store = store_mock()
+        page = snapshot(URL, BODY)
+        store.job_sources.return_value = {page['id']:page}
+        async def model(**kwargs):
+            read = next(handler for tool,handler,_ in kwargs['local_tools']
+                        if tool['name']=='commulingo_pipeline_cached_passages')
+            await read(source_id=page['id'])
+            saved = store.save_editor_checkpoint.call_args.args[1]
+            self.assertIsNone(saved['draft'])
+            self.assertIn('P1', saved['passages'])
+            await kwargs['handler'](candidate())
+        with patch('commulingo_pipeline.service.call', return_value=CURRENT), \
+             patch('commulingo_pipeline.stages.model_call', side_effect=model):
+            result = await Editor(store)(JOB, [], Usage(), .2)
+        self.assertEqual(result.next_stage, 'review')
+
     async def test_citation_rejection_preserves_draft_and_requires_supported_repair(self):
         store, usage = store_mock(), Usage()
         async def model(**kwargs):

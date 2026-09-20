@@ -390,6 +390,19 @@ def pipeline_health(since):
     """Queue and budget state via the digest's existing read-only psql path."""
     boundary = window_boundary(since)
     sql = f"""SELECT json_build_object(
+        'approval_records',(SELECT count(*) FROM commulingo_pipeline_artifacts
+            WHERE stage='submit' AND value->>'status'='approved' AND created_at>{boundary}),
+        'last_publication',(SELECT max(created_at) FROM commulingo_pipeline_artifacts
+            WHERE stage='submit' AND value->>'status'='approved'),
+        'no_edit',(SELECT count(DISTINCT job_id) FROM commulingo_pipeline_attempts
+            WHERE stage='judge' AND outcome='complete' AND next_stage='complete' AND started_at>{boundary}),
+        'retired',(SELECT count(*) FROM commulingo_pipeline_jobs
+            WHERE status='cancelled' AND last_error='automatic commission has no remaining missing fields'
+              AND updated_at>{boundary}),
+        'failed_attempts',(SELECT count(*) FROM commulingo_pipeline_attempts
+            WHERE outcome='error' AND started_at>{boundary}),
+        'budget_waits',(SELECT count(*) FROM commulingo_pipeline_jobs
+            WHERE status='deferred' AND last_error IN ('daily budget unavailable','daily budget reserved or spent')),
         'applied',(SELECT count(DISTINCT job_id) FROM commulingo_pipeline_artifacts
             WHERE stage='submit' AND value->>'status'='approved' AND created_at>{boundary}),
         'escalated',(SELECT count(*) FROM commulingo_pipeline_jobs WHERE status='escalated'),
@@ -437,6 +450,8 @@ def pipeline_health(since):
     value = json.loads(result.stdout)
     lines = [f"파이프라인: 기간 내 반영 {value['applied']}건 · 현재 실행 {value['running']} · 실패 재시도 {value['retrying']} · 운영자 확인 {value['escalated']}",
              f"shared budget (UTC today): spent ${value['today_actual']:.4f}, reserved ${value['today_reserved']:.4f}"]
+    lines.append(f"공개 승인 기록 {value.get('approval_records', 0)}건 · 고유 반영 작업 {value['applied']}개 · 마지막 공개 반영 {value.get('last_publication') or '없음'}")
+    lines.append(f"기간 내 무편집 완료 {value.get('no_edit', 0)} · 불필요 작업 취소 {value.get('retired', 0)} · 실패 시도 {value.get('failed_attempts', 0)} · 현재 예산 대기 {value.get('budget_waits', 0)}")
     for row in value.get('publications', []):
         action = '신규' if row['action']=='create' else '보강'
         lines.append(f"  반영 #{row['job_id']} {row['kind']} {action}: {row['label']} ({row['target']}) · {row['topic']}")

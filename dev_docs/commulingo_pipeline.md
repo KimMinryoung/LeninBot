@@ -176,3 +176,30 @@ frontend DB 검사는 동시 반영, 승인 해시 불일치, 메모 실패 롤�
 Jev 호출 수와 비용은 `jev_calls`·`jev_cost_usd`로 분리한다.
 해결 과제 수는 작성자가 보고하고 검토자가 승인한 값이다. 독립 사후 표본 감사의 오류율은 아직 계측하지 않는다.
 단위 테스트 통과나 소수 성공 사례만으로 품질 향상·비용 절감률을 주장하지 않는다.
+
+### 무편집 대기열 정리와 실행 결과
+
+Editor `tick`은 실행 전에 미착수 자동 보강을 최대 200건 재평가한다.
+`cleanup`은 같은 평가의 미리보기이며 `cleanup --apply`가 취소를 저장한다.
+현재 DB 값에 기존 결손 판정을 적용하되 묶음의 남은 모든 주제를 확인한다.
+명시적 요청, gap, 검토 수정, 실행 중 항목, 시도·비용·자료·artifact 이력이 있는 작업은 제외한다.
+결손이 없는 항목만 `cancelled`와 사유를 남기며 공개 데이터와 과거 이력은 보존한다.
+유지한 후보도 `updated_at`을 갱신해 다음 배치가 뒤의 후보를 확인할 수 있게 한다.
+적용은 관련 queue·원장·대상 테이블의 짧은 NOWAIT 잠금 아래 DB 조회만 수행한다.
+동시 쓰기가 있으면 해당 tick의 정리를 건너뛰고 정상 작업을 계속한다.
+
+캐시 조회 도구는 기존 `passages` 또는 `source_id` 중 하나를 받는다.
+라벨 없는 저장 페이지는 `source_cache.available_pages`의 `source_id`로 열어 라벨을 얻는다.
+원문 시각과 만료는 유지하며 할당된 라벨은 초안이 아직 없어도 체크포인트에 보존한다.
+잘못된 라벨은 대체하거나 무시하지 않고 실제 라벨과 복구 경로를 안내한다.
+
+단계 JSON은 기존 필드를 유지하면서 `completed_stage`와 `disposition`을 추가한다.
+`published`는 승인된 submit, `no_edit`는 공개 저장 없이 종료한 judge,
+`failed`는 실행 실패, `budget_wait`는 예산 대기다. 그 외는 progress/held/deferred로 구분한다.
+정리 결과는 별도 journal 로그로 기록한다. 일일 health 집계는 승인 기록 수와
+고유 반영 작업 수, 마지막 공개 반영 시각, 무편집 완료·취소·실패·현재 예산 대기를 분리한다.
+
+정리 회귀 검사는 확장 smoke에 포함된다. 실제 SQL·동시 쓰기 검사는
+`COMMULINGO_CLEANUP_TEST_PORT=<임시 PostgreSQL 포트> venv/bin/python -m unittest discover -s tests -p test_commulingo_cleanup_db.py`
+로 실행한다. DB명은 `commulingo_integrity_test`이며 전용 임시 schema를 생성·삭제한다.
+운영 DB를 사용하지 않는다.

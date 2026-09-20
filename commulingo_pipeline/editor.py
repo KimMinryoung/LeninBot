@@ -45,6 +45,8 @@ Submit a full draft through commulingo_pipeline_result. After rejection use
 commulingo_pipeline_repair with only repairs, never repeat status, reason or fields there.
 Either tool records a validated patch, not publication. Read cached P-label text with
 commulingo_pipeline_cached_passages instead of reconstructing fetch arguments.
+Use only labels listed in source_cache or shown by a tool. If a cached page has no labels,
+open its source_id with that tool first; do not assume P1 exists.
 '''
 
 
@@ -127,7 +129,7 @@ class Editor:
         box = {}
 
         async def save_checkpoint(error=''):
-            if repair.draft:
+            if repair.draft or session.passages.shown:
                 await asyncio.to_thread(self.store.save_editor_checkpoint, job, {
                     'baseline':baseline, 'draft':repair.draft, 'passages':session.passages.shown,
                     'source_requests':session.requests, 'failures':failures, 'error':error,
@@ -304,7 +306,7 @@ class Editor:
         spec = replace(COMMULINGO_CURATOR, prompt_ir=SystemPrompt(identity=EDITORIAL+WRITING_RULES+INSTRUCTIONS))
         await model_call(spec=spec,prompt=prompt,tool=repair.tool,handler=finish,reads=READS,
             usage=usage,budget=budget,read_wrap=reads.wrap,max_rounds=12,
-            local_tools=[(repair_tool,edit,True),session.cached_tool(),(context_tool,read_context,False),
+            local_tools=[(repair_tool,edit,True),session.cached_tool(on_read=save_checkpoint),(context_tool,read_context,False),
                          reads.tool(field_schema['properties'],usage)],
             scope_id=f'commulingo_pipeline:{job["id"]}:editor',job=job)
         if box.get('rebase'):

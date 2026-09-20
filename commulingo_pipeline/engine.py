@@ -116,12 +116,14 @@ class Engine:
             outcome, next_stage = result.status, result.next_stage
             error = result.value.get('error') or result.value.get('preflight_error') or ''
             return {'status': result.status, 'stage': result.next_stage, 'job_id': job['id'],
+                    'completed_stage': job['stage'],
+                    'disposition': disposition(job['stage'], result),
                     'cost_usd':usage.tracker.get('total_cost',0)}
         except BudgetUnavailable as exc:
             outcome, error = 'budget_deferred', str(exc)
             reason = str(exc) or 'daily budget unavailable'
             await asyncio.to_thread(self.store.defer, job, reason, seconds=3600, failed=False)
-            return {'status': 'budget_deferred', 'job_id': job['id'], 'reason': reason, 'blocked_stage':job['stage']}
+            return {'status': 'budget_deferred', 'disposition':'budget_wait', 'job_id': job['id'], 'reason': reason, 'blocked_stage':job['stage']}
         except asyncio.CancelledError:
             outcome, error = 'cancelled', 'stage cancelled; unsettled usage remains reserved'
             raise
@@ -135,7 +137,7 @@ class Engine:
                                         escalate=job['attempts'] >= 3)
             except LostLease:
                 pass
-            return {'status': 'error', 'job_id': job['id'], 'error': str(exc)}
+            return {'status': 'error', 'disposition':'failed', 'job_id': job['id'], 'error': str(exc)}
         finally:
             for task in (work, heartbeat):
                 if task:
@@ -149,3 +151,15 @@ class Engine:
                 if attempt:
                     await asyncio.to_thread(self.store.finish_attempt,attempt,outcome,next_stage,error,
                         asyncio.get_running_loop().time()-started_at,usage.tracker)
+
+
+def disposition(stage, result):
+    if stage == 'submit' and result.value.get('status') == 'approved':
+        return 'published'
+    if stage == 'judge' and result.status == 'complete':
+        return 'no_edit'
+    if result.status == 'escalated':
+        return 'held'
+    if result.status == 'deferred':
+        return 'deferred'
+    return 'progress'

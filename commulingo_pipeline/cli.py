@@ -2,6 +2,7 @@
 import argparse
 import asyncio
 import json
+import logging
 
 from .store import Store
 
@@ -19,6 +20,9 @@ def main():
     plan.add_argument('--workflow',choices=['legacy','editor'])
     consolidate = commands.add_parser('consolidate',help='bundle untouched enrichment jobs')
     consolidate.add_argument('--apply',action='store_true')
+    cleanup = commands.add_parser('cleanup', help='preview retirement of untouched automatic jobs')
+    cleanup.add_argument('--apply', action='store_true')
+    cleanup.add_argument('--limit', type=int, default=200)
     for name in ('show', 'retry'):
         commands.add_parser(name).add_argument('id', type=int)
     add = commands.add_parser('enqueue')
@@ -51,6 +55,14 @@ def main():
         result = Planner(store,concrete=workflow=='editor').plan(apply=args.apply)
     elif args.command == 'consolidate':
         result = store.consolidate(apply=args.apply)
+    elif args.command == 'cleanup':
+        from .cleanup import retire
+        from .config import load
+        if load()['workflow'] != 'editor':
+            parser.error('cleanup requires editor workflow')
+        if not 1 <= args.limit <= 200:
+            parser.error('--limit must be 1..200')
+        result = retire(store, apply=args.apply, limit=args.limit)
     elif args.command == 'costs':
         result = store.costs()
     elif args.command == 'efficiency':
@@ -106,6 +118,15 @@ def main():
                     amount=config['stage_budget_usd'],review_fraction=config['review_fraction'])
                 await asyncio.to_thread(store.reconcile_reviews)
                 await asyncio.to_thread(store.consolidate,apply=True)
+                if workflow == 'editor':
+                    from .cleanup import retire
+                    from psycopg2.errors import LockNotAvailable
+                    try:
+                        cleanup = await asyncio.to_thread(retire, store, apply=True)
+                        logging.getLogger(__name__).warning('pipeline cleanup: %s', json.dumps(
+                            {k:v for k,v in cleanup.items() if k != 'candidates'}))
+                    except LockNotAvailable:
+                        logging.getLogger(__name__).warning('pipeline cleanup skipped: concurrent work; retry next tick')
                 await asyncio.to_thread(Planner(store,concrete=workflow=='editor').plan,apply=True)
                 await asyncio.to_thread(store.expire_sources)
             engine = Engine(store, stages(store,workflow=workflow),cap=config['daily_cap_usd'],
