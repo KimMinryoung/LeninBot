@@ -335,9 +335,10 @@
     "kind": "system_one",
     "enabled": true,
     "thresholds": {
-      "accept": 0.75
+      "accept": 0.75,
+      "secondary": 0.6
     },
-    "note": "Telegram 예조프 사용자 메시지별 자동 판정. Jev는 사건·활동·접촉·시간 범위·부상 변화의 고정 라벨을 선택하고 코드가 수치를 계산한다. 에이전트에 수치/시간/이벤트 쓰기 권한 없음. 실패·저신뢰 핵심 판정은 상태 보류하며 생성 모델 폴백 없음. dev_docs/roleplay_jev.md"
+    "note": "Telegram 예조프 사용자 메시지별 자동 판정. Jev는 사건·활동·접촉·시간 범위·부상 변화의 고정 라벨을 선택하고 코드가 수치를 계산한다. 에이전트에 수치/시간/이벤트 쓰기 권한 없음. 실패·저신뢰 핵심 판정은 상태 보류하며 생성 모델 폴백 없음. dev_docs/roleplay_jev.md 2026-09-20: accept는 핵심 라벨(mode/event/elapsed/intensity/sexual_act/plan_action), secondary는 활동·장소·접촉·부상·인물·예정 사건 등 보조 라벨."
   },
   "system_one_smoke": {
     "provider": "typesafe",

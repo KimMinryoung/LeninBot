@@ -159,7 +159,7 @@ class VerificationTests(unittest.IsolatedAsyncioTestCase):
         result = await self.verify(verdict(), report="")
         self.chat.assert_not_called()
         self.assertEqual(result["status"], "failed")
-        self.assertEqual(result["retry"], "yes")
+        self.assertEqual(result["retry"], "conditional")
 
     async def test_restart_instructions_follow_actual_tool_surface(self):
         await self.verify(verdict())

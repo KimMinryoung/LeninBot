@@ -530,6 +530,10 @@ SELF_TOOLS = [
                     "description": "Maximum body characters for detail reads. Default null returns the full body; diary and static_page detail reads are not tool-loop truncated.",
                 },
                 "offset": {"type": "integer", "description": "Character offset for paginating long detail reads."},
+                "field": {
+                    "type": "string", "enum": ["content", "result", "tool_log"],
+                    "description": "For task_report detail: paginate just this field with offset/max_chars (default 5000, maximum 20000 characters). Omit for the legacy combined report and log preview.",
+                },
                 "id": {"type": "integer", "description": "Numeric id for diary, task_report, blog_post, or autonomous_project detail."},
                 "post_id": {"type": "integer", "description": "Deprecated alias for id on diary/blog_post."},
                 "diary_id": {"type": "integer", "description": "For diary: alias of post_id."},
@@ -1319,7 +1323,10 @@ async def _exec_read_task_reports(
     task_id: int | None = None,
     max_chars: int | None = None,
     offset: int | None = None,
+    field: str | None = None,
 ) -> str:
+    if field is not None and (field not in {"content", "result", "tool_log"} or not task_id):
+        return "Error: task_report field requires an id and one of content, result, tool_log."
     # Single task full report
     if task_id:
         from db import query_one as _db_query_one
@@ -1332,6 +1339,20 @@ async def _exec_read_task_reports(
         )
         if not row:
             return f"Task #{task_id} not found."
+        if field is not None:
+            text = str(row.get(field) or "")
+            try:
+                page_size = max(1, min(20000, int(max_chars if max_chars is not None else 5000)))
+                page_offset = max(0, min(len(text), int(offset or 0)))
+            except (TypeError, ValueError):
+                return "Error: offset and max_chars must be integers."
+            body, start, end, truncated = _slice_text(text, max_chars=page_size, offset=page_offset)
+            next_hint = (
+                f"\nnext: read_self(content_type='task_report', id={row['id']}, field='{field}', offset={end}, max_chars={page_size})"
+                if truncated else ""
+            )
+            return (f"Task #{row['id']} | field={field}\n"
+                    f"chars={len(text)} returned_chars={start}:{end} truncated={truncated}{next_hint}\n\n{body}")
         ts = _to_kst(row.get("created_at"))
         completed = _to_kst(row.get("completed_at")) if row.get("completed_at") else "N/A"
         result = str(row.get("result") or "(no result)")
@@ -1356,7 +1377,10 @@ async def _exec_read_task_reports(
             f"\n## Full Report\n{report_header}{result}"
         )
         if tool_log:
-            header += f"\n\n## Tool Log\n{tool_log[:5000]}"
+            header += f"\n\n## Tool Log\nchars={len(tool_log)} returned_chars=0:{min(5000, len(tool_log))} truncated={len(tool_log) > 5000}\n{tool_log[:5000]}"
+            if len(tool_log) > 5000:
+                header += (f"\n[Log preview truncated; continue with "
+                           f"read_self(content_type='task_report', id={row['id']}, field='tool_log', offset=5000, max_chars=5000)]")
         return header
 
     # List mode
@@ -2955,6 +2979,7 @@ async def _exec_read_self(
     hours_back: int | None = None, service: str = "telegram",
     grep: str | list[str] | tuple[str, ...] | None = "", status: str | None = None, task_id: int | None = None,
     chat_source: str = "web", slug: str | None = None,
+    field: str | None = None,
 ) -> str:
     """Dispatcher for all read_self sources."""
     raw_type = (content_type or source or "").strip()
@@ -2997,6 +3022,7 @@ async def _exec_read_self(
             task_id=task_id,
             max_chars=max_chars,
             offset=offset,
+            field=field,
         )
     if source == "kg_status":
         return await _exec_read_kg_status()

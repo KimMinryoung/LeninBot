@@ -34,6 +34,7 @@ def _fake_execute(sql, params=None):
 
 
 tasks._execute = _fake_execute
+tasks._mail_task_evidence = lambda task_id: {"staged": [], "reads": 0, "checked_inbox": False}
 
 
 def make_task(task_id, agent_type, metadata=None, content="Analyze X and report."):

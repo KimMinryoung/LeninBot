@@ -25,6 +25,7 @@ RULES_VERSION = 5
 LOCATIONS = ('감방', '구금방', '독방', '심문실', '복도', '집', '사무실', '식당', '병실')
 INTENSITY = {'mild': 1, 'moderate': 2, 'severe': 3}
 BRIEF_ACTIVITY_DEFAULT_MINUTES = 10
+CORE_LABELS = {'mode', 'event', 'elapsed', 'sexual_act', 'intensity', 'plan_action'}
 ACTIVITY_CHOICES = [('light', '가벼운 움직임·대화'), ('rest', '깨어 쉼'), ('restrained', '억제·동결'), ('moderate', '보통 활동'),
                     ('sleep', '잠듦'), ('strenuous', '격한 저항·움직임'), ('self_care', '몸 돌보기'), ('focused_work', '목적 있는 일')]
 # Fictional balancing constants, not medical estimates. Jev never invents a delta.
@@ -190,10 +191,14 @@ def classify(user_text, state, people, history, *, draft=None):
         return {'status': 'unavailable', 'reason': result.error_kind or 'decision_failed'}
     decision = result.decision
     accept = float(profile.extra.get('thresholds', {}).get('accept', .75))
+    # Core labels decide what happened; the rest (activity, location, contact, injury and
+    # person bookkeeping) only refine it, and a 30-question call spreads confidence thin.
+    secondary = float(profile.extra.get('thresholds', {}).get('secondary', accept))
     labels, uncertain = {}, []
     for key, question in questions.items():
         label, confidence = decision.choice(key), decision.confidence(key)
-        if label not in question['criteria'] or confidence is None or not math.isfinite(confidence) or confidence < accept:
+        threshold = accept if key in CORE_LABELS else secondary
+        if label not in question['criteria'] or confidence is None or not math.isfinite(confidence) or confidence < threshold:
             uncertain.append(key)
         else:
             labels[key] = label
@@ -222,7 +227,7 @@ def classify(user_text, state, people, history, *, draft=None):
                       'cost_usd': retry.decision.cost_usd, 'latency_ms': retry.decision.latency_ms}
             for key in missing:
                 label, confidence = retry.decision.choice(key), retry.decision.confidence(key)
-                if label in questions[key]['criteria'] and confidence is not None and math.isfinite(confidence) and confidence >= accept:
+                if label in questions[key]['criteria'] and confidence is not None and math.isfinite(confidence) and confidence >= (accept if key in CORE_LABELS else secondary):
                     labels[key] = label
                     uncertain.remove(key)
     if draft is not None:
