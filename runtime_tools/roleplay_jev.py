@@ -24,6 +24,9 @@ FEATURE = 'roleplay_scene_adjudication'
 RULES_VERSION = 5
 LOCATIONS = ('감방', '구금방', '독방', '심문실', '복도', '집', '사무실', '식당', '병실')
 INTENSITY = {'mild': 1, 'moderate': 2, 'severe': 3}
+BRIEF_ACTIVITY_DEFAULT_MINUTES = 10
+ACTIVITY_CHOICES = [('light', '가벼운 움직임·대화'), ('rest', '깨어 쉼'), ('restrained', '억제·동결'), ('moderate', '보통 활동'),
+                    ('sleep', '잠듦'), ('strenuous', '격한 저항·움직임'), ('self_care', '몸 돌보기'), ('focused_work', '목적 있는 일')]
 # Fictional balancing constants, not medical estimates. Jev never invents a delta.
 EVENT_DELTAS = {
     'meal': {'hunger': -35}, 'snack': {'hunger': -15}, 'water': {},
@@ -336,7 +339,10 @@ def project(before, user_text, people, verdict, scope_id):
     if event in sexual_types and labels.get('sexual_act') != sexual_types[event]:
         raise ValueError('성적 가해 유형과 실제 행위 판정 불일치 또는 미확정')
     if event in {*RESOLVE_EVENT_KINDS, 'injury'} and 'intensity' not in labels:
-        raise PendingChoice('intensity', [('mild', '스침'), ('moderate', '보통'), ('severe', '극심')], 'Jev의 사건 강도 판정 신뢰도 부족')
+        if verdict.get('player_settled'):
+            labels['intensity'] = 'moderate'
+        else:
+            raise PendingChoice('intensity', [('mild', '스침'), ('moderate', '보통'), ('severe', '극심')], 'Jev의 사건 강도 판정 신뢰도 부족')
     state = deepcopy(before)
     initialized = {}
     for key in METRICS:
@@ -345,6 +351,7 @@ def project(before, user_text, people, verdict, scope_id):
             state[key] = int(value)
             initialized[key] = int(value)
     activity = labels.get('activity', 'keep')
+    activity_defaulted = False
     if activity != 'keep':
         state['activity'] = activity
     quality = labels.get('sleep_quality', 'keep')
@@ -371,7 +378,18 @@ def project(before, user_text, people, verdict, scope_id):
             if activity in {'rest', 'sleep'}:
                 raise ValueError('현재 신체적 가해를 휴식·수면 회복으로 계산하지 않음')
         if activity == 'keep':
-            raise ValueError('경과 구간의 활동 판정이 불확실함')
+            # A few minutes of unknown activity cost nothing worth asking about; a longer
+            # passage does, so the player picks it.
+            # Once the player has answered one question about this draft, no second one:
+            # a long unknown passage settles as waking rest.
+            if minutes <= BRIEF_ACTIVITY_DEFAULT_MINUTES and not calendar:
+                activity = state['activity'] = labels['activity'] = 'light'
+                activity_defaulted = True
+            elif verdict.get('player_settled'):
+                activity = state['activity'] = labels['activity'] = 'rest'
+                activity_defaulted = True
+            else:
+                raise PendingChoice('activity', ACTIVITY_CHOICES, '경과 구간의 활동 판정이 불확실함')
         # Preserve the existing 24h-per-interval contract; longer user requests
         # need another turn instead of silently flattening several activities.
         if minutes > 1440:
@@ -462,6 +480,8 @@ def project(before, user_text, people, verdict, scope_id):
                              event_id=f'jev-{scope_id}', reason='Jev 자동 사건 판정')
     applied = {'mode': mode, 'event': event, 'intensity': labels.get('intensity'), 'minutes': minutes, 'initialized': initialized,
                'intensity_source': 'fixed_reward' if fixed_reward else ('fixed_session' if fixed_session else 'jev')}
+    if activity_defaulted:
+        applied['activity_defaulted'] = labels['activity']
     lost = _lose_holdouts(state, before, labels, scope_id, user_text)
     if lost:
         applied['holdouts_lost'] = lost

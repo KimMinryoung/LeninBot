@@ -150,6 +150,23 @@ class PlayerChoiceTests(unittest.TestCase):
             jev.project(initial(), '구타', [], {**verdict, 'labels': {**verdict['labels'], 'event': 'beating'}}, 'scope')
         self.assertEqual(caught.exception.key, 'intensity')
 
+    def test_unknown_activity_defaults_for_brief_intervals_and_asks_for_long_ones(self):
+        verdict = {'status': 'classified', 'labels': {'mode': 'scene', 'elapsed': 'brief', 'event': 'kindness', 'intensity': 'moderate'},
+                   'uncertain': ['activity'], 'answers': {}, 'duration_estimate': {'elapsed_minutes': 4}}
+        with turn_time_scope(policy_for('물을 건넸다')):
+            state, applied = jev.project(initial(), '물을 건넸다', [], verdict, 'scope')
+        self.assertEqual((state['activity'], state['scene_minute'], applied['activity_defaulted']), ('light', 4, 'light'))
+        long = {**verdict, 'labels': {**verdict['labels'], 'elapsed': 'explicit'}}
+        with turn_time_scope(policy_for('한 시간 쉬어')), self.assertRaises(jev.PendingChoice) as caught:
+            jev.project(initial(), '한 시간 쉬어', [], long, 'scope')
+        self.assertEqual(caught.exception.key, 'activity')
+        self.assertEqual(caught.exception.candidates[0][0], 'light')
+        # After one player answer, remaining gaps settle by default instead of a second round.
+        settled = {**long, 'player_settled': True, 'labels': {k: v for k, v in long['labels'].items() if k != 'intensity'}}
+        with turn_time_scope(policy_for('한 시간 쉬어')):
+            state, applied = jev.project(initial(participants=[]), '한 시간 쉬어', [], settled, 'scope')
+        self.assertEqual((state['activity'], applied['activity_defaulted'], applied['intensity'], state['scene_minute']), ('rest', 'rest', 'moderate', 60))
+
     def test_prepare_with_settled_verdict_skips_gate_and_classifier(self):
         before = initial()
         auth = {'user_text': '심문', 'labels': {'mode': 'scene', 'transition': 'current', 'span': 'brief'}}

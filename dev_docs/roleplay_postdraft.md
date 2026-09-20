@@ -39,6 +39,8 @@ SQLite 확정과 PostgreSQL 대화 기록·Telegram 전송은 분산 트랜잭�
 
 턴이 저장되지 않을 때 봇은 "막힌 부분"을 함께 보낸다: 허가 판정 실패 사유, 초안별 거절 사유(범위 검사 불확실, 서술 모순, 예정 사건 중단 등), 정산 보류 사유. 내부 문구는 `_ISSUE_TEXT`로 플레이어용 설명으로 바꾼다.
 
+초안 소요 10분 이하의 구간에서 활동이 불확실하면 light로 기본 처리한다(`activity_defaulted`). 그보다 긴 구간은 활동을 버튼으로 묻되, 플레이어가 이 초안에 대해 이미 한 번 답했으면(`verdict.player_settled`) 강도는 moderate, 활동은 rest로 기본 처리해 초안당 질문을 한 번으로 제한한다.
+
 3단계에서 JEV가 사건 종류나 강도만 확정하지 못하면(`PendingChoice`) 두 번째 초안을 쓰지 않는다. 봇은 초안·verdict·임시 기록(stage)을
 프로세스 메모리 `PENDING_CHOICES[user_id]`에 두고 후보 버튼(`rp:<scope>:<key>:<label>`, 마지막은 "이 초안 버리기")을 보낸다.
 콜백에서 고른 라벨을 verdict에 넣어 `prepare(verdict=…)`→`adjudicate_turn`으로 같은 초안을 확정·전송한다. 강도가 다시 불확실하면

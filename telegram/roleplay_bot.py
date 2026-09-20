@@ -526,7 +526,7 @@ async def handle_message(message: Message) -> None:
     except PendingChoice as exc:
         # Jev could not tell whether this is a scene to play or a question to answer.
         # Cheap to ask now, before any draft is written.
-        PENDING_CHOICES[user_id] = {**turn, "key": exc.key, "phase": "authorize"}
+        PENDING_CHOICES[user_id] = {**turn, "key": exc.key, "phase": "authorize", "candidates": exc.candidates}
         await message.answer(_choice_prompt(exc), reply_markup=_choice_keyboard(turn["scope_id"], exc))
         return
     except Exception as exc:
@@ -595,7 +595,7 @@ async def _draft_and_settle(message: Message, user_id: int, turn: dict, authoriz
                     PENDING_CHOICES[user_id] = {
                         **turn, "phase": "settle", "people": stage['people'], "history": history,
                         "draft": reply, "authorization": authorization, "stage": stage,
-                        "verdict": getattr(exc, "verdict", None), "key": exc.key,
+                        "verdict": getattr(exc, "verdict", None), "key": exc.key, "candidates": exc.candidates,
                     }
                     await progress_cb.flush()
                     await _show_draft(message, reply)
@@ -665,6 +665,7 @@ def _choice_prompt(exc: PendingChoice) -> str:
         "mode": "이 메시지가 장면 실행인지, 질문·상담인지 판정하지 못했어. 골라 주면 그대로 진행할게.",
         "within_scope": "쓴 초안이 지시한 장면 범위 안인지 판정하지 못했어. 범위 안이면 이 초안을 그대로 확정할게.",
         "intensity": "이 장면의 사건 강도를 판정하지 못했어. 골라 주면 이 초안을 그대로 확정할게.",
+        "activity": "이 장면 동안 인물이 무엇을 하고 있었는지(활동) 판정하지 못했어. 골라 주면 이 초안을 그대로 확정할게.",
     }.get(exc.key, "이 장면에서 실제로 일어난 사건을 판정하지 못했어. 골라 주면 이 초안을 그대로 확정할게.")
 
 
@@ -717,11 +718,12 @@ async def on_choice(query: CallbackQuery) -> None:
     if pending.get("verdict") is not None:
         verdict = dict(pending["verdict"])
         verdict["labels"] = {**verdict["labels"], key: value}
+        verdict["player_settled"] = True  # one question per draft; the rest falls to conservative defaults
     try:
         prepared = await asyncio.to_thread(roleplay_turn.prepare, pending["user_text"], pending["state"], pending["people"],
             pending["history"], scope_id, pending["draft"], pending["authorization"], pending["stage"], verdict, key == "within_scope")
     except PendingChoice as exc:
-        pending["verdict"], pending["key"] = getattr(exc, "verdict", None), exc.key
+        pending["verdict"], pending["key"], pending["candidates"] = getattr(exc, "verdict", None), exc.key, exc.candidates
         await query.message.edit_text(f"선택: {chosen}\n" + _choice_prompt(exc), reply_markup=_choice_keyboard(scope_id, exc))
         return
     except ValueError as exc:
@@ -747,10 +749,7 @@ async def on_choice(query: CallbackQuery) -> None:
 
 
 def _candidates_of(pending: dict, key: str) -> list:
-    from runtime_tools.roleplay_jev import event_candidates
-    if key == "intensity":
-        return [("mild", "스침"), ("moderate", "보통"), ("severe", "극심")]
-    return event_candidates(pending["verdict"])
+    return pending.get("candidates") or []
 
 
 async def bot_main() -> None:
