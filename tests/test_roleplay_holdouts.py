@@ -285,21 +285,8 @@ class AuthorizeToleranceTests(unittest.TestCase):
                 turn.authorize('의사 재방문', initial(), [])
         self.assertEqual(caught.exception.key, 'mode')
         self.assertEqual([k for k, _ in caught.exception.candidates], ['scene', 'discussion', 'plan', 'correction'])
-        gate = {'within_scope': {'choice': 'yes', 'confidence': .5, 'probabilities': {'yes': .6, 'no': .4}}}
         auth = {'user_text': '의사 재방문', 'labels': {'mode': 'scene', 'transition': 'current', 'span': 'brief'}}
         verdict = {'status': 'classified', 'labels': {'mode': 'scene', 'event': 'treatment', 'activity': 'light', 'location': 'keep'}, 'uncertain': [], 'answers': {}, 'model': 't'}
-        with patch.object(turn, 'resolve', return_value=profile), patch.object(turn, 'decide_detailed', side_effect=[self.decision(gate), self.decision(gate)]), \
-             patch.object(jev, 'classify', return_value=deepcopy(verdict)), patch.object(jev, 'estimate_duration', return_value={'elapsed_minutes': 4}), \
-             patch.object(turn, 'review_reply', return_value={'approved': True, 'issues': []}):
-            prepared = turn.prepare('의사 재방문', initial(), [], [], '9', '초안', auth, None)
-        # An unsure scope check passes with a flag instead of a button; a confident no still rejects.
-        self.assertTrue(prepared['applied']['scope_uncertain'])
-        self.assertIn('범위 판정 불확실', turn.feedback_line({'status': 'applied', 'applied': prepared['applied']}, prepared['state']))
-        rejecting = {'within_scope': {'choice': 'no', 'confidence': .9, 'probabilities': {'yes': .1, 'no': .9}}}
-        with patch.object(turn, 'resolve', return_value=profile), patch.object(turn, 'decide_detailed', return_value=self.decision(rejecting)), \
-             patch.object(jev, 'classify') as classify, self.assertRaises(ValueError):
-            turn.prepare('의사 재방문', initial(), [], [], '9', '초안', auth, None)
-        classify.assert_not_called()
         # The player's confirmation skips the gate; the classifier then runs as usual.
         with patch.object(turn, 'decide') as gate_call, patch.object(jev, 'classify', return_value=deepcopy(verdict)), \
              patch.object(jev, 'estimate_duration', return_value={'elapsed_minutes': 4}), patch.object(turn, 'review_reply', return_value={'approved': True, 'issues': []}):

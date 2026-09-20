@@ -233,7 +233,11 @@ class AutomaticTransactionTests(unittest.TestCase):
 
 class DurationTests(unittest.TestCase):
     def test_duration_only_valid_integer_within_single_event_cap(self):
-        for value in (True, -1, 11, 1.5, '3', None):
+        for value, expected in ((-1, 10), (11, 10)):
+            with patch.object(jev, 'generate_detailed', return_value=GenerationResult(text=json.dumps({'elapsed_minutes':value,'reason':'arrival'}))):
+                capped = jev.estimate_duration('감방으로 보내',initial(),verdict())
+                self.assertEqual((capped['elapsed_minutes'], capped['capped']), (expected, True))
+        for value in (True, 1.5, '3', None):
             with patch.object(jev, 'generate_detailed', return_value=GenerationResult(text=json.dumps({'elapsed_minutes':value,'reason':'arrival'}))):
                 with self.assertRaises(ValueError): jev.estimate_duration('감방으로 보내',initial(),verdict())
         with patch.object(jev, 'generate_detailed', return_value=GenerationResult(text='{"elapsed_minutes": 4, "reason": "arrival"}')):

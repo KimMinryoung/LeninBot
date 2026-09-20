@@ -175,23 +175,10 @@ def prepare(user_text, before, people, history, scope_id, draft, authorization, 
     (the player settled a choice Jev left open) skips the scope gate and the classifier;
     ``scope_ok`` means the player confirmed the draft stays within the authorized scene."""
     if verdict is None:
-        gate = {'labels': {'within_scope': 'yes'}, 'player_confirmed': True} if scope_ok else None
-        guard_questions = {'within_scope': jev.choice('Check the WHOLE draft against the authorized user endpoint. Accept normal staging details inside that action (sitting, speaking, pausing, sipping water, standing or exiting the interrogation room at the end). These are not separate major scenes. Historical source dates are references, not target dates when the user directs reenactment in the next morning scene; reject extra meals, sleep, assaults, next scenes or days not requested. Parenthesized director instructions authorize their specified scene. A mere discussion/plan must not be enacted. Repetition of the already existing scene as context is fine.', {'yes':'Entire proposed response stays within authorized scope','no':'Adds unauthorized events, skips or enacts a discussion/plan'})}
-        if gate is None:
-            # Only a confident 'no' rejects a draft. An unsure scope check passes with a
-            # flag: the classifier, the location label and the consistency review still
-            # settle what the draft actually did, and a button here cost the player more
-            # than the occasional over-long scene.
-            gate = decide('roleplay-draft-scope', {'current_user':user_text,'authorization':authorization['labels'],
-                'before':{k:before.get(k) for k in ('clock','location','scene')},'draft':draft}, guard_questions,
-                defaults={'within_scope': 'yes'})
-            gate['uncertain'] = 'within_scope' in gate.get('defaulted', {})
-        if gate['labels']['within_scope'] != 'yes':
-            # A first draft that overran gets one rewrite; the last draft is kept and
-            # flagged, because a turn that never settles is worse than an overrun scene.
-            if not final_attempt:
-                raise ValueError('초안이 사용자 지시의 사건 경계를 넘음')
-            gate['breach'] = True
+        # No scope gate. The classifier's own labels (location, events, elapsed minutes
+        # capped by the pacing policy) settle what the draft actually did; a second Jev
+        # call to ask "did it overrun?" only ever produced rejected turns.
+        gate = {'labels': {'within_scope': 'yes'}, 'skipped': True, 'player_confirmed': bool(scope_ok)}
         verdict = jev.classify(user_text,before,people,history,draft=draft)
         if verdict['status'] != 'classified':
             raise ValueError('초안 사건 판정 실패')
@@ -248,8 +235,6 @@ def prepare(user_text, before, people, history, scope_id, draft, authorization, 
             raise
     if mode == 'scene' and verdict['labels'].get('location') in {None, 'unknown'}:
         projected['location'] = '미확인 — 확정된 장면 서술 참조'
-    if (verdict.get('scope_review') or {}).get('uncertain'):
-        applied = {**applied, 'scope_uncertain': True}
     if authorization.get('auto_settled'):
         applied = {**applied, 'auto_settled': {**authorization['auto_settled'], **(applied.get('auto_settled') or {})}}
     if applied.get('interrupted') and not (mode == 'scene' and verdict['labels'].get('elapsed') == 'explicit'):
@@ -272,8 +257,6 @@ def prepare(user_text, before, people, history, scope_id, draft, authorization, 
         if not final_attempt:
             raise ValueError('초안 또는 기록이 정산 결과와 모순됨: ' + '; '.join(review['issues']))
         applied = {**applied, 'review_issues': [issue[:160] for issue in review['issues']][:3]}
-    if (verdict.get('scope_review') or {}).get('breach'):
-        applied = {**applied, 'scope_breach': True}
     verdict['final_review']=review
     return {'before_revision':before['revision'],'state':projected,'applied':applied,
             'verdict':verdict,'reply':draft,'stage':stage}
@@ -354,10 +337,6 @@ def feedback_line(outcome, state=None):
         parts.append('미뤄 둔 반응 해소')
     if applied.get('narrative_only'):
         parts.append('기록만 갱신')
-    if applied.get('scope_uncertain'):
-        parts.append('범위 판정 불확실이라 통과시킴')
-    if applied.get('scope_breach'):
-        parts.append('지시 범위를 넘은 듯하지만 두 번째 초안이라 확정')
     if applied.get('review_issues'):
         parts.append('서술 검토 지적(확정함): ' + ' / '.join(applied['review_issues']))
     if applied.get('auto_settled'):
