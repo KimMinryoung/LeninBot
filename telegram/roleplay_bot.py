@@ -71,7 +71,7 @@ PERSONA_PATH = Path(__file__).resolve().parent.parent / "identity" / "roleplay_p
 # prepends reasoning to the reply, which is why it leaked.
 ROLEPLAY_MODEL = _resolve_deepseek_model("deepseek_flash")  # "deepseek-v4-flash"
 # Thinking and visible prose share the output allowance.
-ROLEPLAY_MAX_TOKENS = int(os.getenv("ROLEPLAY_MAX_TOKENS", "16384"))
+ROLEPLAY_MAX_TOKENS = int(os.getenv("ROLEPLAY_MAX_TOKENS", "32768"))  # 2026-09-20: 16384 truncated a long scene in round 1
 # A scene beat is usually 2–4 bookkeeping calls (time, memory, person); 8 rounds
 # left no room for a single malformed call plus its retry.
 ROLEPLAY_MAX_ROUNDS = int(os.getenv("ROLEPLAY_MAX_ROUNDS", "12"))
@@ -519,9 +519,9 @@ async def handle_message(message: Message) -> None:
         PENDING_CHOICES[user_id] = {**turn, "key": exc.key, "phase": "authorize"}
         await message.answer(_choice_prompt(exc), reply_markup=_choice_keyboard(turn["scope_id"], exc))
         return
-    except Exception:
+    except Exception as exc:
         logger.exception("roleplay authorization failed")
-        await message.answer("이번에 진행할 장면을 확정하지 못했어. 실행할 행동이나 장면을 구체적으로 말해줘.")
+        await message.answer(f"이번에 진행할 장면을 확정하지 못했어.\n막힌 부분: {_issue_text(exc)}\n실행할 행동이나 장면을 구체적으로 말해줘.")
         return
     await _draft_and_settle(message, user_id, turn, authorization)
 
@@ -559,6 +559,7 @@ async def _draft_and_settle(message: Message, user_id: int, turn: dict, authoriz
     progress_cb = _make_progress_callback(message.bot, turn["chat_id"])
     reply = ""
     settled = None
+    issues: list[str] = []
     try:
         for attempt in range(2):
             with caller_scope(ctx), turn_time_scope(time_policy):
@@ -590,6 +591,7 @@ async def _draft_and_settle(message: Message, user_id: int, turn: dict, authoriz
                     return
                 except ValueError as exc:
                     logger.warning("roleplay draft rejected: %s", exc)
+                    issues.append(f"초안 {attempt + 1} 거절: {_issue_text(exc)}")
                     history = attach_context(history, [context_record('draft_revision','telegram_roleplay_runtime',
                         {'direction':'이전 초안은 폐기됐다. 범위를 지킨 새 초안을 작성하라.', 'issue':str(exc)},
                         scope=f"telegram-roleplay:{turn['chat_id']}",observed_at=datetime.now(timezone.utc),temporal_scope='current turn')])
@@ -597,15 +599,35 @@ async def _draft_and_settle(message: Message, user_id: int, turn: dict, authoriz
                 settled = await asyncio.to_thread(adjudicate_turn, user_id, user_text, history, scope_id, prepared=prepared)
                 if settled.get('status') in {'applied','unchanged'}:
                     reply = settled['reply']
+                else:
+                    issues.append(f"정산 보류: {settled.get('reason') or '이유 미상'}")
                 break
-    except Exception:
+        if not reply.strip() or reply.strip() == EMPTY_RESPONSE_FALLBACK:
+            issues.append("연기 모델이 빈 답변을 냈음")
+    except Exception as exc:
         logger.exception("roleplay draft/settlement failed")
+        issues.append(f"내부 오류: {_issue_text(exc)}")
     finally:
         await progress_cb.flush()
     if settled is None or settled.get('status') not in {'applied','unchanged'}:
-        await message.answer("장면을 확정하지 못해서 이번 진행은 저장하지 않았어. 어디까지 진행할지 다시 말해줘.")
+        await message.answer("장면을 확정하지 못해서 이번 진행은 저장하지 않았어.\n막힌 부분: "
+                             + (" / ".join(issues) if issues else "이유가 기록되지 않음") + "\n어디까지 진행할지 다시 말해줘.")
         return
     await _deliver(message, user_id, reply, settled)
+
+
+_ISSUE_TEXT = {
+    "장면 검증 미확정: within_scope": "초안이 지시한 장면 범위 안인지 판정 불확실",
+    "장면 검증 미확정: mode": "장면 실행인지 질문·상담인지 판정 불확실",
+    "장면 검증 미확정: span": "짧은 행동인지 긴 세션인지 판정 불확실",
+    "초안 사건 판정 실패": "초안의 사건 분류 호출 실패",
+    "장면 검증을 완료하지 못함": "판정기 호출 실패",
+}
+
+
+def _issue_text(exc: BaseException) -> str:
+    text = str(exc).strip() or type(exc).__name__
+    return _ISSUE_TEXT.get(text, text)[:300]
 
 
 async def _deliver(message: Message, user_id: int, reply: str, settled: dict) -> None:
