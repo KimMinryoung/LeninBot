@@ -45,6 +45,16 @@ time/update/reset 계약을 유지한다. 다른 문서의 내부 도구 예시�
 
 mode/event/intensity가 불확실하면 사용자 원문과 직전 장면, 이미 수락한 사건 라벨만으로 Jev에 한 번 집중 재판정을 요청한다. 같은 0.75 기준을 유지하며 재판정 답변도 감사 기록에 보존한다. 그래도 사건/강도가 불확실하면 임의 가산하지 않는다.
 
+## 지키는 것·미뤄 둔 반응·플레이어 선택
+
+held 상태의 holdout마다 `holdout_<i>`(keep/lost), ready 상태의 `when_alone` 신호에는 완료 기준이 다른 `story_<i>` 질문이 붙는다.
+효과와 근거는 [roleplay_game_balance.md](roleplay_game_balance.md). event 선택지에서 `holdout_lost`·`sexual_coercion`은 제외한다.
+
+event 또는 intensity가 재판정 뒤에도 불확실하면 `project`는 `PendingChoice(key, candidates)`를 던진다. candidates는 JEV의 event 확률
+상위 3개(+none) 또는 강도 3단계다. Telegram은 이를 버튼으로 플레이어에게 묻고, 고른 라벨을 같은 verdict에 넣어 동일 초안을
+다시 정산한다(`roleplay_turn.prepare(verdict=…)`는 범위 검사·분류·시간 추정을 반복하지 않는다). 다른 불확실성(elapsed·activity·location 등)은
+이전처럼 보류다. 플레이어 선택은 감사 기록의 verdict.labels에 남는다. 흐름은 [roleplay_postdraft.md](roleplay_postdraft.md).
+
 ## 성적 가해와 당사자 활동
 
 구형 sexual_coercion은 과거 기록/내부 호환용이며 새로운 JEV 선택지에서 제외한다.

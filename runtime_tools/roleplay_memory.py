@@ -16,7 +16,7 @@ from runtime_tools.roleplay_pacing import check_time_request, check_time_result,
 from runtime_tools.roleplay_story import STORY_UPDATES_SCHEMA, apply_story_updates, advance_to_event
 from runtime_tools.roleplay_clock import TEMPORAL_SCHEMA, interpret_clock, validate_temporal
 from runtime_tools.roleplay_dynamics import (METRICS, CONDITION_SCHEMA, REQUIRED_CONDITIONS, RESOLVE_EVENT_KINDS, RESOLVE_INTENSITY,
-                                             RESOLVE_EVENT_HISTORY, with_defaults, validate_conditions, advance,
+                                             RESOLVE_EVENT_HISTORY, MAX_HOLDOUTS, HOLDOUT_TITLE_MAX, with_defaults, validate_conditions, advance,
                                              carry_injury_progress, injury_pain_floor, reconcile_injuries,
                                              isolation_stage, resolve_event_delta)
 
@@ -39,9 +39,22 @@ def _connection():
             conn.execute("CREATE TABLE IF NOT EXISTS history_exclusions (user_id TEXT NOT NULL, message_id INTEGER NOT NULL, reason TEXT NOT NULL, PRIMARY KEY(user_id, message_id))")
             conn.execute("CREATE TABLE IF NOT EXISTS people (user_id TEXT NOT NULL, person_id TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(user_id, person_id))")
             conn.execute("CREATE TABLE IF NOT EXISTS state_history (id INTEGER PRIMARY KEY, user_id TEXT NOT NULL, revision INTEGER NOT NULL, payload TEXT NOT NULL)")
+            conn.execute("CREATE TABLE IF NOT EXISTS preferences (user_id TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY(user_id, key))")
             yield conn
     finally:
         conn.close()
+
+
+def get_preference(user_id: str | int, key: str, default: str = "") -> str:
+    with _connection() as conn:
+        row = conn.execute("SELECT value FROM preferences WHERE user_id = ? AND key = ?", (str(user_id), key)).fetchone()
+    return row[0] if row else default
+
+
+def set_preference(user_id: str | int, key: str, value: str) -> None:
+    with _connection() as conn:
+        conn.execute("INSERT INTO preferences VALUES (?, ?, ?) ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value",
+                     (str(user_id), key, value))
 
 
 def _owner_id() -> str:
@@ -254,7 +267,7 @@ def _apply_person_updates(conn, user_id: str, updates: list[dict], warnings: lis
 # ── Character state ───────────────────────────────────────────────────
 SCENE_TEXT_FIELDS = {"period", "location", "last_event", "unresolved", "goal", "avoid", "next_action"}
 DESCRIPTION_FIELDS = {"body", "mood", "scene"}
-CHANGE_KEYS = set(CONDITION_SCHEMA) | set(METRICS) | SCENE_TEXT_FIELDS | DESCRIPTION_FIELDS | {"participants"}
+CHANGE_KEYS = set(CONDITION_SCHEMA) | set(METRICS) | SCENE_TEXT_FIELDS | DESCRIPTION_FIELDS | {"participants", "holdouts"}
 INTERVAL_ALIASES = {"interval", "conditions", "elapsed_conditions", "interval_condition"}
 ADJUSTMENTS = {"initialize", "event", "correction"}
 EVENT_TYPES = {"other", "meal", "sleep", "injury", "treatment"}
@@ -298,6 +311,7 @@ def state_view(state: dict) -> dict:
     stage = isolation_stage(state.get("isolation_minutes", 0))
     view["isolation_stage"] = f"{stage['label']}: {stage['description']}" if stage else None
     view["wakefulness_hours"] = round(state.get("wakefulness_minutes", 0) / 60, 1)
+    view["holdouts"] = state.get("holdouts", [])
     view["story_events"] = [e for e in state.get("story_events", []) if e["status"] in {"pending", "ready"}]
     view["recent_story_outcomes"] = [e for e in state.get("story_events", []) if e["status"] in {"completed", "cancelled"}][-5:]
     if state.get("story_interrupt"):
@@ -383,6 +397,10 @@ def _validate_changes(changes: dict) -> None:
         elif key == "participants":
             if not isinstance(value, list) or len(value) > 12 or any(not isinstance(v, str) for v in value) or len(set(value)) != len(value):
                 raise ValueError("participants must be up to 12 distinct person IDs")
+        elif key == "holdouts":
+            if (not isinstance(value, list) or len(value) > MAX_HOLDOUTS
+                    or any(not isinstance(v, str) or not 1 <= len(v.strip()) <= HOLDOUT_TITLE_MAX for v in value)):
+                raise ValueError(f"holdouts는 인물이 아직 지키는 것의 짧은 제목 최대 {MAX_HOLDOUTS}개({HOLDOUT_TITLE_MAX}자 이내)")
         elif key in SCENE_TEXT_FIELDS:
             if not isinstance(value, str) or len(value) > 300:
                 raise ValueError("Scene fields must be strings of at most 300 characters")
@@ -394,7 +412,9 @@ def _apply_changes(base: dict, changes: dict, *, adjustment: str, metric_reasons
                    event_id: str, event_type: str, warnings: list[str]) -> tuple[dict, str, dict | None]:
     """Apply an immediate update on top of ``base`` (the saved state, or the state after an interval)."""
     numeric = set(changes) & set(METRICS)
-    state = {**base, **{k: v for k, v in changes.items() if k not in numeric}}
+    state = {**base, **{k: v for k, v in changes.items() if k not in numeric and k != "holdouts"}}
+    if "holdouts" in changes:
+        state["holdouts"] = merge_holdouts(base.get("holdouts", []), changes["holdouts"], warnings, scene_minute=base.get("scene_minute", 0))
     if "participants" in changes and changes["participants"] != base.get("participants", []):
         state["alone_rest_minutes"] = 0
         if "social_contact" not in changes:
@@ -444,6 +464,30 @@ def _apply_changes(base: dict, changes: dict, *, adjustment: str, metric_reasons
         "reason": reason,
     }])[-50:]
     return state, adjustment, {k: reasons[k] for k in sorted(numeric)}
+
+
+def merge_holdouts(existing: list, titles: list, warnings: list[str], *, scene_minute: int = 0) -> list:
+    """The actor names what the character still refuses to give up. Titles already held are kept
+    by id, new ones are added, lost ones stay in the record, and nothing is silently dropped:
+    only Jev's reading of a settled scene marks a holdout lost."""
+    result = [dict(h) for h in existing]
+    held = {h["title"].strip(): h for h in result if h.get("status") == "held"}
+    lost = {h["title"].strip() for h in result if h.get("status") == "lost"}
+    wanted = [t.strip() for t in titles]
+    for title in wanted:
+        if title in held:
+            continue
+        if title in lost:
+            raise ValueError(f"'{title}'은 이미 넘긴 것으로 기록됨. 되살리지 않으며 새 항목은 다른 제목으로")
+        if len(held) >= MAX_HOLDOUTS:
+            raise ValueError(f"지키는 것은 최대 {MAX_HOLDOUTS}개. 잃은 뒤에만 새 항목을 더할 수 있음")
+        entry = {"id": f"h{len(result) + 1}", "title": title, "status": "held", "created_minute": scene_minute}
+        result.append(entry)
+        held[title] = entry
+    missing = [t for t in held if t not in wanted]
+    if missing:
+        warnings.append(f"holdouts에서 빠진 {missing}는 그대로 유지함. 넘긴 것은 자동 판정이 기록")
+    return result
 
 
 def _normalize_resolve_event(value, action: str, warnings: list[str]):
@@ -513,7 +557,7 @@ def roleplay_state(action: str, changes: dict | None = None, reason: str = "", *
                 record[side] = {k: record[side].get(k) for k in (*METRICS, "scene_minute", "activity", "sleep_quality", "threat", "injuries", "clock")}
         return json.dumps(records, ensure_ascii=False)
     if caller.scope_type == "telegram_message":
-        narrative = {"goal", "avoid", "next_action", "unresolved", "body", "mood", "scene"}
+        narrative = {"goal", "avoid", "next_action", "unresolved", "body", "mood", "scene", "holdouts"}
         if (action != "update" or not isinstance(changes, dict) or set(changes) - narrative
                 or temporal is not None or interval_conditions is not None or resolve_event is not None
                 or story_updates is not None or adjustment or metric_reasons or extra or person_updates is not None):
@@ -678,12 +722,14 @@ def roleplay_state(action: str, changes: dict | None = None, reason: str = "", *
 
 ROLEPLAY_STATE_TOOL = {
     "name": "roleplay_state",
-    "description": "현재 연기 지침과 장면 이력 조회. read/history로 읽고 update는 goal/avoid/next_action/unresolved/body/mood/scene 서술만 가능. 수치·시간·이벤트·활동·부상·접촉·등장인물은 직접 설정할 수 없음. 자동 판정이 보류됐으면 현재 장면에서 멈춤.",
+    "description": "현재 연기 지침과 장면 이력 조회. read/history로 읽고 update는 goal/avoid/next_action/unresolved/body/mood/scene 서술과 holdouts(아직 지키는 것의 제목, 최대 3개)만 가능. 수치·시간·이벤트·활동·부상·접촉·등장인물은 직접 설정할 수 없고, 지키던 것을 넘긴 사실도 자동 판정이 기록함. 자동 판정이 보류됐으면 현재 장면에서 멈춤.",
     "input_schema": {"type": "object", "properties": {
         "action": {"type": "string", "enum": ["read", "history", "update"]},
         "changes": {"type": "object", "properties": {
-            key: {"type": "string", "maxLength": 300}
-            for key in ("goal", "avoid", "next_action", "unresolved", "body", "mood", "scene")
+            **{key: {"type": "string", "maxLength": 300}
+               for key in ("goal", "avoid", "next_action", "unresolved", "body", "mood", "scene")},
+            "holdouts": {"type": "array", "maxItems": MAX_HOLDOUTS, "items": {"type": "string", "maxLength": HOLDOUT_TITLE_MAX},
+                         "description": "인물이 아직 실제로 넘기지 않은 구체적인 것(빈칸으로 둔 줄, 소리 내어 읽지 않은 이름 등). 이미 지키는 항목은 같은 제목으로 유지, 새 항목 추가만 가능"},
         }, "additionalProperties": False},
         "reason": {"type": "string", "maxLength": 300},
         "expected_revision": {"type": "integer", "minimum": 0},

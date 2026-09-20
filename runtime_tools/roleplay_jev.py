@@ -11,9 +11,10 @@ import re
 
 from llm.call_registry import decide_detailed, generate_detailed, resolve
 from runtime_tools.roleplay_dynamics import (METRICS, THREAT_TARGETS,
-    RESOLVE_EVENT_KINDS, with_defaults, advance,
-    carry_injury_progress, event_repeat_scale)
-from runtime_tools.roleplay_story import advance_to_event, apply_story_updates
+    RESOLVE_EVENT_KINDS, NON_EVENT_KINDS, HOLDOUT_LOSS_KIND, HOLDOUT_LOSS_DELTAS,
+    HUMILIATION_SATURATION, DELAYED_REACTION_PREFIX, DELAYED_REACTION_RELEASE,
+    with_defaults, advance, carry_injury_progress, event_repeat_scale)
+from runtime_tools.roleplay_story import advance_to_event, apply_story_updates, refresh_events
 from runtime_tools.roleplay_clock import interpret_clock
 from runtime_tools.roleplay_pacing import (policy_for, duration_minutes, check_time_request, check_time_result,
                                          check_reset_request)
@@ -48,6 +49,25 @@ def choice(instructions, criteria):
     return {'type': 'choice', 'instructions': instructions, 'criteria': criteria}
 
 
+class PendingChoice(ValueError):
+    """Jev could not settle one closed choice; the player can pick it instead of losing the turn."""
+
+    def __init__(self, key, candidates, message):
+        super().__init__(message)
+        self.key = key            # 'event' or 'intensity'
+        self.candidates = candidates  # [(label, korean)] in the order to offer
+
+
+def event_candidates(verdict, limit=3):
+    """The most probable event labels of an uncertain verdict, always ending with none."""
+    probabilities = ((verdict.get('answers') or {}).get('event') or {}).get('probabilities') or {}
+    ranked = [k for k, _ in sorted(probabilities.items(), key=lambda kv: -float(kv[1] or 0))
+              if k in EVENT_DELTAS and k not in {'none', 'sexual_unspecified'}][:limit]
+    labels = {**{k: v[1] for k, v in RESOLVE_EVENT_KINDS.items()}, 'meal': '식사', 'snack': '간식', 'water': '물',
+              'treatment': '처치', 'injury': '새 부상', 'none': '뚜렷한 사건 없음'}
+    return [(k, labels.get(k, k)) for k in ranked + ['none']]
+
+
 def build_questions(state, people, user_text=""):
     keep = {'keep': '현재 저장 조건 유지. 이번 사건의 명시적 변화 근거 없음'}
     questions = {
@@ -66,7 +86,7 @@ def build_questions(state, people, user_text=""):
             'none': 'No discrete impact event: ordinary movement, return to cell, rest, conversation or advice', 'meal': '실제로 식사를 먹음. 배달·권유만으로는 아님',
             'snack': '실제로 소량 먹음', 'water': '실제로 물을 마심',
             'treatment': '실제로 처치받음', 'injury': '새 비의도적 부상',
-            **{k: label for k, (_, label) in RESOLVE_EVENT_KINDS.items() if k != 'sexual_coercion'},
+            **{k: label for k, (_, label) in RESOLVE_EVENT_KINDS.items() if k not in NON_EVENT_KINDS},
             'sexual_harassment': 'Sexualized verbal/gestural harassment WITHOUT unwanted sexual touching or penetration',
             'sexual_assault': 'Unwanted sexual touching or forced undressing WITHOUT penetration; explicitly 삽입 없음 means this, never rape',
             'rape': 'Nonconsensual penetration explicitly established for THIS event. Do not infer it from assault, coercion, old abuse, victim immobility or severity',
@@ -116,9 +136,16 @@ def build_questions(state, people, user_text=""):
             '사료·회상·언급만으로 등장시키지 않는다. 이동을 수행한 인물은 도착까지만 있고 떠났다고 명시되지 않으면 퇴장시키지 않는다.',
             {'keep': '출입 변화 없음', 'enter': '이번 사건에서 현장에 들어옴/동행 도착', 'leave': '이번 사건에서 나감/이동으로 현장을 떠남'})
     for i, event in enumerate(state.get('story_events', [])):
-        if event['status'] in {'ready', 'pending'}:
+        if event['status'] == 'ready' and event.get('when_alone'):
+            questions[f'story_{i}'] = choice(f'미뤄 둔 반응 신호 "{event["title"]}"이 이번 장면에서 실제로 드러났는가? 인물이 혼자 있는 장면에서 억눌렀던 감정·몸의 반응(눈물·떨림·구토·무너짐 등)이 서술로 나타나야 complete다. 남이 있는 장면이나 언급만으로는 keep.',
+                {'keep': '아직 드러나지 않음', 'complete': '혼자 남은 장면에서 미뤄 둔 반응이 실제로 드러남', 'cancel': '사용자가 이 신호를 무효화'})
+        elif event['status'] in {'ready', 'pending'}:
             questions[f'story_{i}'] = choice(f'예정 사건 {event["id"]}의 사용자 근거 판정. 예정 시점 도래 자체는 완료가 아니다.',
                 {'keep': '변경 없음', 'complete': '사용자가 이 사건의 실제 완료를 명시', 'cancel': '사용자가 이 사건을 취소/무효화'})
+    for i, holdout in enumerate(state.get('holdouts', [])):
+        if holdout.get('status') == 'held':
+            questions[f'holdout_{i}'] = choice(f'인물이 아직 지키고 있는 것 "{holdout["title"]}"을 이번 사건에서 실제로 넘겼는가? 실제 행위(서명·낭독·기입·복종)가 서술되어야 lost다. 요구받기만 하거나 흔들리는 묘사, 과거 언급은 keep.',
+                {'keep': '아직 지키고 있음', 'lost': '이번 사건에서 실제로 넘김·위반함'})
     return questions
 
 
@@ -274,7 +301,7 @@ def project(before, user_text, people, verdict, scope_id):
     # is unknown. Do not invent elapsed time or apply uncertain endpoint changes.
     if 'elapsed' not in labels and labels.get('event') in {'kindness', 'recognition', 'agency', 'small_success', 'boundary_respected', 'support', 'setback', 'betrayal', 'interrogation', 'coerced_confession', 'implicating_others', 'sexual_harassment', 'sexual_assault', 'rape', 'threat_to_kin', 'public_submission', 'futile_effort'} and 'intensity' in labels and before.get('conditions_initialized'):
         immediate = {key: labels[key] for key in ('mode', 'event', 'intensity')}
-        for detail in ('sexual_act', 'new_injury', 'new_severity'):
+        for detail in ('sexual_act', 'new_injury', 'new_severity', *[k for k in labels if k.startswith('holdout_')]):
             if detail in labels:
                 immediate[detail] = labels[detail]
         immediate['elapsed'] = '0'
@@ -282,9 +309,10 @@ def project(before, user_text, people, verdict, scope_id):
         state['story_interrupt'] = deepcopy(before.get('story_interrupt'))
         applied['deferred_components'] = ['time', 'scene_conditions']
         return state, applied
-    for required in ('elapsed', 'event'):
-        if required not in labels:
-            raise ValueError(f'Jev의 {required} 판정 신뢰도 부족')
+    if 'elapsed' not in labels:
+        raise ValueError('Jev의 elapsed 판정 신뢰도 부족')
+    if 'event' not in labels:
+        raise PendingChoice('event', event_candidates(verdict), 'Jev의 event 판정 신뢰도 부족')
     event = labels['event']
     sexual_types = {'sexual_harassment': 'verbal', 'sexual_assault': 'touch', 'rape': 'penetration'}
     if event == 'sexual_unspecified' or event == 'sexual_coercion':
@@ -294,7 +322,7 @@ def project(before, user_text, people, verdict, scope_id):
     if event in sexual_types and labels.get('sexual_act') != sexual_types[event]:
         raise ValueError('성적 가해 유형과 실제 행위 판정 불일치 또는 미확정')
     if event in {*RESOLVE_EVENT_KINDS, 'injury'} and 'intensity' not in labels:
-        raise ValueError('Jev의 사건 강도 판정 신뢰도 부족')
+        raise PendingChoice('intensity', [('mild', '스침'), ('moderate', '보통'), ('severe', '극심')], 'Jev의 사건 강도 판정 신뢰도 부족')
     state = deepcopy(before)
     initialized = {}
     for key in METRICS:
@@ -366,6 +394,7 @@ def project(before, user_text, people, verdict, scope_id):
         if labels.get('social_contact', 'keep') == 'keep':
             state['social_contact'] = 'unknown' if participants else 'none'
     state['participants'] = participants
+    refresh_events(state)  # a when_alone cue readies the moment the room empties, even with no elapsed time
     if state['activity'] not in {'rest', 'sleep'} or (state['threat'] in {'immediate', 'threatening'} and state['threat'] != before['threat']):
         state['alone_rest_minutes'] = 0
     # Existing injury clocks are code-owned; apply only a newly classified change.
@@ -413,6 +442,11 @@ def project(before, user_text, people, verdict, scope_id):
         from runtime_tools.roleplay_memory import _apply_resolve_event
         _apply_resolve_event(state, {'kind': event, 'intensity': INTENSITY[labels['intensity']], 'note': user_text[:300]},
                              event_id=f'jev-{scope_id}', reason='Jev 자동 사건 판정')
+    applied = {'mode': mode, 'event': event, 'intensity': labels.get('intensity'), 'minutes': minutes, 'initialized': initialized,
+               'intensity_source': 'fixed_reward' if fixed_reward else ('fixed_session' if fixed_session else 'jev')}
+    lost = _lose_holdouts(state, before, labels, scope_id, user_text)
+    if lost:
+        applied['holdouts_lost'] = lost
     updates = []
     for i, scheduled in enumerate(before.get('story_events', [])):
         action = labels.get(f'story_{i}', 'keep')
@@ -420,8 +454,45 @@ def project(before, user_text, people, verdict, scope_id):
             updates.append({'op': action, 'id': scheduled['id'], 'outcome': user_text[:300]})
     if updates:
         state = apply_story_updates(state, updates)
+        released = [u['id'] for u in updates if u['op'] == 'complete' and u['id'].startswith(DELAYED_REACTION_PREFIX)]
+        if released:
+            for metric, delta in DELAYED_REACTION_RELEASE.items():
+                if state[metric] is not None:
+                    state[metric] = _clamp(state[metric] + delta)
+                    state.setdefault('metric_remainders', {}).pop(metric, None)
+            applied['delayed_reaction'] = 'released'
+    humiliating = EVENT_DELTAS[event].get('humiliation', 0) > 0 or lost
+    if (humiliating and before['humiliation'] is not None and before['humiliation'] >= HUMILIATION_SATURATION
+            and not any(e.get('when_alone') and e['status'] in {'pending', 'ready'} for e in state.get('story_events', []))):
+        # The slider is full: the scene's humiliation lands later, when nobody is watching.
+        state = apply_story_updates(state, [{'op': 'schedule', 'id': f'{DELAYED_REACTION_PREFIX}{scope_id}', 'when_alone': True,
+            'title': '혼자 남았을 때 미뤄 둔 반응이 온다', 'source': f'굴욕 포화 상태의 사건: {RESOLVE_EVENT_KINDS.get(event, (0, event))[1]}'[:300]}])
+        applied['delayed_reaction'] = 'scheduled'
     state['last_event'] = user_text[:300]
-    return state, {'mode': mode, 'event': event, 'intensity': labels.get('intensity'), 'minutes': minutes, 'initialized': initialized, 'intensity_source': 'fixed_reward' if fixed_reward else ('fixed_session' if fixed_session else 'jev')}
+    return state, applied
+
+
+def _lose_holdouts(state, before, labels, scope_id, user_text):
+    """Mark holdouts Jev saw given up; each is lost once and costs a fixed, bounded amount."""
+    lost = []
+    for i, holdout in enumerate(before.get('holdouts', [])):
+        if holdout.get('status') != 'held' or labels.get(f'holdout_{i}') != 'lost':
+            continue
+        current = next((h for h in state['holdouts'] if h['id'] == holdout['id']), None)
+        if current is None or current['status'] != 'held':
+            continue
+        current.update(status='lost', lost_minute=state['scene_minute'], lost_event=labels.get('event', 'none'), lost_scope_id=scope_id)
+        lost.append(current['title'])
+        for metric, delta in HOLDOUT_LOSS_DELTAS.items():
+            if state[metric] is not None:
+                effect = delta * max(.2, min(1.0, (100 - state[metric]) / 40)) if metric == 'humiliation' else delta
+                state[metric] = _clamp(state[metric] + effect)
+                state.setdefault('metric_remainders', {}).pop(metric, None)
+        if state['resolve'] is not None:
+            from runtime_tools.roleplay_memory import _apply_resolve_event
+            _apply_resolve_event(state, {'kind': HOLDOUT_LOSS_KIND, 'intensity': 2, 'note': f'{holdout["title"]}: {user_text[:200]}'},
+                                 event_id=f'jev-{scope_id}-holdout-{holdout["id"]}', reason='지키던 것을 넘김')
+    return lost
 
 
 def adjudicate_turn(user_id, user_text, history, scope_id, *, prepared=None):

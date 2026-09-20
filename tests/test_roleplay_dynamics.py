@@ -211,8 +211,21 @@ class DynamicsTests(unittest.TestCase):
         self.assertEqual(safe_rest['humiliation'], 48.5)
         coerced = advance(self.initial(threat='immediate', activity='strenuous', fatigue=75, pain=65, **mental), 60, '강요 한 시간')
         self.assertEqual(coerced['resolve'], 45)
-        self.assertLess(coerced['clarity'], 47)  # fatigue crosses 80 during the hour
+        self.assertEqual(coerced['clarity'], 49)  # only the immediate threat clouds the mind; fatigue and moderate pain do not
         self.assertEqual(coerced['humiliation'], 50)
+        # Clarity erodes for few reasons: sleep deprivation, severe pain, fever, immediate threat, isolation.
+        from runtime_tools.roleplay_dynamics import clarity_drain_rate
+        base = self.initial(threat='uncertain', activity='light', **mental)
+        self.assertEqual(clarity_drain_rate({**base, 'fatigue': 95, 'pain': 70}), 0)
+        self.assertEqual(clarity_drain_rate({**base, 'wakefulness_minutes': 16 * 60}), -1)
+        self.assertEqual(clarity_drain_rate({**base, 'wakefulness_minutes': 24 * 60, 'pain': 75}), -2.5)
+        fever = [{'id': 'wound', 'description': '방치된 상처', 'severity': 3, 'trend': 'worsening', 'treated': False}]
+        self.assertEqual(clarity_drain_rate({**base, 'injuries': fever}), -1)
+        # Time-based drains stop at the floor; below it only gains apply.
+        floored = advance(self.initial(threat='immediate', activity='light', clarity=30.5, resolve=50, humiliation=50, participants=['x']), 120, '두 시간 위협')
+        self.assertEqual(floored['clarity'], 30)
+        below = advance(self.initial(threat='immediate', activity='light', clarity=20, resolve=50, humiliation=50, participants=['x']), 60, '한 시간 위협')
+        self.assertEqual(below['clarity'], 20)
         # Minute steps thin the second hour's gain a little (see _diminish), so two hours fall just short of 2x.
         slept = advance(self.initial(activity='sleep', sleep_quality='good', threat='uncertain', **mental), 120, '두 시간 숙면')
         self.assertAlmostEqual(slept['resolve'], 90 - 40 * math.exp(-3 / 40), delta=0.002)

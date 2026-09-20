@@ -6,6 +6,9 @@ MAX_EVENTS = 100
 TERMINAL = {"completed", "cancelled"}
 
 
+ALONE_EVENT_EXPIRY_MINUTES = 1440
+
+
 def refresh_events(state):
     events = state.get("story_events", [])
     by_id = {event["id"]: event for event in events}
@@ -15,6 +18,12 @@ def refresh_events(state):
         dependency = by_id.get(event.get("after_event"))
         if dependency and dependency["status"] == "cancelled":
             event.update(status="cancelled", outcome="선행 사건 취소", resolved_minute=state["scene_minute"])
+        elif event.get("when_alone"):
+            # A cue for the next scene the character spends alone, never a clock stop.
+            if event["status"] == "ready" and state["scene_minute"] - event.get("ready_minute", state["scene_minute"]) >= ALONE_EVENT_EXPIRY_MINUTES:
+                event.update(status="cancelled", outcome="혼자 남은 장면이 이어지지 않아 시기를 놓침", resolved_minute=state["scene_minute"])
+            elif event["status"] == "pending" and not state.get("participants") and (not dependency or dependency["status"] == "completed"):
+                event.update(status="ready", ready_minute=state["scene_minute"])
         elif ((not dependency or dependency["status"] == "completed")
               and event.get("due_minute", state["scene_minute"]) <= state["scene_minute"]):
             event["status"] = "ready"
@@ -27,7 +36,7 @@ def apply_story_updates(state, updates):
     state = deepcopy(state)
     events = state.setdefault("story_events", [])
     for update in updates:
-        if not isinstance(update, dict) or set(update) - {"op", "id", "title", "source", "due_minute", "after_event", "outcome"}:
+        if not isinstance(update, dict) or set(update) - {"op", "id", "title", "source", "due_minute", "after_event", "outcome", "when_alone"}:
             raise ValueError("Invalid story update fields")
         op, eid = update.get("op"), update.get("id")
         if not isinstance(eid, str) or not 1 <= len(eid.strip()) <= 64:
@@ -40,8 +49,10 @@ def apply_story_updates(state, updates):
             for key in ("title", "source"):
                 if not isinstance(update.get(key), str) or not 1 <= len(update[key].strip()) <= 300:
                     raise ValueError(f"Scheduled event needs {key} (1–300 characters)")
-            if "due_minute" not in update and "after_event" not in update:
-                raise ValueError("Scheduled event needs due_minute or after_event")
+            if "when_alone" in update and update["when_alone"] is not True:
+                raise ValueError("when_alone is either true or omitted")
+            if "due_minute" not in update and "after_event" not in update and not update.get("when_alone"):
+                raise ValueError("Scheduled event needs due_minute, after_event or when_alone")
             if "due_minute" in update and (type(update["due_minute"]) is not int or update["due_minute"] < 0):
                 raise ValueError("due_minute is an absolute nonnegative scene minute")
             if "after_event" in update and (not isinstance(update["after_event"], str) or update["after_event"] not in by_id):
@@ -92,7 +103,7 @@ def advance_to_event(state, target, basis, advance_fn):
     by_id = {e["id"]: e for e in state.get("story_events", [])}
     candidates = []
     for event in by_id.values():
-        if event["status"] in TERMINAL:
+        if event["status"] in TERMINAL or event.get("when_alone"):
             continue
         dependency = by_id.get(event.get("after_event"))
         if dependency and dependency["status"] != "completed":
@@ -121,6 +132,7 @@ STORY_UPDATES_SCHEMA = {
         "source": {"type": "string", "maxLength": 300},
         "due_minute": {"type": "integer", "minimum": 0},
         "after_event": {"type": "string", "maxLength": 64},
+        "when_alone": {"type": "boolean", "description": "true면 인물이 혼자 남는 순간 ready가 되는 장면 신호. 시계를 멈추지 않으며 하루 안에 다루지 않으면 취소"},
         "outcome": {"type": "string", "maxLength": 300},
     }, "required": ["op", "id"], "additionalProperties": False},
 }

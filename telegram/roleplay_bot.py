@@ -24,19 +24,20 @@ from pathlib import Path
 from aiogram import BaseMiddleware, Bot, Dispatcher, F, Router
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.filters import Command, CommandStart
-from aiogram.types import BotCommand, Message
+from aiogram.types import BotCommand, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from secrets_loader import get_secret
 from db import query as _query, execute as _execute
 from bot_config import _deepseek_anthropic_client, _resolve_deepseek_model
 from llm.claude_loop import chat_with_tools
 from llm.tool_loop_common import EMPTY_RESPONSE_FALLBACK
-from runtime_tools.roleplay_jev import adjudicate_turn
+from runtime_tools.roleplay_jev import adjudicate_turn, PendingChoice
 from runtime_tools.roleplay_actor import actor_state_view
 from runtime_tools import roleplay_turn
-from runtime_tools.roleplay_dynamics import with_defaults
+from runtime_tools.roleplay_dynamics import with_defaults, holdout_titles
 from runtime_tools.roleplay_pacing import policy_for, turn_time_scope
-from runtime_tools.roleplay_memory import load_notes, load_state, load_people, people_context, excluded_history_ids
+from runtime_tools.roleplay_memory import (load_notes, load_state, load_people, people_context, excluded_history_ids,
+                                           get_preference, set_preference)
 from runtime_tools.registry import TOOLS, TOOL_HANDLERS
 from tool_gateway.profiles import ROLEPLAY_TELEGRAM_TOOLS
 from tool_gateway.security import caller_scope, new_run_context
@@ -98,6 +99,11 @@ def _select_tools() -> tuple[list[dict], dict]:
 
 
 RP_TOOLS, RP_HANDLERS = _select_tools()
+
+# A draft whose one open Jev choice the player settles with a button. Held in
+# process memory only: after a restart the player simply resends the message.
+PENDING_CHOICES: dict[int, dict] = {}
+FEEDBACK_PREFERENCE = "feedback_line"
 
 
 # ── Persistence (own tables → session isolation) ─────────────────────
@@ -236,6 +242,8 @@ async def cmd_help(message: Message) -> None:
         "• /new — 최근 대화 초기화 (메모·상태표 유지)\n"
         "• /status — 핵심 상태, /status 상세 — 계산 근거·세부 상태. 수정·초기화는 대화로 요청해.\n"
         "• /people — 저장된 인물 목록, /people 이름 — 인물 기록 확인\n"
+        "• /feedback 켜기|끄기 — 답변 뒤에 엔진이 확정한 사건·시간을 한 줄로 표시 (기본 켜짐)\n"
+        "• 판정이 애매하면 버튼으로 사건을 골라 그 초안을 그대로 확정할 수 있어.\n"
         "• 캐릭터 설정은 identity/roleplay_persona.md 파일에서 편집 (재시작 불필요)\n"
         f"• 모델: {ROLEPLAY_MODEL} (thinking on, 추론은 답변에 미포함)"
     )
@@ -245,6 +253,20 @@ async def cmd_help(message: Message) -> None:
 async def cmd_new(message: Message) -> None:
     await asyncio.to_thread(reset_session, message.from_user.id)
     await message.answer("새 대화를 시작할게. (최근 대화는 초기화했어. 저장한 메모와 상태표는 유지돼)")
+
+
+@router.message(Command("feedback"))
+async def cmd_feedback(message: Message) -> None:
+    arg = ((message.text or "").split(maxsplit=1)[1:] or [""])[0].strip().casefold()
+    if arg in {"켜기", "on", "켜"}:
+        await asyncio.to_thread(set_preference, message.from_user.id, FEEDBACK_PREFERENCE, "on")
+        await message.answer("확정 한 줄을 답변 뒤에 붙일게.")
+    elif arg in {"끄기", "off", "꺼"}:
+        await asyncio.to_thread(set_preference, message.from_user.id, FEEDBACK_PREFERENCE, "off")
+        await message.answer("확정 한 줄을 숨길게. 보류된 판정의 버튼은 그대로 나와.")
+    else:
+        current = await asyncio.to_thread(get_preference, message.from_user.id, FEEDBACK_PREFERENCE, "on")
+        await message.answer(f"확정 한 줄 표시: {'켜짐' if current != 'off' else '꺼짐'}. /feedback 켜기 또는 /feedback 끄기")
 
 
 @router.message(Command("status"))
@@ -280,6 +302,8 @@ async def cmd_status(message: Message) -> None:
             timing += f" · {event['after_event']} 완료 조건"
         event_lines.append(f"{event['title']} ({timing})")
     state["upcoming"] = "; ".join(event_lines[:5]) + (f" 외 {len(event_lines) - 5}건" if len(event_lines) > 5 else "")
+    held, lost = holdout_titles(state, "held"), holdout_titles(state, "lost")
+    state["holdouts_display"] = ("; ".join(held) if held else "등록 없음") + (f" / 넘긴 것: {'; '.join(lost)}" if lost else "")
     last_resolve = (state.get("resolve_events") or [None])[-1]
     if last_resolve:
         factors = last_resolve.get("factors", {})
@@ -320,7 +344,8 @@ async def cmd_status(message: Message) -> None:
              " · ".join(f"{label}: {display(state.get(key))}" for key, label in mental.items())]
     labels = {"calendar_display": "시각", "location": "장소", "participants": "현재 장면 인물", "saved_people": "저장된 인물",
               "body": "몸 상태", "mood": "기분", "activity": "활동",
-              "last_event": "직전 사건", "goal": "목적", "unresolved": "미해결", "upcoming": "예정 사건"}
+              "last_event": "직전 사건", "goal": "목적", "unresolved": "미해결", "upcoming": "예정 사건",
+              "holdouts_display": "아직 지키는 것"}
     if not state.get("conditions_initialized"):
         state["activity"] = "미확인"
     if not clock["elapsed_complete"]:
@@ -336,7 +361,7 @@ async def cmd_status(message: Message) -> None:
                        "isolation_display": "고립 환경", "wakefulness": "각성 누적", "calm": "조용한 시간", "resolve_event": "최근 의지 사건",
                        "reason": "최근 변경 이유"})
     lines.extend(f"{label}: {display(state.get(key))}" for key, label in labels.items()
-                 if key in {"calendar_display", "location", "participants"} or state.get(key) not in (None, "", "미설정"))
+                 if key in {"calendar_display", "location", "participants"} or state.get(key) not in (None, "", "미설정", "등록 없음"))
     if (state.get("resolve") is not None and state["resolve"] <= 25) or (state.get("humiliation") is not None and state["humiliation"] >= 75):
         lines.append("회복 경로: 작은 선택·과제 완수·경계 존중·지지 대화. 여건이 되면 자기 돌봄이나 목적 있는 작업도 가능.")
     if not detailed:
@@ -464,6 +489,17 @@ async def handle_message(message: Message) -> None:
                 try:
                     prepared = await asyncio.to_thread(roleplay_turn.prepare, user_text, state, stage['people'],
                         history, str(message.message_id), reply, authorization, stage)
+                except PendingChoice as exc:
+                    # Jev left one closed choice open. Ask the director instead of
+                    # burning a second draft or silently dropping the turn.
+                    PENDING_CHOICES[user_id] = {
+                        "user_text": user_text, "state": state, "people": stage['people'], "history": history,
+                        "scope_id": str(message.message_id), "draft": reply, "authorization": authorization,
+                        "stage": stage, "verdict": exc.verdict, "key": exc.key,
+                    }
+                    await progress_cb.flush()
+                    await message.answer(_choice_prompt(exc), reply_markup=_choice_keyboard(str(message.message_id), exc))
+                    return
                 except ValueError as exc:
                     logger.warning("roleplay draft rejected: %s", exc)
                     history = attach_context(history, [context_record('draft_revision','telegram_roleplay_runtime',
@@ -482,10 +518,82 @@ async def handle_message(message: Message) -> None:
     if settled is None or settled.get('status') not in {'applied','unchanged'}:
         await message.answer("장면을 확정하지 못해서 이번 진행은 저장하지 않았어. 어디까지 진행할지 다시 말해줘.")
         return
+    await _deliver(message, user_id, reply, settled)
 
+
+async def _deliver(message: Message, user_id: int, reply: str, settled: dict) -> None:
     await asyncio.to_thread(save_message, user_id, "assistant", reply)
     for chunk in _split_message(reply):
         await message.answer(chunk)
+    if await asyncio.to_thread(get_preference, user_id, FEEDBACK_PREFERENCE, "on") != "off":
+        state = await asyncio.to_thread(load_state, user_id)
+        await message.answer(roleplay_turn.feedback_line(settled, state))
+
+
+def _choice_prompt(exc: PendingChoice) -> str:
+    if exc.key == "intensity":
+        return "이 장면의 사건 강도를 판정하지 못했어. 골라 주면 이 초안을 그대로 확정할게."
+    return "이 장면에서 실제로 일어난 사건을 판정하지 못했어. 골라 주면 이 초안을 그대로 확정할게."
+
+
+def _choice_keyboard(scope_id: str, exc: PendingChoice) -> InlineKeyboardMarkup:
+    rows = [[InlineKeyboardButton(text=korean, callback_data=f"rp:{scope_id}:{exc.key}:{label}")]
+            for label, korean in exc.candidates]
+    rows.append([InlineKeyboardButton(text="이 초안 버리기", callback_data=f"rp:{scope_id}:cancel:-")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+@router.callback_query(F.data.startswith("rp:"))
+async def on_choice(query: CallbackQuery) -> None:
+    user_id = query.from_user.id
+    _, scope_id, key, value = (query.data or "").split(":", 3)
+    pending = PENDING_CHOICES.get(user_id)
+    if not pending or pending["scope_id"] != scope_id:
+        await query.answer("이 선택은 더 이상 유효하지 않아. 메시지를 다시 보내줘.", show_alert=True)
+        return
+    if key == "cancel":
+        PENDING_CHOICES.pop(user_id, None)
+        await query.answer()
+        await query.message.edit_text("이 초안은 버렸어. 어디까지 진행할지 다시 말해줘.")
+        return
+    if key != pending["key"]:
+        await query.answer("이미 처리된 선택이야.")
+        return
+    await query.answer()
+    verdict = dict(pending["verdict"])
+    verdict["labels"] = {**verdict["labels"], key: value}
+    chosen = next((korean for label, korean in _candidates_of(pending, key) if label == value), value)
+    try:
+        prepared = await asyncio.to_thread(roleplay_turn.prepare, pending["user_text"], pending["state"], pending["people"],
+            pending["history"], scope_id, pending["draft"], pending["authorization"], pending["stage"], verdict)
+    except PendingChoice as exc:
+        pending["verdict"], pending["key"] = exc.verdict, exc.key
+        await query.message.edit_text(f"선택: {chosen}\n" + _choice_prompt(exc), reply_markup=_choice_keyboard(scope_id, exc))
+        return
+    except ValueError as exc:
+        PENDING_CHOICES.pop(user_id, None)
+        logger.warning("roleplay choice completion rejected: %s", exc)
+        await query.message.edit_text(f"선택: {chosen}\n그래도 초안을 확정하지 못했어 ({exc}). 다시 말해줘.")
+        return
+    except Exception:
+        PENDING_CHOICES.pop(user_id, None)
+        logger.exception("roleplay choice completion failed")
+        await query.message.edit_text("확정 중 오류가 났어. 메시지를 다시 보내줘.")
+        return
+    PENDING_CHOICES.pop(user_id, None)
+    settled = await asyncio.to_thread(adjudicate_turn, user_id, pending["user_text"], pending["history"], scope_id, prepared=prepared)
+    if settled.get("status") not in {"applied", "unchanged"}:
+        await query.message.edit_text(f"선택: {chosen}\n장면을 확정하지 못해서 저장하지 않았어 ({settled.get('reason')}).")
+        return
+    await query.message.edit_text(f"선택: {chosen}")
+    await _deliver(query.message, user_id, settled["reply"], settled)
+
+
+def _candidates_of(pending: dict, key: str) -> list:
+    from runtime_tools.roleplay_jev import event_candidates
+    if key == "intensity":
+        return [("mild", "스침"), ("moderate", "보통"), ("severe", "극심")]
+    return event_candidates(pending["verdict"])
 
 
 async def bot_main() -> None:
@@ -500,6 +608,7 @@ async def bot_main() -> None:
     bot = Bot(token=ROLEPLAY_BOT_TOKEN, session=session)
     dp = Dispatcher()
     dp.message.middleware(OwnerOnlyMiddleware())
+    dp.callback_query.middleware(OwnerOnlyMiddleware())
     dp.include_router(router)
 
     await bot.set_my_commands([
@@ -507,6 +616,7 @@ async def bot_main() -> None:
         BotCommand(command="help", description="사용법"),
         BotCommand(command="status", description="인물 상태표"),
         BotCommand(command="people", description="저장된 인물 기록"),
+        BotCommand(command="feedback", description="확정 한 줄 표시 켜기/끄기"),
     ])
 
     me = await bot.get_me()

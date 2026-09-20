@@ -1,5 +1,5 @@
 """Allowlisted narrative context for the actor; numerical state stays in the engine."""
-from runtime_tools.roleplay_dynamics import isolation_stage, RESOLVE_EVENT_KINDS
+from runtime_tools.roleplay_dynamics import isolation_stage, holdout_titles, RESOLVE_EVENT_KINDS
 
 
 def actor_state_view(state):
@@ -42,6 +42,12 @@ def actor_state_view(state):
     clock = state.get('clock') or {}
     view['clock'] = {k: clock[k] for k in ('date', 'time', 'daypart', 'certainty') if k in clock}
     view['story_events'] = [{k: event.get(k) for k in ('title', 'status', 'outcome')} for event in state.get('story_events', []) if event['status'] in {'pending', 'ready'}]
+    if any(e.get('when_alone') and e['status'] == 'ready' for e in state.get('story_events', [])):
+        view['story_events'].append({'title': '(신호) 혼자인 장면이면 미뤄 둔 반응을 몸과 행동으로 드러낼 수 있음. 남이 있으면 아직 아님', 'status': 'cue'})
+    held, lost = holdout_titles(state, 'held'), holdout_titles(state, 'lost')
+    view['holdouts'] = {'아직 지키는 것': held or ['(등록 없음 — 인물이 실제로 아직 넘기지 않은 구체적인 것을 roleplay_state update의 holdouts로 등록할 수 있음)'],
+                        '이미 넘긴 것': lost or [],
+                        'cue': '지키는 항목은 아직 넘기지 않은 실제 사실이다. 넘길지는 장면과 압박이 정하며, 넘기면 그 행위를 서술에 분명히 드러낸다. 잃은 항목을 되찾은 것처럼 쓰지 않는다'}
     return view
 
 
@@ -60,4 +66,9 @@ def actor_outcome_view(outcome):
         cue = '이번 행동의 결과가 확정되지 않았다. 현재 장면에서 멈추고 필요한 사실만 짧게 확인한다.'
     event = applied.get('event')
     label = RESOLVE_EVENT_KINDS.get(event, (None, None))[1]
-    return {'direction': cue, **({'confirmed_event': label} if label else {})}
+    view = {'direction': cue, **({'confirmed_event': label} if label else {})}
+    if applied.get('holdouts_lost'):
+        view['holdouts_lost'] = list(applied['holdouts_lost'])
+    if applied.get('delayed_reaction') == 'scheduled':
+        view['delayed_reaction'] = '이번 굴욕은 지금 반응으로 나오지 않고, 혼자 남는 장면에서 드러날 수 있다'
+    return view

@@ -66,8 +66,33 @@ RESOLVE_EVENT_KINDS = {  # kind: (base delta at intensity 2, label)
     "interrogation": (-2.0, "집중 심문"),
     "coerced_confession": (-4.0, "강요된 자백"),
     "implicating_others": (-5.0, "타인 연루 진술"),
+    "holdout_lost": (-3.0, "지키던 것을 넘김"),
 }
+# Not a primary scene event: Jev marks a holdout lost alongside whatever else happened.
+NON_EVENT_KINDS = {"sexual_coercion", "holdout_lost"}
 RESOLVE_INTENSITY = {1: 0.5, 2: 1.0, 3: 1.5}  # 스침 / 보통 / 극심
+# Holdouts: the few concrete things the character still refuses to give up (a blank
+# line, a name not read aloud). Discrete stakes that stay legible when the sliders
+# sit at 0/100. Only Jev's reading of a settled scene marks one lost.
+MAX_HOLDOUTS = 3
+HOLDOUT_TITLE_MAX = 120
+HOLDOUT_LOSS_KIND = "holdout_lost"
+HOLDOUT_LOSS_DELTAS = {"humiliation": 5.0}       # plus the resolve table entry below
+# Once humiliation is saturated, another humiliating event has nowhere to go on
+# the slider; it becomes a reaction deferred until the character is alone.
+HUMILIATION_SATURATION = 90.0
+DELAYED_REACTION_PREFIX = "delayed-reaction-"
+DELAYED_REACTION_RELEASE = {"humiliation": -4.0, "tension": -3.0}
+DELAYED_REACTION_EXPIRY_MINUTES = 1440
+# Clarity erodes only for a few reasons (2026-09-20 owner ruling: the character
+# "sells while knowing"; low clarity turns a person into a symptom). Time-based
+# drains never push clarity below this floor; events and corrections still can.
+CLARITY_DRAIN_FLOOR = 30.0
+CLARITY_WAKEFULNESS_DRAIN = ((24 * 60, -2.0), (16 * 60, -1.0))  # awake minutes → per hour
+CLARITY_SEVERE_PAIN = 75
+CLARITY_SEVERE_PAIN_DRAIN = -0.5
+CLARITY_IMMEDIATE_THREAT_DRAIN = -1.0
+CLARITY_FEVER_DRAIN = -1.0  # an untreated, worsening severity-3 wound reads as infection/fever
 RESOLVE_EVENT_CAP = 15.0            # one event never takes more than this
 RESOLVE_STATE_FACTOR = 1.25         # each of pain >= 60, fatigue >= 70, an isolation stage
 RESOLVE_PAIN_THRESHOLD = 60
@@ -95,6 +120,7 @@ DYNAMICS_DEFAULTS = {
     "last_calculation": None, "clock": None, "event_timestamps": [], "resolve_events": [],
     "social_contact": "unknown", "isolation_mode": "unknown", "alone_rest_minutes": 0,
     "wakefulness_minutes": 0, "story_events": [], "story_interrupt": None, "metric_remainders": {},
+    "holdouts": [],
 }
 
 
@@ -149,7 +175,7 @@ def mental_rates(state):
     else:
         # Quiet rest sharpens the mind, except in solitary once isolation has set in.
         clarity_gain = 1.0 if activity == "rest" and fatigue <= 60 and not stage.get("label") else 0.0
-        clarity_drain = -(2 if fatigue > 80 else 1 if fatigue > 60 else 0) - (1 if pain > 60 else 0) - (1 if threat == "immediate" else 0)
+        clarity_drain = clarity_drain_rate(state)
     clarity_drain += stage["clarity"]
     # Low resolve limits further losses; an unthreatened recovery activity must
     # provide a playable route out of collapse even before complete safety.
@@ -167,6 +193,24 @@ def mental_rates(state):
     return {"resolve": _diminish(resolve_gain, state["resolve"]) + resolve_drain,
             "clarity": _diminish(clarity_gain, state["clarity"]) + clarity_drain,
             "humiliation": humiliation_rate}
+
+
+def clarity_drain_rate(state):
+    """Hourly waking clarity loss: sleep deprivation, severe pain, an immediate threat, fever.
+    Ordinary fatigue, moderate pain and a bad mood do not cloud the mind."""
+    awake = state.get("wakefulness_minutes", 0)
+    drain = next((rate for threshold, rate in CLARITY_WAKEFULNESS_DRAIN if awake >= threshold), 0.0)
+    if (state.get("pain") or 0) >= CLARITY_SEVERE_PAIN:
+        drain += CLARITY_SEVERE_PAIN_DRAIN
+    if state.get("threat") == "immediate":
+        drain += CLARITY_IMMEDIATE_THREAT_DRAIN
+    if any(i["severity"] == 3 and i["trend"] == "worsening" and not i["treated"] for i in state.get("injuries", [])):
+        drain += CLARITY_FEVER_DRAIN
+    return drain
+
+
+def holdout_titles(state, status="held"):
+    return [h["title"] for h in state.get("holdouts", []) if h.get("status") == status]
 
 
 def _diminish(rate, value):
@@ -452,6 +496,9 @@ def _step(state, minutes):
     for key, delta in deltas.items():
         if state[key] is not None:
             raw = max(0, min(100, state[key] + delta))
+            if key == "clarity" and delta < 0:
+                # Time never takes clarity below the floor; below it, only gains apply.
+                raw = max(raw, min(state[key], CLARITY_DRAIN_FLOOR))
             result[key] = round(raw, 4)
             result.setdefault("metric_remainders", {})[key] = raw - result[key]
     result["injuries"], injury_changes = progress_injuries(state["injuries"], minutes)

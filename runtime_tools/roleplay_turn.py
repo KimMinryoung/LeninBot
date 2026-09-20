@@ -131,20 +131,25 @@ def commit_staged(conn, uid, stage):
             conn.executemany(f'INSERT INTO {table} VALUES (?,?,?)',[(str(uid),*row) for row in stage['records'][table]])
 
 
-def prepare(user_text, before, people, history, scope_id, draft, authorization, stage=None):
-    guard_questions = {'within_scope': jev.choice('Check the WHOLE draft against the authorized user endpoint. Accept normal staging details inside that action (sitting, speaking, pausing, sipping water, standing or exiting the interrogation room at the end). These are not separate major scenes. Historical source dates are references, not target dates when the user directs reenactment in the next morning scene; reject extra meals, sleep, assaults, next scenes or days not requested. Parenthesized director instructions authorize their specified scene. A mere discussion/plan must not be enacted. Repetition of the already existing scene as context is fine.', {'yes':'Entire proposed response stays within authorized scope','no':'Adds unauthorized events, skips or enacts a discussion/plan'})}
-    gate = decide('roleplay-draft-scope', {'current_user':user_text,'authorization':authorization['labels'],
-        'before':{k:before.get(k) for k in ('clock','location','scene')},'draft':draft}, guard_questions)
-    if gate['labels']['within_scope'] != 'yes':
-        raise ValueError('초안이 사용자 지시의 사건 경계를 넘음')
-    verdict = jev.classify(user_text,before,people,history,draft=draft)
-    if verdict['status'] != 'classified':
-        raise ValueError('초안 사건 판정 실패')
+def prepare(user_text, before, people, history, scope_id, draft, authorization, stage=None, verdict=None):
+    """Gate and classify the draft, then project it. A ``verdict`` from an earlier attempt
+    (the player settled a choice Jev left open) skips the scope gate and the classifier."""
+    if verdict is None:
+        guard_questions = {'within_scope': jev.choice('Check the WHOLE draft against the authorized user endpoint. Accept normal staging details inside that action (sitting, speaking, pausing, sipping water, standing or exiting the interrogation room at the end). These are not separate major scenes. Historical source dates are references, not target dates when the user directs reenactment in the next morning scene; reject extra meals, sleep, assaults, next scenes or days not requested. Parenthesized director instructions authorize their specified scene. A mere discussion/plan must not be enacted. Repetition of the already existing scene as context is fine.', {'yes':'Entire proposed response stays within authorized scope','no':'Adds unauthorized events, skips or enacts a discussion/plan'})}
+        gate = decide('roleplay-draft-scope', {'current_user':user_text,'authorization':authorization['labels'],
+            'before':{k:before.get(k) for k in ('clock','location','scene')},'draft':draft}, guard_questions)
+        if gate['labels']['within_scope'] != 'yes':
+            raise ValueError('초안이 사용자 지시의 사건 경계를 넘음')
+        verdict = jev.classify(user_text,before,people,history,draft=draft)
+        if verdict['status'] != 'classified':
+            raise ValueError('초안 사건 판정 실패')
+        verdict.update(draft=draft, authorization=authorization, scope_review=gate)
+    else:
+        verdict = deepcopy(verdict)
     mode = authorization['labels']['mode']
     verdict['labels']['mode'] = mode
     if verdict['labels'].get('event') in {'interrogation','coerced_confession','implicating_others'} and 'activity' not in verdict['labels']:
         verdict['labels']['activity'] = 'light'
-    verdict.update(draft=draft, authorization=authorization, scope_review=gate)
     policy = policy_for_authorization(authorization)
     state = deepcopy(before)
     with turn_time_scope(policy):
@@ -181,8 +186,14 @@ def prepare(user_text, before, people, history, scope_id, draft, authorization, 
                 # decides how much time the authorized draft actually uses.
                 verdict['labels']['elapsed']='brief'
                 verdict['duration_limit']=180 if authorization['labels']['span']=='session' else 10
-                verdict['duration_estimate']=jev.estimate_duration(user_text,state,verdict)
-        projected, applied = jev.project(state,user_text,people,verdict,scope_id)
+                if not verdict.get('duration_estimate'):
+                    verdict['duration_estimate']=jev.estimate_duration(user_text,state,verdict)
+        try:
+            projected, applied = jev.project(state,user_text,people,verdict,scope_id)
+        except jev.PendingChoice as exc:
+            # Keep everything already paid for so the player's pick completes this same draft.
+            exc.verdict = verdict
+            raise
     if mode == 'scene' and verdict['labels'].get('location') in {None, 'unknown'}:
         projected['location'] = '미확인 — 확정된 장면 서술 참조'
     if applied.get('interrupted'):
@@ -191,6 +202,11 @@ def prepare(user_text, before, people, history, scope_id, draft, authorization, 
         for key in ('goal','avoid','next_action','unresolved','body','mood','scene'):
             if stage['state'].get(key) != before.get(key):
                 projected[key] = stage['state'].get(key)
+        if stage['state'].get('holdouts') != before.get('holdouts'):
+            # The actor may add what the character still holds; Jev's losses this turn win by id.
+            settled = {h['id']: h for h in projected.get('holdouts', [])}
+            projected['holdouts'] = [settled.get(h['id'], h) if h['id'] in settled and settled[h['id']]['status'] == 'lost' else h
+                                     for h in stage['state'].get('holdouts', [])]
         if mode != 'scene' and (projected != before or stage['records'] != stage['baseline']):
             applied = {**applied,'no_change':False,'narrative_only':True}
     review = review_reply(draft, before, projected, stage)
@@ -235,6 +251,42 @@ def review_reply(draft, before, projected, stage=None):
     except (ValueError,TypeError) as exc:
         raise ValueError('최종 서술 검토 응답 형식 오류') from exc
     return review
+
+
+def feedback_line(outcome, state=None):
+    """One line telling the director what the engine believed happened. No numbers, no thresholds."""
+    from runtime_tools.roleplay_dynamics import RESOLVE_EVENT_KINDS
+    status = outcome.get('status')
+    applied = outcome.get('applied') or {}
+    if status == 'unchanged' or applied.get('no_change'):
+        return '⚙ 상담·회상·계획으로 처리. 장면 시간과 상태는 그대로.'
+    if status != 'applied':
+        return f"⚙ 보류: {outcome.get('reason') or '확정하지 못함'}"
+    if applied.get('mode') == 'reset':
+        return '⚙ 새 장면으로 초기화.'
+    if applied.get('mode') == 'correction':
+        return '⚙ 수치 정정 반영.'
+    if applied.get('scheduled'):
+        return '⚙ 예정 사건 등록.'
+    names = {'meal': '식사', 'snack': '간식', 'water': '물', 'treatment': '처치', 'injury': '새 부상', 'none': '뚜렷한 사건 없음',
+             **{k: v[1] for k, v in RESOLVE_EVENT_KINDS.items()}}
+    parts = ['확정: ' + names.get(applied.get('event'), applied.get('event') or '사건 없음')]
+    if applied.get('deferred_components'):
+        parts.append('시간·장면 조건 보류')
+    elif applied.get('minutes') is not None:
+        parts.append(f"{applied['minutes']}분")
+    clock = (state or {}).get('clock') or {}
+    if clock.get('time'):
+        parts.append(clock['time'] + (' 추정' if clock.get('certainty') == 'estimated' else ''))
+    if applied.get('holdouts_lost'):
+        parts.append('넘긴 것: ' + ', '.join(applied['holdouts_lost']))
+    if applied.get('delayed_reaction') == 'scheduled':
+        parts.append('미뤄 둔 반응 예약')
+    elif applied.get('delayed_reaction') == 'released':
+        parts.append('미뤄 둔 반응 해소')
+    if applied.get('narrative_only'):
+        parts.append('기록만 갱신')
+    return '⚙ ' + ' · '.join(parts)
 
 
 def committed_reply(uid, scope_id):

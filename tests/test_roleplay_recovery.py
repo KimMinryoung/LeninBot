@@ -33,6 +33,7 @@ class TestReplyPersistence(unittest.IsolatedAsyncioTestCase):
              patch.object(bot, "load_history", return_value=[{"role": "user", "content": "질문"}]), \
              patch.object(bot, "load_notes", return_value=[{"key": "관계", "content": "친구"}]), \
              patch.object(bot, "load_state", return_value={"hunger": 25}), \
+             patch.object(bot, "get_preference", return_value="off"), \
              patch.object(bot, "people_context", return_value={"index": [{"person_id": "ivan"}], "present": []}), \
              patch.object(bot, "build_system_prompt", return_value="sys"), \
              patch.object(bot, "_make_progress_callback", return_value=progress), \
