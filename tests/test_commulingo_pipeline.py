@@ -34,48 +34,49 @@ class EvidenceTests(unittest.TestCase):
         self.assertEqual(source['id'],same['id'])
 
     def test_passage_labels_resolve_to_displayed_paragraphs(self):
-        from commulingo_pipeline.evidence import SourceHandles, label_passages, resolve_passages
+        from commulingo_pipeline.evidence import SourceHandles, Passages, resolve_passages
         body = ('Intro sentence here.\n그는 1917년에 입당했다 — «Правда» 편집부에서 일했다.\n\n'
                 'Later he was exiled to Siberia! Final sentence of the page.')
         source = snapshot('https://example.org/source', body)
         sources = {source['id']:source}
         handles = SourceHandles(sources)
-        text, labels = label_passages(handles.handle(source), body)
+        passages = Passages()
+        text = passages.show(handles.handle(source), body)
+        later = body.index('Later')
         # Every non-blank line is one labelled paragraph; the label is the handle and the paragraph's offset.
-        self.assertEqual(list(labels), ['S1@0', 'S1@21', f'S1@{body.index("Later")}'])
+        self.assertEqual(list(passages.shown), ['S1@0', 'S1@21', f'S1@{later}'])
         self.assertTrue(text.startswith('[S1@0] Intro sentence here.\n[S1@21] 그는 1917년에'))
-        shown = {label:(start, end, body[start:end]) for label,(start,end) in labels.items()}
         claim = {'field':'bio','claim':'Joined in 1917','passages':['S1@21']}
-        [resolved] = resolve_passages([claim], shown, handles, sources)
+        [resolved] = resolve_passages([claim], passages, handles, sources)
         self.assertNotIn('passages', resolved)
         self.assertEqual(body[resolved['start']:resolved['end']], '그는 1917년에 입당했다 — «Правда» 편집부에서 일했다.')
         compiled = compile_evidence([resolved], sources, {'bio'})
         self.assertEqual(compiled[0]['excerpt'], '그는 1917년에 입당했다 — «Правда» 편집부에서 일했다.')
-        # Several paragraphs of one source span from the first to the last; a label never shown, a label from
-        # another source in the same claim, and text that changed since display are refused by claim number.
-        [wide] = resolve_passages([{**claim,'passages':[f'S1@{body.index("Later")}','S1@21']}], shown, handles, sources)
+        # Several paragraphs of one source span from the first to the last, whatever the order given.
+        [wide] = resolve_passages([{**claim,'passages':[f'S1@{later}','S1@21']}], passages, handles, sources)
         self.assertEqual((wide['start'], wide['end']), (21, len(body)))
         other = snapshot('https://example.org/other', 'Unrelated page.\nHe was exiled to Siberia in 1930.')
         sources[other['id']] = other
-        _, more = label_passages(handles.handle(other), other['body'])
-        shown.update({label:(start, end, other['body'][start:end]) for label,(start,end) in more.items()})
+        passages.show(handles.handle(other), other['body'])
+        # A label never shown is refused by claim number when alone, and ignored beside shown ones.
         with self.assertRaisesRegex(ValueError, "claim 1: passage label 'S1@999' was not displayed"):
-            resolve_passages([{**claim,'passages':['S1@999']}], shown, handles, sources)
-        # Labels of two sources become two claims; a label never shown is ignored beside shown ones.
-        split = resolve_passages([claim, {**claim,'passages':['S1@21','S2@16','S1@999']}], shown, handles, sources)
+            resolve_passages([{**claim,'passages':['S1@999']}], passages, handles, sources)
+        # Labels of two sources become two claims.
+        split = resolve_passages([claim, {**claim,'passages':['S1@21','S2@16','S1@999']}], passages, handles, sources)
         self.assertEqual([(c['source_id'], c['start']) for c in split], [(source['id'], 21), (source['id'], 21), (other['id'], 16)])
         # Paragraphs too far apart for one evidence range become one claim per cluster.
         far = snapshot('https://example.org/far', 'First paragraph of a long page.\n' + 'x' * 7000 + '\nLast paragraph states the fact.')
         sources[far['id']] = far
-        _, far_labels = label_passages(handles.handle(far), far['body'])
-        shown.update({label:(start, end, far['body'][start:end]) for label,(start,end) in far_labels.items()})
-        pieces = resolve_passages([{**claim,'passages':list(far_labels)}], shown, handles, sources)
+        far_text = passages.show(handles.handle(far), far['body'])
+        far_labels = re.findall(r'\[(S3@\d+)\]', far_text)
+        pieces = resolve_passages([{**claim,'passages':far_labels}], passages, handles, sources)
         ranges = [(c['start'], c['end']) for c in pieces]
         self.assertTrue(len(ranges) >= 2 and ranges[0][0] == 0 and ranges[-1][1] == len(far['body']))
         self.assertTrue(all(end - start <= 6000 for start, end in ranges), ranges)
-        shown['S1@21'] = (21, body.index('Later'), 'edited text that the source no longer shows')
-        with self.assertRaisesRegex(ValueError, 'changed since those passages were shown'):
-            resolve_passages([claim], shown, handles, sources)
+        # Text that changed since display (a restarted snapshot) is refused.
+        sources[source['id']] = {**source, 'body': body.replace('1917', '1918')}
+        with self.assertRaisesRegex(ValueError, 'claim 1: the text of S1 changed since those passages were shown'):
+            resolve_passages([claim], passages, handles, sources)
 
     def test_exact_range_and_expiry(self):
         source = snapshot('https://example.org/source','A documented event happened in 1917.')

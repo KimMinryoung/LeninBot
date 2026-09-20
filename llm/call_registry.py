@@ -707,6 +707,23 @@ class Decision:
     def probabilities(self, key: str) -> dict:
         return dict((self.answers.get(key) or {}).get("probabilities") or {})
 
+    def item(self, item_id: str, keys) -> "Decision":
+        """The answers of one fanned-out item (see ``fan_out``) as a Decision keyed by the plain question keys."""
+        return Decision(answers={k: self.answers.get(f"{item_id}_{k}") for k in keys}, model=self.model,
+                        usage=self.usage, latency_ms=self.latency_ms, cost_usd=self.cost_usd)
+
+
+def fan_out(items: dict, questions: dict, **shared) -> tuple[dict, dict]:
+    """One request for several items: the state carries every item under
+    ``items.<id>`` beside the shared fields, and every question is asked once
+    per item as ``<id>_<key>`` with the item named in its instructions.
+    TypeSafe evaluates a request's questions in parallel, so latency follows
+    requests, not questions. Read answers back with ``Decision.item``."""
+    state = {**shared, "items": dict(items)}
+    keyed = {f"{item_id}_{key}": {**question, "instructions": f"About `items.{item_id}`: " + question["instructions"]}
+             for item_id in items for key, question in questions.items()}
+    return state, keyed
+
 
 @dataclass(frozen=True)
 class DecisionResult:

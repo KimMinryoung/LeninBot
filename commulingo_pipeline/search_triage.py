@@ -11,10 +11,14 @@ the verdicts are joined with which URLs were fetched and cited to decide
 whether showing them would steer the model. Registry feature
 ``commulingo_search_triage``; ``enabled=false`` stops the calls.
 """
+import asyncio
 import logging
 import re
 
-from llm.call_registry import resolve
+from llm.call_registry import fan_out
+from provenance.runtime import external_body
+
+from .citation_gate import settings
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +28,7 @@ SNIPPET_CHARS = 600
 
 QUESTION = {
     'type': 'choice',
-    'instructions': 'Judged from its title, URL and snippet alone, does search hit {key} cover the research target?',
+    'instructions': 'Judged from its title, URL and snippet alone, does this search hit cover the research target?',
     'criteria': {
         'directly': 'The page is about the target itself (the person, the term, the event) or is a document by or '
                     'about it: a biography, an encyclopedia entry, an archive record, an article on it.',
@@ -39,14 +43,10 @@ _BLOCK = re.compile(r'^### ', re.M)
 _HIT = re.compile(r'^(?P<title>[^\n]*)\n\[source_kind=[^\]]*\]\n(?P<url>https?://\S+)\n?(?P<snippet>.*)$', re.S)
 
 
-def settings():
-    extra = resolve(FEATURE).extra or {}
-    return {'enabled': bool(extra.get('enabled', True))}
-
-
 def parse_hits(text):
     """Title, URL and snippet of each hit in a rendered web_search result."""
-    body = re.sub(r'\n</external>\s*$', '', str(text))
+    match = external_body(text)
+    body = match[1] if match else str(text)
     hits = []
     for block in _BLOCK.split(body)[1:]:
         match = _HIT.match(block.strip())
@@ -75,22 +75,21 @@ def search_target(kind, target, current, topic=None):
 
 async def triage_hits(target, hits, *, usage=None, decide=None):
     """One decision for a search's hits; returns [{url, verdict, confidence}] and records them."""
-    if not hits or not settings()['enabled']:
+    if not hits or not settings(FEATURE)['enabled']:
         return []
     if decide is None:
         from llm.call_registry import decide as registry_decide
         decide = registry_decide
-    keys = [f'h{i}' for i in range(1, len(hits) + 1)]
-    state = {'target': target, 'hits': dict(zip(keys, hits))}
-    questions = {k: {**QUESTION, 'instructions': QUESTION['instructions'].format(key=k)} for k in keys}
+    ids = {f'h{i}': hit for i, hit in enumerate(hits, 1)}
+    state, questions = fan_out(ids, {'covers': QUESTION}, target=target)
     decision = await decide(FEATURE, state, questions)
     tracker = usage.tracker if usage is not None else None
     if decision is None:
         if tracker is not None:
             tracker['search_triage_unavailable'] = tracker.get('search_triage_unavailable', 0) + 1
         return []
-    rows = [{'url': hit['url'], 'verdict': decision.choice(k), 'confidence': round(decision.confidence(k) or 0.0, 3)}
-            for k, hit in zip(keys, hits)]
+    rows = [{'url': hit['url'], 'verdict': decision.choice(f'{k}_covers'), 'confidence': round(decision.confidence(f'{k}_covers') or 0.0, 3)}
+            for k, hit in ids.items()]
     if tracker is not None:
         tracker.setdefault('search_triage', []).extend(rows)
         tracker['search_triage_calls'] = tracker.get('search_triage_calls', 0) + 1
@@ -99,11 +98,25 @@ async def triage_hits(target, hits, *, usage=None, decide=None):
     return rows
 
 
-def shadow(target, usage=None, decide=None):
-    """Hook for a web_search wrapper: judge the rendered result, never alter or fail it."""
-    async def hook(text):
+class Shadow:
+    """web_search hook for one run: judges each rendered result off the
+    model's critical path (a task per search) and never alters or fails the
+    search. ``flush`` awaits the outstanding tasks before the run's usage is
+    persisted."""
+    def __init__(self, kind, target, current, topic=None, usage=None, decide=None):
+        self.target, self.usage, self.decide = search_target(kind, target, current, topic), usage, decide
+        self.tasks = []
+
+    async def __call__(self, text):
+        self.tasks.append(asyncio.ensure_future(self._judge(text)))
+
+    async def _judge(self, text):
         try:
-            await triage_hits(target, parse_hits(text), usage=usage, decide=decide)
+            await triage_hits(self.target, parse_hits(text), usage=self.usage, decide=self.decide)
         except Exception as exc:   # shadow: a triage failure must not cost the search
             logger.warning('search triage failed: %s', exc)
-    return hook
+
+    async def flush(self):
+        if self.tasks:
+            await asyncio.gather(*self.tasks, return_exceptions=True)
+            self.tasks.clear()

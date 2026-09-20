@@ -29,7 +29,7 @@ import asyncio
 import json
 import logging
 
-from llm.call_registry import resolve
+from llm.call_registry import fan_out, resolve
 
 logger = logging.getLogger(__name__)
 
@@ -206,7 +206,6 @@ async def _judge(feature, questions, items, *, key, state, skip, describe, usage
     if decide is None:
         from llm.call_registry import decide as registry_decide
         decide = registry_decide
-    from llm.call_registry import Decision
     cache = cache if cache is not None else {}
     gate = asyncio.Semaphore(CONCURRENCY)
 
@@ -224,19 +223,15 @@ async def _judge(feature, questions, items, *, key, state, skip, describe, usage
             pending[k] = item
 
     async def run(batch):
-        ids = [f'c{i + 1}' for i in range(len(batch))]
-        request_state = {'items': {cid: st for cid, (_, _, st) in zip(ids, batch)}}
-        request_questions = {f'{cid}_{q}': {**question, 'instructions': f'About `items.{cid}`: ' + question['instructions']}
-                             for cid in ids for q, question in questions.items()}
+        ids = {f'c{i + 1}': entry for i, entry in enumerate(batch)}
+        request_state, request_questions = fan_out({cid: st for cid, (_, _, st) in ids.items()}, questions)
         async with gate:
             decision = await decide(feature, request_state, request_questions)
-        for cid, (k, item, _) in zip(ids, batch):
-            if decision is None:
-                results[k] = {'support': None, 'error': 'decision unavailable'}
-                continue
-            own = Decision(answers={q: decision.answers.get(f'{cid}_{q}') for q in questions}, model=decision.model,
-                           usage=decision.usage, latency_ms=decision.latency_ms, cost_usd=decision.cost_usd)
-            results[k] = verdict(own, conf['thresholds'], item.get('stance') or 'supports')
+        if decision is None:
+            results.update({k: {'support': None, 'error': 'decision unavailable'} for k, _, _ in batch})
+            return
+        for cid, (k, item, _) in ids.items():
+            results[k] = verdict(decision.item(cid, questions), conf['thresholds'], item.get('stance') or 'supports')
 
     await asyncio.gather(*(run(batch) for batch in _batches(list(pending.items()), state)))
     for k, result in results.items():

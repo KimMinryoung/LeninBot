@@ -9,7 +9,9 @@ import re
 from datetime import datetime, timezone
 
 from .engine import Result
-from .evidence import snapshot, compile_evidence, label_passages, resolve_passages, SourceHandles, SourcePages, MAX_PASSAGES
+from .evidence import snapshot, compile_evidence, resolve_passages, Passages, SourceHandles, SourcePages, MAX_PASSAGES
+from .search_triage import Shadow
+from provenance.runtime import external_body
 from .citation_gate import check_claims, review_gate, annotate as annotate_citations
 from . import service
 from .bundles import work_topics, advance
@@ -286,14 +288,12 @@ class Research:
             await asyncio.to_thread(self.store.link_source,job['id'],merged['id'])
             sources[merged['id']] = merged
         handles = SourceHandles({s['id']:s for s in pages.current.values()})
-        shown = {}   # passage label -> (start, end, text) of every paragraph displayed in this attempt
+        passages = Passages()   # every paragraph displayed in this attempt, by label
         def display(source, span=None):
             body = source['body']
             first, last = (0, len(body)) if span is None else span
             handle = handles.handle(source)
-            text, labels = label_passages(handle, body, first, last)
-            for label, (start, end) in labels.items():
-                shown[label] = (start, end, body[start:end])
+            text = passages.show(handle, body, first, last)
             return (f'Source ID: {handle}\nURL: {source["url"]}\nRetrieved: {source["fetched_at"]}\n'
                     f'Characters {first}..{last} of {len(body)} for this URL\n'
                     f'Each paragraph starts with its passage label [{handle}@offset]; a claim cites those labels.\n'
@@ -305,13 +305,12 @@ class Research:
                 await asyncio.to_thread(self.store.link_source,job['id'],merged['id'])
                 sources[merged['id']] = merged
             return display(merged, span)
-        from .search_triage import shadow as search_shadow, search_target
-        triage = search_shadow(search_target(job['kind'], job['target'], current, job.get('topic')), usage)
+        triage = Shadow(job['kind'], job['target'], current, job.get('topic'), usage)
         def wrap(name, call):
             async def fetched(**kwargs):
                 if name == 'web_search':
                     raw = await call(**kwargs)
-                    await triage(str(raw))   # shadow: recorded on the tracker, shown unchanged
+                    await triage(str(raw))   # shadow: judged off the critical path, shown unchanged
                     return raw
                 if name in {'fetch_url','wiki_get'}:
                     cached = await asyncio.to_thread(self.store.cached_source,name,kwargs)
@@ -320,7 +319,7 @@ class Research:
                         return await absorb(cached['url'], cached['body'])
                 raw = await call(**kwargs)
                 text = str(raw)
-                match = re.search(r'<external source="[^"]*">\n(.*)\n</external>',text,re.S)
+                match = external_body(text)
                 if name in {'fetch_url','wiki_get'} and match:
                     urls = [kwargs.get('url')] if name=='fetch_url' else re.findall(r'https?://[^\s<>\]"\)]+',text[:1000])
                     url = next((u for u in urls if isinstance(u,str) and external_url(u)),None)
@@ -385,7 +384,7 @@ class Research:
             invalid = {c.get('field') for c in value.get('claims',[])} - fields
             if invalid:
                 raise ValueError('claims.field must name a writable field, not a commissioned topic: ' + ', '.join(sorted(str(f) for f in invalid)))
-            claims = resolve_passages(value['claims'], shown, handles, sources)
+            claims = resolve_passages(value['claims'], passages, handles, sources)
             # The cited passages exist; the gate asks whether they say what
             # the claim asserts (citation_gate). Only this call's claims are judged
             # — carried-over claims keep the check they got when made — and
@@ -436,6 +435,7 @@ class Research:
                          reads=READS,usage=usage,budget=budget,read_wrap=wrap,
                          scope_id=f'commulingo_pipeline:{job["id"]}:research',job=job,
                          max_rounds=TARGETED_RESEARCH_ROUNDS if targeted else 12)
+        await triage.flush()
         box['current'] = current
         box['baseline'] = (current or {}).get('revision','')
         box['inspected_sources'] = sorted({s['url'] for s in sources.values()})
@@ -715,6 +715,8 @@ class Draft:
             the inputs so repairs elsewhere in the draft do not re-judge."""
             if classify_term is None and classify_codes is None and classify is None:
                 return fields
+            from runtime_tools.commulingo_classify import (classify_person_card, fill_classification, fill_person_codes,
+                                                          fill_term_category, missing_person_codes)
             key = json.dumps({k:fields.get(k) for k in CLASSIFIED_KEYS if k in fields}, sort_keys=True, ensure_ascii=False, default=str)
             if key in class_memo:
                 verdicts = class_memo[key]
@@ -724,46 +726,29 @@ class Draft:
                     verdicts['term'] = await asyncio.to_thread(classify_term, fields)
                     if verdicts['term'] is None:
                         raise ClassificationUnavailable('term category')
-                staged = fields
                 has_codes = classify_codes is not None and any(isinstance(fields.get(k),dict) for k in ('citizenship','nationalOrigin','fate'))
-                if has_codes and classify is not None:
-                    # A new person: codes and group/role in one request (the role is
-                    # asked for both citizenship cases; commulingo_classify.classify_person_card).
-                    from runtime_tools.commulingo_classify import classify_person_card, fill_person_codes, missing_person_codes
+                if classify is not None:
+                    # A new person: codes and group/role in one request, the role asked for
+                    # both citizenship cases (commulingo_classify.classify_person_card).
                     card = await asyncio.to_thread(classify_person_card, fields, catalogs=catalogs, claims=excerpts)
-                    if card is None:
+                    if card is None or card['person'] is None:
                         raise ClassificationUnavailable('person card')
-                    verdicts['codes'] = card['codes']
-                    if missing_person_codes(fill_person_codes(fields, card['codes'])):
-                        raise ClassificationUnavailable('person codes')
-                    verdicts['person'] = card['person']
-                    if verdicts['person'] is None:
-                        raise ClassificationUnavailable('person group/role')
-                else:
-                    if has_codes:
-                        from runtime_tools.commulingo_classify import fill_person_codes, missing_person_codes
-                        verdicts['codes'] = await asyncio.to_thread(classify_codes, fields, claims=excerpts)
-                        staged = fill_person_codes(fields, verdicts['codes'])
-                        if missing_person_codes(staged):
-                            raise ClassificationUnavailable('person codes')
-                    if classify is not None:
-                        verdicts['person'] = await asyncio.to_thread(classify, staged, catalogs=catalogs, claims=excerpts)
-                        if verdicts['person'] is None:
-                            raise ClassificationUnavailable('person group/role')
+                    verdicts['codes'], verdicts['person'] = card['codes'], card['person']
+                elif has_codes:
+                    verdicts['codes'] = await asyncio.to_thread(classify_codes, fields, claims=excerpts)
+                if has_codes and missing_person_codes(fill_person_codes(fields, verdicts.get('codes'))):
+                    raise ClassificationUnavailable('person codes')
                 class_memo[key] = verdicts
             info = usage.tracker.setdefault('classification',{})
             if verdicts.get('term'):
-                from runtime_tools.commulingo_classify import fill_term_category
                 fields = fill_term_category(fields, verdicts['term'])
                 info.update({'category':verdicts['term']['confidence'],'low_confidence':verdicts['term']['low_confidence']})
             if verdicts.get('codes'):
-                from runtime_tools.commulingo_classify import fill_person_codes
                 fields = fill_person_codes(fields, verdicts['codes'])
                 judged = {k:v for k,v in verdicts['codes'].items() if isinstance(v,dict)}
                 info.update({'codes':{k:v['confidence'] for k,v in judged.items()},
                              'codes_low_confidence':sorted(k for k,v in judged.items() if v['low_confidence'])})
             if verdicts.get('person'):
-                from runtime_tools.commulingo_classify import fill_classification
                 fields = fill_classification(fields, verdicts['person'])
                 info.update({**verdicts['person']['confidence'],'low_confidence':verdicts['person']['low_confidence']})
             return fields
@@ -974,14 +959,13 @@ class Review:
                     'patch_json':draft['fields'],'source_refs':draft['sources']}
         proposal['risks'] = review_risks(proposal,current) + classification_risks(artifacts)
         previous_reviews = prior_reviews(artifacts)
-        fetched, box = {}, {}
+        snapshots, box = {}, {}
         # The reviewer's own quotes get the research claims' question: does the
         # passage say what the finding claims it verifies? Verdicts ride on each
         # check; a confident miss bounces the decision only when the review
         # gate's registry entry says enforce (citation_gate.review_gate).
-        from .search_triage import shadow as search_shadow, search_target
-        handlers = make_handlers({k:TOOL_HANDLERS[k] for k in READS},proposal,fetched,box,gate=review_gate(usage),
-                                 triage=search_shadow(search_target(job['kind'], job['target'], current, job.get('topic')), usage))
+        triage = Shadow(job['kind'], job['target'], current, job.get('topic'), usage)
+        handlers = make_handlers({k:TOOL_HANDLERS[k] for k in READS},proposal,snapshots,box,gate=review_gate(usage),triage=triage)
         async def finish(value):
             return await handlers[DECISION_TOOL['name']](**value)
         convergence = ('' if not previous_reviews else
@@ -1000,6 +984,7 @@ class Review:
             +stage_evidence({'suggestion':proposal,'current_person':current,'previous_reviews':previous_reviews}),
             tool=DECISION_TOOL,handler=finish,reads=READS,usage=usage,budget=budget,
             read_wrap=lambda name,call:handlers[name],scope_id=f'commulingo_pipeline:{job["id"]}:review',job=job)
+        await triage.flush()
         if box['decision']=='revise':
             # Count unchanged content, not lifetime requests or newly added source handles.
             content = {k:v for k,v in draft['fields'].items()

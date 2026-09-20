@@ -51,8 +51,9 @@ class EfficiencyTests(unittest.IsolatedAsyncioTestCase):
     def test_review_checks_cite_displayed_passage_labels(self):
         body = 'The original archive records the birth — and the “subsequent” appointment.\nAnother paragraph.'
         url = 'https://archive.example/person'
-        snapshots = {}
-        source_id, shown = review_source(url, body, snapshots, base=500)
+        from commulingo_pipeline.evidence import Passages
+        snapshots, passages = {}, Passages()
+        source_id, shown = review_source(url, body, snapshots, passages, base=500)
         # Labels carry the slice's offset in its page; the text itself is shown unchanged behind them.
         self.assertEqual(shown, f'[{source_id}@500] The original archive records the birth — and the “subsequent” appointment.\n'
                                 f'[{source_id}@{500+body.index("Another")}] Another paragraph.')
@@ -61,28 +62,28 @@ class EfficiencyTests(unittest.IsolatedAsyncioTestCase):
             'resolved_risks':[], 'checks':[{'citation_id':'S1','passages':[f'{source_id}@500'],'finding':'The appointment is documented.'}]}
         validate_tool_arguments('commulingo_review_decision', decision,
                                 schema=DECISION_TOOL['input_schema'], risk_class='state')
-        resolved = resolve_review_checks(decision, proposal, snapshots)
+        resolved = resolve_review_checks(decision, proposal, snapshots, passages)
         self.assertEqual(resolved['checks'][0]['quote'], 'The original archive records the birth — and the “subsequent” appointment.')
         self.assertEqual(resolved['checks'][0]['source'], url)
         self.assertEqual(resolved['checks'][0]['citation'], url+' — biography')
-        self.assertEqual(validate_decision(resolved, proposal, {url:body}), resolved)
+        self.assertEqual(validate_decision(resolved, proposal), resolved)
         # Two paragraphs join in offset order; a label never shown drops that check and records why; a decision
         # whose every check is unresolvable is refused with the sources retrieved.
         both = deepcopy(decision); both['checks'][0]['passages'] = [f'{source_id}@{500+body.index("Another")}', f'{source_id}@500']
-        self.assertEqual(resolve_review_checks(both, proposal, snapshots)['checks'][0]['quote'], body)
+        self.assertEqual(resolve_review_checks(both, proposal, snapshots, passages)['checks'][0]['quote'], body)
         partial = deepcopy(decision); partial['checks'].append({'citation_id':'S1','passages':['R0000000000000000@0'],'finding':'x'})
-        survived = resolve_review_checks(partial, proposal, snapshots)
+        survived = resolve_review_checks(partial, proposal, snapshots, passages)
         self.assertEqual(len(survived['checks']), 1)
         # Labels of two retrieved sources become one check per source.
-        other_id, _ = review_source('https://other.example/page', 'Different page with enough text to cite.', snapshots)
+        other_id, _ = review_source('https://other.example/page', 'Different page with enough text to cite.', snapshots, passages)
         two = deepcopy(decision); two['checks'][0]['passages'] = [f'{source_id}@500', f'{other_id}@0']
-        self.assertEqual([c['source'] for c in resolve_review_checks(two, proposal, snapshots)['checks']], [url, 'https://other.example/page'])
+        self.assertEqual([c['source'] for c in resolve_review_checks(two, proposal, snapshots, passages)['checks']], [url, 'https://other.example/page'])
         self.assertEqual(survived['dropped_checks'], [{'check':2,'labels':['R0000000000000000@0'],
                                                        'reason':'passage label not shown in this review: R0000000000000000@0'}])
-        self.assertEqual(validate_decision(survived, proposal, {url:body}), survived)
+        self.assertEqual(validate_decision(survived, proposal), survived)
         absent = deepcopy(decision); absent['checks'][0]['passages'] = [f'{source_id}@7']
         with self.assertRaisesRegex(ValueError, f'no check could be verified — check 1: passage label not shown.*{source_id} \\({url}\\)'):
-            resolve_review_checks(absent, proposal, snapshots)
+            resolve_review_checks(absent, proposal, snapshots, passages)
 
     def test_repair_revalidates_full_payload_and_binds_revision(self):
         schema = {'type':'object','additionalProperties':False,'properties':{

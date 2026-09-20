@@ -52,13 +52,16 @@ def invalidated(row, current):
     return None
 
 
-def make_handlers(read_handlers, proposal, fetched, box, gate=None, triage=None):
-    """``gate(value)`` (async) may annotate the resolved decision or raise
-    ValueError to send it back to the reviewer before it is boxed.
+def make_handlers(read_handlers, proposal, snapshots, box, gate=None, triage=None):
+    """``snapshots`` collects the slices this review retrieves (review_source);
+    ``gate(value)`` (async) may annotate the resolved decision or raise
+    ValueError to send it back to the reviewer before it is boxed;
     ``triage(text)`` (async) sees each rendered web_search result (shadow)."""
     from tool_gateway.results import ToolRejection
+    from commulingo_pipeline.evidence import Passages
+    from provenance.runtime import external_body
     handlers = {}
-    snapshots = {}
+    passages = Passages()
     for name, handler in read_handlers.items():
         def wrap(tool_name, call):
             async def wrapped(**kwargs):
@@ -66,14 +69,12 @@ def make_handlers(read_handlers, proposal, fetched, box, gate=None, triage=None)
                 text = str(result)
                 if tool_name == 'web_search' and triage is not None:
                     await triage(text)
-                body = re.search(r'<external source="[^"]*">\n(.*)\n</external>', text, re.S)
+                body = external_body(text)
                 if tool_name in {'fetch_url','wiki_get'} and body and len(body[1])>20:
                     urls = [kwargs.get('url')] if tool_name=='fetch_url' else re.findall(r'https?://[^\s<>\]"\)]+', text[:1000])
                     for url in urls:
                         if isinstance(url,str) and external_url(url):
-                            fetched[url] = fetched.get(url, '') + '\n' + body[1]
-                            base = kwargs.get('offset') or kwargs.get('char_offset') or 0
-                            source_id, labelled = review_source(url, body[1], snapshots, base=int(base) if str(base).isdigit() else 0)
+                            source_id, labelled = review_source(url, body[1], snapshots, passages, base=int(kwargs.get('offset') or 0))
                             return (f'Review source_id={source_id}; each paragraph below starts with its passage label '
                                     f'[{source_id}@offset] and a check cites those labels.\n'
                                     + text[:body.start(1)] + labelled + text[body.end(1):])
@@ -83,8 +84,8 @@ def make_handlers(read_handlers, proposal, fetched, box, gate=None, triage=None)
     async def decide(**value):
         if box: raise ToolRejection('a decision has already been submitted')
         try:
-            value = resolve_review_checks(value, proposal, snapshots)
-            validate_decision(value, proposal, fetched)
+            value = resolve_review_checks(value, proposal, snapshots, passages)
+            validate_decision(value, proposal)
             if gate is not None:
                 value = await gate(value)
         except ValueError as exc: raise ToolRejection(str(exc)) from exc
@@ -109,11 +110,11 @@ async def research(row, current, tracker):
     binding = resolve_agent_tool_loop(spec,policy)
     from types import SimpleNamespace
     from commulingo_pipeline.citation_gate import review_gate
-    fetched,box = {},{}
-    from commulingo_pipeline.search_triage import shadow as search_shadow, search_target
+    from commulingo_pipeline.search_triage import Shadow
+    snapshots,box = {},{}
     usage = SimpleNamespace(tracker=tracker)
-    handlers = make_handlers(read_handlers,row,fetched,box,gate=review_gate(usage),
-                             triage=search_shadow(search_target(row.get('target_type','person'),row.get('target_id'),current),usage))
+    triage = Shadow(row.get('target_type','person'),row.get('target_id'),current,usage=usage)
+    handlers = make_handlers(read_handlers,row,snapshots,box,gate=review_gate(usage),triage=triage)
     task = {'suggestion': row, 'current_person': current}
     context = new_run_context(interface='autonomous', agent_name=spec.name, is_owner=True,
         scope_type='maintenance_job',scope_id=f"commulingo_review:{row['id']}")
@@ -134,7 +135,9 @@ async def research(row, current, tracker):
                 **binding.reasoning)
             tracker['pipeline_call_complete'] = True
         finally:
+            await triage.flush()
             run.account(tracker)
+            fetched = {s['url']: s['body'] for s in snapshots.values()}
             run.record('reviewed' if box else 'error', decision=box.get('decision'), fetched_sources=len(fetched))
             tracker['run_id'] = run.run_id
     if not box: raise RuntimeError('review ended without a validated decision')
@@ -153,7 +156,7 @@ async def process(job, tracker):
         decision,fetched = {'decision':'reject','reason':stale,'checks':[],'resolved_risks':[]},{}
     elif job.get('decision'):
         decision,fetched = job['decision'],job.get('research') or {}
-        validate_decision(decision,row,fetched)
+        validate_decision(decision,row)
     else:
         decision,fetched = await asyncio.wait_for(research(row,current,tracker),timeout=480)
     if not queue.save_decision(job,decision,fetched) or not queue.owned(job): return

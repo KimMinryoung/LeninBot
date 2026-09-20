@@ -4,7 +4,7 @@ import json
 import hashlib
 from urllib.parse import urlsplit
 
-from commulingo_pipeline.evidence import LABEL, MAX_PASSAGES, label_passages
+from commulingo_pipeline.evidence import MAX_PASSAGES, MIN_PASSAGE_CHARS, Passages
 
 DECISION_TOOL = {"name": "commulingo_review_decision", "description": "Submit one independently researched review decision; does not directly write dictionary content.",
     "input_schema": {"type": "object", "additionalProperties": False,
@@ -28,27 +28,25 @@ DECISION_TOOL = {"name": "commulingo_review_decision", "description": "Submit on
         }, "required": ["decision", "reason", "resolved_risks", "checks"]}}
 
 
-def review_source(url, body, snapshots, base=0):
+def review_source(url, body, snapshots, passages, base=0):
     """Register one fetched slice for this review and render it with passage labels.
 
     Returns (source_id, labelled text). ``base`` is the slice's offset in its
     page so labels stay distinct across pages of one URL.
     """
     source_id = "R" + hashlib.sha256((url + "\n" + body).encode()).hexdigest()[:16]
-    text, passages = label_passages(source_id, body, base=base)
-    snapshots[source_id] = {"url": url, "body": body, "passages": passages}
-    return source_id, text
+    snapshots[source_id] = {"url": url, "body": body}
+    return source_id, passages.show(source_id, body, base=base)
 
 
-def resolve_review_checks(value, proposal, snapshots):
+def resolve_review_checks(value, proposal, snapshots, passages):
     """Expand citation IDs and turn passage labels into the persisted decision.
 
-    A check cites the labels of paragraphs shown with retrieved text; the
-    runner already knows that text, so nothing is copied, matched or counted.
-    A check whose labels were not shown is dropped, not fatal: the decision
-    keeps the checks that resolve and records the rest under
-    ``dropped_checks``. Only a decision with checks and none resolvable is
-    refused.
+    A check cites labels shown with retrieved text (``Passages.resolve``:
+    one check per source and per contiguous range). A check none of whose
+    labels was shown is dropped, not fatal: the decision keeps the checks
+    that resolve and records the rest under ``dropped_checks``. Only a
+    decision with checks and none resolvable is refused.
     """
     from copy import deepcopy
     value = deepcopy(value)
@@ -64,29 +62,22 @@ def resolve_review_checks(value, proposal, snapshots):
             if "citation" in check or not 0 <= ref_index < len(refs):
                 raise ValueError(f"check {index}: citation_id must select an original source_refs entry; do not also supply citation")
             check["citation"] = refs[ref_index]
-        if "passages" not in check:
-            kept.append(check)   # already resolved (source and quote present)
+        labels = [str(label) for label in (check.pop("passages", None) or [])]
+        if not labels:
+            raise ValueError(f"check {index}: passages must list the labels shown in brackets before the retrieved paragraphs")
+        try:
+            ranges, unknown = passages.resolve(labels, lambda sid: (snapshots.get(sid) or {}).get("body"))
+        except ValueError as exc:
+            raise ValueError(f"check {index}: {exc}") from exc
+        if not ranges:
+            dropped.append({"check": index, "labels": labels, "reason": "passage label not shown in this review: " + ", ".join(unknown)})
             continue
-        labels = [str(label) for label in (check.pop("passages") or [])]
-        by_source, missing = {}, []
-        for label in labels:
-            match = LABEL.match(label)
-            span = ((snapshots.get(match[1]) or {}).get("passages") or {}).get(label) if match else None
-            if span is None:
-                missing.append(label)
-            else:
-                by_source.setdefault(match[1], []).append(span)
-        if not by_source:
-            dropped.append({"check": index, "labels": labels, "reason": "passage label not shown in this review: " + ", ".join(missing)})
-            continue
-        # Labels from several retrieved sources become one check per source.
-        for sid, spans in by_source.items():
-            snapshot = snapshots[sid]
-            quote = "\n".join(snapshot["body"][s:e] for s, e in sorted(set(spans)))
-            if len(quote.strip()) < 20:
-                dropped.append({"check": index, "labels": labels, "reason": "cited passage is shorter than 20 characters"})
+        for sid, start, end in ranges:
+            quote = snapshots[sid]["body"][start:end]
+            if len(quote.strip()) < MIN_PASSAGE_CHARS:
+                dropped.append({"check": index, "labels": labels, "reason": f"cited passage is shorter than {MIN_PASSAGE_CHARS} characters"})
                 continue
-            kept.append({**check, "source": snapshot["url"], "quote": quote})
+            kept.append({**check, "source": snapshots[sid]["url"], "quote": quote})
     if dropped and not kept:
         available = "; ".join(f"{sid} ({snap['url']})" for sid, snap in snapshots.items()) or "none fetched yet"
         heads = "; ".join(f"check {d['check']}: {d['reason']}" for d in dropped)
@@ -104,7 +95,7 @@ def external_url(url):
     return parts.scheme in {"http", "https"} and host and not (host == "cyber-lenin.com" or host.endswith(".cyber-lenin.com"))
 
 
-def validate_decision(value, proposal, fetched):
+def validate_decision(value, proposal):
     required = {"decision", "reason", "resolved_risks", "checks"}
     if not isinstance(value, dict) or not required.issubset(value) or set(value) - required - {"needs_research", "dropped_checks"}:
         raise ValueError("decision, reason, resolved_risks and checks required")
@@ -124,8 +115,8 @@ def validate_decision(value, proposal, fetched):
             raise ValueError("each check needs citation, source, quote and finding")
         if not external_url(check["source"]):
             raise ValueError(f"check {index}: select an external source fetched during this review")
-        if len(check["quote"].strip()) < 20:
-            raise ValueError(f"check {index}: the cited passage has fewer than 20 characters; cite the paragraph that states the fact")
+        if len(check["quote"].strip()) < MIN_PASSAGE_CHARS:
+            raise ValueError(f"check {index}: the cited passage has fewer than {MIN_PASSAGE_CHARS} characters; cite the paragraph that states the fact")
     if decision in {"approve", "revise", "reject"} and not checks:
         raise ValueError("approve/revise/reject requires retrieved evidence; otherwise escalate")
     if decision == "approve":

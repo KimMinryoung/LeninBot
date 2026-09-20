@@ -24,7 +24,8 @@ PROPOSAL={'source_refs':[SOURCE],'risks':['identity_uncertain']}
 DECISION={'decision':'approve','reason':'원본 기록의 생년과 직책을 대조하여 동명이인임을 확인했습니다.',
     'resolved_risks':['identity_uncertain'],'checks':[{'citation':SOURCE,'source':SOURCE,'quote':QUOTE,'finding':'서로 다른 인물임을 확인'}]}
 from runtime_tools.commulingo_review_policy import review_source as _review_source
-LABEL=f"{_review_source(SOURCE,QUOTE,{})[0]}@0"   # the label the wrapper shows for QUOTE fetched at offset 0
+from commulingo_pipeline.evidence import Passages
+LABEL=f"{_review_source(SOURCE,QUOTE,{},Passages())[0]}@0"   # the label the wrapper shows for QUOTE fetched at offset 0
 SUBMITTED={**DECISION,'checks':[{'citation':SOURCE,'passages':[LABEL],'finding':'서로 다른 인물임을 확인'}]}
 
 class PolicyTests(unittest.IsolatedAsyncioTestCase):
@@ -46,61 +47,61 @@ class PolicyTests(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(threaded.stop)
 
     def test_only_retrieved_passages_resolving_risks_can_approve(self):
-        self.assertEqual(validate_decision(DECISION,PROPOSAL,{SOURCE:QUOTE}),DECISION)
+        self.assertEqual(validate_decision(DECISION,PROPOSAL),DECISION)
         # A check cites labels of paragraphs shown in this review; with nothing retrieved no check resolves.
-        with self.assertRaisesRegex(ValueError,'no check could be verified'):resolve_review_checks(SUBMITTED,PROPOSAL,{})
-        snapshots={}; _review_source(SOURCE,QUOTE,snapshots)
-        self.assertEqual(resolve_review_checks(SUBMITTED,PROPOSAL,snapshots)['checks'],DECISION['checks'])
+        with self.assertRaisesRegex(ValueError,'no check could be verified'):resolve_review_checks(SUBMITTED,PROPOSAL,{},Passages())
+        snapshots,passages={},Passages(); _review_source(SOURCE,QUOTE,snapshots,passages)
+        self.assertEqual(resolve_review_checks(SUBMITTED,PROPOSAL,snapshots,passages)['checks'],DECISION['checks'])
         for change in ({'resolved_risks':[]},{'checks':[]}):
-            with self.assertRaises(ValueError):validate_decision({**DECISION,**change},PROPOSAL,{SOURCE:QUOTE})
+            with self.assertRaises(ValueError):validate_decision({**DECISION,**change},PROPOSAL)
         # Relaxed 2026-09-17: approval no longer needs a check per cited reference
         # or a source outside Wikipedia, only verified quotes and resolved risks.
-        self.assertEqual(validate_decision(DECISION,{**PROPOSAL,'source_refs':['another citation',SOURCE]},{SOURCE:QUOTE}),DECISION)
+        self.assertEqual(validate_decision(DECISION,{**PROPOSAL,'source_refs':['another citation',SOURCE]}),DECISION)
         wiki='https://en.wikipedia.org/wiki/Entry'
         wiki_only={**DECISION,'checks':[{**DECISION['checks'][0],'source':wiki}]}
-        self.assertEqual(validate_decision(wiki_only,PROPOSAL,{wiki:QUOTE}),wiki_only)
+        self.assertEqual(validate_decision(wiki_only,PROPOSAL),wiki_only)
     def test_research_routing_hint_requires_boolean(self):
         for needed in (True,False):
             value={**DECISION,'decision':'revise','needs_research':needed}
-            self.assertEqual(validate_decision(value,PROPOSAL,{SOURCE:QUOTE}),value)
+            self.assertEqual(validate_decision(value,PROPOSAL),value)
         with self.assertRaisesRegex(ValueError,'boolean'):
-            validate_decision({**DECISION,'needs_research':'false'},PROPOSAL,{SOURCE:QUOTE})
+            validate_decision({**DECISION,'needs_research':'false'},PROPOSAL)
 
     def test_many_checks_are_valid_and_an_unshown_label_drops_only_its_check(self):
-        snapshots={}; _review_source(SOURCE,QUOTE,snapshots)
+        snapshots,passages={},Passages(); _review_source(SOURCE,QUOTE,snapshots,passages)
         checks=[dict(SUBMITTED['checks'][0]) for _ in range(63)]
         value={**DECISION,'checks':checks}
-        resolved=resolve_review_checks(value,PROPOSAL,snapshots)
+        resolved=resolve_review_checks(value,PROPOSAL,snapshots,passages)
         self.assertEqual(len(resolved['checks']),63)
-        self.assertEqual(validate_decision(resolved,PROPOSAL,{SOURCE:QUOTE}),resolved)
+        self.assertEqual(validate_decision(resolved,PROPOSAL),resolved)
         checks[-1]['passages']=['R0123456789abcdef@0']
-        resolved=resolve_review_checks(value,PROPOSAL,snapshots)
+        resolved=resolve_review_checks(value,PROPOSAL,snapshots,passages)
         self.assertEqual((len(resolved['checks']),resolved['dropped_checks'][0]['check']),(62,63))
 
     def test_failed_coverage_reports_exact_missing_identifiers(self):
         with self.assertRaisesRegex(ValueError, 'identity_uncertain'):
-            validate_decision({**DECISION, 'resolved_risks': ['identity_uncertain: explanation']}, PROPOSAL, {SOURCE: QUOTE})
+            validate_decision({**DECISION, 'resolved_risks': ['identity_uncertain: explanation']}, PROPOSAL)
 
     def test_uncertainty_can_escalate_without_inventing_evidence(self):
         value={**DECISION,'decision':'escalate','checks':[]}
-        validate_decision(value,PROPOSAL,{})
+        validate_decision(value,PROPOSAL)
     def test_passage_errors_identify_the_check(self):
-        snapshots={}; sid,_=_review_source(SOURCE,QUOTE+'\nShort title',snapshots)
+        snapshots,passages={},Passages(); sid,_=_review_source(SOURCE,QUOTE+'\nShort title',snapshots,passages)
         for label, reason in [(f'{sid}@{len(QUOTE)+1}', 'cited passage is shorter than 20 characters'),
                               (f'{sid}@7', f'passage label not shown in this review: {sid}@7')]:
             value = copy.deepcopy(SUBMITTED)
             value['checks'].append({**value['checks'][0], 'passages':[label]})
             value['checks'][0]['passages']=[f'{sid}@0']
-            resolved=resolve_review_checks(value,PROPOSAL,snapshots)
+            resolved=resolve_review_checks(value,PROPOSAL,snapshots,passages)
             self.assertEqual(resolved['dropped_checks'],[{'check':2,'labels':[label],'reason':reason}])
             self.assertEqual(resolved['checks'][0]['quote'],QUOTE)
     def test_revision_requires_independently_retrieved_evidence(self):
         value={**DECISION,'decision':'revise'}
-        self.assertEqual(validate_decision(value,PROPOSAL,{SOURCE:QUOTE}),value)
+        self.assertEqual(validate_decision(value,PROPOSAL),value)
         with self.assertRaisesRegex(ValueError,'no check could be verified'):
-            resolve_review_checks({**SUBMITTED,'decision':'revise'},PROPOSAL,{})
+            resolve_review_checks({**SUBMITTED,'decision':'revise'},PROPOSAL,{},Passages())
         with self.assertRaises(ValueError):
-            validate_decision({**value,'checks':[]},PROPOSAL,{SOURCE:QUOTE})
+            validate_decision({**value,'checks':[]},PROPOSAL)
 
     async def test_notifications_disabled_even_for_old_pending_requests(self):
         with patch.object(worker.queue,'notifications') as pending, patch.object(worker.queue,'synchronize'):
@@ -172,7 +173,7 @@ class PolicyTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(any(k.startswith('commulingo_person_') for k in kwargs['tool_handlers']))
             await kwargs['tool_handlers']['fetch_url'](url=SOURCE)
             with patch('tool_gateway.security.audit'):
-                result, failed = await execute_tool('commulingo_review_decision', DECISION, kwargs['tool_handlers'], tool_schema=worker.DECISION_TOOL)
+                result, failed = await execute_tool('commulingo_review_decision', SUBMITTED, kwargs['tool_handlers'], tool_schema=worker.DECISION_TOOL)
             self.assertFalse(failed, result)
             return 'An irrelevant model summary'
         names=['wiki_search','wiki_get','web_search','fetch_url','commulingo_people']

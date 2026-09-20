@@ -2940,21 +2940,19 @@ def _run_edit(target_type: str, action: str, target_id: str, patch: dict,
         if target_type == "person":
             from runtime_tools.commulingo_classify import (classify_person, classify_person_card, classify_person_codes,
                                                           fill_classification, fill_person_codes, missing_person_codes)
+            needs_codes = bool(missing_person_codes(fields))
             needs_group = action == "create" and not (fields.get("groupId") and fields.get("role"))
-            classification = None
-            if missing_person_codes(fields) and needs_group:
-                # One request for the whole card (commulingo_classify.classify_person_card).
-                card = classify_person_card(fields)
-                codes, classification = (card or {}).get("codes"), (card or {}).get("person")
+            if needs_codes and needs_group:
+                card = classify_person_card(fields) or {}   # one request for the whole card
+                codes, classification = card.get("codes"), card.get("person")
+            else:
+                codes = classify_person_codes(fields) if needs_codes else None
+                classification = classify_person(fields) if needs_group else None
+            if needs_codes:
                 fields = fill_person_codes(fields, codes)
-                needs_group = False
-            elif missing_person_codes(fields):
-                fields = fill_person_codes(fields, classify_person_codes(fields))
-            if missing_person_codes(fields):
-                return "Error: the classification service is unavailable right now; retry this write later."
+                if missing_person_codes(fields):
+                    return "Error: the classification service is unavailable right now; retry this write later."
             if needs_group:
-                classification = classify_person(fields)
-            if action == "create" and not (fields.get("groupId") and fields.get("role")):
                 if classification is None:
                     return "Error: the classification service is unavailable right now; retry this create later."
                 fields = fill_classification(fields, classification)

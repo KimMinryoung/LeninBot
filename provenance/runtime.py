@@ -106,6 +106,18 @@ def init_provenance_buffer(agent: str = "agent", mission_id: int | None = None) 
     return buf
 
 
+_EXTERNAL_BODY = None
+
+
+def external_body(text: str):
+    """re.Match over the body of a ``_wrap_external`` envelope in ``text`` (group 1), or None."""
+    global _EXTERNAL_BODY
+    import re as _re
+    if _EXTERNAL_BODY is None:
+        _EXTERNAL_BODY = _re.compile(r'<external source="[^"]*">\n(.*)\n</external>', _re.S)
+    return _EXTERNAL_BODY.search(str(text))
+
+
 def _wrap_external(content: str, source: str) -> str:
     """Wrap tool output that came from an untrusted external source.
 

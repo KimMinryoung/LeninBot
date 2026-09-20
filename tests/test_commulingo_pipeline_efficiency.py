@@ -3,7 +3,7 @@ from unittest import IsolatedAsyncioTestCase, TestCase
 from unittest.mock import AsyncMock, Mock, patch
 
 from commulingo_pipeline.draft_repair import DraftRepair
-from commulingo_pipeline.evidence import SourceHandles, snapshot, label_passages, resolve_passages
+from commulingo_pipeline.evidence import SourceHandles, snapshot, Passages, resolve_passages
 from commulingo_pipeline.engine import Engine, Result, Usage
 from commulingo_pipeline.stages import Draft, validate
 from scripts.commulingo_write_session import draft_id
@@ -22,34 +22,19 @@ class EvidenceContracts(TestCase):
         self.assertNotIn('kind', tool_fate['properties'])
         schema_validate({'label':{'ko':'사망 경위 미확정','en':'Circumstances unconfirmed'}},tool_fate)
 
-    def test_short_and_legacy_ids_roundtrip_and_unknown_lists_sources(self):
+    def test_handles_are_one_per_url_and_follow_the_latest_snapshot(self):
         source=snapshot('https://example.org/archive','Documented fact. '*80)
         sources={source['id']:source}
         handles=SourceHandles(sources)
-        claim={'field':'body','claim':'fact','quote':'Documented fact. Documented fact.'}
-        for name in ('S1',source['id']):
-            result=handles.resolve([{**claim,'source_id':name}],sources)
-            self.assertEqual(result[0]['source_id'],source['id'])
-        _,labels=label_passages('S1',source['body'])
-        shown={l:(a,b,source['body'][a:b]) for l,(a,b) in labels.items()}
-        self.assertEqual(resolve_passages([{'field':'body','claim':'fact','passages':['S1@0']}],shown,handles,sources)[0]['start'],0)
-        with self.assertRaisesRegex(ValueError,r'S1 \(https://example.org/archive\)'):
-            handles.resolve([{'source_id':'S99'}],sources)
+        passages=Passages(); passages.show('S1',source['body'])
+        self.assertEqual(resolve_passages([{'field':'body','claim':'fact','passages':['S1@0']}],passages,handles,sources)[0]['start'],0)
         other=snapshot('https://example.org/other','Another page. '*10)
         self.assertEqual(handles.handle(other),'S2')
         self.assertEqual(handles.handle(source),'S1')
-        # A later snapshot of the same URL keeps the handle and becomes its current target,
-        # and a stale persistent ID resolves to it.
+        # A later snapshot of the same URL keeps the handle and becomes its current target.
         later=snapshot('https://example.org/archive','Documented fact. '*80+'Appended page.')
         self.assertEqual(handles.handle(later),'S1')
         self.assertEqual(handles.ids['S1'],later['id'])
-        sources[later['id']]=later
-        stale=handles.resolve([{**claim,'source_id':source['id']}],sources)
-        self.assertEqual(stale[0]['source_id'],later['id'])
-        # A different page of the same URL that is not a prefix keeps its own id.
-        page2=snapshot('https://example.org/archive','Unrelated second page. '*20)
-        sources[page2['id']]=page2
-        self.assertEqual(handles.resolve([{'source_id':page2['id']}],sources)[0]['source_id'],page2['id'])
 
     def test_pages_of_one_url_merge_into_one_snapshot(self):
         from commulingo_pipeline.evidence import SourcePages
@@ -85,10 +70,9 @@ class EvidenceContracts(TestCase):
     def test_many_passages_are_all_kept(self):
         source=snapshot('https://example.org/archive','Documented fact number one. '*100)
         sources={source['id']:source}; handles=SourceHandles(sources)
-        _,labels=label_passages('S1',source['body'])
-        shown={l:(a,b,source['body'][a:b]) for l,(a,b) in labels.items()}
+        passages=Passages(); passages.show('S1',source['body'])
         claim={'field':'body','claim':'fact','passages':['S1@0']}
-        result=resolve_passages([claim]*40,shown,handles,sources)
+        result=resolve_passages([claim]*40,passages,handles,sources)
         self.assertEqual(len(result),40)
 
     def test_valid_draft_survives_downstream_error_and_repairs_follow_the_current_draft(self):

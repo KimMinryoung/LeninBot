@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 LABEL = re.compile(r'^(S[0-9]+|R[0-9a-f]{16})@([0-9]+)$')
 MAX_PARAGRAPH_CHARS = 3000   # a longer paragraph is shown as several labelled pieces
+MIN_PASSAGE_CHARS = 20       # a heading-sized fragment is not evidence
 MAX_PASSAGE_CHARS = 6000     # the most one claim may cite (compile_evidence bound)
 MAX_PASSAGES = 8
 _SENTENCE_END = re.compile(r'[.!?。]["\')\]]?\s')
@@ -64,58 +65,60 @@ def label_passages(handle, body, first=0, last=None, base=0):
     return '\n'.join(lines), shown
 
 
-def resolve_passages(claims, shown, handles, sources):
-    """Replace each claim's passage labels with source snapshots and character ranges.
+class Passages:
+    """The paragraphs shown in one run, by label: the one registry both the
+    research lane (S-handles over merged snapshots) and the review lane
+    (R-ids over fetched slices) cite from and resolve against.
 
-    ``shown`` maps every label displayed in this attempt to (start, end, text).
-    Nothing is searched. Labels from several sources, or paragraphs too far
-    apart to fit one MAX_PASSAGE_CHARS range, become separate claims with the
-    same field and text rather than a rejection (the first live hour bounced
-    15 results on exactly those two shapes); a label never shown is ignored
-    when the claim has other shown labels and refused by claim number when
-    it has none.
+    ``show`` renders a text with labels and remembers each paragraph's span
+    and a digest of its text; ``resolve`` turns cited labels back into
+    evidence ranges. The rules are the same in both lanes: labels of several
+    sources give one range per source, paragraphs too far apart for one
+    MAX_PASSAGE_CHARS range give one range per contiguous cluster, a label
+    never shown is ignored beside shown ones, and a paragraph whose text
+    changed since it was shown (a restarted snapshot) is refused. What to do
+    when nothing resolves — refuse the claim, drop the check — is the lane's
+    policy.
     """
-    resolved = []
-    for index, claim in enumerate(claims, 1):
-        labels = [str(label) for label in (claim.get('passages') or [])]
-        if not labels:
-            raise ValueError(f'claim {index}: passages must list the labels shown in brackets before the paragraphs '
-                             'that state it (for example S2@12303)')
+    def __init__(self):
+        self.shown = {}   # label -> (handle, start, end, digest)
+
+    def show(self, handle, body, first=0, last=None, base=0):
+        text, labels = label_passages(handle, body, first, last, base)
+        for label, (start, end) in labels.items():
+            self.shown[label] = (handle, start, end, _digest(body[start:end]))
+        return text
+
+    def resolve(self, labels, body_of, limit=MAX_PASSAGE_CHARS):
+        """([(handle, start, end)], unknown labels). ``body_of(handle)`` returns
+        that source's current text, or None when it is no longer available."""
         by_handle, unknown = {}, []
-        for label in labels:
-            match = LABEL.match(label)
-            entry = shown.get(label) if match else None
+        for label in (str(label) for label in labels):
+            entry = self.shown.get(label)
             if entry is None:
                 unknown.append(label)
             else:
-                by_handle.setdefault(match[1], []).append(entry)
-        if not by_handle:
-            raise ValueError(f'claim {index}: passage label {unknown[0]!r} was not displayed in this research; copy a '
-                             'label exactly as shown in brackets at the start of a paragraph')
-        if unknown:
-            logger.info('claim %d: ignoring passage labels never displayed: %s', index, unknown)
+                by_handle.setdefault(entry[0], []).append(entry[1:])
+        ranges = []
         for handle, spans in by_handle.items():
-            source = sources.get(handles.ids.get(handle))
-            if not source or not source.get('body'):
-                raise ValueError(f'claim {index}: source {handle} is not available; retrieve it again')
-            body = source['body']
+            body = body_of(handle)
+            if body is None:
+                raise ValueError(f'source {handle} is not available; retrieve it again')
             spans = sorted(set(spans))
-            if spans[-1][1] > len(body) or any(body[s:e] != text for s, e, text in spans):
-                raise ValueError(f'claim {index}: the text of {handle} changed since those passages were shown; retrieve '
-                                 'it again and cite the new labels')
-            for cluster in _clusters(spans, MAX_PASSAGE_CHARS):
-                start, end = cluster[0][0], cluster[-1][1]
-                if end - start < 20:
-                    raise ValueError(f'claim {index}: the cited passage is a heading or fragment of {end - start} '
-                                     'characters; cite the paragraph that states the fact')
-                value = {k: v for k, v in claim.items() if k != 'passages'}
-                value.update(source_id=source['id'], start=start, end=end)
-                resolved.append(value)
-    return resolved
+            if any(_digest(body[s:e]) != d for s, e, d in spans):
+                raise ValueError(f'the text of {handle} changed since those passages were shown; retrieve it again '
+                                 'and cite the new labels')
+            for cluster in _clusters(spans, limit):
+                ranges.append((handle, cluster[0][0], cluster[-1][1]))
+        return ranges, unknown
+
+
+def _digest(text):
+    return hashlib.blake2b(text.encode(), digest_size=8).digest()
 
 
 def _clusters(spans, limit):
-    """Consecutive (start, end, text) spans grouped so each group's range stays within ``limit``."""
+    """Consecutive (start, end, ...) spans grouped so each group's range stays within ``limit``."""
     groups = []
     for span in spans:
         if groups and span[1] - groups[-1][0][0] <= limit:
@@ -123,6 +126,41 @@ def _clusters(spans, limit):
         else:
             groups.append([span])
     return groups
+
+
+def resolve_passages(claims, passages, handles, sources):
+    """Replace each claim's passage labels with source snapshots and character ranges.
+
+    One resolved claim per range ``passages.resolve`` returns; a claim none of
+    whose labels was shown, or whose range is a heading-sized fragment, is
+    refused by claim number.
+    """
+    def body_of(handle):
+        source = sources.get(handles.ids.get(handle)) or {}
+        return source.get('body') or None
+    resolved = []
+    for index, claim in enumerate(claims, 1):
+        labels = claim.get('passages') or []
+        if not labels:
+            raise ValueError(f'claim {index}: passages must list the labels shown in brackets before the paragraphs '
+                             'that state it (for example S2@12303)')
+        try:
+            ranges, unknown = passages.resolve(labels, body_of)
+        except ValueError as exc:
+            raise ValueError(f'claim {index}: {exc}') from exc
+        if not ranges:
+            raise ValueError(f'claim {index}: passage label {unknown[0]!r} was not displayed in this research; copy a '
+                             'label exactly as shown in brackets at the start of a paragraph')
+        if unknown:
+            logger.info('claim %d: ignoring passage labels never displayed: %s', index, unknown)
+        for handle, start, end in ranges:
+            if end - start < MIN_PASSAGE_CHARS:
+                raise ValueError(f'claim {index}: the cited passage is a heading or fragment of {end - start} '
+                                 'characters; cite the paragraph that states the fact')
+            value = {k: v for k, v in claim.items() if k != 'passages'}
+            value.update(source_id=sources[handles.ids[handle]]['id'], start=start, end=end)
+            resolved.append(value)
+    return resolved
 
 
 def snapshot(url, body, now=None):
@@ -150,8 +188,8 @@ def compile_evidence(claims, sources, changed_fields):
         body = source['body']
         if type(start) is not int or type(end) is not int or not 0 <= start < end <= len(body):
             raise ValueError('invalid source character range')
-        if not 20 <= end-start <= MAX_PASSAGE_CHARS:
-            raise ValueError(f'source range must contain 20..{MAX_PASSAGE_CHARS} characters')
+        if not MIN_PASSAGE_CHARS <= end-start <= MAX_PASSAGE_CHARS:
+            raise ValueError(f'source range must contain {MIN_PASSAGE_CHARS}..{MAX_PASSAGE_CHARS} characters')
         if claim.get('field') not in changed_fields or not str(claim.get('claim', '')).strip():
             raise ValueError('claim must name a changed field and explain its support')
         stance = claim.get('stance', 'supports')
@@ -168,8 +206,7 @@ class SourceHandles:
 
     A URL has one handle whose current snapshot is the merged text of every
     page fetched (see SourcePages); older snapshots stay in the job's source
-    map so carried-over claims still compile, and a persistent ID is still
-    accepted and mapped to the URL's current snapshot.
+    map so carried-over claims still compile.
     """
     def __init__(self, sources):
         self.ids = {}      # handle -> current source id
@@ -184,24 +221,6 @@ class SourceHandles:
 
     def handle(self, source):
         return self.register(source)
-
-    def resolve(self, claims, sources):
-        result = []
-        for claim in claims:
-            source_id = self.ids.get(claim.get('source_id'), claim.get('source_id'))
-            source = sources.get(source_id)
-            if not source or not source.get('body'):
-                available = ', '.join(f'{handle} ({sources[sid]["url"]})'
-                    for handle,sid in self.ids.items() if sources.get(sid,{}).get('body'))
-                raise ValueError('unknown source_id; retrieve or use an available source: ' + available)
-            # A persistent ID names one snapshot; a model that kept it from an
-            # earlier fetch means the URL's current merged text, of which the
-            # earlier snapshot is a prefix.
-            current = sources.get(self.ids.get(self.by_url.get(source['url'])))
-            if current and current.get('body') and current['body'].startswith(source['body']):
-                source_id = current['id']
-            result.append({**claim, 'source_id':source_id})
-        return result
 
 
 # A URL's merged snapshot may not exceed this many characters. A whole

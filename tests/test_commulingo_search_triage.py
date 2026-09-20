@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, patch
 from types import SimpleNamespace
 
 from commulingo_pipeline import search_triage
-from commulingo_pipeline.search_triage import parse_hits, triage_hits, shadow, search_target
+from commulingo_pipeline.search_triage import parse_hits, triage_hits, Shadow, search_target
 
 RENDERED = ('<external source="web_search:brave:Постышев реабилитация">\n'
             'Search snippets, not full source pages. Retrieved at 2026-09-20T00:00:00+00:00; cache reuse preserves this retrieval time. '
@@ -32,27 +32,28 @@ class SearchTriageTests(unittest.IsolatedAsyncioTestCase):
         seen = {}
         async def decide(feature, state, questions):
             seen.update(feature=feature, state=state, questions=questions)
-            answers = {'h1': {'choice': 'directly', 'confidence': 0.97}, 'h2': {'choice': 'unrelated', 'confidence': 0.9},
-                       'h3': {'choice': 'possibly', 'confidence': 0.5}}
+            answers = {'h1_covers': {'choice': 'directly', 'confidence': 0.97}, 'h2_covers': {'choice': 'unrelated', 'confidence': 0.9},
+                       'h3_covers': {'choice': 'possibly', 'confidence': 0.5}}
             return SimpleNamespace(choice=lambda k: answers[k]['choice'], confidence=lambda k: answers[k]['confidence'])
         usage = SimpleNamespace(tracker={})
-        with patch.object(search_triage, 'settings', return_value={'enabled': True}):
+        with patch.object(search_triage, 'settings', return_value={'enabled': True, 'enforce': False, 'thresholds': {}}):
             rows = await triage_hits(target, parse_hits(RENDERED), usage=usage, decide=decide)
         self.assertEqual(seen['feature'], 'commulingo_search_triage')
-        self.assertEqual(set(seen['state']), {'target', 'hits'})
-        self.assertEqual(list(seen['questions']), ['h1', 'h2', 'h3'])
-        self.assertIn('search hit h2', seen['questions']['h2']['instructions'])
+        self.assertEqual(set(seen['state']), {'target', 'items'})
+        self.assertEqual(list(seen['questions']), ['h1_covers', 'h2_covers', 'h3_covers'])
+        self.assertIn('`items.h2`', seen['questions']['h2_covers']['instructions'])
         self.assertEqual(rows[1], {'url': 'https://shop.example/postyshev', 'verdict': 'unrelated', 'confidence': 0.9})
         self.assertEqual(usage.tracker['search_triage'], rows)
         self.assertEqual(usage.tracker['search_triage_calls'], 1)
         # Disabled: no call. Unavailable: counted, nothing recorded. A failure never reaches the search.
-        with patch.object(search_triage, 'settings', return_value={'enabled': False}):
+        with patch.object(search_triage, 'settings', return_value={'enabled': False, 'enforce': False, 'thresholds': {}}):
             self.assertEqual(await triage_hits(target, parse_hits(RENDERED), usage=usage, decide=AsyncMock()), [])
-        with patch.object(search_triage, 'settings', return_value={'enabled': True}):
+        with patch.object(search_triage, 'settings', return_value={'enabled': True, 'enforce': False, 'thresholds': {}}):
             self.assertEqual(await triage_hits(target, parse_hits(RENDERED), usage=usage, decide=AsyncMock(return_value=None)), [])
             self.assertEqual(usage.tracker['search_triage_unavailable'], 1)
-            hook = shadow(target, usage, decide=AsyncMock(side_effect=RuntimeError('proxy down')))
-            self.assertIsNone(await hook(RENDERED))
+            hook = Shadow('person', 'postyshev', {}, usage=usage, decide=AsyncMock(side_effect=RuntimeError('proxy down')))
+            await hook(RENDERED); await hook.flush()
+            self.assertEqual(hook.tasks, [])
 
     async def test_review_wrapper_passes_search_results_to_the_hook_unchanged(self):
         import importlib.util, os

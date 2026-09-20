@@ -100,6 +100,13 @@ TERM_RULES = {
 }
 
 
+def _profile(feature: str) -> tuple[bool, float]:
+    """(enabled, accept threshold) of a classification registry entry."""
+    from llm.call_registry import resolve
+    extra = resolve(feature).extra or {}
+    return bool(extra.get("enabled", True)), float((extra.get("thresholds") or {}).get("accept", DEFAULT_ACCEPT))
+
+
 def load_term_categories() -> list[dict]:
     """Rows of commulingo_term_categories, or the built-in fallback pairs."""
     try:
@@ -136,13 +143,11 @@ def term_state(fields: dict) -> dict:
 
 def classify_term(fields: dict, *, categories=None, decide=None) -> dict | None:
     """{"category", "confidence", "low_confidence", "model"} for a drafted term, or None when unavailable."""
-    from llm.call_registry import decide_detailed, resolve
+    from llm.call_registry import decide_detailed
 
-    profile = resolve(TERM_FEATURE)
-    extra = profile.extra or {}
-    if not extra.get("enabled", True):
+    enabled, accept = _profile(TERM_FEATURE)
+    if not enabled:
         return None
-    accept = float((extra.get("thresholds") or {}).get("accept", DEFAULT_ACCEPT))
     categories = categories or load_term_categories()
     result = (decide or decide_detailed)(TERM_FEATURE, term_state(fields), term_questions(categories),
                                          label="term-classification")
@@ -196,22 +201,31 @@ def _living(years) -> bool:
 
 
 def person_code_questions(fields: dict, citizenship_codes, origin_codes=()) -> dict:
-    """One question per code object on the card: citizenship.code,
-    nationalOrigin.code and fate.kind."""
+    """One question per code object on the card that still lacks its code:
+    citizenship.code, nationalOrigin.code and fate.kind (not asked for a living person)."""
+    def missing(key, code):
+        return isinstance(fields.get(key), dict) and not fields[key].get(code)
     questions = {}
-    if isinstance(fields.get("nationalOrigin"), dict) and origin_codes:
+    if missing("nationalOrigin", "code") and origin_codes:
         questions["nationalOrigin"] = {"type": "choice", "criteria": {c: c for c in origin_codes},
                                        "instructions": ORIGIN_INSTRUCTIONS}
-    if isinstance(fields.get("citizenship"), dict):
+    if missing("citizenship", "code"):
         questions["citizenship"] = {
             "type": "choice", "criteria": {c: c for c in citizenship_codes},
             "instructions": "Which state code matches the citizenship label and the source excerpts? soviet for Soviet "
                             "citizens; the state of most of the person's public life."}
-    if isinstance(fields.get("fate"), dict) and not _living(fields.get("years")):
+    if isinstance(fields.get("fate"), dict) and fields["fate"].get("kind") is None and not _living(fields.get("years")):
         questions["fate"] = {
             "type": "choice", "criteria": FATE_CRITERIA,
             "instructions": "How did this person's life or career end, according to the fate label and the source excerpts?"}
     return questions
+
+
+def _living_fate(fields: dict) -> dict:
+    """A living person's fate is the empty kind, decided without a call."""
+    if isinstance(fields.get("fate"), dict) and _living(fields.get("years")):
+        return {"fate": {"kind": "", "confidence": 1.0, "low_confidence": False}}
+    return {}
 
 
 def person_code_state(fields: dict, claims: dict | None) -> dict:
@@ -228,45 +242,35 @@ def person_code_state(fields: dict, claims: dict | None) -> dict:
             "fate_claims": claims.get("fate", [])[:4]}
 
 
-def _codes_from(decision, questions, fields, accept):
+def _codes_from(decision, questions, fields, accept) -> dict:
     """Code verdicts from a decision that answered person_code_questions."""
     from runtime_tools.commulingo_people import _NATIONAL_ORIGIN_CODES, _NATIONALITY_CODES
-    out = {}
-    if isinstance(fields.get("fate"), dict) and _living(fields.get("years")):
-        out["fate"] = {"kind": "", "confidence": 1.0, "low_confidence": False}
-    if "nationalOrigin" in questions and decision.choice("nationalOrigin") in _NATIONAL_ORIGIN_CODES:
-        conf = round(decision.confidence("nationalOrigin") or 0.0, 3)
-        out["nationalOrigin"] = {"code": decision.choice("nationalOrigin"), "confidence": conf, "low_confidence": conf < accept}
-    if "citizenship" in questions and decision.choice("citizenship") in _NATIONALITY_CODES:
-        conf = round(decision.confidence("citizenship") or 0.0, 3)
-        out["citizenship"] = {"code": decision.choice("citizenship"), "confidence": conf, "low_confidence": conf < accept}
-    if "fate" in questions and decision.choice("fate") in FATE_CRITERIA:
-        conf = round(decision.confidence("fate") or 0.0, 3)
-        kind = decision.choice("fate")
-        out["fate"] = {"kind": "" if kind == "unconfirmed" else kind, "confidence": conf, "low_confidence": conf < accept}
+    out = _living_fate(fields)
+    for key, field, valid in (("nationalOrigin", "code", _NATIONAL_ORIGIN_CODES), ("citizenship", "code", _NATIONALITY_CODES),
+                              ("fate", "kind", FATE_CRITERIA)):
+        choice = decision.choice(key) if key in questions else None
+        if choice not in valid:
+            continue
+        conf = round(decision.confidence(key) or 0.0, 3)
+        value = "" if key == "fate" and choice == "unconfirmed" else choice
+        out[key] = {field: value, "confidence": conf, "low_confidence": conf < accept}
     out["model"] = decision.model
     return out
 
 
 def classify_person_codes(fields: dict, *, claims: dict | None = None, decide=None) -> dict | None:
     """{"citizenship": {"code", "confidence", "low_confidence"}, "fate": {"kind", ...}} for the code
-    objects present on the card, or None when the model is unavailable. A living
-    person's fate is the empty kind without a call. ``claims`` maps field name to
-    [{"claim", "excerpt"}] from the research artifact."""
-    from llm.call_registry import decide_detailed, resolve
+    objects still lacking a code, or None when the model is unavailable. ``claims``
+    maps field name to [{"claim", "excerpt"}] from the research artifact."""
+    from llm.call_registry import decide_detailed
     from runtime_tools.commulingo_people import _NATIONAL_ORIGIN_CODES, _NATIONALITY_CODES
 
-    profile = resolve(CODES_FEATURE)
-    extra = profile.extra or {}
-    if not extra.get("enabled", True):
+    enabled, accept = _profile(CODES_FEATURE)
+    if not enabled:
         return None
-    accept = float((extra.get("thresholds") or {}).get("accept", DEFAULT_ACCEPT))
     questions = person_code_questions(fields, sorted(_NATIONALITY_CODES), sorted(_NATIONAL_ORIGIN_CODES))
     if not questions:
-        out = {}
-        if isinstance(fields.get("fate"), dict) and _living(fields.get("years")):
-            out["fate"] = {"kind": "", "confidence": 1.0, "low_confidence": False}
-        return out
+        return _living_fate(fields)
     result = (decide or decide_detailed)(CODES_FEATURE, person_code_state(fields, claims), questions,
                                          label="person-codes")
     decision = result.decision
@@ -375,11 +379,20 @@ def evidence_for(claims: dict | None, fields=CLASSIFY_EVIDENCE_FIELDS) -> list[d
     return out
 
 
-def classify_person(fields: dict, *, catalogs=None, claims: dict | None = None, decide=None) -> dict | None:
-    """Group and role for a drafted person, or None when the model is unavailable.
+def _person_from(decision, role_key, groups, offices, categories, accept) -> dict | None:
+    """The group/role verdict of a decision, or None when a choice is off the catalogs."""
+    group, role = decision.choice("group"), decision.choice(role_key)
+    office_ids = {o["id"] for o in offices}
+    if group not in {g["id"] for g in groups} or role not in office_ids | {c["id"] for c in categories}:
+        return None
+    conf = {"group": round(decision.confidence("group") or 0.0, 3), "role": round(decision.confidence(role_key) or 0.0, 3)}
+    return {"groupId": group, "role": {"officeId": role} if role in office_ids else {"category": role},
+            "confidence": conf, "low_confidence": min(conf.values()) < accept, "model": decision.model}
 
-    ``claims`` (pipeline path) maps field name to [{"claim", "excerpt"}] from
-    the research artifact; bio/career/moment/years excerpts join the state.
+
+def classify_person(fields: dict, *, catalogs=None, claims: dict | None = None, decide=None) -> dict | None:
+    """Group and role for a drafted person whose codes are settled, or None when
+    the model is unavailable: the card request without its code questions.
 
     Returns {"groupId", "role": {"officeId"|"category"}, "confidence": {"group", "role"},
     "low_confidence": bool, "model"}. ``low_confidence`` (below the entry's
@@ -387,34 +400,8 @@ def classify_person(fields: dict, *, catalogs=None, claims: dict | None = None, 
     reviewer confirm the classification rather than drop it: the best choice
     still beats the writer guessing.
     """
-    from llm.call_registry import decide_detailed, resolve
-
-    profile = resolve(FEATURE)
-    extra = profile.extra or {}
-    if not extra.get("enabled", True):
-        return None
-    accept = float((extra.get("thresholds") or {}).get("accept", DEFAULT_ACCEPT))
-    groups, offices, categories = catalogs or load_catalogs()
-    if not groups or not categories:
-        return None
-    state = state_from_fields(fields)
-    evidence = evidence_for(claims)
-    if evidence:
-        state["research_excerpts"] = evidence
-    soviet = offices_allowed((fields.get("citizenship") or {}).get("code"))
-    result = (decide or decide_detailed)(FEATURE, state, build_questions(groups, offices, categories, soviet),
-                                         label="person-classification")
-    decision = result.decision
-    if decision is None:
-        logger.warning("person classification unavailable: %s", result.error)
-        return None
-    group, role = decision.choice("group"), decision.choice("role")
-    office_ids = {o["id"] for o in offices}
-    if group not in {g["id"] for g in groups} or role not in office_ids | {c["id"] for c in categories}:
-        return None
-    conf = {"group": round(decision.confidence("group") or 0.0, 3), "role": round(decision.confidence("role") or 0.0, 3)}
-    return {"groupId": group, "role": {"officeId": role} if role in office_ids else {"category": role},
-            "confidence": conf, "low_confidence": min(conf.values()) < accept, "model": decision.model}
+    card = classify_person_card(fields, catalogs=catalogs, claims=claims, decide=decide, codes=False)
+    return card["person"] if card else None
 
 
 def person_card_state(fields: dict, claims: dict | None) -> dict:
@@ -429,56 +416,53 @@ def person_card_state(fields: dict, claims: dict | None) -> dict:
     return state
 
 
-def person_card_questions(fields: dict, groups, offices, categories, citizenship_codes, origin_codes) -> dict:
-    """Codes, group, and the role asked both ways. Which role answer counts
-    depends on the citizenship this same request decides (offices are Soviet
-    institutions), so both variants are asked up front and code picks one."""
-    questions = person_code_questions(fields, citizenship_codes, origin_codes)
-    soviet = build_questions(groups, offices, categories, soviet=True)
-    questions["group"] = soviet["group"]
-    questions["role_soviet"] = soviet["role"]
-    questions["role_non_soviet"] = build_questions(groups, offices, categories, soviet=False)["role"]
+def person_card_questions(fields: dict, groups, offices, categories, citizenship_codes, origin_codes, codes=True) -> dict:
+    """The card's questions: missing codes, group, and role. The role's options
+    depend on the citizenship (offices are Soviet institutions): when the card
+    already carries the code, one role question fits it; when this request
+    decides the citizenship, the role is asked both ways and code picks one."""
+    questions = person_code_questions(fields, citizenship_codes, origin_codes) if codes else {}
+    questions["group"] = build_questions(groups, offices, categories, soviet=True)["group"]
+    if "citizenship" in questions:
+        questions["role_soviet"] = build_questions(groups, offices, categories, soviet=True)["role"]
+        questions["role_non_soviet"] = build_questions(groups, offices, categories, soviet=False)["role"]
+    else:
+        soviet = offices_allowed((fields.get("citizenship") or {}).get("code"))
+        questions["role"] = build_questions(groups, offices, categories, soviet=soviet)["role"]
     return questions
 
 
-def classify_person_card(fields: dict, *, catalogs=None, claims: dict | None = None, decide=None) -> dict | None:
-    """One request for a new person's card: {"codes": classify_person_codes shape,
-    "person": classify_person shape}, or None when the model is unavailable.
+def classify_person_card(fields: dict, *, catalogs=None, claims: dict | None = None, decide=None, codes=True) -> dict | None:
+    """One request for a person's card: {"codes": classify_person_codes shape,
+    "person": classify_person shape or None}, or None when the model is unavailable.
 
     Two requests (codes, then group/role once the citizenship was known) sent
-    the same ~8k-token card twice and doubled the latency. The card is now
-    sent once with every question; the role is asked with Soviet offices and
-    with categories only, and the answer matching the decided citizenship is
-    used (speculative fan-out).
+    the same ~8k-token card twice and doubled the latency.
     """
-    from llm.call_registry import decide_detailed, resolve
+    from llm.call_registry import decide_detailed
     from runtime_tools.commulingo_people import _NATIONAL_ORIGIN_CODES, _NATIONALITY_CODES
 
-    profile = resolve(FEATURE)
-    extra = profile.extra or {}
-    if not extra.get("enabled", True):
+    enabled, accept = _profile(FEATURE)
+    if not enabled:
         return None
-    accept = float((extra.get("thresholds") or {}).get("accept", DEFAULT_ACCEPT))
     groups, offices, categories = catalogs or load_catalogs()
     if not groups or not categories:
         return None
-    questions = person_card_questions(fields, groups, offices, categories, sorted(_NATIONALITY_CODES), sorted(_NATIONAL_ORIGIN_CODES))
-    result = (decide or decide_detailed)(FEATURE, person_card_state(fields, claims), questions, label="person-card")
+    questions = person_card_questions(fields, groups, offices, categories, sorted(_NATIONALITY_CODES),
+                                      sorted(_NATIONAL_ORIGIN_CODES), codes=codes)
+    result = (decide or decide_detailed)(FEATURE, person_card_state(fields, claims), questions,
+                                         label="person-card" if codes else "person-classification")
     decision = result.decision
     if decision is None:
         logger.warning("person card classification unavailable: %s", result.error)
         return None
-    codes = _codes_from(decision, questions, fields, accept)
-    citizenship = (fields.get("citizenship") or {}).get("code") or (codes.get("citizenship") or {}).get("code")
-    role_key = "role_soviet" if offices_allowed(citizenship) else "role_non_soviet"
-    group, role = decision.choice("group"), decision.choice(role_key)
-    office_ids = {o["id"] for o in offices}
-    person = None
-    if group in {g["id"] for g in groups} and role in office_ids | {c["id"] for c in categories}:
-        conf = {"group": round(decision.confidence("group") or 0.0, 3), "role": round(decision.confidence(role_key) or 0.0, 3)}
-        person = {"groupId": group, "role": {"officeId": role} if role in office_ids else {"category": role},
-                  "confidence": conf, "low_confidence": min(conf.values()) < accept, "model": decision.model}
-    return {"codes": codes, "person": person}
+    verdicts = _codes_from(decision, questions, fields, accept) if codes else {}
+    if "role" in questions:
+        role_key = "role"
+    else:
+        citizenship = (verdicts.get("citizenship") or {}).get("code")
+        role_key = "role_soviet" if offices_allowed(citizenship) else "role_non_soviet"
+    return {"codes": verdicts, "person": _person_from(decision, role_key, groups, offices, categories, accept)}
 
 
 def fill_classification(fields: dict, classification: dict | None) -> dict:
