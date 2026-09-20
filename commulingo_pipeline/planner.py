@@ -24,6 +24,10 @@ class Planner:
             '(SELECT count(*) FROM commulingo_person_sections s WHERE s.person_id=p.id) < '
             + SECTION_CAP_SQL.format(events=PERSON_EVENTS_SQL.format(person='p.id')))
         with self.store.transaction() as cur:
+            # Only empty values are commissioned. Prose that predates the
+            # evidence regime is not re-researched to backfill sources: that
+            # rewrote reviewed entries at dictionary scale (operator decision
+            # 2026-09-20). Evidence is still required for any edit that happens.
             # People are ordered by importance, measured for now as the number
             # of linked history events (operator decision 2026-09-17), not by
             # topic or alphabetical enqueue order. 100 - events keeps every
@@ -40,15 +44,10 @@ class Planner:
                 FROM commulingo_people p CROSS JOIN LATERAL (VALUES
                     ('basics',20,p.years_label='' OR p.epithet_ko='' OR p.epithet_en=''
                         OR NOT EXISTS (SELECT 1 FROM commulingo_person_roles r WHERE r.person_id=p.id)
-                        OR NOT EXISTS (SELECT 1 FROM commulingo_person_career_entries c WHERE c.person_id=p.id)
-                        OR NOT EXISTS (SELECT 1 FROM commulingo_person_evidence e WHERE e.person_id=p.id AND e.field='years')),
-                    ('bio',30,p.bio_ko='' OR p.bio_en='' OR NOT EXISTS
-                        (SELECT 1 FROM commulingo_person_evidence e WHERE e.person_id=p.id AND e.field='bio')),
-                    ('nationality',35,p.citizenship_code='' OR p.origin_code='' OR NOT EXISTS
-                        (SELECT 1 FROM commulingo_person_evidence e WHERE e.person_id=p.id AND e.field='citizenship')
-                        OR NOT EXISTS (SELECT 1 FROM commulingo_person_evidence e WHERE e.person_id=p.id AND e.field IN ('nationalOrigin','origin'))),
-                    ('moment',40,p.moment_ko='' OR p.moment_en='' OR NOT EXISTS
-                        (SELECT 1 FROM commulingo_person_evidence e WHERE e.person_id=p.id AND e.field='moment')),
+                        OR NOT EXISTS (SELECT 1 FROM commulingo_person_career_entries c WHERE c.person_id=p.id)),
+                    ('bio',30,p.bio_ko='' OR p.bio_en=''),
+                    ('nationality',35,p.citizenship_code='' OR p.origin_code=''),
+                    ('moment',40,p.moment_ko='' OR p.moment_en=''),
                     ('sections',50,''' + section_needed + ''')
                 ) AS topic(name,priority,needed)
                 WHERE topic.needed AND NOT EXISTS (SELECT 1 FROM commulingo_person_enrichment e
@@ -61,10 +60,8 @@ class Planner:
                     'Commissioned glossary explanation: ' || topic.name,t.updated_at::text,
                     (t.body_ko='' OR t.body_en='') AS body_empty
                 FROM commulingo_terms t CROSS JOIN LATERAL (VALUES
-                    ('definition',30,t.definition_ko='' OR t.definition_en='' OR NOT EXISTS
-                        (SELECT 1 FROM commulingo_term_evidence e WHERE e.term_id=t.id AND e.field='definition')),
-                    ('history',40,t.body_ko='' OR t.body_en='' OR NOT EXISTS
-                        (SELECT 1 FROM commulingo_term_evidence e WHERE e.term_id=t.id AND e.field='body')),
+                    ('definition',30,t.definition_ko='' OR t.definition_en=''),
+                    ('history',40,t.body_ko='' OR t.body_en=''),
                     ('distinctions',50,''' + ('false' if self.concrete else 'true') + '''),
                     ('examples',50,''' + ('false' if self.concrete else 'true') + '''),
                     ('relations',50,''' + ('false AND (' if self.concrete else '(') + '''NOT EXISTS (SELECT 1 FROM commulingo_term_people r WHERE r.term_id=t.id)

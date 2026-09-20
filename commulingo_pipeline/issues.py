@@ -1,4 +1,4 @@
-"""Concrete editorial defects; quotas never commission new prose."""
+"""Concrete editorial defects: empty values and explicit requests. Quotas and missing provenance never commission new prose."""
 from .bundles import work_topics
 
 PERSON = {'basics': ('years', 'epithet', 'role', 'career'), 'bio': ('bio',),
@@ -14,9 +14,6 @@ def commission(job, current):
         return [{'id':'register', 'field':'*', 'problem':job['reason'],
                  'done_when':'A supported bilingual entry identifies the requested person or concept.'}]
     current = current or {}
-    evidence = {e.get('field') for e in current.get('evidence', [])}
-    if 'origin' in evidence:
-        evidence.add('nationalOrigin')
     issues = []
     for topic in work_topics(job):
         fields = (PERSON if job['kind']=='person' else TERM).get(topic, ())
@@ -26,13 +23,11 @@ def commission(job, current):
             if isinstance(value, dict) and field not in {'role'}:
                 text = value.get('label', value)
                 missing = any(not str(text.get(lang) or '').strip() for lang in ('ko','en')) if isinstance(text,dict) else not text
+            # Existing prose without recorded evidence is not an issue: attaching
+            # sources turned into rewrites of reviewed text (2026-09-20).
             if missing:
                 issues.append({'id':f'missing:{field}', 'field':field, 'topic':topic,
                     'problem':'Missing value or language.', 'done_when':'Supply the missing supported value/language, preserving existing facts.'})
-            elif field in FACTS[job['kind']] and field not in evidence:
-                issues.append({'id':f'evidence:{field}', 'field':field, 'topic':topic,
-                    'problem':'Existing factual field has no recorded supporting evidence.',
-                    'done_when':'Attach supporting original text; change prose only if the evidence requires correction.'})
     payload = job.get('payload') or {}
     explicit = payload.get('gap_id') or payload.get('gap_ids') or payload.get('review_feedback') or not job['reason'].startswith(('Commissioned ', 'Bundled enrichment:'))
     if explicit:

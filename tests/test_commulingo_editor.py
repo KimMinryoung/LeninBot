@@ -75,7 +75,8 @@ class SourceAndIssueTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(commission(person,{'sections':[]}), [])
         explicit = {**person,'reason':'Add the documented 1930 trial section.'}
         self.assertEqual(commission(explicit,{})[0]['id'],'requested')
-        self.assertEqual(commission(JOB,{**full,'evidence':[]})[0]['id'],'evidence:body')
+        # Missing provenance on existing prose is not a commission (2026-09-20).
+        self.assertEqual(commission(JOB,{**full,'evidence':[]}), [])
         complete_person = {'years':'1900–1980','epithet':{'ko':'역사가','en':'Historian'},
                            'role':{'category':'scholar'},'career':[{'y':'1930'}],'evidence':[{'field':'years'}]}
         self.assertEqual(commission({**person,'topic':'basics'},complete_person), [])
