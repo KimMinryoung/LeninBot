@@ -69,6 +69,11 @@ def authorize(user_text, state, history):
         'span': jev.choice('Classify the REQUESTED workload, not elapsed time or whether it has happened yet. A direction explicitly requesting intensive interrogation (집중 심문), a 66-name testimony, or a whole work session is session even when phrased in future tense. Sending to a cell or one spoken sentence is brief. Do not add other activities.', {
             'brief':'Only a short movement or single utterance/action is requested; NO intensive session or extensive testimony',
             'session':'The instruction requests 집중 심문, an extensive/66-person testimony, or a complete sustained task/session'}),
+        'time_scope': jev.choice('How much fictional time does the USER\'S MESSAGE itself allow to pass? Judge the director\'s intent, not the character\'s. A question, hypothetical or plan allows none.', {
+            'none':'A single action or exchange with no stated passage of time (moving to a cell, one line of dialogue, a delivery)',
+            'explicit':'The user states a duration or a count of hours/days to pass (한 시간 쉬어, 두 시간 뒤, 이틀을 넘겨)',
+            'open_ended':'The user leaves the length of a rest/wait to the character without a number (맘대로 쉬어, 알아서 자라, 원하는 만큼 기다려)',
+            'day_skip':'The user moves the story to the next day or next morning without a duration'}),
     }
     clock = state.get('clock') or {}
     morning_directive = bool(re.match(r'^\s*[（(]?\s*(?:다음\s*날\s*|내일\s*)?아침(?:에는|에|\s*장면)', user_text)) and clock.get('daypart') in {'afternoon','evening','night'}
@@ -76,9 +81,10 @@ def authorize(user_text, state, history):
         questions.pop('transition')
     # Unsure about the workload or a day transition, take the smaller scene; only the
     # mode itself is worth asking the player about.
+    from runtime_tools.roleplay_pacing import duration_minutes
     result = decide('roleplay-authorize', {'current_user':user_text,'current':{k:state.get(k) for k in ('clock','scene','location')},
         'history':[{'role':m['role'],'content':m['content'][-1800:]} for m in history[-2:]]}, questions,
-        defaults={'transition': 'current', 'span': 'brief'})
+        defaults={'transition': 'current', 'span': 'brief', 'time_scope': 'explicit' if duration_minutes(user_text) else 'none'})
     if morning_directive:
         result['labels']['transition'] = 'next_morning' if result['labels']['mode'] == 'scene' else 'current'
         result['transition_source'] = 'literal_morning_direction_after_evening; execution_authorized_by_jev'
@@ -87,15 +93,10 @@ def authorize(user_text, state, history):
 
 
 def policy_for_authorization(authorization):
-    policy = policy_for(authorization['user_text'])
+    """Jev's labels are the only source of time permission; see roleplay_pacing.policy_for."""
     labels = authorization['labels']
-    if labels['mode'] != 'scene':
-        return policy
-    transition = labels['transition'] != 'current'
-    budget = max(policy.max_minutes, 180 if labels['span']=='session' else 10)
-    return replace(policy, max_minutes=budget + (1440 if transition else 0),
-                   calendar_skip=policy.calendar_skip or transition,
-                   explicit_passage=policy.explicit_passage or transition)
+    return policy_for(authorization['user_text'], mode=labels['mode'], time_scope=labels.get('time_scope', 'auto'),
+                      span=labels.get('span', 'brief'), transition=labels.get('transition', 'current'))
 
 
 def direction(authorization, state=None):
@@ -119,7 +120,7 @@ def expected_stop(authorization, state):
     the written scene agree."""
     from runtime_tools.roleplay_dynamics import routine_occurrences
     from runtime_tools.roleplay_story import blocking_events
-    policy = policy_for(authorization['user_text'])
+    policy = policy_for_authorization(authorization)
     if authorization['labels'].get('transition', 'current') != 'current' or not policy.explicit_passage or policy.calendar_skip:
         return None
     span = min(policy.max_minutes, 1440)
@@ -218,7 +219,7 @@ def prepare(user_text, before, people, history, scope_id, draft, authorization, 
                             'gap_effects':'not_applied: omitted activity unknown'}
             verdict['transition'] = temporal
         if mode == 'scene':
-            if policy_for(user_text).explicit_passage and authorization['labels']['transition']=='current':
+            if policy.explicit_passage and authorization['labels']['transition']=='current':
                 verdict['labels']['elapsed']='explicit'
             else:
                 # The duration generator, not ambiguous temporal word classification,

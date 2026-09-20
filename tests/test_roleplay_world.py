@@ -24,10 +24,10 @@ def bargain(request, price, **extra):
     return {'id': 'b1', 'request': request, 'price': price, 'status': 'open', 'paid': False, 'struck_minute': 0, **extra}
 
 
-def project(text, state, **labels):
+def project(text, state, time_scope='auto', **labels):
     verdict = {'status': 'classified', 'labels': {'mode': 'scene', 'elapsed': '0', 'event': 'none', **labels},
                'uncertain': [], 'model': 'jev-test', 'answers': {}}
-    with turn_time_scope(policy_for(text)):
+    with turn_time_scope(policy_for(text, mode=labels.get('mode', 'scene'), time_scope=time_scope)):
         return jev.project(state, text, [{'person_id': 'rodos', 'name': '로도스'}], verdict, 'scope')
 
 
@@ -167,16 +167,16 @@ class RoutineTests(unittest.TestCase):
     def test_routine_survives_reset_and_far_events_do_not_block_next_day(self):
         state = self.routine()
         text = '새 장면. 초기화'
-        with turn_time_scope(policy_for(text)):
+        with turn_time_scope(policy_for(text, mode='reset')):
             fresh, _ = jev.project(state, text, [], {'labels': {'mode': 'reset'}}, 'r')
         self.assertEqual(fresh['routine'], state['routine'])
         self.assertEqual(fresh['bargains'], [])
         far = jev.apply_story_updates(initial(participants=[]), [{'op': 'schedule', 'id': 'far', 'title': '먼 사건', 'source': 's', 'due_minute': 5000}])
-        skipped, applied = project('다음 날 아침이 되었다', far, elapsed='explicit', activity='rest')
+        skipped, applied = project('다음 날 아침이 되었다', far, time_scope='day_skip', elapsed='explicit', activity='rest')
         self.assertEqual(skipped['clock']['date'], '1939-04-29')
         near = jev.apply_story_updates(initial(participants=[]), [{'op': 'schedule', 'id': 'near', 'title': '가까운 사건', 'source': 's', 'due_minute': 300}])
         with self.assertRaises(ValueError):
-            project('다음 날 아침이 되었다', near, elapsed='explicit', activity='rest')
+            project('다음 날 아침이 되었다', near, time_scope='day_skip', elapsed='explicit', activity='rest')
 
 
 class TrackTests(unittest.TestCase):
@@ -211,7 +211,7 @@ class TrackTests(unittest.TestCase):
 
     def test_far_milestones_do_not_block_next_day_and_bot_commands(self):
         state = track.enable(initial(participants=[]))
-        skipped, _ = project('다음 날 아침이 되었다', state, elapsed='explicit', activity='rest')
+        skipped, _ = project('다음 날 아침이 되었다', state, time_scope='day_skip', elapsed='explicit', activity='rest')
         self.assertEqual(skipped['clock']['date'], '1939-04-29')
         from telegram import roleplay_bot as bot
         self.assertIn('다음: 1939-04-30 조서: 음모 가담자 66명 지목 (1일 뒤)', bot._track_display(state))

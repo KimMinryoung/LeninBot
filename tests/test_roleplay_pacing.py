@@ -72,8 +72,12 @@ class PacingTests(unittest.TestCase):
         self.assertEqual(memory.load_state(1)['scene_minute'], 120)
 
     def test_discussion_and_clock_bypasses(self):
+        # Meaning comes from Jev's mode label, never from keywords: a discussion budget is 10 even with numbers in it.
         for text in ['하루 쉬게 하면 어떨까?', '두 시간 지나면 나을까?', '어제 한 시간 쉬었다. 어떻게 할까?', '이야기를 리드해봐']:
-            self.assertEqual(policy_for(text).max_minutes, 10)
+            self.assertEqual(policy_for(text, mode='discussion').max_minutes, 10)
+        self.assertEqual(policy_for('맘대로 쉬어라', time_scope='open_ended').max_minutes, 180)
+        self.assertEqual(policy_for('감방에서 쉬어').max_minutes, 10)
+        self.assertEqual(policy_for('한 시간 푹 쉬어').max_minutes, 60)
         for op, fields in [('next_day', {}), ('correct', {'date': '1939-04-30'}),
                            ('until', {'date': '1939-04-29', 'time': '07:30'})]:
             with turn_time_scope(policy_for('위로 올려보내')), self.assertRaises(ValueError):
@@ -84,7 +88,7 @@ class PacingTests(unittest.TestCase):
 
     def test_explicit_next_day_and_past_reference(self):
         text = '다음 날 아침으로 넘겨'
-        with turn_time_scope(policy_for(text)):
+        with turn_time_scope(policy_for(text, time_scope='day_skip')):
             memory.roleplay_state('time', temporal=self.temporal('next_day', quote=text), reason='명시적 진행',
                                   event_id='tomorrow', expected_revision=memory.load_state(1)['revision'])
             with self.assertRaises(ValueError):
@@ -103,7 +107,7 @@ class PacingTests(unittest.TestCase):
         with memory._connection() as conn:
             conn.execute('INSERT INTO turn_retractions VALUES (?, ?, ?)', ('1', '1467', '사용자 철회'))
         self.assertEqual(json.loads(memory.roleplay_state('history')), [])
-        with turn_time_scope(policy_for('새 장면으로 초기화해')):
+        with turn_time_scope(policy_for('새 장면으로 초기화해', mode='reset')):
             memory.roleplay_state('reset', reason='새 장면', expected_revision=memory.load_state(1)['revision'])
         self.assertEqual(memory.load_state(1)['scene_minute'], 0)
 
@@ -118,14 +122,3 @@ class PacingTests(unittest.TestCase):
             self.assertEqual(bot.load_history(1), [{'role': 'user', 'content': '유효한 대화'}])
         self.assertIn('id = ANY(%s)', query.call_args.args[0])
         self.assertEqual(query.call_args.args[1][-2], [976])
-
-
-class OpenEndedRestTests(unittest.TestCase):
-    def test_rest_left_to_the_character_allows_a_session_budget(self):
-        from runtime_tools.roleplay_pacing import policy_for
-        free = policy_for('(예조프야 맘대로 쉬어라)')
-        self.assertEqual((free.max_minutes, free.explicit_passage, free.calendar_skip), (180, False, False))
-        plain = policy_for('감방에서 쉬어')
-        self.assertEqual((plain.max_minutes, plain.explicit_passage), (10, False))
-        timed = policy_for('한 시간 푹 쉬어')
-        self.assertEqual((timed.max_minutes, timed.explicit_passage), (60, True))

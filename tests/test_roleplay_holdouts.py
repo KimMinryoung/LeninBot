@@ -272,8 +272,8 @@ class AuthorizeToleranceTests(unittest.TestCase):
         profile = SimpleNamespace(extra={'enabled': True, 'thresholds': {'accept': .75}})
         with patch.object(turn, 'resolve', return_value=profile), patch.object(turn, 'decide_detailed', side_effect=[self.decision(sure), self.decision(sure)]):
             result = turn.authorize('아침 배식이나 해라', initial(), [])
-        self.assertEqual(result['labels'], {'mode': 'scene', 'transition': 'current', 'span': 'brief'})
-        self.assertEqual(result['defaulted'], {'transition': 'current', 'span': 'brief'})
+        self.assertEqual(result['labels'], {'mode': 'scene', 'transition': 'current', 'span': 'brief', 'time_scope': 'none'})
+        self.assertEqual(result['defaulted'], {'transition': 'current', 'span': 'brief', 'time_scope': 'none'})
         self.assertEqual(turn.policy_for_authorization(result).max_minutes, 10)
 
     def test_unsure_mode_and_scope_become_player_choices(self):

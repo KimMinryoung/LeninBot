@@ -12,15 +12,6 @@ _NUMBERS = {'한': 1, '하나': 1, '두': 2, '둘': 2, '세': 3, '셋': 3, '네'
             '다섯': 5, '여섯': 6, '일곱': 7, '여덟': 8, '아홉': 9, '열': 10,
             '하루': 1, '이틀': 2, '사흘': 3, '나흘': 4}
 _DURATION = re.compile(r'(?P<n>\d+(?:\.\d+)?|다섯|여섯|일곱|여덟|아홉|하나|둘|셋|넷|한|두|세|네|열)\s*(?P<u>시간|분|일|주)|(?P<days>하루|이틀|사흘|나흘)')
-# A request for suggestions or a hypothetical is not permission to enact a skip.
-_DISCUSSION = re.compile(r'어떻게|어떨|할까|해볼까|좋을까|나을까|가정|계획|제안|설명|상담|만약|했더라면|지나면|지난다면')
-_PROGRESS = re.compile(r'넘겨|넘기|건너뛰|진행|흘렀|흘러|지났다|지났어|지났고|지나갔|기다려|기다린|기다렸|쉬어|쉬자|쉰다|쉬었다|쉬었|잤다|잤어|잤고|잠을\s*잔다|보냈|보낸다|보내자|보내라|보내줘|씻어|씻었다|정돈해|정돈한다|읽어|읽었다|정리해|정리했다|가다듬어|가다듬었다')
-_DAY_SKIP = re.compile(r'다음\s*날|다음날|내일|아침까지|밤새|밤을\s*넘')
-_CORRECTION = re.compile(r'정정|수정|바로잡|되돌|잘못|아니라|틀렸')
-# "맘대로 쉬어" leaves the length to the character: allow a session-sized estimate.
-_OPEN_ENDED = re.compile(r'맘대로|마음대로|알아서|원하는\s*만큼|충분히|실컷|푹')
-
-
 def normalized(text):
     return re.sub(r'\s+', ' ', unicodedata.normalize('NFKC', text)).strip()
 
@@ -32,6 +23,7 @@ class TurnTimePolicy:
     calendar_skip: bool
     correction: bool
     explicit_passage: bool
+    reset: bool = False
 
     def view(self):
         return {'max_elapsed_minutes_this_turn': self.max_minutes,
@@ -57,15 +49,36 @@ def duration_minutes(user_text):
     return int(total)
 
 
-def policy_for(user_text):
+SESSION_MINUTES = 180
+TIME_SCOPES = ('none', 'explicit', 'open_ended', 'day_skip')
+
+
+def policy_for(user_text, *, mode='scene', time_scope='auto', span='brief', transition='current'):
+    """The turn's time permission from Jev's authorization labels. Nothing here reads
+    meaning out of keywords: the only text parsing is the number+unit duration
+    ("2시간", "이틀"), and even that only when the message is a scene.
+
+    time_scope: none / explicit (a stated duration) / open_ended (length left to the
+    character) / day_skip (move to the next day). 'auto' means explicit when a number
+    and unit are present, otherwise none."""
+    active = _POLICY.get()
+    if active is not None and active.user_text == normalized(user_text) and time_scope == 'auto' and mode == 'scene':
+        return active
     text = normalized(user_text)
-    discussion = bool(_DISCUSSION.search(text))
-    explicit = not discussion and bool(_PROGRESS.search(text))
-    total = duration_minutes(text) if explicit else 0
-    calendar = not discussion and bool(_DAY_SKIP.search(text)) and (explicit or bool(re.search(r'다음\s*날(?:이다|이\s*되|\s*아침)|아침이\s*되', text)))
-    open_ended = explicit and not total and bool(_OPEN_ENDED.search(text))
-    budget = min(MAX_EXPLICIT_MINUTES, max(DEFAULT_TURN_MINUTES, total, 1440 if calendar else 0, 180 if open_ended else 0))
-    return TurnTimePolicy(text, budget, calendar, bool(_CORRECTION.search(text)), bool(total or calendar))
+    if mode != 'scene':
+        return TurnTimePolicy(text, DEFAULT_TURN_MINUTES, False, mode == 'correction', False, mode == 'reset')
+    total = duration_minutes(text)
+    if time_scope == 'auto':
+        time_scope = 'explicit' if total else 'none'
+    if time_scope not in TIME_SCOPES:
+        raise ValueError(f'time_scope must be one of {TIME_SCOPES}')
+    calendar = time_scope == 'day_skip' or transition != 'current'
+    budget = max(DEFAULT_TURN_MINUTES, total if time_scope == 'explicit' else 0,
+                 SESSION_MINUTES if (time_scope == 'open_ended' or span == 'session') else 0)
+    if calendar:
+        budget += 1440  # the skipped day itself, on top of whatever the scene then spends
+    return TurnTimePolicy(text, min(MAX_EXPLICIT_MINUTES, budget), calendar, False,
+                          bool(time_scope == 'explicit' and total) or calendar)
 
 
 @contextmanager
@@ -120,5 +133,5 @@ def check_time_result(before, after, temporal, scope_id, policy):
 
 def check_reset_request():
     policy = _POLICY.get()
-    if policy and not re.search(r'초기화|새\s*장면|처음부터|장면.{0,8}(?:바꿔|변경)|리셋', policy.user_text):
-        raise ValueError('초기화 거절: 사용자가 새 장면·초기화를 명시하지 않았음. reset으로 시간 제한을 우회하지 말 것')
+    if policy and not policy.reset:
+        raise ValueError('초기화 거절: 사용자가 새 장면·초기화를 명시하지 않았음(허가 판정 mode=reset 아님). reset으로 시간 제한을 우회하지 말 것')

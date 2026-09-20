@@ -26,7 +26,7 @@ def verdict(**labels):
 
 class ProjectionTests(unittest.TestCase):
     def project(self, text, state=None, **labels):
-        with turn_time_scope(policy_for(text)):
+        with turn_time_scope(policy_for(text, mode=labels.get('mode', 'scene'))):
             return jev.project(state or initial(), text, [], verdict(**labels), 'test')
 
     def test_move_and_advice_only_reach_destination(self):
@@ -133,8 +133,11 @@ class ProjectionTests(unittest.TestCase):
     def test_correction_and_unknown_initial_values(self):
         fixed, _ = self.project('의지를 40으로 정정해',mode='correction')
         self.assertEqual(fixed['resolve'],40)
+        # Whether a message is a correction is Jev's mode label, not a keyword; a question settles as no change.
+        asked, applied = self.project('의지 40이면 어떻게 돼?',mode='discussion')
+        self.assertTrue(applied['no_change']); self.assertEqual(asked['resolve'], initial()['resolve'])
         with self.assertRaises(ValueError):
-            self.project('의지 40이면 어떻게 돼?',mode='correction')
+            self.project('의지를 정정해',mode='correction')  # no number to correct to
         empty=initial(hunger=None,pain=None)
         initialized, _ = self.project('잠깐 이동해',empty,initial_hunger='50',initial_pain='unknown')
         self.assertEqual(initialized['hunger'],50.15)
