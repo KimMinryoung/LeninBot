@@ -5,7 +5,7 @@ CONSUMERS = (
     "leninbot-autonomous", "leninbot-experience",
     "leninbot-commulingo-new", "leninbot-commulingo-enrich",
     "leninbot-commulingo-maintainer", "leninbot-commulingo-terms",
-    "leninbot-commulingo-events", "leninbot-commulingo-gap",
+    "leninbot-commulingo-gap",
     "leninbot-commulingo-review", "leninbot-commulingo-pipeline",
 )
 SEARCH_KEYS = frozenset({"tavily_api_key", "brave_search_api_key"})

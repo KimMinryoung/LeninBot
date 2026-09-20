@@ -1,5 +1,7 @@
 import unittest
 import json
+import io
+from contextlib import redirect_stdout
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -7,6 +9,26 @@ from scripts import commulingo_lane_health as health
 
 
 class LaneHealth(unittest.TestCase):
+    def test_pipeline_only_digest_does_not_read_retired_lane_journals(self):
+        for phase in ('draft', 'live'):
+            output = io.StringIO()
+            with self.subTest(phase=phase), \
+                 patch('sys.argv', ['commulingo_lane_health.py']), \
+                 patch.object(health.Path, 'read_text', return_value=json.dumps(
+                     {'phase': phase, 'legacy_shared_budget': False})), \
+                 patch.object(health, 'journal') as journal, \
+                 patch.object(health, 'pipeline_health', return_value=(['pipeline healthy'], [], .2)) as pipeline, \
+                 patch.object(health, 'tool_rejections', return_value=([], [])), \
+                 patch.object(health, 'bio_length_drift', return_value=([], [])), \
+                 patch.object(health, 'execution_metrics', return_value=[]), \
+                 redirect_stdout(output):
+                self.assertEqual(health.main(), 0)
+            pipeline.assert_called_once_with('-24h')
+            journal.assert_not_called()
+            self.assertIn('pipeline healthy', output.getvalue())
+            self.assertIn('$0.2000', output.getvalue())
+            self.assertNotIn('PROBLEMS:', output.getvalue())
+
     def test_query_json_keeps_multiline_aggregate(self):
         value=[{'tool_name':'a'},{'tool_name':'b'}]
         with patch.object(health.subprocess,'run',return_value=SimpleNamespace(stdout=json.dumps(value,indent=2))):

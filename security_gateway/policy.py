@@ -211,7 +211,7 @@ OWNER_REQUIRED_TOOLS = frozenset({
 # whole history of the table: the curation lanes, the analyst on research
 # follow-ups, and the orchestrator itself. Nothing else has ever written.
 COMMULINGO_WRITE_CALLERS = frozenset({
-    "commulingo_curator", "commulingo_event_curator", "analyst", "telegram",
+    "commulingo_curator", "analyst", "telegram",
 })
 
 TOOL_CALLER_ALLOWLIST: dict[str, frozenset[str]] = {

@@ -38,9 +38,7 @@ class DeepSeekSelectionTests(unittest.TestCase):
 
     def test_scheduled_agent_and_oneshot_defaults_use_flash(self):
         from agents.commulingo_curator import COMMULINGO_CURATOR
-        from agents.commulingo_event_curator import COMMULINGO_EVENT_CURATOR
-        for spec in (COMMULINGO_CURATOR, COMMULINGO_EVENT_CURATOR):
-            self.assertEqual(spec.model, "deepseek_flash")
+        self.assertEqual(COMMULINGO_CURATOR.model, "deepseek_flash")
         root = Path(__file__).resolve().parents[1]
         for filename in ("agent_runtime.json", "llm_call_sites.json"):
             entries = json.loads((root / "config" / filename).read_text())

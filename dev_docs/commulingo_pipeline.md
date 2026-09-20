@@ -8,7 +8,13 @@
 
 운영 설정은 `workflow=editor`, `phase=live`다. 코드의 workflow 미지정 기본값인 `legacy`와 구분한다.
 `leninbot-commulingo-pipeline.timer`가 배치를 실행하고, 별도 `leninbot-commulingo-review.timer`는 비활성화되어 있다.
-독립 검토는 editor 안에서 수행한다. 기존 batch는 사건·연결을 담당한다.
+독립 검토는 editor 안에서 수행한다. 사건 작성·인물-사건 연결의 기존 batch는
+2026-09-20 운영자 결정으로 폐기했으며 pipeline으로 이관하지 않았다.
+사건 작성 전용 runner·agent는 제거했다. `leninbot-commulingo-batch.timer/service`와
+events·links service는 빈 unit 파일로 남겨 systemd에서 masked로 처리한다.
+이는 기존 설치나 전체 unit 복사 시 폐기한 batch가 다시 실행되는 것을 막는 배포 표식이며 실행 코드는 없다.
+기존 사건과 연결 데이터는 보존한다. 인물·용어 pipeline의 gap 완료 처리는 기존처럼
+`resolved_id`를 기록하며 사건 연결을 자동 생성하지 않는다.
 
 운영자는 독립 검토를 통과한 결과의 공개 반영과 향후 자동 실행을 지속 승인했다.
 분류용 설명·라벨과 판정에 필요한 원문 발췌를 기존 TypeSafe/Jev로 전송하는 것도 지속 승인했다.
@@ -127,7 +133,11 @@ DB 접근·credential·쓰기 가드는 [MCP gateway](mcp_gateway.md)와 [시크
 frontend 변경 자산은 `deploy/commulingo-editor-frontend.patch`다. 실제 저장은 기존 Admin 함수가 소유한다.
 운영 frontend/data는 호스트 마운트이므로 파일 변경 자체가 운영 반영이다.
 private RPC는 호출마다 새 Node 프로세스로 모듈을 읽는다. 이 경로의 모듈 반영에는 웹 서버 재시작이 필요 없다.
-사건 worker의 KG 조회에는 service의 `neo4j_password` credential이 필요하며 없으면 유료 호출 전에 실패한다.
+pipeline이 사용하는 `scripts/commulingo_person_reviewer.py`의 검토 함수와
+`commulingo_write_session.py`의 초안 수정 함수는 보존한다.
+`commulingo_gap_event_links.py`는 legacy gap worker가 가져다 쓰는 연결 조회·생성·검증·저장
+공통 함수만 남겼으며 독립 CLI와 배치 반복 실행은 제거했다.
+`commulingo_lane_health.py`는 pipeline과 공통 검사만 감시하며 폐기된 lane의 무실행을 장애로 보고하지 않는다.
 
 ## 검증과 효율 지표
 

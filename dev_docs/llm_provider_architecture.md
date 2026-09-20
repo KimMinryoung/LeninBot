@@ -141,7 +141,6 @@ Each `AgentSpec` may set `provider` and `model`. `None` means follow task config
 | `programmer` | `provider="codex"`; Codex CLI owns the actual code execution tool loop |
 | `autonomous_project` | DeepSeek Pro, lower budget, publication finalization tools |
 | `commulingo_curator` | DeepSeek Pro for Korean people/glossary document creation and enrichment |
-| `commulingo_event_curator` | DeepSeek Pro for Korean history-event document sections and updates |
 | `browser`, `scout`, `stasova`, `diary` | DeepSeek by default |
 | `analyst`, `diplomat`, `visualizer` | inherit task config unless overridden |
 

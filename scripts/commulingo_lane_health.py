@@ -1,12 +1,9 @@
 #!/usr/bin/env python3
-"""Daily health digest for the CommuLingo curation lanes.
+"""Daily health digest for the CommuLingo pipeline.
 
-Each lane is a oneshot systemd unit that prints a JSON summary per run and
-raises on a bad run. Nothing read those tracebacks: the glossary lane failed
-roughly one run in five for a full day before anyone noticed, because a failure
-looks exactly like a success from outside the journal. This tallies the last
-window per lane and, with --notify, sends Telegram only when a lane is actually
-unhealthy — a quiet run means the lanes are fine.
+The active pipeline owns scheduled curation. Legacy journal parsers remain
+available for historical diagnostics; retired lanes are not health targets.
+With --notify, send Telegram only when the pipeline or shared checks are unhealthy.
 
 Usage:
   scripts/commulingo_lane_health.py                 # digest to stdout
@@ -80,18 +77,10 @@ def execution_metrics(since: str, path: Path | None = None) -> list[str]:
             + (f", approved-work ${v['approved_cost']/v['approved']:.4f}/edit incl. linked reviews in window" if v['approved'] else ""))
             for stage,v in sorted(lanes.items())]
 
-# Active batch lanes plus the independent review timer. enrich came back on
-# 2026-08-29 (existing-person standard fields); new/terms stay installed but not
-# pulled in — putting a parked unit here would page "no runs recorded" every
-# morning. Change this dict in the same commit that changes the Wants= list in
-# leninbot-commulingo-batch.service.
-LANES = {
-    "review": "leninbot-commulingo-review.service",
-    "gap": "leninbot-commulingo-gap.service",
-    "enrich": "leninbot-commulingo-enrich.service",
-    "events": "leninbot-commulingo-events.service",
-    "links": "leninbot-commulingo-links.service",
-}
+# Automated curation now runs only through the people/term pipeline. Keep
+# journal parsers available for historical diagnostics, but do not report
+# retired batch/review units as missing or unhealthy.
+LANES: dict[str, str] = {}
 
 # Drain lanes clear a queue the other lanes feed instead of picking their own
 # subject, so their healthy steady state is the one the curator lanes must
@@ -495,7 +484,7 @@ def main() -> int:
 
     lines, alerts, total_cost = [], [], 0.0
     config = json.loads((ROOT/'config/commulingo_pipeline.json').read_text())
-    pipeline_active = config['phase'] in {'canary','live'} and config['legacy_shared_budget']
+    pipeline_active = config['phase'] in {'draft','canary','live'}
     waste_lines = []
     for lane, unit in LANES.items():
         drain = lane in DRAIN_LANES
@@ -544,7 +533,7 @@ def main() -> int:
     if pipeline_active:
         try:
             pipeline_lines, pipeline_alerts, pipeline_cost = pipeline_health(args.since)
-            lines = pipeline_lines + ['보조 레인:'] + lines
+            lines = pipeline_lines + lines
             alerts.extend(pipeline_alerts)
             total_cost += pipeline_cost
         except (subprocess.SubprocessError,ValueError) as exc:

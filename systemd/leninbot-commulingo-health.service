@@ -1,5 +1,5 @@
 [Unit]
-Description=LeninBot CommuLingo lane health digest (notifies Telegram on unhealthy lanes)
+Description=LeninBot CommuLingo pipeline health digest (notifies Telegram on unhealthy checks)
 Wants=network-online.target
 After=network-online.target
 

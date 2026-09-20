@@ -1,38 +1,15 @@
 #!/usr/bin/env python3
-"""Link the person cards an event commissioned back to that event.
+"""Shared event-link helpers retained for the legacy gap worker.
 
-`commulingo_person_create` is a finalization tool: a successful call ends the
-run. The gap worker was built around that, so a curator that made a card had no
-round left to call `commulingo_event_link`, and 206 of the 253 cards ordered by
-an event page never linked back to the page that ordered them. Valery
-Khodemchuk, the first man killed at Chernobyl, sat outside the Chernobyl event's
-people list while eighteen others were in it.
-
-The research is already done and stored: the gap row names the person, the
-event, and — in the curator's own words — why that section needed them. What is
-missing is only the two short bilingual strings the link carries, so this asks
-the model for those and nothing else. It never invents a link: every row comes
-from a gap whose event the curator chose.
-
-The worker itself is fixed separately (it links in code after the card lands),
-so this is a one-off for the backlog, not a recurring job.
-
-Not to be confused with commulingo_backfill_event_links.py, which audits an
-event's roster against the wiki. This one only ever links what the gap queue
-already decided.
-
-Usage:
-  scripts/commulingo_gap_event_links.py --dry-run --limit 8
-  scripts/commulingo_gap_event_links.py --limit 50
-  scripts/commulingo_gap_event_links.py            # the whole backlog
+The scheduled event-link batch and standalone CLI were retired on 2026-09-20.
+No automatic replacement was added to the people/term pipeline. The gap
+worker still imports pending_rows_for, describe, acceptable and write_link;
+keep their validation and persistence helpers available for explicit use.
 """
 
 from __future__ import annotations
 
-import argparse
-import asyncio
 import json
-import logging
 import os
 import sys
 from pathlib import Path
@@ -43,7 +20,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 os.environ.setdefault("COMMULINGO_SUGGESTED_BY", "commulingo-gap-event-links")
 
-from bot_config import _deepseek_anthropic_client, _resolve_deepseek_model  # noqa: E402
+from bot_config import _deepseek_anthropic_client  # noqa: E402
 from db import get_conn  # noqa: E402
 from psycopg2.extras import RealDictCursor  # noqa: E402
 from runtime_tools.commulingo_people import (  # noqa: E402
@@ -51,11 +28,6 @@ from runtime_tools.commulingo_people import (  # noqa: E402
     normalize_commulingo_write,
     _run_edit,
 )
-
-logger = logging.getLogger("commulingo_backfill_event_links")
-# A batch that dies takes every item in it with it, so this stays modest even
-# now that thinking is off and the whole budget goes to the reply.
-BATCH = 6
 
 PROMPT = """You are filling in the connective tissue of a Korean-language site on Soviet
 history. Each item below is a person the site already has a card for, an event the site
@@ -113,11 +85,6 @@ def _select(extra: str, params: tuple) -> list[dict]:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(_PENDING_SQL + extra, params)
             return [dict(row) for row in cur.fetchall()]
-
-
-def pending_rows(limit: int) -> list[dict]:
-    """Gap-commissioned cards that never linked back to their event."""
-    return _select(" ORDER BY g.priority DESC, g.id LIMIT %s", (limit,))
 
 
 def pending_rows_for(person_id: str, event_id: str) -> list[dict]:
@@ -213,57 +180,3 @@ def write_link(row: dict, entry: dict) -> None:
     result = _run_edit("history_event_person", "create", row["event_id"], patch, citations, None)
     if result.startswith("Error:"):
         raise RuntimeError(result)
-
-
-async def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--limit", type=int, default=10_000)
-    parser.add_argument("--dry-run", action="store_true")
-    args = parser.parse_args()
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-
-    rows = pending_rows(args.limit)
-    logger.info("unlinked gap-commissioned cards: %d", len(rows))
-    # Flash: the research is already in the gap row and this writes two short
-    # captions from it. Nothing here decides what is true.
-    model = _resolve_deepseek_model("deepseek_flash")
-    written = skipped = 0
-
-    for start in range(0, len(rows), BATCH):
-        batch = rows[start:start + BATCH]
-        try:
-            entries = await describe(batch, model)
-        except Exception as exc:
-            from commulingo_pipeline.store import BudgetUnavailable
-            if isinstance(exc,BudgetUnavailable):
-                logger.info('Daily CommuLingo budget deferred; remaining links stay queued')
-                break
-            logger.warning("batch %d failed, left alone: %s", start // BATCH, exc)
-            skipped += len(batch)
-            continue
-        for row, entry in zip(batch, entries):
-            problem = acceptable(entry)
-            if problem:
-                logger.warning("skip %s -> %s: %s", row["person_id"], row["event_id"], problem)
-                skipped += 1
-                continue
-            if args.dry_run:
-                print(f"{row['event_id']:<28} {row['name_ko']:<18} [{entry['kind']}] "
-                      f"{entry['relation_ko']}\n    {entry['note_ko']}")
-                written += 1
-                continue
-            try:
-                write_link(row, entry)
-                written += 1
-            except Exception as exc:
-                logger.warning("write failed %s -> %s: %s", row["person_id"], row["event_id"], exc)
-                skipped += 1
-        logger.info("progress: %d written, %d skipped, %d remaining",
-                    written, skipped, len(rows) - start - len(batch))
-
-    logger.info("done: %d written, %d skipped", written, skipped)
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(asyncio.run(main()))

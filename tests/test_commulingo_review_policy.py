@@ -217,7 +217,7 @@ class PolicyTests(unittest.IsolatedAsyncioTestCase):
             stats=health.tally('leninbot-commulingo-review.service','today')
         self.assertEqual(stats['idle'],1)
         self.assertEqual(health.problems('review',stats),[])
-        self.assertIn('review',health.LANES)
+        self.assertNotIn('review',health.LANES)
     def test_stale_and_legacy_versions_never_refresh(self):
         row={'target_type':'person','action':'update','patch_json':{'expectedRevision':'old'}}
         self.assertTrue(worker.invalidated(row,{'revision':'new'}))

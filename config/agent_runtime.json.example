@@ -92,25 +92,5 @@
       "commulingo_term_create"
     ],
     "skip_orchestrator_report": true
-  },
-  "commulingo_event_curator": {
-    "provider": "deepseek",
-    "model": "deepseek_flash",
-    "budget_usd": 0.8,
-    "max_rounds": 24,
-    "max_input_tokens": 160000,
-    "max_output_tokens": 16000,
-    "max_output_continuations": 2,
-    "thinking_policy": "tool_loop",
-    "thinking_budget_tokens": 4096,
-    "finalization_tools": [
-      "commulingo_event_section_save",
-      "commulingo_event_update"
-    ],
-    "terminal_tools": [
-      "commulingo_event_section_save",
-      "commulingo_event_update"
-    ],
-    "skip_orchestrator_report": true
   }
 }
