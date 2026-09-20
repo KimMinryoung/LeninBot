@@ -35,7 +35,7 @@ class EvidenceTests(unittest.TestCase):
 
     def test_passage_labels_resolve_to_displayed_paragraphs(self):
         from commulingo_pipeline.evidence import SourceHandles, Passages, resolve_passages
-        body = ('Intro sentence here.\n그는 1917년에 입당했다 — «Правда» 편집부에서 일했다.\n\n'
+        body = ('Intro sentence here.\n•\n그는 1917년에 입당했다 — «Правда» 편집부에서 일했다.\n\n'
                 'Later he was exiled to Siberia! Final sentence of the page.')
         source = snapshot('https://example.org/source', body)
         sources = {source['id']:source}
@@ -44,17 +44,18 @@ class EvidenceTests(unittest.TestCase):
         text = passages.show(handles.handle(source), body)
         later = body.index('Later')
         # Every non-blank line is one labelled paragraph; the label is the handle and the paragraph's offset.
-        self.assertEqual(list(passages.shown), ['S1@0', 'S1@21', f'S1@{later}'])
-        self.assertTrue(text.startswith('[S1@0] Intro sentence here.\n[S1@21] 그는 1917년에'))
-        claim = {'field':'bio','claim':'Joined in 1917','passages':['S1@21']}
+        # A bullet or heading shorter than the evidence floor is shown without a label.
+        self.assertEqual(list(passages.shown), ['S1@0', 'S1@23', f'S1@{later}'])
+        self.assertTrue(text.startswith('[S1@0] Intro sentence here.\n•\n[S1@23] 그는 1917년에'))
+        claim = {'field':'bio','claim':'Joined in 1917','passages':['S1@23']}
         [resolved] = resolve_passages([claim], passages, handles, sources)
         self.assertNotIn('passages', resolved)
         self.assertEqual(body[resolved['start']:resolved['end']], '그는 1917년에 입당했다 — «Правда» 편집부에서 일했다.')
         compiled = compile_evidence([resolved], sources, {'bio'})
         self.assertEqual(compiled[0]['excerpt'], '그는 1917년에 입당했다 — «Правда» 편집부에서 일했다.')
         # Several paragraphs of one source span from the first to the last, whatever the order given.
-        [wide] = resolve_passages([{**claim,'passages':[f'S1@{later}','S1@21']}], passages, handles, sources)
-        self.assertEqual((wide['start'], wide['end']), (21, len(body)))
+        [wide] = resolve_passages([{**claim,'passages':[f'S1@{later}','S1@23']}], passages, handles, sources)
+        self.assertEqual((wide['start'], wide['end']), (23, len(body)))
         other = snapshot('https://example.org/other', 'Unrelated page.\nHe was exiled to Siberia in 1930.')
         sources[other['id']] = other
         passages.show(handles.handle(other), other['body'])
@@ -62,8 +63,8 @@ class EvidenceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "claim 1: passage label 'S1@999' was not displayed"):
             resolve_passages([{**claim,'passages':['S1@999']}], passages, handles, sources)
         # Labels of two sources become two claims.
-        split = resolve_passages([claim, {**claim,'passages':['S1@21','S2@16','S1@999']}], passages, handles, sources)
-        self.assertEqual([(c['source_id'], c['start']) for c in split], [(source['id'], 21), (source['id'], 21), (other['id'], 16)])
+        split = resolve_passages([claim, {**claim,'passages':['S1@23','S2@16','S1@999']}], passages, handles, sources)
+        self.assertEqual([(c['source_id'], c['start']) for c in split], [(source['id'], 23), (source['id'], 23), (other['id'], 16)])
         # Paragraphs too far apart for one evidence range become one claim per cluster.
         far = snapshot('https://example.org/far', 'First paragraph of a long page.\n' + 'x' * 7000 + '\nLast paragraph states the fact.')
         sources[far['id']] = far

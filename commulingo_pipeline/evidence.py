@@ -59,6 +59,9 @@ def label_passages(handle, body, first=0, last=None, base=0):
     """
     lines, shown = [], {}
     for start, end in paragraph_spans(body, first, last):
+        if end - start < MIN_PASSAGE_CHARS:
+            lines.append(body[start:end])   # a bullet, a heading: shown, but not citable evidence
+            continue
         label = f'{handle}@{base + start}'
         shown[label] = (start, end)
         lines.append(f'[{label}] {body[start:end]}')
