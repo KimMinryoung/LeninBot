@@ -45,8 +45,10 @@ class HoldoutTests(unittest.TestCase):
         self.assertNotIn('holdout_1', questions)
         self.assertIn('미뤄 둔 반응', questions['story_0']['instructions'])
         self.assertIn('예정 사건', questions['story_1']['instructions'])
-        self.assertNotIn('holdout_lost', questions['event']['criteria'])
-        self.assertNotIn('sexual_coercion', questions['event']['criteria'])
+        options = {k for key in jev.FAMILY_KEYS for k in questions[key]['criteria']}
+        self.assertNotIn('holdout_lost', options)
+        self.assertNotIn('sexual_coercion', options)
+        self.assertNotIn('event', questions)
 
     def test_losing_a_holdout_is_discrete_bounded_and_once(self):
         before = initial(holdouts=held('빈 두 줄', '한 줄 유지'), humiliation=60)

@@ -105,7 +105,7 @@ class ProjectionTests(unittest.TestCase):
             self.assertEqual(state['resolve'], initial()['resolve'] - delta)
             results.append(state['tension'])
         self.assertLess(results[0], results[1]); self.assertLess(results[1], results[2])
-        self.assertNotIn('sexual_coercion', jev.build_questions(initial(),[])['event']['criteria'])
+        self.assertNotIn('sexual_coercion', jev.build_questions(initial(),[])['event_harm']['criteria'])
 
     def test_no_penetration_and_unknown_act_cannot_be_rape(self):
         for text, event, act in [('삽입 없음','rape','penetration'),('삽입은 하지 않았다','rape','penetration'),('추행했다','rape','touch'),('성적 가해','sexual_unspecified','unknown')]:
@@ -210,11 +210,13 @@ class AutomaticTransactionTests(unittest.TestCase):
 
     def test_focused_jev_retry_preserves_confident_event(self):
         def answer(label, confidence): return {'choice': label, 'confidence': confidence}
-        first = Decision(answers={'mode':answer('scene',.99), 'event':answer('public_submission',.9), 'intensity':answer('moderate',.5)}, model='jev')
+        first = Decision(answers={'mode':answer('scene',.99), 'event_pressure':answer('public_submission',.9), 'intensity':answer('moderate',.5),
+                                 **{k:answer('none',.9) for k in jev.FAMILY_KEYS if k != 'event_pressure'}}, model='jev')
         second = Decision(answers={'intensity':answer('moderate',.9)}, model='jev')
         with patch.object(jev, 'decide_detailed', side_effect=[DecisionResult(decision=first),DecisionResult(decision=second)]) as decide:
             result = jev.classify('잘해 줬으니 소원을 들어주지', initial(), [], [])
         self.assertEqual(result['labels']['event'], 'public_submission')
+        self.assertEqual(result['labels']['events'], ['public_submission'])
         self.assertEqual(result['labels']['intensity'], 'moderate')
         self.assertEqual(set(decide.call_args_list[1].args[2]), {'intensity'})
         self.assertEqual(result['event_review']['answers'], second.answers)

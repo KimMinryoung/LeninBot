@@ -53,7 +53,7 @@ class BargainTests(unittest.TestCase):
         self.assertEqual(broken['resolve_events'][-1]['kind'], 'betrayal')
         self.assertLess(broken['resolve'], paid['resolve'])
         self.assertGreater(broken['tension'], paid['tension'])
-        self.assertNotIn('bargain_kept', jev.build_questions(before, [])['event']['criteria'])
+        self.assertNotIn('bargain_kept', jev.build_questions(before, [])['event_relief']['criteria'])
 
     def test_actor_records_a_deal_but_cannot_settle_it(self):
         with tempfile.TemporaryDirectory() as tmp, patch.object(memory, 'MEMORY_PATH', Path(tmp) / 'm.sqlite3'):
@@ -74,6 +74,42 @@ class BargainTests(unittest.TestCase):
             self.assertEqual([b['status'] for b in stored['bargains']], ['open'] * 3)
             view = actor_state_view(stored)
             self.assertNotIn('struck_minute', json.dumps(view, ensure_ascii=False))
+
+
+class EventAxesTests(unittest.TestCase):
+    """Material events (intake/care/harm) and impact events (pressure/relief) are independent axes."""
+
+    def test_meal_and_kindness_apply_together(self):
+        before = initial(hunger=60, resolve=30, humiliation=50)
+        state, applied = project('간수가 따뜻한 죽을 건넸고 그걸 먹었다', before, event_intake='meal', event_relief='kindness', intensity='moderate')
+        self.assertEqual(applied['events'], ['kindness', 'meal'])
+        self.assertEqual(applied['event'], 'kindness')
+        self.assertEqual(state['hunger'], 25)
+        self.assertEqual(state['resolve'], 33)
+        self.assertEqual(state['humiliation'], 47)
+        self.assertEqual([e['kind'] for e in state['resolve_events']], ['kindness'])
+        self.assertEqual(turn.feedback_line({'status': 'applied', 'applied': applied}, state).split(' · ')[0], '⚙ 확정: 배려·양보 + 식사')
+        from runtime_tools.roleplay_actor import actor_outcome_view
+        self.assertEqual(actor_outcome_view({'status': 'applied', 'applied': applied})['confirmed_event'], '배려·양보')
+
+    def test_unsettled_family_becomes_the_players_choice_and_a_pick_settles_the_rest(self):
+        labels = {'mode': 'scene', 'elapsed': '0', 'intensity': 'moderate', 'event_intake': 'meal', 'event_harm': 'none', 'event_care': 'none', 'event_pressure': 'none'}
+        uncertain = ['event_relief']
+        answers = {'event_relief': {'choice': 'kindness', 'confidence': .5, 'probabilities': {'kindness': .5, 'none': .3, 'recognition': .2}}}
+        jev.settle_event_families(labels, uncertain, answers)
+        self.assertEqual(uncertain, ['event_relief', 'event'])
+        verdict = {'labels': labels, 'answers': answers}
+        with turn_time_scope(policy_for('죽')), self.assertRaises(jev.PendingChoice) as caught:
+            jev.project(initial(), '죽', [], verdict, 'scope')
+        self.assertEqual([k for k, _ in caught.exception.candidates], ['kindness', 'recognition', 'none'])
+        picked = {**labels, 'event': 'kindness'}
+        self.assertEqual(jev.resolve_events(picked), (['kindness', 'meal'], False))
+        self.assertEqual(jev.resolve_events({**labels, 'event': 'none'}), (['meal'], False))
+        # Leaning to none settles silently.
+        lean = {'mode': 'scene', 'elapsed': '0'}
+        unsure = list(jev.FAMILY_KEYS)
+        jev.settle_event_families(lean, unsure, {k: {'choice': 'none', 'confidence': .4} for k in jev.FAMILY_KEYS})
+        self.assertEqual((lean['event'], lean['events'], unsure), ('none', [], []))
 
 
 class RoutineTests(unittest.TestCase):

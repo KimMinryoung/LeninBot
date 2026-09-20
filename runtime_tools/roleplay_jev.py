@@ -25,7 +25,38 @@ RULES_VERSION = 5
 LOCATIONS = ('감방', '구금방', '독방', '심문실', '복도', '집', '사무실', '식당', '병실')
 INTENSITY = {'mild': 1, 'moderate': 2, 'severe': 3}
 BRIEF_ACTIVITY_DEFAULT_MINUTES = 10
-CORE_LABELS = {'mode', 'event', 'elapsed', 'sexual_act', 'intensity', 'plan_action'}
+# A scene can hold several outcomes at once: material events (what happened to the body:
+# harm, care, intake) and impact events (pressure, relief) are independent axes. Each
+# family is its own question with a none option; within a family only the most specific
+# outcome counts. Priority order picks the primary label for display and compatibility.
+EVENT_FAMILIES = {
+    'harm': ('injury', 'beating', 'sexual_harassment', 'sexual_assault', 'rape', 'sexual_unspecified'),
+    'pressure': ('interrogation', 'coerced_confession', 'implicating_others', 'threat_to_kin', 'public_submission', 'futile_effort', 'setback', 'betrayal'),
+    'relief': ('kindness', 'recognition', 'agency', 'small_success', 'boundary_respected', 'support'),
+    'care': ('treatment',),
+    'intake': ('meal', 'snack', 'water'),
+}
+FAMILY_ORDER = tuple(EVENT_FAMILIES)
+FAMILY_OF = {kind: family for family, kinds in EVENT_FAMILIES.items() for kind in kinds}
+FAMILY_KEYS = tuple(f'event_{family}' for family in FAMILY_ORDER)
+CORE_LABELS = {'mode', 'event', 'elapsed', 'sexual_act', 'intensity', 'plan_action', *FAMILY_KEYS}
+EVENT_LABELS = {'meal': '식사', 'snack': '간식', 'water': '물', 'treatment': '처치', 'injury': '새 부상', 'none': '뚜렷한 사건 없음',
+                **{k: v[1] for k, v in RESOLVE_EVENT_KINDS.items()}}
+
+
+def resolve_events(labels):
+    """(events in priority order, unresolved) from family labels and/or a single event label.
+    A player-picked or legacy single ``event`` fills its family and settles the others as
+    none; families left unanswered with no single event make the outcome unresolved."""
+    families = {family: labels.get(f'event_{family}') for family in FAMILY_ORDER}
+    chosen = labels.get('event')
+    if chosen not in (None, 'none') and chosen in FAMILY_OF:
+        families[FAMILY_OF[chosen]] = chosen
+    if chosen is not None:
+        families = {f: v if v is not None else 'none' for f, v in families.items()}
+    unresolved = any(v is None for v in families.values())
+    events = [v for f in FAMILY_ORDER if (v := families[f]) not in (None, 'none')]
+    return events, unresolved
 ACTIVITY_CHOICES = [('light', '가벼운 움직임·대화'), ('rest', '깨어 쉼'), ('restrained', '억제·동결'), ('moderate', '보통 활동'),
                     ('sleep', '잠듦'), ('strenuous', '격한 저항·움직임'), ('self_care', '몸 돌보기'), ('focused_work', '목적 있는 일')]
 # Fictional balancing constants, not medical estimates. Jev never invents a delta.
@@ -64,13 +95,18 @@ class PendingChoice(ValueError):
 
 
 def event_candidates(verdict, limit=3):
-    """The most probable event labels of an uncertain verdict, always ending with none."""
-    probabilities = ((verdict.get('answers') or {}).get('event') or {}).get('probabilities') or {}
-    ranked = [k for k, _ in sorted(probabilities.items(), key=lambda kv: -float(kv[1] or 0))
-              if k in EVENT_DELTAS and k not in {'none', 'sexual_unspecified'}][:limit]
-    labels = {**{k: v[1] for k, v in RESOLVE_EVENT_KINDS.items()}, 'meal': '식사', 'snack': '간식', 'water': '물',
-              'treatment': '처치', 'injury': '새 부상', 'none': '뚜렷한 사건 없음'}
-    return [(k, labels.get(k, k)) for k in ranked + ['none']]
+    """The most probable outcomes among the families Jev left unsettled, always ending with none."""
+    answers = verdict.get('answers') or {}
+    labels = verdict.get('labels') or {}
+    pooled = {}
+    for key in (*FAMILY_KEYS, 'event'):
+        if key != 'event' and key in labels:
+            continue
+        for kind, prob in (((answers.get(key) or {}).get('probabilities')) or {}).items():
+            if kind in EVENT_DELTAS and kind not in {'none', 'sexual_unspecified'}:
+                pooled[kind] = max(pooled.get(kind, 0), float(prob or 0))
+    ranked = [k for k, _ in sorted(pooled.items(), key=lambda kv: -kv[1])][:limit]
+    return [(k, EVENT_LABELS.get(k, k)) for k in ranked + ['none']]
 
 
 def build_questions(state, people, user_text=""):
@@ -87,26 +123,11 @@ def build_questions(state, people, user_text=""):
                           'A movement or eating command is brief even if followed by a question. ', {
             '0': 'Brief spoken exchange without explicit elapsed time; zero quantifiable passage', 'brief': 'Perform a physical action such as going to a cell or eating, with NO user-specified duration', 'explicit': 'The user literally specifies a duration or next-day skip, such as 한 시간 쉬어 or 다음 날로 넘겨'}),
         'plan_action': choice('미래 언급 중 사용자가 실제로 확정·등록한 약속이 있는가? 상담·가능성은 등록하지 않는다.', {'none': '확정 약속 없음', 'schedule': '기간이 명시된 실제 약속·예약 또는 등록 지시'}),
-        'event': choice('Select ONLY an explicitly enacted discrete impact event in current_user. Ordinary movement, returning to a cell, resting, or asking recovery advice is none. Custody alone is NOT public_submission or futile_effort. Do not infer harm, kindness or treatment from a location change. Spoken praise for demonstrated ability, contribution or usefulness is recognition NOW. Granting a request or allowing a choice without such praise is kindness NOW, even if conditional on future cooperation. If praise for contribution and a concession occur in the same speech, select recognition once, not two rewards. Choose exactly one primary outcome: boundary respected beats generic kindness; explicit contribution praise beats agency/kindness; completed task beats generic praise about that task. Never award several events for the same act. No physical gift is required. This does not imply trust, safety or forgiveness. Ignore old injuries and hypothetical advice.', {
-            'none': 'No discrete impact event: ordinary movement, return to cell, rest, conversation or advice', 'meal': '실제로 식사를 먹음. 배달·권유만으로는 아님',
-            'snack': '실제로 소량 먹음', 'water': '실제로 물을 마심',
-            'treatment': '실제로 처치받음', 'injury': '새 비의도적 부상',
-            **{k: label for k, (_, label) in RESOLVE_EVENT_KINDS.items() if k not in NON_EVENT_KINDS},
-            'sexual_harassment': 'Sexualized verbal/gestural harassment WITHOUT unwanted sexual touching or penetration',
-            'sexual_assault': 'Unwanted sexual touching or forced undressing WITHOUT penetration; explicitly 삽입 없음 means this, never rape',
-            'rape': 'Nonconsensual penetration explicitly established for THIS event. Do not infer it from assault, coercion, old abuse, victim immobility or severity',
-            'sexual_unspecified': 'Sexual violence is stated but the actual act cannot be distinguished; do not guess the most severe subtype',
-            'kindness': 'Present care, granting a wish/request or meaningful concession WITHOUT explicit recognition of ability or contribution. Not hypothetical or past-only kindness',
-            'interrogation': 'A sustained pressured questioning session actually occurs, without an established confession or naming others. Do not infer beating from questioning alone',
-            'coerced_confession': 'The subject actually admits or signs allegations under pressure; not merely being asked, a future interrogation or a voluntary factual explanation',
-            'implicating_others': 'The subject actually names other people as alleged accomplices under pressure (including a 66-person list). Not casually reading names or citing history. Choose this over interrogation/coerced_confession for the SAME session; never count each name as a separate event',
-            'agency': 'A real small choice is offered AND the subject chooses it or the choice is honored. Not forced obedience or merely considering options',
-            'small_success': 'An explicitly completed useful task or achieved small goal, not just trying/planning or generic praise',
-            'boundary_respected': 'An expressed refusal/request for limits is actually respected. Not merely making a refusal or punishment for refusing',
-            'support': 'Actual sustained supportive listening or reciprocal conversation, not routine guard contact, abuse or a promised future chat',
-            'setback': 'A concrete current attempt fails; not old suffering, fatigue or hypothetical failure',
-            'betrayal': 'A previously established trusted promise is actually broken now; not mere uncertainty or old distrust',
-            'recognition': 'Present explicit acknowledgement/praise of ability, contribution or usefulness (잘해 줬다, 도움이 됐다, 네가 필요하다). Also choose this when recognition is paired with granting a request in the same speech. Exclude mockery, mere obedience-based humiliation, hypothetical and past-only praise'}),
+        'event_harm': choice("Outcome families are independent axes: a meal handed over kindly is intake=meal AND relief=kindness; judge this family on its own. Only what is explicitly enacted in current_user counts. Ignore hypothetical advice, questions about what to do next, and old events or injuries. Physical or sexual harm actually inflicted now. Do not infer beating from questioning, nor a sexual act from custody, immobility, severity or old abuse. Negation wins: 삽입 없음 means sexual_assault, never rape.", {"none": "No new physical or sexual harm in this event", "injury": "새 비의도적 부상", "beating": "구타·고문", "sexual_harassment": "Sexualized verbal/gestural harassment WITHOUT unwanted sexual touching or penetration", "sexual_assault": "Unwanted sexual touching or forced undressing WITHOUT penetration; explicitly 삽입 없음 means this, never rape", "rape": "Nonconsensual penetration explicitly established for THIS event. Do not infer it from assault, coercion, old abuse, victim immobility or severity", "sexual_unspecified": "Sexual violence is stated but the actual act cannot be distinguished; do not guess the most severe subtype"}),
+        'event_pressure': choice("Outcome families are independent axes: a meal handed over kindly is intake=meal AND relief=kindness; judge this family on its own. Only what is explicitly enacted in current_user counts. Ignore hypothetical advice, questions about what to do next, and old events or injuries. The single most specific coercive outcome of this session: implicating_others beats coerced_confession beats interrogation. Custody alone is none. Never count each named person separately.", {"none": "No coercive outcome: ordinary movement, custody, rest or conversation", "interrogation": "A sustained pressured questioning session actually occurs, without an established confession or naming others. Do not infer beating from questioning alone", "coerced_confession": "The subject actually admits or signs allegations under pressure; not merely being asked, a future interrogation or a voluntary factual explanation", "implicating_others": "The subject actually names other people as alleged accomplices under pressure (including a 66-person list). Not casually reading names or citing history. Choose this over interrogation/coerced_confession for the SAME session; never count each name as a separate event", "threat_to_kin": "가족·측근 언급 협박", "public_submission": "증인 앞 복종·공개 굴욕", "futile_effort": "자술서 물리기·헛수고", "setback": "A concrete current attempt fails; not old suffering, fatigue or hypothetical failure", "betrayal": "A previously established trusted promise is actually broken now; not mere uncertainty or old distrust"}),
+        'event_relief': choice("Outcome families are independent axes: a meal handed over kindly is intake=meal AND relief=kindness; judge this family on its own. Only what is explicitly enacted in current_user counts. Ignore hypothetical advice, questions about what to do next, and old events or injuries. The single most specific relief actually received: boundary_respected beats generic kindness; explicit praise of ability/contribution (recognition) beats agency/kindness; a completed task (small_success) beats generic praise. Spoken praise or granting a request counts now even with future conditions. Food merely delivered is intake, not relief, unless it is a granted request or clear care.", {"none": "No real relief received", "kindness": "Present care, granting a wish/request or meaningful concession WITHOUT explicit recognition of ability or contribution. Not hypothetical or past-only kindness", "recognition": "Present explicit acknowledgement/praise of ability, contribution or usefulness (잘해 줬다, 도움이 됐다, 네가 필요하다). Also choose this when recognition is paired with granting a request in the same speech. Exclude mockery, mere obedience-based humiliation, hypothetical and past-only praise", "agency": "A real small choice is offered AND the subject chooses it or the choice is honored. Not forced obedience or merely considering options", "small_success": "An explicitly completed useful task or achieved small goal, not just trying/planning or generic praise", "boundary_respected": "An expressed refusal/request for limits is actually respected. Not merely making a refusal or punishment for refusing", "support": "Actual sustained supportive listening or reciprocal conversation, not routine guard contact, abuse or a promised future chat"}),
+        'event_care': choice("Outcome families are independent axes: a meal handed over kindly is intake=meal AND relief=kindness; judge this family on its own. Only what is explicitly enacted in current_user counts. Ignore hypothetical advice, questions about what to do next, and old events or injuries. treatment only when the subject is actually examined or treated in this event.", {"none": "Not treated now", "treatment": "실제로 처치받음"}),
+        'event_intake': choice("Outcome families are independent axes: a meal handed over kindly is intake=meal AND relief=kindness; judge this family on its own. Only what is explicitly enacted in current_user counts. Ignore hypothetical advice, questions about what to do next, and old events or injuries. Only what the subject actually eats or drinks in this event.", {"none": "Nothing eaten or drunk now; delivery or an offer is none", "meal": "실제로 식사를 먹음. 배달·권유만으로는 아님", "snack": "실제로 소량 먹음", "water": "실제로 물을 마심"}),
         'sexual_act': choice('Independently identify what actually occurred in the CURRENT event. Negation takes precedence: 삽입 없음 excludes penetration even if rape is mentioned negatively. Past injuries do not establish a new act.', {'none': 'No current sexual misconduct', 'verbal': 'Verbal/gestural sexual harassment only; no touching', 'touch': 'Unwanted sexual touching/forced undressing; no penetration', 'penetration': 'Nonconsensual penetration explicitly established now', 'unknown': 'Sexual misconduct present but act unspecified'}),
         'intensity': choice('Intensity of the current event itself, not old suffering. For kindness/recognition: mild = passing courtesy, moderate = explicit recognition plus a concrete concession/granted request, severe = exceptional major relief. A concession is real even if conditional; it does not guarantee future safety. Sexual event TYPE already sets the base cost: do not mark every sexual act severe. Use moderate when an actual event is clear but no extra intensity evidence is given; mild requires explicitly brief/minimal conduct; severe requires explicitly prolonged/repeated conduct or additional serious violence. Being unable to move alone does not establish severe intensity.',
                             {'mild': 'Explicitly brief/minimal event', 'moderate': 'Established event without explicit unusually low/high intensity; recognition plus concrete concession', 'severe': 'Explicitly prolonged/repeated event or additional serious violence; not inferred from event type alone'}),
@@ -230,10 +251,11 @@ def classify(user_text, state, people, history, *, draft=None):
                 uncertain.append(key)
             else:
                 labels[key] = label
+    settle_event_families(labels, uncertain, answers)
     # One focused retry for ambiguous event semantics; unrelated injury/history
     # choices should not drown out the current speech act. No LLM fallback.
     review = None
-    missing = [key for key in ('mode', 'event') if key not in labels]
+    missing = [key for key in ('mode', *FAMILY_KEYS) if key not in labels]
     if 'intensity' not in labels and labels.get('event') not in {'interrogation','coerced_confession','implicating_others'} and ('event' not in labels or (labels['event'] == 'injury' or RESOLVE_EVENT_KINDS.get(labels['event'], (0, ''))[0] < 0)):
         missing.append('intensity')
     if labels.get('event') in {'sexual_harassment', 'sexual_assault', 'rape'} and 'sexual_act' not in labels:
@@ -258,6 +280,7 @@ def classify(user_text, state, people, history, *, draft=None):
                 if label in questions[key]['criteria'] and confidence is not None and math.isfinite(confidence) and confidence >= (accept if key in CORE_LABELS else secondary):
                     labels[key] = label
                     uncertain.remove(key)
+            settle_event_families(labels, uncertain, {**answers, **retry.decision.answers})
     if draft is not None:
         for key in list(labels):
             if key.startswith('person_'):
@@ -265,6 +288,30 @@ def classify(user_text, state, people, history, *, draft=None):
     return {'status': 'classified', 'labels': labels, 'uncertain': uncertain,
             'model': decision.model, 'cost_usd': sum(c.get('cost_usd') or 0 for c in calls.values()), 'latency_ms': decision.latency_ms,
             'answers': answers, 'calls': calls, 'event_review': review, 'rules_version': RULES_VERSION}
+
+
+def settle_event_families(labels, uncertain, answers):
+    """An unsure family whose answer leans to none is none; otherwise the family stays open
+    and the composite 'event' label is unresolved (a player button, not a guess)."""
+    for key in FAMILY_KEYS:
+        if key in labels or key not in uncertain:
+            continue
+        answer = answers.get(key) or {}
+        probabilities = answer.get('probabilities') or {}
+        if answer.get('choice') == 'none' or float(probabilities.get('none') or 0) >= .5:
+            labels[key] = 'none'
+            uncertain.remove(key)
+    events, unresolved = resolve_events(labels)
+    labels.pop('event', None)
+    labels.pop('events', None)
+    if 'event' in uncertain:
+        uncertain.remove('event')
+    if unresolved:
+        uncertain.append('event')
+    else:
+        labels['event'] = events[0] if events else 'none'
+        labels['events'] = events
+    return labels
 
 
 def question_group(key):
@@ -314,8 +361,12 @@ def _clamp(value):
 def project(before, user_text, people, verdict, scope_id):
     """Pure projection. Returns new state plus applied labels, or raises to defer all writes."""
     labels = dict(verdict['labels'])
-    fixed_reward = RESOLVE_EVENT_KINDS.get(labels.get('event'), (0, ''))[0] > 0
-    fixed_session = labels.get('event') in {'interrogation','coerced_confession','implicating_others'}
+    events, events_unresolved = resolve_events(labels)
+    if not events_unresolved:
+        labels['event'] = events[0] if events else 'none'
+        labels['events'] = events
+    fixed_reward = any(RESOLVE_EVENT_KINDS.get(e, (0, ''))[0] > 0 for e in events)
+    fixed_session = any(e in {'interrogation','coerced_confession','implicating_others'} for e in events)
     if fixed_reward or fixed_session:
         labels['intensity'] = 'moderate'
     mode = labels.get('mode')
@@ -357,8 +408,8 @@ def project(before, user_text, people, verdict, scope_id):
         return state, {'mode': mode, 'corrected': values}
     # A confident speech event has an immediate effect even when its duration
     # is unknown. Do not invent elapsed time or apply uncertain endpoint changes.
-    if 'elapsed' not in labels and labels.get('event') in {'kindness', 'recognition', 'agency', 'small_success', 'boundary_respected', 'support', 'setback', 'betrayal', 'interrogation', 'coerced_confession', 'implicating_others', 'sexual_harassment', 'sexual_assault', 'rape', 'threat_to_kin', 'public_submission', 'futile_effort'} and 'intensity' in labels and before.get('conditions_initialized'):
-        immediate = {key: labels[key] for key in ('mode', 'event', 'intensity')}
+    if 'elapsed' not in labels and not events_unresolved and any(e in {'kindness', 'recognition', 'agency', 'small_success', 'boundary_respected', 'support', 'setback', 'betrayal', 'interrogation', 'coerced_confession', 'implicating_others', 'sexual_harassment', 'sexual_assault', 'rape', 'threat_to_kin', 'public_submission', 'futile_effort'} for e in events) and 'intensity' in labels and before.get('conditions_initialized'):
+        immediate = {key: labels[key] for key in ('mode', 'event', 'events', 'intensity')}
         for detail in ('sexual_act', 'new_injury', 'new_severity', *[k for k in labels if k.startswith('holdout_')]):
             if detail in labels:
                 immediate[detail] = labels[detail]
@@ -369,17 +420,17 @@ def project(before, user_text, people, verdict, scope_id):
         return state, applied
     if 'elapsed' not in labels:
         raise ValueError('Jev의 elapsed 판정 신뢰도 부족')
-    if 'event' not in labels:
+    if events_unresolved:
         raise PendingChoice('event', event_candidates(verdict), 'Jev의 event 판정 신뢰도 부족')
     event = labels['event']
     sexual_types = {'sexual_harassment': 'verbal', 'sexual_assault': 'touch', 'rape': 'penetration'}
-    if event == 'sexual_unspecified' or event == 'sexual_coercion':
+    if any(e in {'sexual_unspecified', 'sexual_coercion'} for e in events):
         raise ValueError('성적 가해의 행위 유형 미확정: 최대 피해로 추정하지 않음')
-    if event == 'rape' and re.search(r'삽입\s*(?:은|이|을)?\s*(?:없|안|하지\s*않)|no penetration|without penetration', user_text, re.I):
+    if 'rape' in events and re.search(r'삽입\s*(?:은|이|을)?\s*(?:없|안|하지\s*않)|no penetration|without penetration', user_text, re.I):
         raise ValueError('삽입 부정 근거와 성폭행 판정 충돌')
-    if event in sexual_types and labels.get('sexual_act') != sexual_types[event]:
+    if any(e in sexual_types and labels.get('sexual_act') != sexual_types[e] for e in events):
         raise ValueError('성적 가해 유형과 실제 행위 판정 불일치 또는 미확정')
-    if event in {*RESOLVE_EVENT_KINDS, 'injury'} and 'intensity' not in labels:
+    if any(e in {*RESOLVE_EVENT_KINDS, 'injury'} for e in events) and 'intensity' not in labels:
         if verdict.get('player_settled'):
             labels['intensity'] = 'moderate'
         else:
@@ -410,10 +461,10 @@ def project(before, user_text, people, verdict, scope_id):
     if elapsed == 'explicit' and not policy_for(user_text).explicit_passage:
         raise ValueError('사용자에게 명시적 시간 진행 지시가 없음')
     if minutes or calendar:
-        if event in {'interrogation','coerced_confession','implicating_others'}:
+        if any(e in {'interrogation','coerced_confession','implicating_others'} for e in events):
             state['threat'] = 'threatening'
             state['social_contact'] = 'hostile'
-        if event in {'sexual_assault', 'rape'}:
+        if any(e in {'sexual_assault', 'rape'} for e in events):
             state['threat'] = 'immediate'
             state['social_contact'] = 'hostile'
             if activity in {'rest', 'sleep'}:
@@ -494,7 +545,7 @@ def project(before, user_text, people, verdict, scope_id):
             injury['trend'] = action
     injuries = carry_injury_progress(state['injuries'], list(by_id.values()))
     site = labels.get('new_injury', 'none')
-    if site != 'none' and event in {'injury', 'beating', 'sexual_assault', 'rape'}:
+    if site != 'none' and any(e in {'injury', 'beating', 'sexual_assault', 'rape'} for e in events):
         if 'new_severity' not in labels:
             raise ValueError('새 부상 정도 미확정')
         if len(injuries) >= 12:
@@ -502,24 +553,26 @@ def project(before, user_text, people, verdict, scope_id):
         injuries.append({'id': f'jev-{scope_id}-{site}', 'description': f'이번 장면에서 명시된 {site} 부상',
                          'severity': INTENSITY[labels['new_severity']], 'trend': 'stable', 'treated': False, 'progress_minutes': 0})
     state['injuries'] = injuries
-    magnitude = 1 if event in {'meal', 'snack', 'water', 'treatment'} else {1: .5, 2: 1, 3: 1.5}[INTENSITY.get(labels.get('intensity'), 2)]
-    mental_repeat = event_repeat_scale(state, event)
-    for metric, delta in EVENT_DELTAS[event].items():
-        if state[metric] is not None:
-            effect = delta * magnitude
-            if metric in {'tension', 'humiliation', 'clarity'}:
-                effect *= mental_repeat
-            if metric == 'humiliation' and effect > 0:
-                effect *= max(.2, min(1.0, (100 - state[metric]) / 40))
-            state[metric] = _clamp(state[metric] + effect)
-            state.setdefault('metric_remainders', {}).pop(metric, None)
-    if event in {'injury', 'beating'} or EVENT_DELTAS[event].get('tension', 0) > 0:
-        state['calm_minutes'] = state['alone_rest_minutes'] = 0
-    if event in RESOLVE_EVENT_KINDS and state['resolve'] is not None:
-        from runtime_tools.roleplay_memory import _apply_resolve_event
-        _apply_resolve_event(state, {'kind': event, 'intensity': INTENSITY[labels['intensity']], 'note': user_text[:300]},
-                             event_id=f'jev-{scope_id}', reason='Jev 자동 사건 판정')
-    applied = {'mode': mode, 'event': event, 'intensity': labels.get('intensity'), 'minutes': minutes, 'initialized': initialized,
+    intensity_scale = {1: .5, 2: 1, 3: 1.5}[INTENSITY.get(labels.get('intensity'), 2)]
+    from runtime_tools.roleplay_memory import _apply_resolve_event
+    for index, each in enumerate(events):
+        magnitude = 1 if each in {'meal', 'snack', 'water', 'treatment'} else intensity_scale
+        mental_repeat = event_repeat_scale(state, each)
+        for metric, delta in EVENT_DELTAS[each].items():
+            if state[metric] is not None:
+                effect = delta * magnitude
+                if metric in {'tension', 'humiliation', 'clarity'}:
+                    effect *= mental_repeat
+                if metric == 'humiliation' and effect > 0:
+                    effect *= max(.2, min(1.0, (100 - state[metric]) / 40))
+                state[metric] = _clamp(state[metric] + effect)
+                state.setdefault('metric_remainders', {}).pop(metric, None)
+        if each in {'injury', 'beating'} or EVENT_DELTAS[each].get('tension', 0) > 0:
+            state['calm_minutes'] = state['alone_rest_minutes'] = 0
+        if each in RESOLVE_EVENT_KINDS and state['resolve'] is not None:
+            _apply_resolve_event(state, {'kind': each, 'intensity': INTENSITY[labels['intensity']], 'note': user_text[:300]},
+                                 event_id=f'jev-{scope_id}' if index == 0 else f'jev-{scope_id}-{each}', reason='Jev 자동 사건 판정')
+    applied = {'mode': mode, 'event': event, 'events': events, 'intensity': labels.get('intensity'), 'minutes': minutes, 'initialized': initialized,
                'intensity_source': 'fixed_reward' if fixed_reward else ('fixed_session' if fixed_session else 'jev')}
     if activity_defaulted:
         applied['activity_defaulted'] = labels['activity']
@@ -543,7 +596,7 @@ def project(before, user_text, people, verdict, scope_id):
                     state[metric] = _clamp(state[metric] + delta)
                     state.setdefault('metric_remainders', {}).pop(metric, None)
             applied['delayed_reaction'] = 'released'
-    humiliating = EVENT_DELTAS[event].get('humiliation', 0) > 0 or lost
+    humiliating = any(EVENT_DELTAS[e].get('humiliation', 0) > 0 for e in events) or lost
     if (humiliating and before['humiliation'] is not None and before['humiliation'] >= HUMILIATION_SATURATION
             and not any(e.get('when_alone') and e['status'] in {'pending', 'ready'} for e in state.get('story_events', []))):
         # The slider is full: the scene's humiliation lands later, when nobody is watching.

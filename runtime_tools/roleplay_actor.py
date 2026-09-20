@@ -69,9 +69,9 @@ def actor_outcome_view(outcome):
         cue = '현재 상태에서 질문·회상·계획에 답한다. 새로운 사건이나 시간 경과를 실행하지 않는다.'
     else:
         cue = '이번 행동의 결과가 확정되지 않았다. 현재 장면에서 멈추고 필요한 사실만 짧게 확인한다.'
-    event = applied.get('event')
-    label = RESOLVE_EVENT_KINDS.get(event, (None, None))[1]
-    view = {'direction': cue, **({'confirmed_event': label} if label else {})}
+    events = applied.get('events') or ([applied['event']] if applied.get('event') else [])
+    labels = [RESOLVE_EVENT_KINDS[e][1] for e in events if e in RESOLVE_EVENT_KINDS]
+    view = {'direction': cue, **({'confirmed_event': ' + '.join(labels)} if labels else {})}
     if applied.get('holdouts_lost'):
         view['holdouts_lost'] = list(applied['holdouts_lost'])
     if applied.get('delayed_reaction') == 'scheduled':

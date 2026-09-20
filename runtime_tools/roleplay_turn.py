@@ -186,7 +186,7 @@ def prepare(user_text, before, people, history, scope_id, draft, authorization, 
         verdict = deepcopy(verdict)
     mode = authorization['labels']['mode']
     verdict['labels']['mode'] = mode
-    if verdict['labels'].get('event') in {'interrogation','coerced_confession','implicating_others'} and 'activity' not in verdict['labels']:
+    if any(e in {'interrogation','coerced_confession','implicating_others'} for e in jev.resolve_events(verdict['labels'])[0]) and 'activity' not in verdict['labels']:
         verdict['labels']['activity'] = 'light'
     policy = policy_for_authorization(authorization)
     state = deepcopy(before)
@@ -310,8 +310,9 @@ def feedback_line(outcome, state=None):
         return '⚙ 예정 사건 등록.'
     names = {'meal': '식사', 'snack': '간식', 'water': '물', 'treatment': '처치', 'injury': '새 부상', 'none': '뚜렷한 사건 없음',
              **{k: v[1] for k, v in RESOLVE_EVENT_KINDS.items()}}
-    parts = ['확정: ' + ('도래 사건까지 진행' if applied.get('interrupted') and not applied.get('event')
-                        else names.get(applied.get('event'), applied.get('event') or '사건 없음'))]
+    events = applied.get('events') if applied.get('events') is not None else ([applied['event']] if applied.get('event') not in (None, 'none') else [])
+    parts = ['확정: ' + ('도래 사건까지 진행' if applied.get('interrupted') and not events
+                        else (' + '.join(names.get(e, e) for e in events) or '사건 없음'))]
     if applied.get('deferred_components'):
         parts.append('시간·장면 조건 보류')
     elif applied.get('minutes') is not None:
