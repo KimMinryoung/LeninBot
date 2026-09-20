@@ -87,11 +87,35 @@ def policy_for_authorization(authorization):
                    explicit_passage=policy.explicit_passage or transition)
 
 
-def direction(authorization):
+def direction(authorization, state=None):
     mode = authorization['labels']['mode']
-    if mode == 'scene':
-        return '사용자가 지정한 한 장면의 초안을 쓴다. 다음 아침으로의 전환이 허용되면 아침 장면에서 바로 시작하고, 생략된 밤의 수면·회복·사건을 만들어 넣지 않는다. 지정한 종료점에서 멈추고 후속 사건을 붙이지 않는다. 아직 저장·확정되지 않은 초안이다.'
-    return '장면을 진행하지 않고 질문·회상·계획·정정 요청에 답하는 초안을 쓴다. 새 사건이 일어났다고 서술하지 않는다.'
+    if mode != 'scene':
+        return '장면을 진행하지 않고 질문·회상·계획·정정 요청에 답하는 초안을 쓴다. 새 사건이 일어났다고 서술하지 않는다.'
+    text = '사용자가 지정한 한 장면의 초안을 쓴다. 다음 아침으로의 전환이 허용되면 아침 장면에서 바로 시작하고, 생략된 밤의 수면·회복·사건을 만들어 넣지 않는다. 지정한 종료점에서 멈추고 후속 사건을 붙이지 않는다. 아직 저장·확정되지 않은 초안이다.'
+    stop = expected_stop(authorization, state) if state is not None else None
+    if stop:
+        text += f" 이 장면은 {stop['title']}({stop['minutes']}분 뒤)에서 멈춘다. 그 도래 장면까지만 쓰고 그 뒤는 쓰지 않는다."
+    return text
+
+
+def expected_stop(authorization, state):
+    """The first clock-stopping beat an explicit passage will cross: a registered routine
+    item or a scheduled event. Told to the actor before drafting, so the settled stop and
+    the written scene agree."""
+    from runtime_tools.roleplay_dynamics import routine_occurrences
+    from runtime_tools.roleplay_story import blocking_events
+    policy = policy_for(authorization['user_text'])
+    if authorization['labels'].get('transition', 'current') != 'current' or not policy.explicit_passage or policy.calendar_skip:
+        return None
+    span = min(policy.max_minutes, 1440)
+    candidates = [(at, f"{item['time']} {item['title']}") for at, item in routine_occurrences(state, span)]
+    for event in blocking_events(state, span):
+        due = max(0, event.get('due_minute', state['scene_minute']) - state['scene_minute'])
+        candidates.append((due, event['title']))
+    if not candidates:
+        return None
+    minutes, title = min(candidates, key=lambda pair: pair[0])
+    return {'title': title, 'minutes': minutes}
 
 
 def _records(conn, uid):
@@ -196,8 +220,10 @@ def prepare(user_text, before, people, history, scope_id, draft, authorization, 
             raise
     if mode == 'scene' and verdict['labels'].get('location') in {None, 'unknown'}:
         projected['location'] = '미확인 — 확정된 장면 서술 참조'
-    if applied.get('interrupted'):
+    if applied.get('interrupted') and not (mode == 'scene' and verdict['labels'].get('elapsed') == 'explicit'):
         raise ValueError('예정 사건 도래로 초안 끝까지 실행할 수 없음. 도래 장면에서 멈춰야 함')
+    # An explicit passage was told where it stops (see direction/expected_stop); the settled
+    # scene ends there and the rest of the requested time is simply not spent.
     if stage is not None and mode in {'scene','discussion','plan'}:
         for key in ('goal','avoid','next_action','unresolved','body','mood','scene'):
             if stage['state'].get(key) != before.get(key):
@@ -270,7 +296,8 @@ def feedback_line(outcome, state=None):
         return '⚙ 예정 사건 등록.'
     names = {'meal': '식사', 'snack': '간식', 'water': '물', 'treatment': '처치', 'injury': '새 부상', 'none': '뚜렷한 사건 없음',
              **{k: v[1] for k, v in RESOLVE_EVENT_KINDS.items()}}
-    parts = ['확정: ' + names.get(applied.get('event'), applied.get('event') or '사건 없음')]
+    parts = ['확정: ' + ('도래 사건까지 진행' if applied.get('interrupted') and not applied.get('event')
+                        else names.get(applied.get('event'), applied.get('event') or '사건 없음'))]
     if applied.get('deferred_components'):
         parts.append('시간·장면 조건 보류')
     elif applied.get('minutes') is not None:
@@ -278,8 +305,12 @@ def feedback_line(outcome, state=None):
     clock = (state or {}).get('clock') or {}
     if clock.get('time'):
         parts.append(clock['time'] + (' 추정' if clock.get('certainty') == 'estimated' else ''))
+    if applied.get('interrupted'):
+        parts.append(', '.join(applied.get('stopped_at') or ['예정 사건']) + '에서 멈춤')
     if applied.get('holdouts_lost'):
         parts.append('넘긴 것: ' + ', '.join(applied['holdouts_lost']))
+    for request, action in (applied.get('bargains') or {}).items():
+        parts.append({'paid': '값 치름', 'kept': '이행됨', 'broken': '파기됨'}[action] + ': ' + request)
     if applied.get('delayed_reaction') == 'scheduled':
         parts.append('미뤄 둔 반응 예약')
     elif applied.get('delayed_reaction') == 'released':

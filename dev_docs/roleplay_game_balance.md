@@ -63,6 +63,36 @@ created_minute, 잃으면 lost_minute·lost_event·lost_scope_id). 등록은 연
 JEV가 `story_<i>=complete`로 판정하면 굴욕 −4·긴장 −3을 적용한다(`DELAYED_REACTION_RELEASE`). ready 뒤 1440분 안에 다루지 않으면 취소된다.
 연기 에이전트는 ready 신호를 story_events의 cue 항목으로 본다.
 
+## 거래 (bargains)
+
+인물이 쓸모를 지렛대로 쓸 수 있게, 심문관이 원하는 것과 인물의 요구를 맞바꾼 거래를 `bargains`(id/request/price/status open|kept|broken/
+paid/struck_minute, 열린 거래 최대 3개, 기록 20건)로 둔다. 성립한 거래만 연기 에이전트가 `roleplay_state(update, changes.bargain={request, price})`로
+기록한다(`add_bargain`: 같은 열린 거래는 중복 등록하지 않음). 판정은 JEV의 `bargain_<i>`(keep/paid/kept/broken)다.
+paid는 값을 치른 표시만 남기고(주 사건, 예컨대 연루 진술의 효과는 그대로), kept는 `bargain_kept` 의지 사건(+4, 반복 감쇠·상한 적용)과
+긴장 −3·굴욕 −3, broken은 기존 betrayal(의지 −6, 긴장 +6, 굴욕 +4)이다. 거래 하나는 한 번만 정산된다. `bargain_kept`는 event 선택지가
+아니다. `/status`에 "열린 거래", 확정 한 줄에 "값 치름/이행됨/파기됨: 요구"로 표시한다. 열린 거래는 reset으로 비워진다.
+
+## 감옥 일과 (routine)
+
+감독이 `/routine 추가 HH:MM 제목`으로 등록한 일과(최대 8개, `routine`, `set_routine`)는 세계 설정이라 reset 뒤에도 남는다(`WORLD_SETTINGS`).
+명시적 기간 진행(`elapsed=explicit`, 예: "12시간 쉬어")이 일과 시각을 지나면 `schedule_routine`이 그 구간 안의 발생분을
+`kind=routine` 예정 사건(`routine-<id>-<due>`)으로 등록하고, 기존 규칙대로 첫 도래에서 시계가 멈춘다. 초안 작성 전에 `roleplay_turn.expected_stop`이
+같은 계산으로 "이 장면은 06:00 아침 배식(600분 뒤)에서 멈춘다"를 scene_direction에 넣으므로 초안과 정산이 같은 곳에서 끝난다.
+명시적 기간 진행의 중단은 `prepare`가 거절하지 않고 그 시점까지만 확정한다(요청한 나머지 시간은 쓰지 않음). 초안 소요 추정(brief)의 중단은
+이전처럼 거절한다. 도래한 일과는 JEV `story_<i>`(keep/complete/cancel)로 처리하며, 배식의 도래는 섭취(meal)가 아니다.
+연기 문맥의 `routine_next`는 다음 24시간의 일과 3개다. 시각을 모르면 일과는 계산되지 않는다.
+
+## 실존 궤도 (track)
+
+`/track 켜기`는 `runtime_tools/roleplay_track.py`의 연표(1939-04-30 66명 조서, 06-10 기소장, 08-04 대량 작전 조서, 1940-02-01 최종 기소,
+02-02 재판, 02-03 최후 진술, 02-04 처형; 사용자 사료 메모 기반이며 코드가 재검증하지 않음) 중 장면 날짜 이후의 것을 `kind=track` 예정 사건
+(`track-YYYY-MM-DD`, 그 날 06:00 도래)으로 등록한다. 날짜·시각을 모르면 켤 수 없다. 도래하면 시계가 멈추고 JEV `story_<i>`로 연표대로(complete)
+또는 다르게(cancel) 진행됐는지 기록한다. `/status`와 `/track`은 켜짐 여부·일치 수·이탈 수·다음 사건까지 남은 일수를 보여준다. `/track 끄기`는
+남은 연표 사건을 "궤도 해제"로 취소하며 이는 이탈로 세지 않는다. 연기 에이전트에는 제목만 전달한다.
+
+next_day(경과량 미상의 하루 건너뛰기) 거절 조건은 "활성 예정 사건이 있으면"에서 "하루 안에 도래하거나 ready인 사건이 있으면"으로 좁혔다
+(`blocking_events`). 그래야 몇 달 뒤의 연표 사건이 매일의 진행을 막지 않는다. `when_alone` 신호도 막지 않는다.
+
 ## 명료함 감소 원인 (2026-09-20)
 
 사용자 판정("명료함은 수면박탈·질병에서만, 25~35 아래 금지")을 바탕으로 원인을 코드가 확정했다(`clarity_drain_rate`).
@@ -79,6 +109,7 @@ JEV가 `story_<i>=complete`로 판정하면 굴욕 −4·긴장 −3을 적용�
 
 ## 검증
 
+`tests/test_roleplay_world.py`는 거래의 값 치름·이행·파기·1회성, 일과 발생·중단·안내·reset 유지, 연표 등록·이탈·해제·next_day 비차단, 봇 명령을 검증한다.
 `tests/test_roleplay_holdouts.py`는 holdout 등록·손실·1회성, 미뤄 둔 반응의 예약·ready·해소·만료, 명료함 원인·하한(`test_roleplay_dynamics`)을 검증한다.
 `tests/test_roleplay_balance.py`는 극단 상태 탈출, 반복 보상 제한과 시간 창 종료, 활동별 비용·회복,
 현재 위협 중 회복 금지, 낮은 의지 손실 완화, 굴욕 포화 완화, 시간 분할 불변성을 검증한다.

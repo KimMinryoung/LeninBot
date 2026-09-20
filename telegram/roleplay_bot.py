@@ -34,10 +34,11 @@ from llm.tool_loop_common import EMPTY_RESPONSE_FALLBACK
 from runtime_tools.roleplay_jev import adjudicate_turn, PendingChoice
 from runtime_tools.roleplay_actor import actor_state_view
 from runtime_tools import roleplay_turn
-from runtime_tools.roleplay_dynamics import with_defaults, holdout_titles
+from runtime_tools.roleplay_dynamics import with_defaults, holdout_titles, open_bargains, routine_occurrences
 from runtime_tools.roleplay_pacing import policy_for, turn_time_scope
 from runtime_tools.roleplay_memory import (load_notes, load_state, load_people, people_context, excluded_history_ids,
-                                           get_preference, set_preference)
+                                           get_preference, set_preference, mutate_state, set_routine)
+from runtime_tools import roleplay_track
 from runtime_tools.registry import TOOLS, TOOL_HANDLERS
 from tool_gateway.profiles import ROLEPLAY_TELEGRAM_TOOLS
 from tool_gateway.security import caller_scope, new_run_context
@@ -243,6 +244,8 @@ async def cmd_help(message: Message) -> None:
         "• /status — 핵심 상태, /status 상세 — 계산 근거·세부 상태. 수정·초기화는 대화로 요청해.\n"
         "• /people — 저장된 인물 목록, /people 이름 — 인물 기록 확인\n"
         "• /feedback 켜기|끄기 — 답변 뒤에 엔진이 확정한 사건·시간을 한 줄로 표시 (기본 켜짐)\n"
+        "• /routine — 감옥 일과 보기, /routine 추가 06:00 아침 배식, /routine 삭제 1, /routine 비우기\n"
+        "• /track 켜기|끄기 — 실존 연표(4/30 66명 조서 … 1940-02-04 처형)를 예정 사건으로 깔고 일치·이탈을 표시\n"
         "• 판정이 애매하면 버튼으로 사건을 골라 그 초안을 그대로 확정할 수 있어.\n"
         "• 캐릭터 설정은 identity/roleplay_persona.md 파일에서 편집 (재시작 불필요)\n"
         f"• 모델: {ROLEPLAY_MODEL} (thinking on, 추론은 답변에 미포함)"
@@ -267,6 +270,74 @@ async def cmd_feedback(message: Message) -> None:
     else:
         current = await asyncio.to_thread(get_preference, message.from_user.id, FEEDBACK_PREFERENCE, "on")
         await message.answer(f"확정 한 줄 표시: {'켜짐' if current != 'off' else '꺼짐'}. /feedback 켜기 또는 /feedback 끄기")
+
+
+@router.message(Command("routine"))
+async def cmd_routine(message: Message) -> None:
+    user_id = message.from_user.id
+    args = (message.text or "").split(maxsplit=2)[1:]
+    verb = args[0].strip() if args else ""
+    try:
+        if verb in {"추가", "add"} and len(args) > 1:
+            parts = args[1].split(maxsplit=1)
+            if len(parts) < 2:
+                raise ValueError("형식: /routine 추가 HH:MM 제목")
+            time, title = parts
+            state = await asyncio.to_thread(mutate_state, user_id, f"일과 추가: {time} {title}",
+                lambda s: set_routine(s, s.get("routine", []) + [{"time": time, "title": title}]))
+        elif verb in {"삭제", "remove"} and len(args) > 1:
+            index = int(args[1].strip()) - 1
+            def drop(s):
+                items = list(s.get("routine", []))
+                if not 0 <= index < len(items):
+                    raise ValueError("그 번호의 일과가 없어")
+                items.pop(index)
+                return set_routine(s, items)
+            state = await asyncio.to_thread(mutate_state, user_id, "일과 삭제", drop)
+        elif verb in {"비우기", "clear"}:
+            state = await asyncio.to_thread(mutate_state, user_id, "일과 비우기", lambda s: set_routine(s, []))
+        else:
+            state = await asyncio.to_thread(load_state, user_id)
+    except (ValueError, TypeError) as exc:
+        await message.answer(f"일과를 바꾸지 못했어: {exc}")
+        return
+    items = state.get("routine", [])
+    lines = ["감옥 일과 (장면 시간이 이 시각을 지나면 거기서 멈추고 인물이 그 사건을 다뤄)"] if items else ["등록된 일과가 없어. /routine 추가 06:00 아침 배식"]
+    lines.extend(f"{i + 1}. {item['time']} {item['title']}" for i, item in enumerate(items))
+    upcoming = routine_occurrences(state, 1440)
+    if upcoming:
+        lines.append("다음: " + ", ".join(f"{item['title']} {at}분 뒤" for at, item in upcoming[:3]))
+    elif items:
+        lines.append("장면 시각이 알려져야 다음 일과를 계산할 수 있어.")
+    await message.answer("\n".join(lines))
+
+
+@router.message(Command("track"))
+async def cmd_track(message: Message) -> None:
+    user_id = message.from_user.id
+    arg = ((message.text or "").split(maxsplit=1)[1:] or [""])[0].strip().casefold()
+    try:
+        if arg in {"켜기", "on", "켜"}:
+            state = await asyncio.to_thread(mutate_state, user_id, "실존 궤도 켜기", roleplay_track.enable)
+        elif arg in {"끄기", "off", "꺼"}:
+            state = await asyncio.to_thread(mutate_state, user_id, "실존 궤도 끄기", roleplay_track.disable)
+        else:
+            state = await asyncio.to_thread(load_state, user_id)
+    except ValueError as exc:
+        await message.answer(f"실존 궤도를 바꾸지 못했어: {exc}")
+        return
+    await message.answer(_track_display(state) or "실존 궤도가 꺼져 있어. /track 켜기 — 장면 날짜 이후의 연표 사건을 예정 사건으로 깔아.")
+
+
+def _track_display(state: dict) -> str:
+    summary = roleplay_track.summary(state)
+    if not summary:
+        return ""
+    parts = ["켜짐" if summary["enabled"] else "꺼짐", f"일치 {summary['matched']}", f"이탈 {summary['departed']}"]
+    if summary["next"]:
+        when = "지금 다룰 사건" if summary["next"]["status"] == "ready" else f"{summary['next']['days']}일 뒤"
+        parts.append(f"다음: {summary['next']['title']} ({when})")
+    return "실존 궤도: " + " · ".join(parts)
 
 
 @router.message(Command("status"))
@@ -304,6 +375,9 @@ async def cmd_status(message: Message) -> None:
     state["upcoming"] = "; ".join(event_lines[:5]) + (f" 외 {len(event_lines) - 5}건" if len(event_lines) > 5 else "")
     held, lost = holdout_titles(state, "held"), holdout_titles(state, "lost")
     state["holdouts_display"] = ("; ".join(held) if held else "등록 없음") + (f" / 넘긴 것: {'; '.join(lost)}" if lost else "")
+    state["bargains_display"] = "; ".join(f"{b['request']} ← {b['price']}" + (" (값 치름)" if b.get("paid") else "") for b in open_bargains(state)) or "등록 없음"
+    state["routine_display"] = ", ".join(f"{item['time']} {item['title']}" for item in state.get("routine", [])) or "등록 없음"
+    state["track_display"] = _track_display(state).removeprefix("실존 궤도: ") or "등록 없음"
     last_resolve = (state.get("resolve_events") or [None])[-1]
     if last_resolve:
         factors = last_resolve.get("factors", {})
@@ -345,7 +419,7 @@ async def cmd_status(message: Message) -> None:
     labels = {"calendar_display": "시각", "location": "장소", "participants": "현재 장면 인물", "saved_people": "저장된 인물",
               "body": "몸 상태", "mood": "기분", "activity": "활동",
               "last_event": "직전 사건", "goal": "목적", "unresolved": "미해결", "upcoming": "예정 사건",
-              "holdouts_display": "아직 지키는 것"}
+              "holdouts_display": "아직 지키는 것", "bargains_display": "열린 거래", "track_display": "실존 궤도"}
     if not state.get("conditions_initialized"):
         state["activity"] = "미확인"
     if not clock["elapsed_complete"]:
@@ -359,6 +433,7 @@ async def cmd_status(message: Message) -> None:
                        "injuries": "세부 부상", "pain_floor": "부상 기저 통증",
                        "isolation": "고립 누적 부담(게임 환산)", "contact_display": "교류",
                        "isolation_display": "고립 환경", "wakefulness": "각성 누적", "calm": "조용한 시간", "resolve_event": "최근 의지 사건",
+                       "routine_display": "감옥 일과",
                        "reason": "최근 변경 이유"})
     lines.extend(f"{label}: {display(state.get(key))}" for key, label in labels.items()
                  if key in {"calendar_display", "location", "participants"} or state.get(key) not in (None, "", "미설정", "등록 없음"))
@@ -457,7 +532,7 @@ async def handle_message(message: Message) -> None:
             "people": people,
             "recent_repeated_phrases": repeated_phrases(history),
             "persona_time": "fictional; infer from the roleplay, not the server clock",
-            "scene_direction": {"direction": roleplay_turn.direction(authorization)},
+            "scene_direction": {"direction": roleplay_turn.direction(authorization, state)},
         }, scope=f"telegram-roleplay:{message.chat.id}",
         observed_at=datetime.now(timezone.utc), temporal_scope="current turn",
     )])
@@ -617,6 +692,8 @@ async def bot_main() -> None:
         BotCommand(command="status", description="인물 상태표"),
         BotCommand(command="people", description="저장된 인물 기록"),
         BotCommand(command="feedback", description="확정 한 줄 표시 켜기/끄기"),
+        BotCommand(command="routine", description="감옥 일과 보기/추가/삭제"),
+        BotCommand(command="track", description="실존 연표 궤도 켜기/끄기"),
     ])
 
     me = await bot.get_me()

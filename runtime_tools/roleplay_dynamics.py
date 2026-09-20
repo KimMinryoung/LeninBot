@@ -67,9 +67,10 @@ RESOLVE_EVENT_KINDS = {  # kind: (base delta at intensity 2, label)
     "coerced_confession": (-4.0, "강요된 자백"),
     "implicating_others": (-5.0, "타인 연루 진술"),
     "holdout_lost": (-3.0, "지키던 것을 넘김"),
+    "bargain_kept": (4.0, "약속된 요구의 이행"),
 }
-# Not a primary scene event: Jev marks a holdout lost alongside whatever else happened.
-NON_EVENT_KINDS = {"sexual_coercion", "holdout_lost"}
+# Not primary scene events: Jev marks these alongside whatever else happened.
+NON_EVENT_KINDS = {"sexual_coercion", "holdout_lost", "bargain_kept"}
 RESOLVE_INTENSITY = {1: 0.5, 2: 1.0, 3: 1.5}  # 스침 / 보통 / 극심
 # Holdouts: the few concrete things the character still refuses to give up (a blank
 # line, a name not read aloud). Discrete stakes that stay legible when the sliders
@@ -93,6 +94,15 @@ CLARITY_SEVERE_PAIN = 75
 CLARITY_SEVERE_PAIN_DRAIN = -0.5
 CLARITY_IMMEDIATE_THREAT_DRAIN = -1.0
 CLARITY_FEVER_DRAIN = -1.0  # an untreated, worsening severity-3 wound reads as infection/fever
+# Bargains: what the character asked for in exchange for what the interrogators want.
+# A kept promise is the one reward the character can earn by being useful; a broken
+# one is the existing betrayal. Jev reads paid/kept/broken; the actor only records the deal.
+MAX_BARGAINS = 3
+BARGAIN_TEXT_MAX = 120
+BARGAIN_KEPT_KIND = "bargain_kept"
+BARGAIN_KEPT_DELTAS = {"tension": -3.0, "humiliation": -3.0}
+# Prison routine: recurring institutional beats the director registers once.
+MAX_ROUTINE = 8
 RESOLVE_EVENT_CAP = 15.0            # one event never takes more than this
 RESOLVE_STATE_FACTOR = 1.25         # each of pain >= 60, fatigue >= 70, an isolation stage
 RESOLVE_PAIN_THRESHOLD = 60
@@ -120,8 +130,10 @@ DYNAMICS_DEFAULTS = {
     "last_calculation": None, "clock": None, "event_timestamps": [], "resolve_events": [],
     "social_contact": "unknown", "isolation_mode": "unknown", "alone_rest_minutes": 0,
     "wakefulness_minutes": 0, "story_events": [], "story_interrupt": None, "metric_remainders": {},
-    "holdouts": [],
+    "holdouts": [], "bargains": [], "routine": [], "track": None,
 }
+# World settings survive a scene reset; the scene's own record does not.
+WORLD_SETTINGS = ("routine",)
 
 
 def with_defaults(state):
@@ -211,6 +223,40 @@ def clarity_drain_rate(state):
 
 def holdout_titles(state, status="held"):
     return [h["title"] for h in state.get("holdouts", []) if h.get("status") == status]
+
+
+def open_bargains(state):
+    return [b for b in state.get("bargains", []) if b.get("status") == "open"]
+
+
+def clock_minute_of_day(state):
+    """Minutes since midnight of the scene clock, or None when the time is unknown."""
+    time = (state.get("clock") or {}).get("time")
+    if not time:
+        return None
+    hour, minute = map(int, time.split(":"))
+    return hour * 60 + minute
+
+
+def routine_occurrences(state, span_minutes):
+    """(minutes from now, item) for each routine item that falls inside the next span, soonest first.
+    An item due exactly now is not upcoming. Needs a known clock time."""
+    now = clock_minute_of_day(state)
+    if now is None or span_minutes <= 0:
+        return []
+    found = []
+    for item in state.get("routine", []):
+        hour, minute = map(int, item["time"].split(":"))
+        offset = (hour * 60 + minute - now) % 1440
+        day = 0
+        while True:
+            at = offset + day * 1440
+            if at > span_minutes:
+                break
+            if at > 0:
+                found.append((at, item))
+            day += 1
+    return sorted(found, key=lambda pair: pair[0])
 
 
 def _diminish(rate, value):

@@ -36,8 +36,12 @@ def apply_story_updates(state, updates):
     state = deepcopy(state)
     events = state.setdefault("story_events", [])
     for update in updates:
-        if not isinstance(update, dict) or set(update) - {"op", "id", "title", "source", "due_minute", "after_event", "outcome", "when_alone"}:
+        if not isinstance(update, dict) or set(update) - {"op", "id", "title", "source", "due_minute", "after_event", "outcome", "when_alone", "kind", "date"}:
             raise ValueError("Invalid story update fields")
+        if "kind" in update and (not isinstance(update["kind"], str) or not 1 <= len(update["kind"]) <= 32):
+            raise ValueError("kind is a short label such as routine or track")
+        if "date" in update and (not isinstance(update["date"], str) or len(update["date"]) != 10):
+            raise ValueError("date is YYYY-MM-DD")
         op, eid = update.get("op"), update.get("id")
         if not isinstance(eid, str) or not 1 <= len(eid.strip()) <= 64:
             raise ValueError("Story event needs a stable id of 1–64 characters")
@@ -97,6 +101,22 @@ def apply_story_updates(state, updates):
     return state
 
 
+def blocking_events(state, horizon_minutes):
+    """Active clock-stopping events that are ready now or due within the horizon.
+    Cues (when_alone) and far-off milestones never block a day skip."""
+    by_id = {e["id"]: e for e in state.get("story_events", [])}
+    result = []
+    for event in by_id.values():
+        if event["status"] in TERMINAL or event.get("when_alone"):
+            continue
+        dependency = by_id.get(event.get("after_event"))
+        if dependency and dependency["status"] != "completed":
+            continue
+        if event["status"] == "ready" or event.get("due_minute", state["scene_minute"]) <= state["scene_minute"] + horizon_minutes:
+            result.append(event)
+    return result
+
+
 def advance_to_event(state, target, basis, advance_fn):
     """Stop at the first eligible event; effects at the requested endpoint are deferred."""
     state = refresh_events(deepcopy(state))
@@ -133,6 +153,8 @@ STORY_UPDATES_SCHEMA = {
         "due_minute": {"type": "integer", "minimum": 0},
         "after_event": {"type": "string", "maxLength": 64},
         "when_alone": {"type": "boolean", "description": "true면 인물이 혼자 남는 순간 ready가 되는 장면 신호. 시계를 멈추지 않으며 하루 안에 다루지 않으면 취소"},
+        "kind": {"type": "string", "maxLength": 32, "description": "routine(일과)·track(실존 연표) 등 코드가 만든 사건의 종류. 보통 생략"},
+        "date": {"type": "string", "maxLength": 10, "description": "연표 사건의 실제 날짜 YYYY-MM-DD. 보통 생략"},
         "outcome": {"type": "string", "maxLength": 300},
     }, "required": ["op", "id"], "additionalProperties": False},
 }

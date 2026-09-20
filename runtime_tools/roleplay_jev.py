@@ -13,8 +13,9 @@ from llm.call_registry import decide_detailed, generate_detailed, resolve
 from runtime_tools.roleplay_dynamics import (METRICS, THREAT_TARGETS,
     RESOLVE_EVENT_KINDS, NON_EVENT_KINDS, HOLDOUT_LOSS_KIND, HOLDOUT_LOSS_DELTAS,
     HUMILIATION_SATURATION, DELAYED_REACTION_PREFIX, DELAYED_REACTION_RELEASE,
-    with_defaults, advance, carry_injury_progress, event_repeat_scale)
-from runtime_tools.roleplay_story import advance_to_event, apply_story_updates, refresh_events
+    BARGAIN_KEPT_KIND, BARGAIN_KEPT_DELTAS, WORLD_SETTINGS,
+    with_defaults, advance, carry_injury_progress, event_repeat_scale, open_bargains, routine_occurrences)
+from runtime_tools.roleplay_story import advance_to_event, apply_story_updates, refresh_events, blocking_events
 from runtime_tools.roleplay_clock import interpret_clock
 from runtime_tools.roleplay_pacing import (policy_for, duration_minutes, check_time_request, check_time_result,
                                          check_reset_request)
@@ -139,9 +140,20 @@ def build_questions(state, people, user_text=""):
         if event['status'] == 'ready' and event.get('when_alone'):
             questions[f'story_{i}'] = choice(f'미뤄 둔 반응 신호 "{event["title"]}"이 이번 장면에서 실제로 드러났는가? 인물이 혼자 있는 장면에서 억눌렀던 감정·몸의 반응(눈물·떨림·구토·무너짐 등)이 서술로 나타나야 complete다. 남이 있는 장면이나 언급만으로는 keep.',
                 {'keep': '아직 드러나지 않음', 'complete': '혼자 남은 장면에서 미뤄 둔 반응이 실제로 드러남', 'cancel': '사용자가 이 신호를 무효화'})
+        elif event['status'] in {'ready', 'pending'} and event.get('kind') == 'routine':
+            questions[f'story_{i}'] = choice(f'일과 "{event["title"]}"이 이번 장면에서 실제로 일어났는가(배식·점검·교대 등이 서술됨)? 도래 자체는 완료가 아니며, 먹은 것은 별도의 meal 사건이다.',
+                {'keep': '아직 일어나지 않음', 'complete': '이번 장면에서 실제로 일어남', 'cancel': '이번에는 건너뛰었거나 취소됨이 명시됨'})
+        elif event['status'] in {'ready', 'pending'} and event.get('kind') == 'track':
+            questions[f'story_{i}'] = choice(f'실존 연표 사건 "{event["title"]}"이 이번 장면에서 실제로 재현되었는가? 다른 결과로 대체되었거나 사용자가 무효화하면 cancel, 아직이면 keep.',
+                {'keep': '아직 다루지 않음', 'complete': '이번 장면에서 연표대로 일어남', 'cancel': '연표와 다르게 진행되어 이 사건은 일어나지 않음'})
         elif event['status'] in {'ready', 'pending'}:
             questions[f'story_{i}'] = choice(f'예정 사건 {event["id"]}의 사용자 근거 판정. 예정 시점 도래 자체는 완료가 아니다.',
                 {'keep': '변경 없음', 'complete': '사용자가 이 사건의 실제 완료를 명시', 'cancel': '사용자가 이 사건을 취소/무효화'})
+    for i, bargain in enumerate(state.get('bargains', [])):
+        if bargain.get('status') == 'open':
+            paid = ' 값은 이미 치렀다.' if bargain.get('paid') else ''
+            questions[f'bargain_{i}'] = choice(f'거래 "{bargain["request"]} ← {bargain["price"]}"의 이번 사건 판정.{paid} 요구가 실제로 이행되면 kept, 약속이 명시적으로 파기되면 broken, 인물이 값(이름·서명·진술)을 실제로 넘겼으면 paid. 언급·재확인만이면 keep.',
+                {'keep': '변화 없음', 'paid': '인물이 값을 실제로 치름', 'kept': '요구가 실제로 이행됨', 'broken': '약속이 명시적으로 파기됨'})
     for i, holdout in enumerate(state.get('holdouts', [])):
         if holdout.get('status') == 'held':
             questions[f'holdout_{i}'] = choice(f'인물이 아직 지키고 있는 것 "{holdout["title"]}"을 이번 사건에서 실제로 넘겼는가? 실제 행위(서명·낭독·기입·복종)가 서술되어야 lost다. 요구받기만 하거나 흔들리는 묘사, 과거 언급은 keep.',
@@ -280,7 +292,9 @@ def project(before, user_text, people, verdict, scope_id):
     if mode == 'reset':
         check_reset_request()
         from runtime_tools.roleplay_memory import STATE_DEFAULTS
-        return with_defaults(dict(STATE_DEFAULTS)), {'mode': 'reset'}
+        fresh = with_defaults(dict(STATE_DEFAULTS))
+        fresh.update({k: deepcopy(before.get(k)) for k in WORLD_SETTINGS})
+        return fresh, {'mode': 'reset'}
     if mode == 'correction':
         values = {}
         for metric, korean in zip(METRICS, ('허기', '피로', '통증', '긴장', '의지', '명료함', '굴욕')):
@@ -365,15 +379,19 @@ def project(before, user_text, people, verdict, scope_id):
         temporal = {'operation': 'advance', 'relation': 'current', 'certainty': 'explicit' if elapsed == 'explicit' else 'estimated',
                     'source_quote': user_text[:400], 'interpretation': 'Jev: 사용자가 지정한 단일 사건까지만 진행', 'elapsed_minutes': minutes}
         if calendar:
-            if any(e['status'] in {'pending', 'ready'} for e in before.get('story_events', [])):
+            if blocking_events(before, 1440):
                 raise ValueError('예정 사건이 있어 미상 경과의 다음 날로 건너뛸 수 없음')
             temporal.pop('elapsed_minutes')
             temporal.update(operation='next_day', daypart='morning' if '아침' in user_text else 'unknown')
+        elif elapsed == 'explicit':
+            state = schedule_routine(state, minutes)
         policy = check_time_request(before, temporal, scope_id)
         state = interpret_clock(state, temporal, lambda s, target, basis: advance_to_event(s, target, basis, advance))
         check_time_result(before, state, temporal, scope_id, policy)
         if state.get('story_interrupt'):
-            return state, {'mode': mode, 'interrupted': True, 'initialized': initialized}
+            stopped = [e for e in state['story_events'] if e['id'] in state['story_interrupt']['event_ids']]
+            return state, {'mode': mode, 'interrupted': True, 'initialized': initialized, 'minutes': state['scene_minute'] - before['scene_minute'],
+                           'stopped_at': [e['title'] for e in stopped], 'stopped_kinds': sorted({e.get('kind', 'planned') for e in stopped})}
     else:
         state['story_interrupt'] = None
     for key in ('threat', 'social_contact', 'isolation_mode', 'location'):
@@ -447,6 +465,9 @@ def project(before, user_text, people, verdict, scope_id):
     lost = _lose_holdouts(state, before, labels, scope_id, user_text)
     if lost:
         applied['holdouts_lost'] = lost
+    bargains = _settle_bargains(state, before, labels, scope_id, user_text)
+    if bargains:
+        applied['bargains'] = bargains
     updates = []
     for i, scheduled in enumerate(before.get('story_events', [])):
         action = labels.get(f'story_{i}', 'keep')
@@ -470,6 +491,53 @@ def project(before, user_text, people, verdict, scope_id):
         applied['delayed_reaction'] = 'scheduled'
     state['last_event'] = user_text[:300]
     return state, applied
+
+
+def schedule_routine(state, span_minutes):
+    """Register the routine beats an explicit passage will cross, so the clock stops there."""
+    existing = {e['id'] for e in state.get('story_events', [])}
+    updates = []
+    for at, item in routine_occurrences(state, span_minutes):
+        due = state['scene_minute'] + at
+        eid = f"routine-{item['id']}-{due}"
+        if eid not in existing:
+            updates.append({'op': 'schedule', 'id': eid, 'kind': 'routine', 'title': f"{item['time']} {item['title']}",
+                            'source': '등록된 일과', 'due_minute': due})
+    return apply_story_updates(state, updates) if updates else state
+
+
+def _settle_bargains(state, before, labels, scope_id, user_text):
+    """paid marks the price given; kept rewards the honored request; broken is a betrayal."""
+    from runtime_tools.roleplay_memory import _apply_resolve_event
+    settled = {}
+    for i, bargain in enumerate(before.get('bargains', [])):
+        action = labels.get(f'bargain_{i}', 'keep')
+        if bargain.get('status') != 'open' or action == 'keep':
+            continue
+        current = next((b for b in state['bargains'] if b['id'] == bargain['id']), None)
+        if current is None or current['status'] != 'open':
+            continue
+        if action == 'paid':
+            if current.get('paid'):
+                continue
+            current.update(paid=True, paid_minute=state['scene_minute'])
+        else:
+            current.update(status=action, resolved_minute=state['scene_minute'], resolved_scope_id=scope_id)
+            kind = BARGAIN_KEPT_KIND if action == 'kept' else 'betrayal'
+            deltas = BARGAIN_KEPT_DELTAS if action == 'kept' else EVENT_DELTAS['betrayal']
+            repeat = event_repeat_scale(state, kind)
+            for metric, delta in deltas.items():
+                if state[metric] is not None:
+                    effect = delta * repeat
+                    if metric == 'humiliation' and effect > 0:
+                        effect *= max(.2, min(1.0, (100 - state[metric]) / 40))
+                    state[metric] = _clamp(state[metric] + effect)
+                    state.setdefault('metric_remainders', {}).pop(metric, None)
+            if state['resolve'] is not None:
+                _apply_resolve_event(state, {'kind': kind, 'intensity': 2, 'note': f'{bargain["request"]} ← {bargain["price"]}: {user_text[:160]}'},
+                                     event_id=f'jev-{scope_id}-bargain-{bargain["id"]}', reason='거래의 이행' if action == 'kept' else '거래의 파기')
+        settled[bargain['request']] = action
+    return settled
 
 
 def _lose_holdouts(state, before, labels, scope_id, user_text):

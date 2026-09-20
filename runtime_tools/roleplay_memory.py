@@ -1,6 +1,7 @@
 """Private, user-scoped persistent notes for the standalone roleplay bot."""
 from __future__ import annotations
 
+from copy import deepcopy
 import hashlib
 import json
 import math
@@ -13,10 +14,11 @@ from pathlib import Path
 
 from tool_gateway.security import get_caller
 from runtime_tools.roleplay_pacing import check_time_request, check_time_result, check_reset_request
-from runtime_tools.roleplay_story import STORY_UPDATES_SCHEMA, apply_story_updates, advance_to_event
+from runtime_tools.roleplay_story import STORY_UPDATES_SCHEMA, apply_story_updates, advance_to_event, blocking_events
 from runtime_tools.roleplay_clock import TEMPORAL_SCHEMA, interpret_clock, validate_temporal
 from runtime_tools.roleplay_dynamics import (METRICS, CONDITION_SCHEMA, REQUIRED_CONDITIONS, RESOLVE_EVENT_KINDS, RESOLVE_INTENSITY,
-                                             RESOLVE_EVENT_HISTORY, MAX_HOLDOUTS, HOLDOUT_TITLE_MAX, with_defaults, validate_conditions, advance,
+                                             RESOLVE_EVENT_HISTORY, MAX_HOLDOUTS, HOLDOUT_TITLE_MAX, MAX_BARGAINS, BARGAIN_TEXT_MAX,
+                                             MAX_ROUTINE, WORLD_SETTINGS, open_bargains, with_defaults, validate_conditions, advance,
                                              carry_injury_progress, injury_pain_floor, reconcile_injuries,
                                              isolation_stage, resolve_event_delta)
 
@@ -55,6 +57,42 @@ def set_preference(user_id: str | int, key: str, value: str) -> None:
     with _connection() as conn:
         conn.execute("INSERT INTO preferences VALUES (?, ?, ?) ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value",
                      (str(user_id), key, value))
+
+
+def mutate_state(user_id: str | int, reason: str, mutate) -> dict:
+    """Apply a director command (routine, track) as one audited revision. ``mutate`` takes the
+    loaded state and returns the new one; raising leaves everything untouched."""
+    uid = str(user_id)
+    with _connection() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute("SELECT payload FROM character_state WHERE user_id = ?", (uid,)).fetchone()
+        before = with_defaults({**STATE_DEFAULTS, **(json.loads(row[0]) if row else {})})
+        state = mutate(deepcopy(before))
+        state["revision"] = before["revision"] + 1
+        state["reason"] = reason
+        audit = {"revision": state["revision"], "action": "command", "reason": reason, "before": before, "after": state}
+        conn.execute("INSERT INTO state_history(user_id, revision, payload) VALUES (?, ?, ?)", (uid, state["revision"], json.dumps(audit, ensure_ascii=False)))
+        conn.execute("INSERT INTO character_state VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET payload = excluded.payload",
+                     (uid, json.dumps(state, ensure_ascii=False)))
+    return state
+
+
+def set_routine(state: dict, items: list) -> dict:
+    """Replace the routine list: [{id, time 'HH:MM', title}], validated and sorted by time."""
+    if not isinstance(items, list) or len(items) > MAX_ROUTINE:
+        raise ValueError(f"일과는 최대 {MAX_ROUTINE}개")
+    cleaned, seen = [], set()
+    for item in items:
+        time, title = str(item.get("time", "")), str(item.get("title", "")).strip()
+        if not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", time) or not 1 <= len(title) <= 60:
+            raise ValueError("일과 항목은 HH:MM 시각과 60자 이내 제목이 필요함")
+        key = (time, title)
+        if key in seen:
+            continue
+        seen.add(key)
+        cleaned.append({"id": hashlib.sha1(f"{time}|{title}".encode()).hexdigest()[:8], "time": time, "title": title})
+    state["routine"] = sorted(cleaned, key=lambda i: i["time"])
+    return state
 
 
 def _owner_id() -> str:
@@ -267,7 +305,7 @@ def _apply_person_updates(conn, user_id: str, updates: list[dict], warnings: lis
 # ── Character state ───────────────────────────────────────────────────
 SCENE_TEXT_FIELDS = {"period", "location", "last_event", "unresolved", "goal", "avoid", "next_action"}
 DESCRIPTION_FIELDS = {"body", "mood", "scene"}
-CHANGE_KEYS = set(CONDITION_SCHEMA) | set(METRICS) | SCENE_TEXT_FIELDS | DESCRIPTION_FIELDS | {"participants", "holdouts"}
+CHANGE_KEYS = set(CONDITION_SCHEMA) | set(METRICS) | SCENE_TEXT_FIELDS | DESCRIPTION_FIELDS | {"participants", "holdouts", "bargain"}
 INTERVAL_ALIASES = {"interval", "conditions", "elapsed_conditions", "interval_condition"}
 ADJUSTMENTS = {"initialize", "event", "correction"}
 EVENT_TYPES = {"other", "meal", "sleep", "injury", "treatment"}
@@ -312,6 +350,9 @@ def state_view(state: dict) -> dict:
     view["isolation_stage"] = f"{stage['label']}: {stage['description']}" if stage else None
     view["wakefulness_hours"] = round(state.get("wakefulness_minutes", 0) / 60, 1)
     view["holdouts"] = state.get("holdouts", [])
+    view["bargains"] = state.get("bargains", [])
+    view["routine"] = state.get("routine", [])
+    view["track"] = state.get("track")
     view["story_events"] = [e for e in state.get("story_events", []) if e["status"] in {"pending", "ready"}]
     view["recent_story_outcomes"] = [e for e in state.get("story_events", []) if e["status"] in {"completed", "cancelled"}][-5:]
     if state.get("story_interrupt"):
@@ -401,6 +442,10 @@ def _validate_changes(changes: dict) -> None:
             if (not isinstance(value, list) or len(value) > MAX_HOLDOUTS
                     or any(not isinstance(v, str) or not 1 <= len(v.strip()) <= HOLDOUT_TITLE_MAX for v in value)):
                 raise ValueError(f"holdouts는 인물이 아직 지키는 것의 짧은 제목 최대 {MAX_HOLDOUTS}개({HOLDOUT_TITLE_MAX}자 이내)")
+        elif key == "bargain":
+            if (not isinstance(value, dict) or set(value) != {"request", "price"}
+                    or any(not isinstance(value[k], str) or not 1 <= len(value[k].strip()) <= BARGAIN_TEXT_MAX for k in ("request", "price"))):
+                raise ValueError(f"bargain은 {{request: 인물이 요구한 것, price: 그 대가로 넘기기로 한 것}} 각 {BARGAIN_TEXT_MAX}자 이내")
         elif key in SCENE_TEXT_FIELDS:
             if not isinstance(value, str) or len(value) > 300:
                 raise ValueError("Scene fields must be strings of at most 300 characters")
@@ -412,9 +457,11 @@ def _apply_changes(base: dict, changes: dict, *, adjustment: str, metric_reasons
                    event_id: str, event_type: str, warnings: list[str]) -> tuple[dict, str, dict | None]:
     """Apply an immediate update on top of ``base`` (the saved state, or the state after an interval)."""
     numeric = set(changes) & set(METRICS)
-    state = {**base, **{k: v for k, v in changes.items() if k not in numeric and k != "holdouts"}}
+    state = {**base, **{k: v for k, v in changes.items() if k not in numeric and k not in {"holdouts", "bargain"}}}
     if "holdouts" in changes:
         state["holdouts"] = merge_holdouts(base.get("holdouts", []), changes["holdouts"], warnings, scene_minute=base.get("scene_minute", 0))
+    if "bargain" in changes:
+        state["bargains"] = add_bargain(base.get("bargains", []), changes["bargain"], scene_minute=base.get("scene_minute", 0))
     if "participants" in changes and changes["participants"] != base.get("participants", []):
         state["alone_rest_minutes"] = 0
         if "social_contact" not in changes:
@@ -490,6 +537,20 @@ def merge_holdouts(existing: list, titles: list, warnings: list[str], *, scene_m
     return result
 
 
+def add_bargain(existing: list, bargain: dict, *, scene_minute: int = 0) -> list:
+    """Record a deal struck in the scene: what the character asked for and what it costs.
+    Only Jev settles it (paid/kept/broken); an identical open deal is not duplicated."""
+    result = [dict(b) for b in existing]
+    request, price = bargain["request"].strip(), bargain["price"].strip()
+    if any(b["status"] == "open" and b["request"] == request and b["price"] == price for b in result):
+        return result
+    if sum(b["status"] == "open" for b in result) >= MAX_BARGAINS:
+        raise ValueError(f"열린 거래는 최대 {MAX_BARGAINS}개. 이행·파기가 판정된 뒤에 새 거래를 기록")
+    result.append({"id": f"b{len(result) + 1}", "request": request, "price": price, "status": "open",
+                   "paid": False, "struck_minute": scene_minute})
+    return result[-20:]
+
+
 def _normalize_resolve_event(value, action: str, warnings: list[str]):
     if value in (None, {}, ""):
         return None
@@ -557,7 +618,7 @@ def roleplay_state(action: str, changes: dict | None = None, reason: str = "", *
                 record[side] = {k: record[side].get(k) for k in (*METRICS, "scene_minute", "activity", "sleep_quality", "threat", "injuries", "clock")}
         return json.dumps(records, ensure_ascii=False)
     if caller.scope_type == "telegram_message":
-        narrative = {"goal", "avoid", "next_action", "unresolved", "body", "mood", "scene", "holdouts"}
+        narrative = {"goal", "avoid", "next_action", "unresolved", "body", "mood", "scene", "holdouts", "bargain"}
         if (action != "update" or not isinstance(changes, dict) or set(changes) - narrative
                 or temporal is not None or interval_conditions is not None or resolve_event is not None
                 or story_updates is not None or adjustment or metric_reasons or extra or person_updates is not None):
@@ -654,8 +715,8 @@ def roleplay_state(action: str, changes: dict | None = None, reason: str = "", *
         if action == "time":
             pacing_policy = check_time_request(before, temporal, caller.scope_id)
             if (temporal["relation"] == "current" and temporal["operation"] == "next_day"
-                    and any(e["status"] in {"pending", "ready"} for e in before.get("story_events", []))):
-                raise ValueError("예정 사건이 있어 경과량 미상의 next_day로 건너뛸 수 없음. 근거 있는 advance/until로 진행하거나 무효인 사건을 취소")
+                    and blocking_events(before, 1440)):
+                raise ValueError("하루 안에 도래하는 예정 사건이 있어 경과량 미상의 next_day로 건너뛸 수 없음. 근거 있는 advance/until로 진행하거나 무효인 사건을 취소")
             interval_state = {**before, **(interval_conditions or {})}
             if interval_conditions and all(k in interval_conditions for k in REQUIRED_CONDITIONS):
                 interval_state["conditions_initialized"] = True
@@ -679,6 +740,7 @@ def roleplay_state(action: str, changes: dict | None = None, reason: str = "", *
         elif action == "reset":
             base = with_defaults(dict(STATE_DEFAULTS))
             base["revision"] = before["revision"]
+            base.update({k: deepcopy(before.get(k)) for k in WORLD_SETTINGS})
         else:
             base = before
             if "injuries" in changes:
@@ -730,6 +792,9 @@ ROLEPLAY_STATE_TOOL = {
                for key in ("goal", "avoid", "next_action", "unresolved", "body", "mood", "scene")},
             "holdouts": {"type": "array", "maxItems": MAX_HOLDOUTS, "items": {"type": "string", "maxLength": HOLDOUT_TITLE_MAX},
                          "description": "인물이 아직 실제로 넘기지 않은 구체적인 것(빈칸으로 둔 줄, 소리 내어 읽지 않은 이름 등). 이미 지키는 항목은 같은 제목으로 유지, 새 항목 추가만 가능"},
+            "bargain": {"type": "object", "properties": {"request": {"type": "string", "maxLength": BARGAIN_TEXT_MAX}, "price": {"type": "string", "maxLength": BARGAIN_TEXT_MAX}},
+                        "required": ["request", "price"], "additionalProperties": False,
+                        "description": "장면에서 실제로 성립한 거래 하나: 인물이 요구한 것(request)과 그 대가로 넘기기로 한 것(price). 이행·파기·값 치름은 자동 판정이 기록"},
         }, "additionalProperties": False},
         "reason": {"type": "string", "maxLength": 300},
         "expected_revision": {"type": "integer", "minimum": 0},
