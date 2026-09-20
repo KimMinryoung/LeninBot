@@ -700,17 +700,18 @@ async def on_choice(query: CallbackQuery) -> None:
     if key != pending["key"]:
         await query.answer("이미 처리된 선택이야.")
         return
+    # Claim the pending draft before any slow work: a second tap (or a Telegram retry)
+    # must not settle the same draft twice in parallel.
+    PENDING_CHOICES.pop(user_id, None)
     await query.answer()
     chosen = _CHOICE_LABELS.get(key, {}).get(value) or next((korean for label, korean in _candidates_of(pending, key) if label == value), value)
     if key == "mode":
-        PENDING_CHOICES.pop(user_id, None)
         await query.message.edit_text(f"선택: {chosen}")
         authorization = {"user_text": pending["user_text"], "labels": {"mode": value, "transition": "current", "span": "brief"},
                          "player_confirmed": True}
         await _draft_and_settle(query.message, user_id, pending, authorization)
         return
     if key == "within_scope" and value != "yes":
-        PENDING_CHOICES.pop(user_id, None)
         await asyncio.to_thread(_drop_unsettled, user_id, pending, "플레이어가 범위 밖으로 판정")
         await query.message.edit_text("이 초안은 버렸어. 어디까지 진행할지 다시 말해줘.")
         return
@@ -724,21 +725,19 @@ async def on_choice(query: CallbackQuery) -> None:
             pending["history"], scope_id, pending["draft"], pending["authorization"], pending["stage"], verdict, key == "within_scope")
     except PendingChoice as exc:
         pending["verdict"], pending["key"], pending["candidates"] = getattr(exc, "verdict", None), exc.key, exc.candidates
+        PENDING_CHOICES[user_id] = pending
         await query.message.edit_text(f"선택: {chosen}\n" + _choice_prompt(exc), reply_markup=_choice_keyboard(scope_id, exc))
         return
     except ValueError as exc:
-        PENDING_CHOICES.pop(user_id, None)
         logger.warning("roleplay choice completion rejected: %s", exc)
         await asyncio.to_thread(_drop_unsettled, user_id, pending, f"선택 후 확정 실패: {_issue_text(exc)}")
         await query.message.edit_text(f"선택: {chosen}\n그래도 초안을 확정하지 못했어.\n막힌 부분: {_issue_text(exc)}\n다시 말해줘.")
         return
     except Exception:
-        PENDING_CHOICES.pop(user_id, None)
         logger.exception("roleplay choice completion failed")
         await asyncio.to_thread(_drop_unsettled, user_id, pending, "선택 후 내부 오류")
         await query.message.edit_text("확정 중 오류가 났어. 메시지를 다시 보내줘.")
         return
-    PENDING_CHOICES.pop(user_id, None)
     settled = await asyncio.to_thread(adjudicate_turn, user_id, pending["user_text"], pending["history"], scope_id, prepared=prepared)
     if settled.get("status") not in {"applied", "unchanged"}:
         await asyncio.to_thread(_drop_unsettled, user_id, pending, f"정산 보류: {settled.get('reason')}")

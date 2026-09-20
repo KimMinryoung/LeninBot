@@ -103,6 +103,10 @@ def direction(authorization, state=None):
     if mode != 'scene':
         return '장면을 진행하지 않고 질문·회상·계획·정정 요청에 답하는 초안을 쓴다. 새 사건이 일어났다고 서술하지 않는다.'
     text = '사용자가 지정한 한 장면의 초안을 쓴다. 다음 아침으로의 전환이 허용되면 아침 장면에서 바로 시작하고, 생략된 밤의 수면·회복·사건을 만들어 넣지 않는다. 지정한 종료점에서 멈추고 후속 사건을 붙이지 않는다. 아직 저장·확정되지 않은 초안이다.'
+    if state is not None:
+        location = state.get('location') or '미확인'
+        text += (f" 현재 위치는 \"{location}\"이며, 사용자가 이동을 지시하지 않았으면 사건은 그 자리에서 일어난다. 감방으로 돌아가는 길·계단·다른 방을 지어내지 않는다."
+                 " 초안은 이 사건 하나와 그 직후의 반응까지다. 한두 문단이면 충분하고, 그 뒤의 식사·수면·다음 방문·다음 날은 쓰지 않는다.")
     stop = expected_stop(authorization, state) if state is not None else None
     if stop:
         text += f" 이 장면은 {stop['title']}({stop['minutes']}분 뒤)에서 멈춘다. 그 도래 장면까지만 쓰고 그 뒤는 쓰지 않는다."
