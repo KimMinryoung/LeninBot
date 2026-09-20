@@ -276,6 +276,26 @@ class Store:
                         (attempt,job['id'],job['stage']))
         return attempt
 
+    def save_editor_checkpoint(self, job, value):
+        """Durable rejected patch, fenced by the same lease as stage completion."""
+        with self.transaction() as cur:
+            cur.execute('''SELECT id FROM commulingo_pipeline_jobs WHERE id=%s
+                AND lease_token=%s AND status='running' AND lease_until>now() FOR UPDATE''',
+                (job['id'], job['lease_token']))
+            if not cur.fetchone():
+                raise LostLease(str(job['id']))
+            cur.execute('''INSERT INTO commulingo_pipeline_artifacts(job_id,stage,value)
+                VALUES (%s,'editor_checkpoint',%s)''', (job['id'], Json(value)))
+
+    def pin_editor_workflow(self, job):
+        with self.transaction() as cur:
+            cur.execute('''UPDATE commulingo_pipeline_jobs SET payload=payload || '{"workflow":"editor"}'::jsonb
+                WHERE id=%s AND lease_token=%s AND status='running' AND lease_until>now()
+                AND (payload->>'workflow' IS NULL OR payload->>'workflow'='editor') RETURNING id''',
+                (job['id'],job['lease_token']))
+            if not cur.fetchone():
+                raise LostLease(str(job['id']))
+
     def link_attempt_budget(self, attempt, reservation):
         with self.transaction() as cur:
             cur.execute('UPDATE commulingo_pipeline_attempts SET budget_id=%s WHERE id=%s',
@@ -283,12 +303,13 @@ class Store:
 
     def finish_attempt(self, attempt, outcome, next_stage, error, duration, metrics):
         # Do not duplicate tool transcripts/source text or ledger cost in metrics.
-        terminal_calls = sum(isinstance(line,str) and '] commulingo_pipeline_result(' in line
+        terminal_calls = sum(isinstance(line,str) and any('] '+name+'(' in line for name in
+                             ('commulingo_pipeline_result','commulingo_pipeline_repair'))
                              for line in metrics.get('tool_work_details',[]))
         metrics = {k:v for k,v in metrics.items() if k in {
             'rounds_used','input_tokens','output_tokens','model_calls','pipeline_cache_hits',
             'preflight_checks','preflight_failures','preflight_passed','rejections','provider_fallback',
-            'targeted_research'}}
+            'targeted_research','workflow','repair_protocol_errors','jev_calls','jev_cost_usd'}}
         metrics['terminal_calls'] = terminal_calls
         if 'rejections' in metrics:
             metrics['rejections'] = metrics['rejections'][-12:]
@@ -340,7 +361,7 @@ class Store:
                         'review_citation_checks','review_citation_rejections','review_citation_unavailable',
                         # search-hit triage, shadow (search_triage.py): per-hit verdicts for the later join
                         'search_triage','search_triage_calls','search_triage_unavailable',
-                        'classification'}}
+                        'classification','workflow'}}
             if (usage or {}).get('provider_fallback'):
                 # Later stages see the same sources; skip the provider that refused them.
                 cur.execute('''UPDATE commulingo_pipeline_jobs
@@ -355,6 +376,8 @@ class Store:
             if job['stage']=='discover':
                 for candidate in value.get('candidates',[]):
                     payload = {'candidate':candidate,'material_id':job['payload']['material_id']}
+                    if job['payload'].get('workflow'):
+                        payload['workflow'] = job['payload']['workflow']
                     if payload['material_id'].startswith('gap:'):
                         payload['gap_id'] = int(payload['material_id'].split(':')[1])
                     cur.execute('''INSERT INTO commulingo_pipeline_mentions(kind,target,material_id,mention)
@@ -515,6 +538,8 @@ class Store:
     def retry(self, job_id):
         with self.transaction() as cur:
             cur.execute('''UPDATE commulingo_pipeline_jobs SET status='ready',
+                stage=CASE WHEN stage='complete' AND payload->>'workflow'='editor'
+                    THEN 'research' ELSE stage END,
                 available_at=now(),attempts=0,last_error='',updated_at=now()
                 WHERE id=%s AND status IN ('deferred','escalated') RETURNING id''', (job_id,))
             return bool(cur.fetchone())

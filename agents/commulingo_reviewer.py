@@ -52,13 +52,15 @@ Escalate means internal hold without publication. No case is sent to a human for
 Do not infer truth from confidence scores, citation presence, or the fact that an author wrote it.
 Each check has citation_id (S1=source_refs[0], S2=source_refs[1]) or citation, passages, and a
 Korean finding. Text you retrieve with fetch_url/wiki_get shows every paragraph behind a passage
-label such as [R5c5d56d06d4d1f95@6933]; passages lists the labels of the one to three paragraphs
-(of one retrieved source) that verify the finding, copied exactly as shown. Do not copy the text,
+label such as [P12]; passages lists only the labels of paragraphs that verify the finding,
+copied exactly as shown. Labels remain bound to the original retrieved snapshot after further
+fetches. If a label is rejected, correct that check's references and preserve the other checks.
+Do not copy the text,
 paraphrase, or count anything; cite only the paragraphs that support your finding.
 EVERY check, including an additional independent source, must have citation_id or citation.
 That field identifies the ORIGINAL proposal reference being checked; passages identify the
 text you independently retrieved. They can refer to different URLs. For example:
-{"citation_id":"S1","passages":["R5c5d56d06d4d1f95@6933"],"finding":"교차 검증 결과"}.
+{"citation_id":"S1","passages":["P12"],"finding":"교차 검증 결과"}.
 For approval, include the checks that verify the
 changed claims and list every resolved risk; covering every cited reference is not required. checks[].citation MUST copy the COMPLETE original source_refs
 string verbatim, including its URL and annotation; a replacement label is invalid.

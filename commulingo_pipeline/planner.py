@@ -8,8 +8,9 @@ from .mentions import report_mentions_by_term
 
 
 class Planner:
-    def __init__(self, store, overlap_allow=None, exclude=None):
+    def __init__(self, store, overlap_allow=None, exclude=None, *, concrete=False):
         self.store = store
+        self.concrete = concrete
         if overlap_allow is None or exclude is None:
             from .config import load
             config = load()
@@ -19,6 +20,9 @@ class Planner:
         self.exclude = list(exclude)
 
     def candidates(self, limit=40):
+        section_needed = ('false' if self.concrete else
+            '(SELECT count(*) FROM commulingo_person_sections s WHERE s.person_id=p.id) < '
+            + SECTION_CAP_SQL.format(events=PERSON_EVENTS_SQL.format(person='p.id')))
         with self.store.transaction() as cur:
             # People are ordered by importance, measured for now as the number
             # of linked history events (operator decision 2026-09-17), not by
@@ -45,8 +49,7 @@ class Planner:
                         OR NOT EXISTS (SELECT 1 FROM commulingo_person_evidence e WHERE e.person_id=p.id AND e.field IN ('nationalOrigin','origin'))),
                     ('moment',40,p.moment_ko='' OR p.moment_en='' OR NOT EXISTS
                         (SELECT 1 FROM commulingo_person_evidence e WHERE e.person_id=p.id AND e.field='moment')),
-                    ('sections',50,(SELECT count(*) FROM commulingo_person_sections s WHERE s.person_id=p.id)
-                        < ''' + SECTION_CAP_SQL.format(events=PERSON_EVENTS_SQL.format(person='p.id')) + ''')
+                    ('sections',50,''' + section_needed + ''')
                 ) AS topic(name,priority,needed)
                 WHERE topic.needed AND NOT EXISTS (SELECT 1 FROM commulingo_person_enrichment e
                     WHERE e.person_id=p.id AND e.topic=topic.name AND e.status!='open' AND e.review_after>now())
@@ -62,16 +65,17 @@ class Planner:
                         (SELECT 1 FROM commulingo_term_evidence e WHERE e.term_id=t.id AND e.field='definition')),
                     ('history',40,t.body_ko='' OR t.body_en='' OR NOT EXISTS
                         (SELECT 1 FROM commulingo_term_evidence e WHERE e.term_id=t.id AND e.field='body')),
-                    ('distinctions',50,true),('examples',50,true),
-                    ('relations',50,NOT EXISTS (SELECT 1 FROM commulingo_term_people r WHERE r.term_id=t.id)
-                        OR NOT EXISTS (SELECT 1 FROM commulingo_term_events r WHERE r.term_id=t.id))
+                    ('distinctions',50,''' + ('false' if self.concrete else 'true') + '''),
+                    ('examples',50,''' + ('false' if self.concrete else 'true') + '''),
+                    ('relations',50,''' + ('false AND (' if self.concrete else '(') + '''NOT EXISTS (SELECT 1 FROM commulingo_term_people r WHERE r.term_id=t.id)
+                        OR NOT EXISTS (SELECT 1 FROM commulingo_term_events r WHERE r.term_id=t.id)))
                 ) AS topic(name,priority,needed)
                 WHERE topic.needed AND NOT EXISTS (SELECT 1 FROM commulingo_term_enrichment e
                     WHERE e.term_id=t.id AND e.topic=topic.name AND e.status!='open' AND e.review_after>now())
                 AND NOT EXISTS (SELECT 1 FROM commulingo_agent_suggestions s
                     WHERE s.target_id=t.id AND s.target_type='term' AND s.status='pending')
                 AND NOT ''' + TERM_IN_GRACE_SQL.format(term='t.id') + '''
-                AND NOT ''' + TERM_BODY_ENOUGH_SQL.format(t='t') + '''
+                AND NOT ''' + ('false' if self.concrete else TERM_BODY_ENOUGH_SQL.format(t='t')) + '''
                 AND t.id <> ALL(%(term_exclude)s::text[])
                 ORDER BY priority,target''', {**GRACE_PARAMS, **term_params(self.exclude)})
             candidates = [dict(row) for row in cur.fetchall()]
@@ -176,14 +180,19 @@ class Planner:
                      if discovery or m['material_id'].startswith('gap:')]
         if apply:
             for candidate in candidates:
+                if self.concrete:
+                    candidate['payload'] = {**candidate.get('payload',{}), 'workflow':'editor'}
                 self.store.enqueue(**candidate)
             self.store.reprioritize_people()
             self.store.retire_people_in_grace()
             self.store.reprioritize_terms(report_mentions_by_term())
-            self.store.retire_unqualified_terms(self.exclude)
+            if not self.concrete:
+                self.store.retire_unqualified_terms(self.exclude)
             if not discovery:
                 self.store.cancel_discovery()
             for material in materials:
+                if self.concrete:
+                    material['workflow'] = 'editor'
                 target = 'material-'+hashlib.sha256((material['material_id']+material['content_hash']).encode()).hexdigest()[:32]
                 self.store.enqueue(kind='term',action='create',target=target,topic='discovery',
                     reason='New or changed public material',priority=10 if material['material_id'].startswith('gap:') else 60,payload=material,stage='discover')

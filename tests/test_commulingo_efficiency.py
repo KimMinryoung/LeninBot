@@ -54,12 +54,12 @@ class EfficiencyTests(unittest.IsolatedAsyncioTestCase):
         from commulingo_pipeline.evidence import Passages
         snapshots, passages = {}, Passages()
         source_id, shown = review_source(url, body, snapshots, passages, base=500)
-        # Labels carry the slice's offset in its page; the text itself is shown unchanged behind them.
-        self.assertEqual(shown, f'[{source_id}@500] The original archive records the birth — and the “subsequent” appointment.\n'
-                                f'[{source_id}@{500+body.index("Another")}] Another paragraph.')
+        # Short labels bind the immutable slice, independently of its page offset.
+        self.assertEqual(shown, '[P1] The original archive records the birth — and the “subsequent” appointment.\n'
+                                '[P2] Another paragraph.')
         proposal = {'source_refs':[url+' — biography'], 'risks':[]}
         decision = {'decision':'approve','reason':'Original evidence substantiates the proposed facts.',
-            'resolved_risks':[], 'checks':[{'citation_id':'S1','passages':[f'{source_id}@500'],'finding':'The appointment is documented.'}]}
+            'resolved_risks':[], 'checks':[{'citation_id':'S1','passages':['P1'],'finding':'The appointment is documented.'}]}
         validate_tool_arguments('commulingo_review_decision', decision,
                                 schema=DECISION_TOOL['input_schema'], risk_class='state')
         resolved = resolve_review_checks(decision, proposal, snapshots, passages)
@@ -67,22 +67,17 @@ class EfficiencyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(resolved['checks'][0]['source'], url)
         self.assertEqual(resolved['checks'][0]['citation'], url+' — biography')
         self.assertEqual(validate_decision(resolved, proposal), resolved)
-        # Two paragraphs join in offset order; a label never shown drops that check and records why; a decision
-        # whose every check is unresolvable is refused with the sources retrieved.
-        both = deepcopy(decision); both['checks'][0]['passages'] = [f'{source_id}@{500+body.index("Another")}', f'{source_id}@500']
+        both = deepcopy(decision); both['checks'][0]['passages'] = ['P2', 'P1']
         self.assertEqual(resolve_review_checks(both, proposal, snapshots, passages)['checks'][0]['quote'], body)
-        partial = deepcopy(decision); partial['checks'].append({'citation_id':'S1','passages':['R0000000000000000@0'],'finding':'x'})
-        survived = resolve_review_checks(partial, proposal, snapshots, passages)
-        self.assertEqual(len(survived['checks']), 1)
-        # Labels of two retrieved sources become one check per source.
-        other_id, _ = review_source('https://other.example/page', 'Different page with enough text to cite.', snapshots, passages)
-        two = deepcopy(decision); two['checks'][0]['passages'] = [f'{source_id}@500', f'{other_id}@0']
+        partial = deepcopy(decision); partial['checks'].append({'citation_id':'S1','passages':['P999'],'finding':'x'})
+        with self.assertRaisesRegex(ValueError, 'check 2: passage labels not displayed: P999'):
+            resolve_review_checks(partial, proposal, snapshots, passages)
+        # Labels of two retrieved snapshots become one check per snapshot.
+        review_source('https://other.example/page', 'Different page with enough text to cite.', snapshots, passages)
+        two = deepcopy(decision); two['checks'][0]['passages'] = ['P1', 'P3']
         self.assertEqual([c['source'] for c in resolve_review_checks(two, proposal, snapshots, passages)['checks']], [url, 'https://other.example/page'])
-        self.assertEqual(survived['dropped_checks'], [{'check':2,'labels':['R0000000000000000@0'],
-                                                       'reason':'passage label not shown in this review: R0000000000000000@0'}])
-        self.assertEqual(validate_decision(survived, proposal), survived)
-        absent = deepcopy(decision); absent['checks'][0]['passages'] = [f'{source_id}@7']
-        with self.assertRaisesRegex(ValueError, f'no check could be verified — check 1: passage label not shown.*{source_id} \\({url}\\)'):
+        absent = deepcopy(decision); absent['checks'][0]['passages'] = ['P999']
+        with self.assertRaisesRegex(ValueError, 'check 1: passage labels not displayed: P999'):
             resolve_review_checks(absent, proposal, snapshots, passages)
 
     def test_repair_revalidates_full_payload_and_binds_revision(self):

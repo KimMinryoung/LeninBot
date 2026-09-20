@@ -16,6 +16,7 @@ def main():
     efficiency.add_argument('--since',default='today',help='UTC today or -Nh')
     plan = commands.add_parser('plan')
     plan.add_argument('--apply',action='store_true')
+    plan.add_argument('--workflow',choices=['legacy','editor'])
     consolidate = commands.add_parser('consolidate',help='bundle untouched enrichment jobs')
     consolidate.add_argument('--apply',action='store_true')
     for name in ('show', 'retry'):
@@ -34,16 +35,20 @@ def main():
     run.add_argument('--job-id',type=int,help='resume only this job, with normal lease and safety checks')
     run.add_argument('--review', action='store_true',
                      help='include independent review while keeping publication disabled')
+    run.add_argument('--workflow',choices=['legacy','editor'])
     tick = commands.add_parser('tick')
     tick.add_argument('--limit',type=int,default=12)
     tick.add_argument('--max-seconds',type=int,default=1800)
+    tick.add_argument('--workflow',choices=['legacy','editor'])
     args = parser.parse_args()
     store = Store()
     if args.command == 'list':
         result = store.list_jobs()
     elif args.command == 'plan':
         from .planner import Planner
-        result = Planner(store).plan(apply=args.apply)
+        from .config import load
+        workflow = args.workflow or load()['workflow']
+        result = Planner(store,concrete=workflow=='editor').plan(apply=args.apply)
     elif args.command == 'consolidate':
         result = store.consolidate(apply=args.apply)
     elif args.command == 'costs':
@@ -72,6 +77,7 @@ def main():
         from .stages import stages
         from .config import load
         config = load()
+        workflow = args.workflow or config['workflow']
         if not config['legacy_shared_budget']:
             parser.error('enable legacy_shared_budget after schema migration before running paid stages')
         publish = config['phase']!='draft' if args.command=='tick' else args.publish
@@ -79,6 +85,14 @@ def main():
             parser.error('publication requires phase=canary or live after evaluation')
         if publish and not config['term_editorial_service']:
             parser.error('enable the deployed term editorial service before publication')
+        if workflow=='editor':
+            from . import service
+            try:
+                capabilities = service.call({'command':'capabilities','target':'term'})
+            except (ValueError,RuntimeError) as exc:
+                parser.error(f'editor workflow requires the atomic frontend RPC before paid work: {exc}')
+            if capabilities.get('atomicPublish') is not True:
+                parser.error('frontend does not support atomic editorial publication')
         if not 1 <= args.limit <= 100:
             parser.error('--limit must be 1..100')
         if not 480 <= args.max_seconds <= 3600:
@@ -92,9 +106,9 @@ def main():
                     amount=config['stage_budget_usd'],review_fraction=config['review_fraction'])
                 await asyncio.to_thread(store.reconcile_reviews)
                 await asyncio.to_thread(store.consolidate,apply=True)
-                await asyncio.to_thread(Planner(store).plan,apply=True)
+                await asyncio.to_thread(Planner(store,concrete=workflow=='editor').plan,apply=True)
                 await asyncio.to_thread(store.expire_sources)
-            engine = Engine(store, stages(store),cap=config['daily_cap_usd'],
+            engine = Engine(store, stages(store,workflow=workflow),cap=config['daily_cap_usd'],
                             stage_budget=config['stage_budget_usd'],review_fraction=config['review_fraction'])
             return await engine.run_batch(limit=args.limit,max_seconds=args.max_seconds,
                         draft_only=not publish,job_id=getattr(args,'job_id',None),

@@ -41,43 +41,42 @@ class EvidenceTests(unittest.TestCase):
         sources = {source['id']:source}
         handles = SourceHandles(sources)
         passages = Passages()
-        text = passages.show(handles.handle(source), body)
-        later = body.index('Later')
-        # Every non-blank line is one labelled paragraph; the label is the handle and the paragraph's offset.
+        text = passages.show(source['id'], body)
+        # Each displayed paragraph has an immutable short label.
         # Every non-blank line is citable, a one-character bullet included: whether it supports a claim is the gate's call.
-        self.assertEqual(list(passages.shown), ['S1@0', 'S1@21', 'S1@23', f'S1@{later}'])
-        self.assertTrue(text.startswith('[S1@0] Intro sentence here.\n[S1@21] •\n[S1@23] 그는 1917년에'))
-        claim = {'field':'bio','claim':'Joined in 1917','passages':['S1@23']}
-        [resolved] = resolve_passages([claim], passages, handles, sources)
+        self.assertEqual(list(passages.shown), ['P1', 'P2', 'P3', 'P4'])
+        self.assertTrue(text.startswith('[P1] Intro sentence here.\n[P2] •\n[P3] 그는 1917년에'))
+        claim = {'field':'bio','claim':'Joined in 1917','passages':['P3']}
+        [resolved] = resolve_passages([claim], passages, sources)
         self.assertNotIn('passages', resolved)
         self.assertEqual(body[resolved['start']:resolved['end']], '그는 1917년에 입당했다 — «Правда» 편집부에서 일했다.')
         compiled = compile_evidence([resolved], sources, {'bio'})
         self.assertEqual(compiled[0]['excerpt'], '그는 1917년에 입당했다 — «Правда» 편집부에서 일했다.')
         # Several paragraphs of one source span from the first to the last, whatever the order given.
-        [wide] = resolve_passages([{**claim,'passages':[f'S1@{later}','S1@23']}], passages, handles, sources)
+        [wide] = resolve_passages([{**claim,'passages':['P4','P3']}], passages, sources)
         self.assertEqual((wide['start'], wide['end']), (23, len(body)))
         other = snapshot('https://example.org/other', 'Unrelated page.\nHe was exiled to Siberia in 1930.')
         sources[other['id']] = other
-        passages.show(handles.handle(other), other['body'])
-        # A label never shown is refused by claim number when alone, and ignored beside shown ones.
-        with self.assertRaisesRegex(ValueError, "claim 1: passage label 'S1@999' was not displayed"):
-            resolve_passages([{**claim,'passages':['S1@999']}], passages, handles, sources)
+        passages.show(other['id'], other['body'])
+        # A label never shown is refused by claim number.
+        with self.assertRaisesRegex(ValueError, "claim 1: passage labels not displayed: P999"):
+            resolve_passages([{**claim,'passages':['P999']}], passages, sources)
         # Labels of two sources become two claims.
-        split = resolve_passages([claim, {**claim,'passages':['S1@23','S2@16','S1@999']}], passages, handles, sources)
+        split = resolve_passages([claim, {**claim,'passages':['P3','P6']}], passages, sources)
         self.assertEqual([(c['source_id'], c['start']) for c in split], [(source['id'], 23), (source['id'], 23), (other['id'], 16)])
         # Paragraphs too far apart for one evidence range become one claim per cluster.
         far = snapshot('https://example.org/far', 'First paragraph of a long page.\n' + 'x' * 7000 + '\nLast paragraph states the fact.')
         sources[far['id']] = far
-        far_text = passages.show(handles.handle(far), far['body'])
-        far_labels = re.findall(r'\[(S3@\d+)\]', far_text)
-        pieces = resolve_passages([{**claim,'passages':far_labels}], passages, handles, sources)
+        far_text = passages.show(far['id'], far['body'])
+        far_labels = re.findall(r'\[(P\d+)\]', far_text)
+        pieces = resolve_passages([{**claim,'passages':far_labels}], passages, sources)
         ranges = [(c['start'], c['end']) for c in pieces]
         self.assertTrue(len(ranges) >= 2 and ranges[0][0] == 0 and ranges[-1][1] == len(far['body']))
         self.assertTrue(all(end - start <= 6000 for start, end in ranges), ranges)
         # Text that changed since display (a restarted snapshot) is refused.
         sources[source['id']] = {**source, 'body': body.replace('1917', '1918')}
-        with self.assertRaisesRegex(ValueError, 'claim 1: the text of S1 changed since those passages were shown'):
-            resolve_passages([claim], passages, handles, sources)
+        with self.assertRaisesRegex(ValueError, 'claim 1: source snapshot changed since these passages were shown'):
+            resolve_passages([claim], passages, sources)
 
     def test_exact_range_and_expiry(self):
         source = snapshot('https://example.org/source','A documented event happened in 1917.')
@@ -368,11 +367,39 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
                 result, failed = await execute_tool(tool['name'],{'reason':'A sourced conclusion'},kwargs['tool_handlers'],tool_schema=tool['input_schema'])
                 self.assertFalse(failed,result)
             kwargs['budget_tracker']['total_cost']=.01
+            kwargs['budget_tracker']['jev_cost_usd']=.0001
         binding = SimpleNamespace(chat=chat,client=None,model='fixture',render_provider='deepseek',reasoning={})
+        usage = Usage()
         with patch('bot_config.resolve_agent_tool_loop',return_value=binding):
             await model_call(spec=spec('research'),prompt='Fixture',tool=tool,handler=handler,
-                             reads=set(),usage=Usage(),budget=.2)
+                             reads=set(),usage=usage,budget=.2)
+        self.assertAlmostEqual(usage.tracker['total_cost'],.0101)
         self.assertEqual(saved,[{'reason':'A sourced conclusion'}])
+
+    async def test_repair_tool_is_a_terminal_including_forced_finalization(self):
+        from commulingo_pipeline.stages import model_call, result_tool
+        from commulingo_pipeline.prompts import spec
+        from commulingo_pipeline.engine import Usage
+        from tool_gateway.dispatcher import execute_tool
+        tool = result_tool({'type':'object','properties':{}})
+        repair = {'name':'commulingo_pipeline_repair','input_schema':{
+            'type':'object','additionalProperties':False,'properties':{'repairs':{'type':'array'}},'required':['repairs']}}
+        saved = []
+        async def edit(repairs):
+            saved.extend(repairs)
+            return 'validated'
+        async def chat(*args,**kwargs):
+            self.assertIn(repair['name'],kwargs['terminal_tools'])
+            self.assertIn(repair['name'],kwargs['finalization_tools'])
+            with patch('tool_gateway.security.audit'):
+                result, failed = await execute_tool(repair['name'],{'repairs':['fixture']},
+                    kwargs['tool_handlers'],tool_schema=repair)
+                self.assertFalse(failed,result)
+        binding = SimpleNamespace(chat=chat,client=None,model='fixture',render_provider='deepseek',reasoning={})
+        with patch('bot_config.resolve_agent_tool_loop',return_value=binding):
+            await model_call(spec=spec('research'),prompt='Fixture',tool=tool,handler=AsyncMock(),
+                reads=set(),usage=Usage(),budget=.2,local_tools=[(repair,edit,True)])
+        self.assertEqual(saved,['fixture'])
 
     async def test_model_stage_reruns_on_gpt_when_deepseek_refuses_content(self):
         from commulingo_pipeline.stages import model_call, result_tool
@@ -640,10 +667,10 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
         source=snapshot('https://example.org/history','A retrieved historical source with adequate context for the body.')
         store=Mock()
         store.job_sources.return_value={source['id']:source}
-        store.cached_source.return_value={'url':source['url'],'body':source['body']}
+        store.cached_source.return_value=source
         async def model(**kwargs):
             shown=await kwargs['read_wrap']('fetch_url',AsyncMock())(url=source['url'])
-            label=re.search(r'\[(S1@\d+)\]',shown)[1]
+            label=re.search(r'\[(P\d+)\]',shown)[1]
             value={'status':'ready','reason':'Verified history for the commissioned term.',
                    'claims':[{'field':'history','claim':'Verified history','passages':[label]}]}
             schema=kwargs['tool']['input_schema']
@@ -689,22 +716,58 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
                           'Investigating commissioned topics before returning a final artifact.'):
                 with self.assertRaisesRegex(ValueError,'probe or progress note'):
                     await kwargs['handler']({'status':'sources_unavailable','reason':probe,'claims':[]})
-            with self.assertRaisesRegex(ValueError,"claim 1: passage label 'S9@0' was not displayed"):
+            with self.assertRaisesRegex(ValueError,"claim 1: passage labels not displayed: P999"):
                 await kwargs['handler']({'status':'ready','reason':'Both pages support the body claim.',
-                    'claims':[{'field':'body','claim':'x','passages':['S9@0']}]})
+                    'claims':[{'field':'body','claim':'x','passages':['P999']}]})
             # Page two's paragraph carries a label at its offset in the merged text; citing it resolves.
-            label=re.search(r'\[(S1@\d+)\] Second page',second)[1]
-            self.assertEqual(label,f'S1@{len(page1)+1}')
+            label=re.search(r'\[(P\d+)\] Second page',second)[1]
+            self.assertEqual(label,'P2')
+            # Re-displaying page one from the merged snapshot gets a new label;
+            # its original P1 still points to the earlier saved snapshot.
+            again=await fetch_url(url='https://example.org/article',max_chars=400,offset=0)
+            self.assertIn('[P3] First page',again)
+            with self.assertRaisesRegex(ValueError,'claim 1: passage labels not displayed: P999'):
+                await kwargs['handler']({'status':'ready','reason':'Both pages support the body claim.',
+                    'claims':[{'field':'body','claim':'From page two','passages':[label,'P999']}]})
             await kwargs['handler']({'status':'ready','reason':'Both pages support the body claim.',
-                'claims':[{'field':'body','claim':'From page two','passages':[label]}]})
+                'claims':[{'field':'body','claim':'From page one','passages':['P1']},
+                          {'field':'body','claim':'From page two','passages':[label]}]})
         job={'id':31,'kind':'term','action':'update','target':'fixture','topic':'history'}
         with patch('commulingo_pipeline.stages.service.call',return_value={'revision':'original'}), \
              patch('commulingo_pipeline.stages.model_call',side_effect=model):
             result=await Research(store)(job,[],Usage(),.2)
-        [claim]=result.value['claims']
+        [first_claim,claim]=result.value['claims']
+        self.assertNotEqual(first_claim['source_id'],claim['source_id'])
+        original=next(c.args[0] for c in store.save_source.call_args_list if c.args[0]['id']==first_claim['source_id'])
+        self.assertEqual(original['body'][first_claim['start']:first_claim['end']],page1.strip())
         merged=next(c.args[0] for c in store.save_source.call_args_list if c.args[0]['id']==claim['source_id'])
         self.assertTrue(merged['body'].startswith(page1) and merged['body'].endswith(page2))
         self.assertEqual(merged['body'][claim['start']:claim['end']], page2.strip())
+
+    async def test_research_cache_hit_preserves_source_age(self):
+        from commulingo_pipeline.stages import Research
+        from commulingo_pipeline.engine import Usage
+        source = snapshot('https://example.org/history', 'Historical evidence for the body.',
+                          now=datetime.now(timezone.utc) - timedelta(days=10))
+        store = Mock()
+        store.job_sources.return_value = {}
+        store.cached_source.return_value = source
+        fetch = AsyncMock()
+
+        async def model(**kwargs):
+            shown = await kwargs['read_wrap']('fetch_url', fetch)(url=source['url'])
+            self.assertIn(str(source['fetched_at']), shown)
+            label = re.search(r'\[(P\d+)\]', shown)[1]
+            await kwargs['handler']({'status': 'ready', 'reason': 'Cached evidence supports the body.',
+                'claims': [{'field': 'body', 'claim': 'Historical fact', 'passages': [label]}]})
+
+        job = {'id': 32, 'kind': 'term', 'action': 'update', 'target': 'fixture', 'topic': 'history'}
+        with patch('commulingo_pipeline.stages.service.call', return_value={'revision': 'original'}), \
+             patch('commulingo_pipeline.stages.model_call', side_effect=model):
+            result = await Research(store)(job, [], Usage(), .2)
+        fetch.assert_not_awaited()
+        self.assertEqual(result.next_stage, 'draft')
+        store.save_source.assert_called_once_with(source)
 
     async def test_validate_bounce_runs_targeted_research_and_carries_claims(self):
         from commulingo_pipeline.stages import Research, TARGETED_RESEARCH_ROUNDS
@@ -712,7 +775,7 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
         source=snapshot('https://example.org/history','A retrieved historical source with adequate context for the body and the years.')
         store=Mock()
         store.job_sources.return_value={source['id']:source}
-        store.cached_source.return_value={'url':source['url'],'body':source['body']}
+        store.cached_source.return_value=source
         previous={'field':'body','claim':'Verified body','source_id':source['id'],'start':0,'end':40}
         junk={'field':'body','claim':'placeholder','source_id':source['id'],'start':0,'end':240}
         seen={}
@@ -724,7 +787,7 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
                 await kwargs['handler']({'status':'ready','reason':'Nothing new found for the term.','claims':[]})
             shown=await kwargs['read_wrap']('fetch_url',AsyncMock())(url=source['url'])
             await kwargs['handler']({'status':'ready','reason':'The source dates the end of the period.',
-                'claims':[{'field':'endYear','claim':'Ended in 1991','passages':[re.search(r'\[(S1@\d+)\]',shown)[1]]}]})
+                'claims':[{'field':'endYear','claim':'Ended in 1991','passages':[re.search(r'\[(P\d+)\]',shown)[1]]}]})
         job={'id':31,'kind':'term','action':'update','target':'fixture','topic':'history'}
         artifacts=[{'stage':'research','value':{'claims':[previous,junk]}},
                    {'stage':'draft','value':{'rejected_draft':{}}},

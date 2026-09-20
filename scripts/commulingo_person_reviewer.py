@@ -75,8 +75,8 @@ def make_handlers(read_handlers, proposal, snapshots, box, gate=None, triage=Non
                     for url in urls:
                         if isinstance(url,str) and external_url(url):
                             source_id, labelled = review_source(url, body[1], snapshots, passages, base=int(kwargs.get('offset') or 0))
-                            return (f'Review source_id={source_id}; each paragraph below starts with its passage label '
-                                    f'[{source_id}@offset] and a check cites those labels.\n'
+                            return (f'Review source_id={source_id}; each paragraph below starts with its immutable '
+                                    'passage label; a check cites the labels actually shown.\n'
                                     + text[:body.start(1)] + labelled + text[body.end(1):])
                 return result
             return wrapped
@@ -90,10 +90,7 @@ def make_handlers(read_handlers, proposal, snapshots, box, gate=None, triage=Non
                 value = await gate(value)
         except ValueError as exc: raise ToolRejection(str(exc)) from exc
         box.update(value)
-        dropped = value.get('dropped_checks') or []
-        note = (f' {len(dropped)} check(s) could not be verified in retrieved text and were dropped: '
-                + '; '.join(f"check {d['check']} ({d['reason']})" for d in dropped) + '.') if dropped else ''
-        return 'OK: review decision recorded; no dictionary write was made by this tool.' + note
+        return 'OK: review decision recorded; no dictionary write was made by this tool.'
     handlers[DECISION_TOOL['name']] = decide
     return handlers
 

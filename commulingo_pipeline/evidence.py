@@ -1,11 +1,8 @@
 """Content-addressed source snapshots and exact, bounded claim citations.
 
-A displayed source shows every paragraph behind a label ``[S2@12303]`` (the
-source handle and the paragraph's character offset). A claim cites labels;
-the runner already knows what text each label showed, so nothing is copied,
-matched or counted. Copied quotes located by folded substring matching
-(2026-09-19, one day) bounced whole results when one copy drifted, and the
-numbered 240-character tiles before that drifted from their snapshots.
+Displayed paragraphs have attempt-local labels such as ``[P1]``. Each label
+binds an immutable snapshot and a canonical paragraph range, never a mutable
+URL handle. Persisted evidence still uses snapshot IDs and character ranges.
 """
 import hashlib
 import logging
@@ -14,23 +11,22 @@ from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger(__name__)
 
-LABEL = re.compile(r'^(S[0-9]+|R[0-9a-f]{16})@([0-9]+)$')
+PASSAGE_PATTERN = r'^P[1-9][0-9]*$'
 MAX_PARAGRAPH_CHARS = 3000   # a longer paragraph is shown as several labelled pieces
 MAX_PASSAGE_CHARS = 6000     # the most one claim may cite (compile_evidence bound)
 MAX_PASSAGES = 8
 _SENTENCE_END = re.compile(r'[.!?。]["\')\]]?\s')
 
 
-def paragraph_spans(body, first=0, last=None):
-    """(start, end) of each non-blank line of body[first:last], in body offsets.
+def paragraph_spans(body):
+    """Canonical (start, end) ranges computed from the complete snapshot.
 
     A line longer than MAX_PARAGRAPH_CHARS is split at sentence ends so every
     piece stays citable within the passage bound.
     """
-    last = len(body) if last is None else last
     spans = []
-    for match in re.finditer(r'[^\n]+', body[first:last]):
-        start, end = first + match.start(), first + match.end()
+    for match in re.finditer(r'[^\n]+', body):
+        start, end = match.start(), match.end()
         while start < end and body[start].isspace():
             start += 1
         while end > start and body[end - 1].isspace():
@@ -49,67 +45,89 @@ def paragraph_spans(body, first=0, last=None):
     return spans
 
 
-def label_passages(handle, body, first=0, last=None, base=0):
-    """Render body[first:last] with a passage label before each paragraph.
-
-    Returns (text, {label: (start, end)}) with spans in ``body`` offsets; the
-    label's number is the offset plus ``base`` (a page's position in its
-    source when ``body`` is one fetched slice).
-    """
-    lines, shown = [], {}
-    for start, end in paragraph_spans(body, first, last):
-        label = f'{handle}@{base + start}'
-        shown[label] = (start, end)
-        lines.append(f'[{label}] {body[start:end]}')
-    return '\n'.join(lines), shown
-
-
 class Passages:
-    """The paragraphs shown in one run, by label: the one registry both the
-    research lane (S-handles over merged snapshots) and the review lane
-    (R-ids over fetched slices) cite from and resolve against.
+    """Immutable passage references shared by research and independent review.
 
-    ``show`` renders a text with labels and remembers each paragraph's span
-    and a digest of its text; ``resolve`` turns cited labels back into
-    evidence ranges. The rules are the same in both lanes: labels of several
-    sources give one range per source, paragraphs too far apart for one
-    MAX_PASSAGE_CHARS range give one range per contiguous cluster, a label
-    never shown is ignored beside shown ones, and a paragraph whose text
-    changed since it was shown (a restarted snapshot) is refused. What to do
-    when nothing resolves — refuse the claim, drop the check — is the lane's
-    policy.
+    Viewports select whole canonical paragraphs; they never cut a paragraph
+    into a new citation. Repeated displays reuse labels. New snapshots get
+    new labels while previously displayed snapshots remain citable.
     """
     def __init__(self):
-        self.shown = {}   # label -> (handle, start, end, digest)
+        self.shown = {}   # label -> (snapshot id, start, end)
+        self._labels = {}  # (snapshot id, start, end) -> label
+        self._snapshots = {}  # snapshot id -> (digest, canonical ranges)
 
-    def show(self, handle, body, first=0, last=None, base=0):
-        text, labels = label_passages(handle, body, first, last, base)
-        for label, (start, end) in labels.items():
-            self.shown[label] = (handle, start, end, _digest(body[start:end]))
-        return text
+    def restore(self, shown, sources):
+        """Restore runner-owned checkpoint references without reassigning IDs.
+
+        Expired/missing snapshots reserve their old labels but cannot resolve;
+        a refetch must not accidentally make an old label mean a new passage.
+        """
+        if self.shown:
+            raise ValueError('restore requires an empty passage registry')
+        for label, entry in shown.items():
+            if not re.fullmatch(PASSAGE_PATTERN, label) or len(entry) != 3:
+                raise ValueError('invalid passage checkpoint')
+            source_id, start, end = entry
+            source = sources.get(source_id) or {}
+            body = source.get('body')
+            if body:
+                if source_id not in self._snapshots:
+                    self._snapshots[source_id] = (_digest(body), paragraph_spans(body))
+                if (start, end) not in self._snapshots[source_id][1]:
+                    raise ValueError('checkpoint passage is not a canonical source paragraph')
+            self.shown[label] = (source_id, start, end)
+            self._labels[(source_id, start, end)] = label
+        if set(self.shown) != {f'P{i}' for i in range(1, len(self.shown)+1)}:
+            raise ValueError('checkpoint passage IDs must be contiguous')
+
+    def show(self, source_id, body, first=0, last=None):
+        last = len(body) if last is None else last
+        if not 0 <= first <= last <= len(body):
+            raise ValueError('invalid source display range')
+        digest = _digest(body)
+        if source_id not in self._snapshots:
+            self._snapshots[source_id] = (digest, paragraph_spans(body))
+        stored_digest, spans = self._snapshots[source_id]
+        if digest != stored_digest:
+            raise ValueError('source snapshot changed; register the retrieved text as a new snapshot')
+        lines = []
+        for start, end in spans:
+            if first == last or end <= first or start >= last:
+                continue
+            key = (source_id, start, end)
+            if key not in self._labels:
+                label = f'P{len(self.shown) + 1}'
+                self._labels[key] = label
+                self.shown[label] = key
+            lines.append(f'[{self._labels[key]}] {body[start:end]}')
+        return '\n'.join(lines)
 
     def resolve(self, labels, body_of, limit=MAX_PASSAGE_CHARS):
-        """([(handle, start, end)], unknown labels). ``body_of(handle)`` returns
-        that source's current text, or None when it is no longer available."""
-        by_handle, unknown = {}, []
+        """Resolve every label or reject; never silently discard evidence."""
+        by_source, unknown = {}, []
         for label in (str(label) for label in labels):
             entry = self.shown.get(label)
             if entry is None:
                 unknown.append(label)
             else:
-                by_handle.setdefault(entry[0], []).append(entry[1:])
+                by_source.setdefault(entry[0], []).append(entry[1:])
+        if unknown:
+            raise ValueError(f'passage labels not displayed: {", ".join(unknown)}; '
+                             'correct only this item using labels already shown, preserving the other items. '
+                             'Retrieve the relevant source again only if its labels are unavailable.')
         ranges = []
-        for handle, spans in by_handle.items():
-            body = body_of(handle)
+        for source_id, spans in by_source.items():
+            body = body_of(source_id)
             if body is None:
-                raise ValueError(f'source {handle} is not available; retrieve it again')
+                raise ValueError(f'source for these passages is not available; retrieve it again')
             spans = sorted(set(spans))
-            if any(_digest(body[s:e]) != d for s, e, d in spans):
-                raise ValueError(f'the text of {handle} changed since those passages were shown; retrieve it again '
-                                 'and cite the new labels')
+            if _digest(body) != self._snapshots[source_id][0]:
+                raise ValueError('source snapshot changed since these passages were shown; retrieve it again '
+                                 'and cite the new snapshot labels')
             for cluster in _clusters(spans, limit):
-                ranges.append((handle, cluster[0][0], cluster[-1][1]))
-        return ranges, unknown
+                ranges.append((source_id, cluster[0][0], cluster[-1][1]))
+        return ranges
 
 
 def _digest(text):
@@ -127,35 +145,30 @@ def _clusters(spans, limit):
     return groups
 
 
-def resolve_passages(claims, passages, handles, sources):
+def resolve_passages(claims, passages, sources):
     """Replace each claim's passage labels with source snapshots and character ranges.
 
-    One resolved claim per range ``passages.resolve`` returns; a claim none of
-    whose labels was shown is refused by claim number. Whether a cited
+    One resolved claim per range ``passages.resolve`` returns; invalid labels
+    are refused by claim number even beside valid ones. Whether a cited
     paragraph, however short, supports the claim is the citation gate's
     judgement, not a length rule.
     """
-    def body_of(handle):
-        source = sources.get(handles.ids.get(handle)) or {}
+    def body_of(source_id):
+        source = sources.get(source_id) or {}
         return source.get('body') or None
     resolved = []
     for index, claim in enumerate(claims, 1):
         labels = claim.get('passages') or []
         if not labels:
             raise ValueError(f'claim {index}: passages must list the labels shown in brackets before the paragraphs '
-                             'that state it (for example S2@12303)')
+                             'that state it (for example P12)')
         try:
-            ranges, unknown = passages.resolve(labels, body_of)
+            ranges = passages.resolve(labels, body_of)
         except ValueError as exc:
             raise ValueError(f'claim {index}: {exc}') from exc
-        if not ranges:
-            raise ValueError(f'claim {index}: passage label {unknown[0]!r} was not displayed in this research; copy a '
-                             'label exactly as shown in brackets at the start of a paragraph')
-        if unknown:
-            logger.info('claim %d: ignoring passage labels never displayed: %s', index, unknown)
-        for handle, start, end in ranges:
+        for source_id, start, end in ranges:
             value = {k: v for k, v in claim.items() if k != 'passages'}
-            value.update(source_id=sources[handles.ids[handle]]['id'], start=start, end=end)
+            value.update(source_id=source_id, start=start, end=end)
             resolved.append(value)
     return resolved
 
@@ -243,7 +256,7 @@ class SourcePages:
         self.current = {}   # url -> merged snapshot
         self.spans = {}     # url -> {page hash: (start, end)}
 
-    def seed(self, sources):
+    def seed(self, sources, *, now=None):
         """Merge the snapshots a job already holds for a URL, oldest first.
 
         Returns only snapshots that this seeding actually changed, so an
@@ -251,8 +264,11 @@ class SourcePages:
         """
         merged = []
         by_url = {}
+        now = now or datetime.now(timezone.utc)
         for source in sorted((s for s in sources.values() if s.get('body')),
                              key=lambda s: str(s.get('fetched_at') or '')):
+            if source['expires_at'] <= now:
+                continue
             if len(source['body']) > MAX_SNAPSHOT_CHARS:
                 logger.warning('skipping oversize stored snapshot %s (%d chars) for %s',
                                source.get('id', '?')[:16], len(source['body']), source['url'])
@@ -265,25 +281,32 @@ class SourcePages:
                 continue
             known = {page['id'] for page in pages}
             for page in pages:
-                self.absorb(url, page['body'])
+                self.absorb(url, page['body'], fetched_at=page['fetched_at'],
+                            expires_at=page['expires_at'])
             if self.current[url]['id'] not in known:
                 merged.append(self.current[url])
         return merged
 
-    def absorb(self, url, body):
+    def absorb(self, url, body, *, fetched_at=None, expires_at=None):
+        if not isinstance(body, str) or not body.strip():
+            raise ValueError('source body is empty')
+        if len(body) > MAX_SNAPSHOT_CHARS:
+            raise ValueError(f'source page exceeds {MAX_SNAPSHOT_CHARS} characters; retrieve a smaller page')
         body = body.replace('\x00', '\ufffd')
+        fetched_at = fetched_at or datetime.now(timezone.utc)
+        expires_at = expires_at if expires_at is not None else fetched_at + timedelta(days=14)
         digest = hashlib.sha256(body.encode()).hexdigest()
         current = self.current.get(url)
         spans = self.spans.setdefault(url, {})
         if current is None:
-            merged = snapshot(url, body)
+            merged = snapshot(url, body, now=fetched_at)
             spans[digest] = (0, len(body))
         elif digest in spans:
             return current, spans[digest], False
         elif body.startswith(current['body']):
             # An earlier merge that already extends the current text: adopt
             # it whole. Existing spans stay valid because the prefix is kept.
-            merged = snapshot(url, body)
+            merged = snapshot(url, body, now=fetched_at)
             spans[digest] = (0, len(body))
         elif (at := current['body'].find(body)) >= 0:
             # Already inside the snapshot (an earlier partial merge, or a page
@@ -293,12 +316,17 @@ class SourcePages:
         elif len(current['body']) + 1 + len(body) > MAX_SNAPSHOT_CHARS:
             logger.warning('snapshot for %s would exceed %d chars; restarting from the new page',
                            url, MAX_SNAPSHOT_CHARS)
-            merged = snapshot(url, body)
+            merged = snapshot(url, body, now=fetched_at)
             spans.clear()
             spans[digest] = (0, len(body))
         else:
             offset = len(current['body']) + 1
-            merged = snapshot(url, current['body'] + '\n' + body)
+            # Appending a page does not re-fetch the older portion. The whole
+            # snapshot is usable only while every constituent is still fresh.
+            fetched_at = min(fetched_at, current['fetched_at'])
+            expires_at = min(expires_at, current['expires_at'])
+            merged = snapshot(url, current['body'] + '\n' + body, now=fetched_at)
             spans[digest] = (offset, offset + len(body))
+        merged['expires_at'] = expires_at
         self.current[url] = merged
         return merged, spans[digest], True

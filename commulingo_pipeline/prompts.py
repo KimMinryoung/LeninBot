@@ -25,6 +25,19 @@ Discovery proposes new dictionary slugs within the commission; a material/gap ID
 Finish this stage with commulingo_pipeline_result; do not attempt unavailable write tools.
 '''
 
+WRITING_RULES = '''Korean and English must express equivalent claims. Write natural Korean 한다체 and fluent English.
+Use card definitions/biographies for concise explanation and body/sections for depth. Do not
+expand to a character target. Preserve existing information and complete replacement lists.
+For terms, explain meaning, historical context, distinctions or examples only as commissioned.
+Aliases drive automatic links: do not add everyday ambiguous words merely to increase matches.
+Use dictionary spellings in the supplied snapshot. Omit unsupported relationships.
+Keep patronymics separate from given/family names and native names.
+Use the official Korean transcription for Russian names, including ш before consonants as 시,
+while preserving established conventional forms. Follow the runtime schema's exact limits.
+Do not use an em dash outside a quoted title. Write 조선민주주의인민공화국/조선 and historical
+그루지야. Do not leak unrelated scripts or partially transliterated words into Korean prose.
+'''
+
 STAGES = {
     'discover': '''Identify important people or concepts actually mentioned in the supplied
 material and check existing names and aliases. A person, event, or institution with its own
@@ -47,9 +60,11 @@ startYear/endYear for a term. Other supported fields may carry their own claims.
 Claim field names must be actual writable fields, never commissioned topic names. For terms,
 history, distinctions and examples belong to body claims; definition claims cannot substitute
 for body evidence. For people, use bio rather than a topic such as basics.
-Retrieved text shows every paragraph behind a passage label such as [S2@12303]. Each claim
-cites the labels of the one to three paragraphs (of one source) that state it, copied exactly
-as shown; the runner stores those paragraphs as the evidence. Do not copy the text itself,
+Retrieved text shows each paragraph behind an immutable passage label such as [P12]. Each claim
+cites only the labels of paragraphs that state it, copied exactly as shown. Labels keep their
+meaning even after more pages are fetched; the runner stores the original snapshot and range.
+If a label is rejected, correct that claim's references and preserve the other claims.
+Do not copy the text itself,
 paraphrase, or count anything.
 Return ready only when
 useful writing is supported; otherwise explain complete/not_applicable/sources_unavailable.
@@ -61,20 +76,7 @@ When validation_to_resolve requests missing evidence, retain valid earlier claim
 the missing support; do not return the same incomplete collection as ready.''',
     'draft': '''Produce the smallest useful supported patch from the supplied research.
 Use only claims in that research. The runner adds field evidence and the original revision.
-Korean and English must express equivalent claims. Write natural Korean 한다체 and fluent English.
-Use card definitions/biographies for concise explanation and body/sections for depth. Do not
-expand to a character target. Preserve existing information and complete replacement lists.
-For terms, explain meaning, historical context, distinctions or examples only as commissioned.
-Aliases drive automatic links: do not add everyday ambiguous words merely to increase matches.
-Use dictionary spellings in the supplied snapshot. The read tool can retrieve a known ID
-with get_person/get_term/get_office/get_event/get_sections, at most three times; it cannot
-search names or list records. If a related ID is unknown, omit that unsupported relationship.
-Keep patronymics separate from given/family names and native names.
-Use the official Korean transcription for Russian names, including ш before consonants as 시,
-while preserving established conventional forms. Follow the runtime schema's exact limits.
-Do not use an em dash outside a quoted title. Write 조선민주주의인민공화국/조선 and historical
-그루지야. Do not leak unrelated scripts or partially transliterated words into Korean prose.
-When validation errors are supplied, repair them using the saved research, without rewriting
+''' + WRITING_RULES + '''When validation errors are supplied, repair them using the saved research, without rewriting
 unrelated fields. Never remove supported information simply to make a validator pass.''',
 }
 

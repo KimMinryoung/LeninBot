@@ -8,6 +8,34 @@ from tool_gateway.security import caller_scope, new_run_context
 
 
 class DraftRepairTests(unittest.IsolatedAsyncioTestCase):
+    async def test_editor_dispatch_retains_bad_shape_and_enum_then_repairs_without_resend(self):
+        original = self.session()
+        session = DraftRepair({'name':original.name,'input_schema':original.canonical}, capture_invalid=True)
+        completed = []
+        async def finish(**value):
+            from tool_gateway.results import ToolRejection
+            try:
+                prepared = session.prepare(value)
+            except ValueError as exc:
+                raise ToolRejection(str(exc)) from exc
+            completed.append(prepared)
+            return 'saved'
+        context = new_run_context(interface='autonomous',agent_name='commulingo_curator',is_owner=True,
+            scope_type='maintenance_job',scope_id='commulingo_pipeline:capture-test')
+        with caller_scope(context), patch('tool_gateway.security.audit'):
+            bad = {'fields':{'bio':{'en':['Wrong shape']},'groupId':'invented'}}
+            result, failed = await execute_tool(session.name,bad,{session.name:finish},tool_schema=session.tool)
+            self.assertTrue(failed)
+            self.assertIn('Saved draft_id=',result)
+            self.assertEqual(session.draft['args'],bad)
+            self.assertEqual(completed,[])
+            result, failed = await execute_tool(session.name,{'repairs':[
+                {'op':'set','path':'/fields/bio/en','value':'Concise biography'},
+                {'op':'set','path':'/fields/groupId','value':'valid-group'}]},
+                {session.name:finish},tool_schema=session.tool)
+            self.assertFalse(failed,result)
+            self.assertEqual(completed[0]['fields']['groupId'],'valid-group')
+
     def session(self):
         return DraftRepair({'name':'commulingo_pipeline_result','input_schema':{
             'type':'object','additionalProperties':False,'required':['fields'],

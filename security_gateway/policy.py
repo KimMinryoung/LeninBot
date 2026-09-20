@@ -94,6 +94,10 @@ TOOL_RISK_CLASS: dict[str, str] = {
     # section writes bounced mid-task).
     "commulingo_review_decision": "state",  # runner-local decision, applied by the review worker
     "commulingo_pipeline_result": "state",  # runner-local artifact; no dictionary write
+    "commulingo_pipeline_repair": "state",  # edits the private runner-local draft
+    "commulingo_pipeline_cached_passages": "read",
+    "commulingo_pipeline_context": "read",
+    "commulingo_pipeline_research": "state",
     "research_review_verdict": "state",  # reviewer-local verdict record; the author's tool publishes
     "commulingo_person_create": "write",
     "commulingo_person_update": "write",
@@ -178,6 +182,10 @@ OWNER_REQUIRED_RISK_CLASSES = frozenset({"pay", "send", "execute", "admin"})
 # same owner test covers them without naming the agent.
 OWNER_REQUIRED_TOOLS = frozenset({
     "commulingo_pipeline_result",
+    "commulingo_pipeline_repair",
+    "commulingo_pipeline_cached_passages",
+    "commulingo_pipeline_context",
+    "commulingo_pipeline_research",
     "commulingo_review_decision",
     "commulingo_person_create",
     "commulingo_person_update",
@@ -210,6 +218,10 @@ TOOL_CALLER_ALLOWLIST: dict[str, frozenset[str]] = {
     **{tool: COMMULINGO_WRITE_CALLERS for tool in OWNER_REQUIRED_TOOLS},
     "commulingo_review_decision": frozenset({"commulingo_reviewer"}),
     "commulingo_pipeline_result": frozenset({"commulingo_curator"}),
+    "commulingo_pipeline_repair": frozenset({"commulingo_curator"}),
+    "commulingo_pipeline_cached_passages": frozenset({"commulingo_curator"}),
+    "commulingo_pipeline_context": frozenset({"commulingo_curator"}),
+    "commulingo_pipeline_research": frozenset({"commulingo_curator"}),
 }
 
 # ── Rate limits (NEW — shadow by default) ─────────────────────────────

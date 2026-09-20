@@ -11,7 +11,7 @@ from commulingo_pipeline import evidence
 from commulingo_pipeline.evidence import MAX_SNAPSHOT_CHARS, SourcePages, snapshot
 
 URL = "https://en.wikipedia.org/wiki/Alexei_Kosygin"
-T0 = datetime(2026, 9, 19, 10, 0, tzinfo=timezone.utc)
+T0 = datetime.now(timezone.utc) - timedelta(days=1)
 
 
 def _attempt(sources, pages, start):
@@ -31,6 +31,50 @@ def _attempt(sources, pages, start):
 
 
 class SourcePagesRetryTests(unittest.TestCase):
+    def test_seed_does_not_renew_stored_sources(self):
+        first = snapshot(URL, 'first page', now=T0)
+        second = snapshot(URL, 'second page', now=T0 + timedelta(hours=1))
+        sp = SourcePages()
+        merged, = sp.seed({s['id']: s for s in (first, second)})
+        self.assertEqual(merged['fetched_at'], first['fetched_at'])
+        self.assertEqual(merged['expires_at'], first['expires_at'])
+        self.assertEqual(merged['body'], 'first page\nsecond page')
+
+    def test_seed_ignores_expired_sources_even_before_cleanup(self):
+        expired = snapshot(URL, 'expired page', now=T0 - timedelta(days=15))
+        fresh = snapshot(URL, 'fresh page', now=T0)
+        sp = SourcePages()
+        self.assertEqual(sp.seed({s['id']: s for s in (expired, fresh)}), [])
+        self.assertEqual(sp.current[URL], fresh)
+        self.assertEqual(SourcePages().seed({expired['id']: expired}), [])
+
+    def test_cached_page_keeps_its_original_expiration(self):
+        page = snapshot(URL, 'cached page', now=T0)
+        page['expires_at'] = T0 + timedelta(days=2)
+        sp = SourcePages()
+        merged, _, _ = sp.absorb(URL, page['body'], fetched_at=page['fetched_at'],
+                                expires_at=page['expires_at'])
+        self.assertEqual(merged, page)
+        merged, _, _ = sp.absorb(URL, 'newly fetched page')
+        self.assertEqual(merged['expires_at'], page['expires_at'])
+
+    def test_oversize_page_is_rejected_before_any_state_change(self):
+        for prefix in (None, 'prefix'):
+            with self.subTest(prefix=prefix):
+                sp = SourcePages()
+                if prefix:
+                    sp.absorb(URL, prefix)
+                before = dict(sp.current)
+                with self.assertRaisesRegex(ValueError, 'smaller page'):
+                    sp.absorb(URL, (prefix or '') + 'z' * (MAX_SNAPSHOT_CHARS + 1))
+                self.assertEqual(sp.current, before)
+
+    def test_empty_page_does_not_create_a_fake_citation_span(self):
+        sp = SourcePages()
+        sp.absorb(URL, 'valid page')
+        with self.assertRaisesRegex(ValueError, 'empty'):
+            sp.absorb(URL, '')
+
     def test_reseeding_stored_merges_does_not_grow(self):
         chunks = [f"chunk {i} " + ("x" * 1000) for i in range(3)]
         sources = {}

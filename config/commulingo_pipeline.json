@@ -10,5 +10,6 @@
   "term_event_overlap_allow": [
     "battle-of-lake-khasan"
   ],
-  "term_enrichment_exclude": []
+  "term_enrichment_exclude": [],
+  "workflow": "editor"
 }

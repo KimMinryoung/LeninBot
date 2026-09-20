@@ -1,0 +1,175 @@
+diff --git a/data/commulingo/editorial-pipeline-service.js b/data/commulingo/editorial-pipeline-service.js
+--- a/data/commulingo/editorial-pipeline-service.js
++++ b/data/commulingo/editorial-pipeline-service.js
+@@ -3,15 +3,26 @@
+ const { badRequest } = require('./people-admin-fields');
+ const people = require('./person-editorial-service');
+ const terms = require('./term-editorial-service');
++const {patchHash} = require('./editorial-patch');
+ 
+ async function execute(request) {
+     if (!['person','person_section','term'].includes(request.target)) throw badRequest('invalid target');
++    if (request.command==='capabilities') return {atomicPublish:true,patchVersion:1};
+     const service = request.target==='term' ? {
+         read:terms.readTermEditorial,submit:terms.submitTermEdit,review:terms.reviewTermSuggestion,enrichment:terms.saveEnrichment,note:terms.saveNote,
+     } : {read:people.readPersonEditorial,submit:people.submitPersonEdit,review:people.reviewPersonSuggestion,enrichment:people.saveEnrichment,note:people.saveNote};
+     if (request.command==='read') return service.read(request.id);
+-    if (!['validate','submit','review','enrichment','note'].includes(request.command)) throw badRequest('invalid command');
++    if (!['validate','submit','review','enrichment','note','publish'].includes(request.command)) throw badRequest('invalid command');
+     if (request.command==='review' && (typeof request.approve!=='boolean' || typeof request.note!=='string' || !request.note.trim())) throw badRequest('review requires boolean approve and a note');
++    if (request.command==='publish') {
++        if (request.approvedPatchHash!==patchHash(request)) throw badRequest('approval does not match this patch');
++        const review = request.review;
++        if (!review || review.decision!=='approve' || typeof review.reason!=='string' || !review.reason.trim()
++            || !Array.isArray(review.checks) || !review.checks.length
++            || review.checks.some(check => !check || ['citation','source','quote','finding'].some(key => typeof check[key]!=='string' || !check[key].trim()))) {
++            throw badRequest('publication requires an independent evidence-based approval');
++        }
++    }
+     if (request.command==='validate') return service.submit({...request,dryRun:true,directApply:false});
+     if (typeof request.idempotencyKey!=='string' || !/^[a-zA-Z0-9:_-]{1,180}$/.test(request.idempotencyKey)) throw badRequest('idempotencyKey required');
+     const hash = createHash('sha256').update(JSON.stringify(request)).digest('hex');
+@@ -20,6 +31,29 @@
+         if (receipt) {
+             if (receipt.request_hash!==hash) throw badRequest('idempotencyKey reused with a different request');
+             return receipt.result;
++        }
++        if (request.command==='publish') {
++            // Stage and approve through the canonical stores within ONE outer
++            // transaction. A failure in approval, replacement or notes rolls
++            // back the public row, suggestions, history and receipt together.
++            if (request.replacesSuggestionId) {
++                const old = (await client.query('SELECT target_type,target_id,status FROM commulingo_agent_suggestions WHERE id=$1 FOR UPDATE', [request.replacesSuggestionId])).rows[0];
++                if (!old || old.target_type!==request.target || old.target_id!==request.id || old.status!=='pending') {
++                    throw badRequest('original suggestion is no longer eligible for replacement');
++                }
++            }
++            const staged = await service.submit({...request,directApply:false,dryRun:false},{client});
++            const note = request.review.reason+'\n'+JSON.stringify(request.review.checks);
++            const result = await service.review(staged.suggestionId,true,note,{client,changedBy:'commulingo-pipeline-reviewer'});
++            if (result.status!=='approved') throw badRequest('publication did not produce an approved edit');
++            if (request.replacesSuggestionId) {
++                await service.review(request.replacesSuggestionId,false,'Replaced by independently approved patch '+request.approvedPatchHash,{client,changedBy:'commulingo-pipeline-reviewer'});
++            }
++            if (request.notes) await service.note({id:request.id,note:request.notes,jobRef:request.jobRef,changedBy:'commulingo-pipeline'},{client});
++            const receipt = {...result,patchHash:request.approvedPatchHash};
++            await client.query('INSERT INTO commulingo_editorial_receipts(key,request_hash,result) VALUES ($1,$2,$3)',
++                [request.idempotencyKey,hash,JSON.stringify(receipt)]);
++            return receipt;
+         }
+         let alreadyReviewed;
+         if (request.command==='review') {
+diff --git a/data/commulingo/editorial-patch.js b/data/commulingo/editorial-patch.js
+new file mode 100644
+--- /dev/null
++++ b/data/commulingo/editorial-patch.js
+@@ -0,0 +1,16 @@
++const {createHash} = require('node:crypto');
++
++// Python patches.canonical uses ASCII, sorted-key JSON. Public patch numbers
++// are integers (years/sort order); no provider scores participate in identity.
++function canonical(value) {
++    if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
++    if (value && typeof value==='object') return `{${Object.keys(value).sort().map(key => `${canonical(key)}:${canonical(value[key])}`).join(',')}}`;
++    const encoded = JSON.stringify(value);
++    if (encoded === undefined || (typeof value==='number' && !Number.isFinite(value))) throw new Error('invalid patch value');
++    return encoded.replace(/[\u007f-\uffff]/g, ch => `\\u${ch.charCodeAt(0).toString(16).padStart(4,'0')}`);
++}
++function patchHash(request) {
++    const bound = Object.fromEntries(['target','action','id','fields','sources'].map(key => [key,request[key]]));
++    return createHash('sha256').update(canonical(bound)).digest('hex');
++}
++module.exports = {canonical, patchHash};
+diff --git a/scripts/test-commulingo-pipeline-db.js b/scripts/test-commulingo-pipeline-db.js
+--- a/scripts/test-commulingo-pipeline-db.js
++++ b/scripts/test-commulingo-pipeline-db.js
+@@ -2,10 +2,12 @@
+ if (process.env.COMMULINGO_ISOLATED_TEST!=='1' || process.env.DB_NAME!=='commulingo_integrity_test'
+     || process.env.DB_HOST!=='127.0.0.1') throw new Error('isolated database required');
+ const db = require('../config/database');
++const {patchHash} = require('../data/commulingo/editorial-patch');
+ const {execute} = require('../data/commulingo/editorial-pipeline-service');
+ const {readTermEditorial} = require('../data/commulingo/term-editorial-service');
+ const id = `pipeline-test-${Date.now()}`;
+ const source = 'https://example.org/archive';
++const personId = id+'-person';
+ const evidence = field => ({field,claim:`Documented ${field}`,source,locator:'p. 12',excerpt:'Documented source quotation'});
+ (async () => {
+     await db.query("INSERT INTO commulingo_term_categories(id,label_ko,label_en) VALUES ('pipeline-test','테스트','Test') ON CONFLICT DO NOTHING");
+@@ -52,8 +54,61 @@
+     await assert.rejects(execute(invalid));
+     assert.equal((await readTermEditorial(id)).revision,after.revision,'failed linked write must fully roll back');
+     await assert.rejects(execute({...request,id:`${id}-collision`,idempotencyKey:`test:${id}:collision`}),/already belongs/);
++    const approval = {decision:'approve',reason:'Independently checked the proposed definition against the archive.',
++        checks:[{citation:source,source,quote:'The archive supports the revised definition.',finding:'The proposed definition is supported.'}]};
++    const atomic = {command:'publish',target:'term',action:'update',id,sources:[source],
++        fields:{expectedRevision:after.revision,definition:{ko:'원자적으로 검증한 정의다.',en:'Atomically verified definition.'},evidence:[evidence('definition')]},
++        review:approval,notes:'Retained editorial note.',jobRef:'atomic fixture',idempotencyKey:`test:${id}:atomic`};
++    atomic.approvedPatchHash = patchHash(atomic);
++    await assert.rejects(execute({...atomic,approvedPatchHash:'bad'}),/approval does not match/);
++    const count = async table => Number((await db.query(`SELECT count(*) AS n FROM ${table}`)).rows[0].n);
++    const original = await execute({...update,idempotencyKey:`test:${id}:replace-original`,fields:{...update.fields,expectedRevision:after.revision}});
++    const failing = {...atomic,replacesSuggestionId:original.suggestionId,notes:{invalid:true},idempotencyKey:`test:${id}:atomic-rollback`};
++    const beforeCounts = await Promise.all(['commulingo_agent_suggestions','commulingo_people_revisions','commulingo_editorial_notes','commulingo_editorial_receipts'].map(count));
++    await assert.rejects(execute(failing));
++    assert.equal((await readTermEditorial(id)).revision,after.revision,'late note failure must roll back public data');
++    assert.deepEqual(await Promise.all(['commulingo_agent_suggestions','commulingo_people_revisions','commulingo_editorial_notes','commulingo_editorial_receipts'].map(count)),beforeCounts,'late failure must roll back all suggestions/history/notes/receipts');
++    assert.equal((await db.query('SELECT status FROM commulingo_agent_suggestions WHERE id=$1',[original.suggestionId])).rows[0].status,'pending','replacement rejection must also roll back');
++    atomic.replacesSuggestionId = original.suggestionId;
++    const published = await Promise.all([execute(atomic),execute(atomic)]);
++    assert.equal(published[0].status,'approved');
++    assert.equal(published[0].suggestionId,published[1].suggestionId,'concurrent publication must have one receipt');
++    assert.equal(published[0].patchHash,atomic.approvedPatchHash);
++    assert.equal((await db.query('SELECT status FROM commulingo_agent_suggestions WHERE id=$1',[original.suggestionId])).rows[0].status,'rejected');
++    assert.deepEqual(await execute(atomic),JSON.parse(JSON.stringify(published[0])),'replay must return committed result despite old revision');
++    const stale = {...atomic,idempotencyKey:`test:${id}:atomic-stale`};
++    delete stale.replacesSuggestionId;
++    await assert.rejects(execute(stale),/changed since/);
++    const tampered = {...atomic,fields:{...atomic.fields,definition:{ko:'승인되지 않은 변조'}}};
++    await assert.rejects(execute(tampered),/approval does not match/);
++    assert.equal((await execute({command:'capabilities',target:'term'})).atomicPublish,true);
++    await db.query("INSERT INTO commulingo_people_groups(id) VALUES ('pipeline-atomic-group') ON CONFLICT DO NOTHING");
++    const person = {command:'publish',target:'person',action:'create',id:personId,sources:[source],review:approval,
++        fields:{groupId:'pipeline-atomic-group',name:{ko:'원자 검증 인물',en:'Atomic Fixture Person'},
++            years:'1900–1980',bio:{ko:'문헌으로 확인한 인물이다.',en:'A documented person.'},role:{icon:'book-open'},
++            citizenship:{code:'france'},nationalOrigin:{code:'france'},
++            evidence:['years','bio','citizenship','nationalOrigin'].map(evidence)},idempotencyKey:`test:${id}:person`};
++    person.approvedPatchHash=patchHash(person);
++    assert.equal((await execute(person)).status,'approved');
++    const personBefore = await execute({command:'read',target:'person',id:personId});
++    const personUpdate = {...person,action:'update',fields:{expectedRevision:personBefore.revision,
++        bio:{ko:'추가 원문으로 확인한 인물이다.',en:'A person verified with additional original evidence.'},evidence:[evidence('bio')]},
++        idempotencyKey:`test:${id}:person-update`};
++    personUpdate.approvedPatchHash=patchHash(personUpdate);
++    assert.equal((await execute(personUpdate)).status,'approved');
++    const section = {...person,target:'person_section',action:'create',
++        fields:{expectedRevision:(await execute({command:'read',target:'person',id:personId})).revision,
++                slug:'archive',heading:{ko:'기록',en:'Archive'},body:{ko:'문헌에 나타난 사실이다.',en:'Facts in the original archive.'},evidence:[evidence('body')]},
++        idempotencyKey:`test:${id}:section`};
++    section.approvedPatchHash=patchHash(section);
++    assert.equal((await execute(section)).status,'approved');
++    assert.equal((await execute({command:'read',target:'person',id:personId})).sections.length,1);
++    console.log('Atomic publication: patch binding, concurrent replay, full rollback, replacement, notes and stale revision passed');
+     console.log('Pipeline store: concurrent receipts, pending isolation, review replay, evidence, bilingual merge, revision conflicts, FK rollback and alias collision passed');
+ })().catch(error => {console.error(error);process.exitCode=1;}).finally(async () => {
++    await db.query('DELETE FROM commulingo_people WHERE id=$1',[personId]);
++    await db.query('DELETE FROM commulingo_agent_suggestions WHERE target_id=$1',[personId]);
++    await db.query('DELETE FROM commulingo_people_revisions WHERE entity_id=$1',[personId]);
+     await db.query('DELETE FROM commulingo_terms WHERE id=$1',[id]);
+     await db.query("DELETE FROM commulingo_editorial_notes WHERE target_type='term' AND target_id=$1",[id]);
+     await db.query('DELETE FROM commulingo_agent_suggestions WHERE target_id=$1',[id]);
+diff --git a/dev_docs/commulingo-term-editorial.md b/dev_docs/commulingo-term-editorial.md
+--- a/dev_docs/commulingo-term-editorial.md
++++ b/dev_docs/commulingo-term-editorial.md
+@@ -38,3 +38,11 @@
+ 운영 frontend 재시작은 기존 `scripts/deploy --restart` 절차를 사용한다.
+ 
+ 인물·절·용어 근거 배열은 개수 상한 없이 검증한다. 많은 근거를 이유로 거절하지 않으며, 각 항목의 출처·필드·인용 형식과 변경 사실의 지원 여부는 계속 검사한다.
++
++`publish`는 새 편집 파이프라인의 원자적 반영 명령이다. 요청의 target/action/id/fields/sources를
++정렬·ASCII JSON으로 정규화한 SHA-256과 `approvedPatchHash`가 일치해야 한다.
++`review`에는 approve 결정과 사유, 독립적으로 확인한 citation/source/quote/finding checks가 필요하다.
++기존 submit/review 저장 함수를 하나의 외부 트랜잭션 안에서 실행하고, 선택적 원 제안 대체·작업 메모·
++영수증도 함께 커밋한다. 어떤 부분이라도 실패하면 공개 내용·제안·이력·영수증 전부 롤백된다.
++같은 요청의 재실행은 revision 재검사 전에 영수증을 반환한다. 이 명령은 private RPC에만 존재하며,
++공개 HTTP API나 LLM 도구로 노출하지 않는다. Python 검토 artifact도 같은 수정안 해시에 묶인다.

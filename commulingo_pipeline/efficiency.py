@@ -30,7 +30,7 @@ def query(boundary):
         WHERE a.started_at>(SELECT cutoff FROM bounds) GROUP BY 1,2),
     first_checks AS (
         SELECT DISTINCT ON (job_id) job_id,started_at,metrics
-        FROM commulingo_pipeline_attempts WHERE stage='draft'
+        FROM commulingo_pipeline_attempts WHERE (stage='draft' OR metrics->>'workflow'='editor')
             AND (metrics ? 'preflight_passed' OR metrics ? 'preflight_failures' OR coalesce((metrics->>'terminal_calls')::integer,0)>0)
         ORDER BY job_id,started_at,id),
     validation AS (
@@ -40,6 +40,16 @@ def query(boundary):
                 AND coalesce((f.metrics->>'terminal_calls')::integer,0)<=1) AS first_pass
         FROM first_checks f JOIN commulingo_pipeline_jobs j ON j.id=f.job_id
         WHERE f.started_at>(SELECT cutoff FROM bounds) GROUP BY 1,2),
+    editorial AS (
+        SELECT j.kind,j.action,
+            coalesce(sum(jsonb_array_length(coalesce(a.value->'resolved_issues','[]'::jsonb)))
+                FILTER (WHERE a.stage='submit' AND a.value->>'status'='approved'),0) AS resolved_issues,
+            coalesce(sum(jsonb_array_length(coalesce(a.value->'deferred_issues','[]'::jsonb)))
+                FILTER (WHERE a.stage='submit' AND a.value->>'status'='approved'),0) AS deferred_issues,
+            count(*) FILTER (WHERE a.value ? 'hold_reason') AS no_progress_holds,
+            count(*) FILTER (WHERE a.stage='review' AND a.value->>'decision'='revise') AS factual_revisions
+        FROM commulingo_pipeline_artifacts a JOIN commulingo_pipeline_jobs j ON j.id=a.job_id
+        WHERE a.created_at>(SELECT cutoff FROM bounds) GROUP BY 1,2),
     dispositions AS (
         SELECT j.kind,j.action,
             count(*) FILTER (WHERE a.stage='discover') AS discoveries,
@@ -51,10 +61,11 @@ def query(boundary):
             c.actual,coalesce(c.reserved,0) AS reserved,coalesce(c.unsettled,0) AS unsettled,
             coalesce(a.attempts,0) AS attempts,coalesce(a.unfinished,0) AS unfinished,
             a.seconds,a.rounds,a.research,a.rework,v.checked,v.first_pass,
-            d.discoveries,d.judgments
+            d.discoveries,d.judgments,e.resolved_issues,e.deferred_issues,e.no_progress_holds,e.factual_revisions
         FROM groups g LEFT JOIN publications p USING(kind,action)
         LEFT JOIN costs c USING(kind,action) LEFT JOIN attempts a USING(kind,action)
         LEFT JOIN validation v USING(kind,action) LEFT JOIN dispositions d USING(kind,action)
+        LEFT JOIN editorial e USING(kind,action)
         ORDER BY g.kind,g.action) r"""
 
 
@@ -73,4 +84,7 @@ def render(rows):
         if r['checked']:
             lines.append(f"    첫 저장 검증 {r['first_pass']}/{r['checked']} · "
                          f"후보 발견 {r['discoveries'] or 0} · 무편집 판단 {r['judgments'] or 0}")
+        if r.get('resolved_issues') or r.get('deferred_issues') or r.get('no_progress_holds'):
+            lines.append(f"    승인·반영한 결함 해결 {r.get('resolved_issues') or 0} · 미해결 {r.get('deferred_issues') or 0} · "
+                         f"진전 없는 반복 보류 {r.get('no_progress_holds') or 0} · 사실 수정 요청 {r.get('factual_revisions') or 0}")
     return lines

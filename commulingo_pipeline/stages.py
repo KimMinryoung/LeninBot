@@ -9,7 +9,7 @@ import re
 from datetime import datetime, timezone
 
 from .engine import Result
-from .evidence import snapshot, compile_evidence, resolve_passages, Passages, SourceHandles, SourcePages, MAX_PASSAGES
+from .evidence import snapshot, compile_evidence, resolve_passages, Passages, SourceHandles, SourcePages, MAX_PASSAGES, PASSAGE_PATTERN
 from .search_triage import Shadow
 from provenance.runtime import external_body
 from .citation_gate import check_claims, review_gate, annotate as annotate_citations
@@ -33,7 +33,13 @@ READS = {'wiki_search','wiki_get','web_search','fetch_url','commulingo_people'}
 
 
 def latest(artifacts, stage):
-    return next((a['value'] for a in reversed(current_artifacts(artifacts)) if a['stage']==stage), {})
+    for artifact in reversed(current_artifacts(artifacts)):
+        value = artifact['value']
+        if value.get('editor_version') == 2 and stage in {'research','draft'} and stage in value:
+            return value[stage]
+        if artifact['stage'] == stage:
+            return value
+    return {}
 
 
 def current_artifacts(artifacts):
@@ -190,7 +196,7 @@ def content_risk(exc):
     return CONTENT_RISK in str(exc)
 
 
-async def model_call(*, spec, prompt, tool, handler, reads, usage, budget, read_wrap=None, scope_id=None, read_tools=None, max_rounds=12, job=None):
+async def model_call(*, spec, prompt, tool, handler, reads, usage, budget, read_wrap=None, scope_id=None, read_tools=None, max_rounds=12, job=None, local_tools=()):
     from bot_config import resolve_agent_tool_loop
     from runtime_tools.registry import TOOLS, TOOL_HANDLERS
     from tool_gateway.inference import resolve_agent_inference_policy
@@ -221,6 +227,26 @@ async def model_call(*, spec, prompt, tool, handler, reads, usage, budget, read_
         completed = True
         return result
     handlers[tool['name']] = terminal
+    terminal_names = [tool['name']]
+    for definition, callback, is_terminal in local_tools:
+        tools.append(definition)
+        if is_terminal:
+            async def extra_terminal(_callback=callback, **value):
+                nonlocal completed
+                if completed:
+                    raise ToolRejection('stage already completed')
+                try:
+                    result = await _callback(**value)
+                except ValueError as exc:
+                    rejections.append(str(exc))
+                    usage.tracker.setdefault('rejections', []).append(str(exc)[:500])
+                    raise ToolRejection(str(exc)) from exc
+                completed = True
+                return result
+            handlers[definition['name']] = extra_terminal
+            terminal_names.append(definition['name'])
+        else:
+            handlers[definition['name']] = callback
     context = new_run_context(interface='autonomous',agent_name=spec.name,is_owner=True,
                               scope_type='maintenance_job',scope_id=scope_id or 'commulingo_pipeline:standalone')
     # Artifact handlers populate an in-memory box; they must run in every attempt.
@@ -246,8 +272,9 @@ async def model_call(*, spec, prompt, tool, handler, reads, usage, budget, read_
                 system_prompt=spec.render_prompt(provider=binding.render_provider),
                 max_rounds=min(policy.max_rounds,max_rounds),max_tokens=policy.max_output_tokens,
                 max_input_tokens=policy.max_input_tokens,budget_usd=budget,budget_tracker=usage.tracker,
-                agent_name=spec.name,finalization_tools=[tool['name']],terminal_tools=[tool['name']],
+                agent_name=spec.name,finalization_tools=terminal_names,terminal_tools=terminal_names,
                 terminal_required=True,**binding.reasoning)
+    jev_before = usage.tracker.get('jev_cost_usd',0)
     try:
         await run(spec)
     except Exception as exc:
@@ -258,6 +285,11 @@ async def model_call(*, spec, prompt, tool, handler, reads, usage, budget, read_
         usage.tracker['provider_fallback'] = FALLBACK_PROVIDER
         usage.tracker['model_calls'] = usage.tracker.get('model_calls',0) + 1
         await run(replace(spec,provider=FALLBACK_PROVIDER,model=FALLBACK_MODEL))
+    finally:
+        # Provider loops replace total_cost on return; add sidecar decisions
+        # afterwards so their usage is neither lost nor charged twice.
+        usage.tracker['total_cost'] = usage.tracker.get('total_cost',0) + (
+            usage.tracker.get('jev_cost_usd',0)-jev_before)
     usage.complete = True
     if not completed:
         detail = '; '.join(dict.fromkeys(rejections[-3:]))
@@ -293,13 +325,14 @@ class Research:
             body = source['body']
             first, last = (0, len(body)) if span is None else span
             handle = handles.handle(source)
-            text = passages.show(handle, body, first, last)
+            text = passages.show(source['id'], body, first, last)
             return (f'Source ID: {handle}\nURL: {source["url"]}\nRetrieved: {source["fetched_at"]}\n'
-                    f'Characters {first}..{last} of {len(body)} for this URL\n'
-                    f'Each paragraph starts with its passage label [{handle}@offset]; a claim cites those labels.\n'
+                    f'Characters {first}..{last} of {len(body)} requested; boundary paragraphs shown in full.\n'
+                    'Each paragraph starts with its immutable passage label; cite those labels.\n'
                     '<external source="pipeline-source">\n'+text+'\n</external>')
-        async def absorb(url, body):
-            merged, span, created = pages.absorb(url, body)
+        async def absorb(source):
+            merged, span, created = pages.absorb(source['url'], source['body'],
+                fetched_at=source['fetched_at'], expires_at=source['expires_at'])
             if created:
                 await asyncio.to_thread(self.store.save_source,merged)
                 await asyncio.to_thread(self.store.link_source,job['id'],merged['id'])
@@ -316,7 +349,7 @@ class Research:
                     cached = await asyncio.to_thread(self.store.cached_source,name,kwargs)
                     if cached:
                         usage.tracker['pipeline_cache_hits'] = usage.tracker.get('pipeline_cache_hits',0)+1
-                        return await absorb(cached['url'], cached['body'])
+                        return await absorb(cached)
                 raw = await call(**kwargs)
                 text = str(raw)
                 match = external_body(text)
@@ -325,9 +358,10 @@ class Research:
                     url = next((u for u in urls if isinstance(u,str) and external_url(u)),None)
                     if url:
                         page = snapshot(url,match[1])
+                        displayed = await absorb(page)
                         await asyncio.to_thread(self.store.save_source,page)
                         await asyncio.to_thread(self.store.cache_source,name,kwargs,page['id'])
-                        return await absorb(url, page['body'])
+                        return displayed
                 return raw
             return fetched
         from runtime_tools.commulingo_people import (COMMULINGO_PERSON_CREATE_TOOL,
@@ -349,9 +383,9 @@ class Research:
             'claims':{'type':'array','items':{'type':'object','additionalProperties':False,
                 'properties':{'field':{'type':'string','enum':sorted(fields)},'claim':{'type':'string'},
                     'passages':{'type':'array','minItems':1,'maxItems':MAX_PASSAGES,
-                        'items':{'type':'string','pattern':'^S[0-9]+@[0-9]+$'},'description':
+                        'items':{'type':'string','pattern':PASSAGE_PATTERN},'description':
                         'The labels shown in brackets at the start of the displayed paragraphs that state this claim '
-                        '(for example S2@12303): one to three paragraphs of one source, copied exactly. '
+                        '(for example P12), copied exactly. Cite only the passages needed to support this claim. '
                         'The runner stores those paragraphs as the evidence.'},
                     'stance':{'type':'string','enum':['supports','disputes']}},
                 'required':['field','claim','passages']}}},
@@ -384,7 +418,7 @@ class Research:
             invalid = {c.get('field') for c in value.get('claims',[])} - fields
             if invalid:
                 raise ValueError('claims.field must name a writable field, not a commissioned topic: ' + ', '.join(sorted(str(f) for f in invalid)))
-            claims = resolve_passages(value['claims'], passages, handles, sources)
+            claims = resolve_passages(value['claims'], passages, sources)
             # The cited passages exist; the gate asks whether they say what
             # the claim asserts (citation_gate). Only this call's claims are judged
             # — carried-over claims keep the check they got when made — and
@@ -411,7 +445,7 @@ class Research:
             'This is RESEARCH ONLY. Do not write a dictionary patch. Investigate all current commissioned topics together, '
             'identity and missing facts. Collect supporting AND conflicting sources. Finish through ')
             + 'commulingo_pipeline_result: each claim cites passages, the labels shown in brackets at the start of '
-            'the displayed paragraphs that state it (for example S2@12303), one to three paragraphs of one source; '
+            'the displayed paragraphs that state it (for example P12); '
             'the runner stores those paragraphs as the evidence. Facts need field-specific claims. '
             'Reuse the dated sources below: fetch_url retrieves their cached text. '
             'A no-edit status applies to ALL current topics; use it only when that judgement holds for all of them. '
@@ -1079,6 +1113,8 @@ async def submit(job, artifacts, usage, budget):
                   'ready' if value.get('remaining_topics') else 'complete')
 
 
-def stages(store):
-    return {'discover':Discover(),'research':Research(store),'judge':judge,'draft':Draft(store),'validate':validate,
-            'review':Review(),'submit':submit}
+def stages(store, workflow='legacy'):
+    legacy = {'discover':Discover(),'research':Research(store),'judge':judge,'draft':Draft(store),'validate':validate,
+              'review':Review(),'submit':submit}
+    from .workflow import routed_stages
+    return routed_stages(store, legacy, workflow)

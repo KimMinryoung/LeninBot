@@ -4,7 +4,7 @@ import json
 import hashlib
 from urllib.parse import urlsplit
 
-from commulingo_pipeline.evidence import MAX_PASSAGES, Passages
+from commulingo_pipeline.evidence import MAX_PASSAGES, PASSAGE_PATTERN, Passages
 
 DECISION_TOOL = {"name": "commulingo_review_decision", "description": "Submit one independently researched review decision; does not directly write dictionary content.",
     "input_schema": {"type": "object", "additionalProperties": False,
@@ -18,8 +18,8 @@ DECISION_TOOL = {"name": "commulingo_review_decision", "description": "Submit on
                     "citation": {"type": "string", "description": "Copy one COMPLETE suggestion.source_refs entry verbatim, including its URL and any annotation. Never shorten or rename it."},
                     "citation_id": {"type": "string", "pattern": "^S[1-9][0-9]*$", "description": "S1 is suggestion.source_refs[0], S2 is source_refs[1]."},
                     "passages": {"type": "array", "minItems": 1, "maxItems": MAX_PASSAGES,
-                                 "items": {"type": "string", "pattern": "^R[0-9a-f]{16}@[0-9]+$"},
-                                 "description": "The labels shown in brackets at the start of the retrieved paragraphs that verify this finding (for example R5c5d56d06d4d1f95@6933): one to three paragraphs of one retrieved source, copied exactly."},
+                                 "items": {"type": "string", "pattern": PASSAGE_PATTERN},
+                                 "description": "The immutable labels shown in brackets before retrieved paragraphs that verify this finding (for example P12), copied exactly. Cite only the passages needed to verify this finding."},
                     "finding": {"type": "string", "description": "Your Korean explanation of what those passages verify."},
                 },
                 "required": ["passages", "finding"],
@@ -31,26 +31,25 @@ DECISION_TOOL = {"name": "commulingo_review_decision", "description": "Submit on
 def review_source(url, body, snapshots, passages, base=0):
     """Register one fetched slice for this review and render it with passage labels.
 
-    Returns (source_id, labelled text). ``base`` is the slice's offset in its
-    page so labels stay distinct across pages of one URL.
+    Returns (source_id, labelled text). Each independently retrieved slice is
+    an immutable snapshot; its page offset is metadata, not a model-facing ID.
     """
-    source_id = "R" + hashlib.sha256((url + "\n" + body).encode()).hexdigest()[:16]
-    snapshots[source_id] = {"url": url, "body": body}
-    return source_id, passages.show(source_id, body, base=base)
+    source_id = "R" + hashlib.sha256(json.dumps([url, base, body], ensure_ascii=False).encode()).hexdigest()
+    labelled = passages.show(source_id, body)
+    snapshots.setdefault(source_id, {"url": url, "body": body, "offset": base})
+    return source_id, labelled
 
 
 def resolve_review_checks(value, proposal, snapshots, passages):
     """Expand citation IDs and turn passage labels into the persisted decision.
 
     A check cites labels shown with retrieved text (``Passages.resolve``:
-    one check per source and per contiguous range). A check none of whose
-    labels was shown is dropped, not fatal: the decision keeps the checks
-    that resolve and records the rest under ``dropped_checks``. Only a
-    decision with checks and none resolvable is refused.
+    one check per snapshot and per contiguous range). Invalid labels identify
+    the affected check for correction; no check or cited passage is dropped.
     """
     from copy import deepcopy
     value = deepcopy(value)
-    kept, dropped = [], []
+    kept = []
     for index, check in enumerate(value.get("checks", []), 1):
         if not isinstance(check, dict):
             raise ValueError(f"check {index}: each check must be an object")
@@ -66,22 +65,12 @@ def resolve_review_checks(value, proposal, snapshots, passages):
         if not labels:
             raise ValueError(f"check {index}: passages must list the labels shown in brackets before the retrieved paragraphs")
         try:
-            ranges, unknown = passages.resolve(labels, lambda sid: (snapshots.get(sid) or {}).get("body"))
+            ranges = passages.resolve(labels, lambda sid: (snapshots.get(sid) or {}).get("body"))
         except ValueError as exc:
             raise ValueError(f"check {index}: {exc}") from exc
-        if not ranges:
-            dropped.append({"check": index, "labels": labels, "reason": "passage label not shown in this review: " + ", ".join(unknown)})
-            continue
         for sid, start, end in ranges:
             kept.append({**check, "source": snapshots[sid]["url"], "quote": snapshots[sid]["body"][start:end]})
-    if dropped and not kept:
-        available = "; ".join(f"{sid} ({snap['url']})" for sid, snap in snapshots.items()) or "none fetched yet"
-        heads = "; ".join(f"check {d['check']}: {d['reason']}" for d in dropped)
-        raise ValueError("no check could be verified — " + heads + ". Cite passage labels exactly as shown in brackets "
-                         f"before the retrieved paragraphs. Sources retrieved in this review: {available}")
     value["checks"] = kept
-    if dropped:
-        value["dropped_checks"] = dropped
     return value
 
 

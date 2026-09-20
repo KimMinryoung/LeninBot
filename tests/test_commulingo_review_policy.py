@@ -25,7 +25,7 @@ DECISION={'decision':'approve','reason':'원본 기록의 생년과 직책을 �
     'resolved_risks':['identity_uncertain'],'checks':[{'citation':SOURCE,'source':SOURCE,'quote':QUOTE,'finding':'서로 다른 인물임을 확인'}]}
 from runtime_tools.commulingo_review_policy import review_source as _review_source
 from commulingo_pipeline.evidence import Passages
-LABEL=f"{_review_source(SOURCE,QUOTE,{},Passages())[0]}@0"   # the label the wrapper shows for QUOTE fetched at offset 0
+LABEL='P1'  # First paragraph displayed in a fresh review registry.
 SUBMITTED={**DECISION,'checks':[{'citation':SOURCE,'passages':[LABEL],'finding':'서로 다른 인물임을 확인'}]}
 
 class PolicyTests(unittest.IsolatedAsyncioTestCase):
@@ -49,7 +49,7 @@ class PolicyTests(unittest.IsolatedAsyncioTestCase):
     def test_only_retrieved_passages_resolving_risks_can_approve(self):
         self.assertEqual(validate_decision(DECISION,PROPOSAL),DECISION)
         # A check cites labels of paragraphs shown in this review; with nothing retrieved no check resolves.
-        with self.assertRaisesRegex(ValueError,'no check could be verified'):resolve_review_checks(SUBMITTED,PROPOSAL,{},Passages())
+        with self.assertRaisesRegex(ValueError,'check 1: passage labels not displayed'):resolve_review_checks(SUBMITTED,PROPOSAL,{},Passages())
         snapshots,passages={},Passages(); _review_source(SOURCE,QUOTE,snapshots,passages)
         self.assertEqual(resolve_review_checks(SUBMITTED,PROPOSAL,snapshots,passages)['checks'],DECISION['checks'])
         for change in ({'resolved_risks':[]},{'checks':[]}):
@@ -67,16 +67,16 @@ class PolicyTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(ValueError,'boolean'):
             validate_decision({**DECISION,'needs_research':'false'},PROPOSAL)
 
-    def test_many_checks_are_valid_and_an_unshown_label_drops_only_its_check(self):
+    def test_many_checks_are_valid_and_an_unshown_label_identifies_its_check(self):
         snapshots,passages={},Passages(); _review_source(SOURCE,QUOTE,snapshots,passages)
         checks=[dict(SUBMITTED['checks'][0]) for _ in range(63)]
         value={**DECISION,'checks':checks}
         resolved=resolve_review_checks(value,PROPOSAL,snapshots,passages)
         self.assertEqual(len(resolved['checks']),63)
         self.assertEqual(validate_decision(resolved,PROPOSAL),resolved)
-        checks[-1]['passages']=['R0123456789abcdef@0']
-        resolved=resolve_review_checks(value,PROPOSAL,snapshots,passages)
-        self.assertEqual((len(resolved['checks']),resolved['dropped_checks'][0]['check']),(62,63))
+        checks[-1]['passages']=['P999']
+        with self.assertRaisesRegex(ValueError, 'check 63: passage labels not displayed: P999'):
+            resolve_review_checks(value,PROPOSAL,snapshots,passages)
 
     def test_failed_coverage_reports_exact_missing_identifiers(self):
         with self.assertRaisesRegex(ValueError, 'identity_uncertain'):
@@ -87,18 +87,16 @@ class PolicyTests(unittest.IsolatedAsyncioTestCase):
         validate_decision(value,PROPOSAL)
     def test_passage_errors_identify_the_check(self):
         snapshots,passages={},Passages(); sid,_=_review_source(SOURCE,QUOTE+'\nShort title',snapshots,passages)
-        for label, reason in [(f'{sid}@{len(QUOTE)+5}', f'passage label not shown in this review: {sid}@{len(QUOTE)+5}'),
-                              (f'{sid}@7', f'passage label not shown in this review: {sid}@7')]:
+        for labels in (['P999'], ['P1', 'P999']):
             value = copy.deepcopy(SUBMITTED)
-            value['checks'].append({**value['checks'][0], 'passages':[label]})
-            value['checks'][0]['passages']=[f'{sid}@0']
-            resolved=resolve_review_checks(value,PROPOSAL,snapshots,passages)
-            self.assertEqual(resolved['dropped_checks'],[{'check':2,'labels':[label],'reason':reason}])
-            self.assertEqual(resolved['checks'][0]['quote'],QUOTE)
+            value['checks'].append({**value['checks'][0], 'passages': labels})
+            with self.assertRaisesRegex(ValueError, 'check 2: passage labels not displayed: P999'):
+                resolve_review_checks(value, PROPOSAL, snapshots, passages)
+            self.assertEqual(value['checks'][0], SUBMITTED['checks'][0])
     def test_revision_requires_independently_retrieved_evidence(self):
         value={**DECISION,'decision':'revise'}
         self.assertEqual(validate_decision(value,PROPOSAL),value)
-        with self.assertRaisesRegex(ValueError,'no check could be verified'):
+        with self.assertRaisesRegex(ValueError,'check 1: passage labels not displayed'):
             resolve_review_checks({**SUBMITTED,'decision':'revise'},PROPOSAL,{},Passages())
         with self.assertRaises(ValueError):
             validate_decision({**value,'checks':[]},PROPOSAL)
@@ -156,6 +154,26 @@ class PolicyTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(ToolRejection,'citation check failed'):
             await handlers['commulingo_review_decision'](**SUBMITTED)
         self.assertEqual(box,{})
+
+    async def test_invalid_label_is_repaired_without_refetch_or_dropped_checks(self):
+        from tool_gateway.results import ToolRejection
+        fetch = AsyncMock(return_value=f'<external source="url:{SOURCE}">\n{QUOTE}\n</external>')
+        gate = AsyncMock(side_effect=lambda value: value)
+        box, fetched = {}, {}
+        handlers = worker.make_handlers({'fetch_url': fetch}, PROPOSAL, fetched, box, gate=gate)
+        await handlers['fetch_url'](url=SOURCE)
+        invalid = copy.deepcopy(SUBMITTED)
+        invalid['checks'].append({**invalid['checks'][0], 'passages': ['P1', 'P999']})
+        with self.assertRaisesRegex(ToolRejection, 'check 2: passage labels not displayed: P999'):
+            await handlers['commulingo_review_decision'](**invalid)
+        self.assertEqual(box, {})
+        gate.assert_not_awaited()
+        invalid['checks'][1]['passages'] = ['P1']
+        await handlers['commulingo_review_decision'](**invalid)
+        self.assertEqual(len(box['checks']), 2)
+        self.assertNotIn('dropped_checks', box)
+        gate.assert_awaited_once()
+        fetch.assert_awaited_once()
     async def test_real_runner_context_and_typed_terminal_without_network(self):
         import db
         with patch.object(db,'query',return_value=[]),patch.object(db,'query_one',return_value=None):

@@ -26,8 +26,8 @@ class EvidenceContracts(TestCase):
         source=snapshot('https://example.org/archive','Documented fact. '*80)
         sources={source['id']:source}
         handles=SourceHandles(sources)
-        passages=Passages(); passages.show('S1',source['body'])
-        self.assertEqual(resolve_passages([{'field':'body','claim':'fact','passages':['S1@0']}],passages,handles,sources)[0]['start'],0)
+        passages=Passages(); passages.show(source['id'],source['body'])
+        self.assertEqual(resolve_passages([{'field':'body','claim':'fact','passages':['P1']}],passages,sources)[0]['start'],0)
         other=snapshot('https://example.org/other','Another page. '*10)
         self.assertEqual(handles.handle(other),'S2')
         self.assertEqual(handles.handle(source),'S1')
@@ -49,7 +49,7 @@ class EvidenceContracts(TestCase):
         self.assertFalse(created); self.assertIs(again,second); self.assertEqual(span_again,span1)
         # Snapshots a job already holds for one URL are merged oldest first.
         from datetime import datetime,timezone,timedelta
-        t=datetime(2026,9,19,tzinfo=timezone.utc)
+        t=datetime.now(timezone.utc)-timedelta(days=1)
         old={**snapshot('https://example.org/p','page one. '*30,now=t),}
         new={**snapshot('https://example.org/p','page two. '*30,now=t+timedelta(minutes=1))}
         single=snapshot('https://example.org/q','only page. '*30,now=t)
@@ -70,9 +70,9 @@ class EvidenceContracts(TestCase):
     def test_many_passages_are_all_kept(self):
         source=snapshot('https://example.org/archive','Documented fact number one. '*100)
         sources={source['id']:source}; handles=SourceHandles(sources)
-        passages=Passages(); passages.show('S1',source['body'])
-        claim={'field':'body','claim':'fact','passages':['S1@0']}
-        result=resolve_passages([claim]*40,passages,handles,sources)
+        passages=Passages(); passages.show(source['id'],source['body'])
+        claim={'field':'body','claim':'fact','passages':['P1']}
+        result=resolve_passages([claim]*40,passages,sources)
         self.assertEqual(len(result),40)
 
     def test_valid_draft_survives_downstream_error_and_repairs_follow_the_current_draft(self):
