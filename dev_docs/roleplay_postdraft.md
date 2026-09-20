@@ -26,6 +26,12 @@ SQLite 확정과 PostgreSQL 대화 기록·Telegram 전송은 분산 트랜잭�
 
 ## 보류 판정의 버튼과 확정 한 줄
 
+1단계 허가 판정에서 span(짧은 행동/세션)·transition(다음 날 전환)이 불확실하면 보수적 기본값(brief/current)으로 진행하고 결과의
+`defaulted`에 남긴다(2026-09-20: "아침 배식이나 해라", "의사 재방문" 같은 짧은 지시가 span 미확정으로 매번 실패했음). mode가 불확실하면
+초안 작성 전에 버튼(장면 실행/질문·상담/예정만 등록/…)으로 묻고, 고른 mode와 기본값으로 같은 메시지의 턴을 진행한다. 초안 범위 검사
+`within_scope`가 불확실하면 초안을 버리지 않고 "범위 안 — 이 초안 확정 / 범위 밖 — 버리기" 버튼을 보낸다. 확정을 고르면 범위 검사를
+건너뛰고(`prepare(scope_ok=True)`, verdict.scope_review.player_confirmed) 분류·정산은 그대로 진행한다.
+
 3단계에서 JEV가 사건 종류나 강도만 확정하지 못하면(`PendingChoice`) 두 번째 초안을 쓰지 않는다. 봇은 초안·verdict·임시 기록(stage)을
 프로세스 메모리 `PENDING_CHOICES[user_id]`에 두고 후보 버튼(`rp:<scope>:<key>:<label>`, 마지막은 "이 초안 버리기")을 보낸다.
 콜백에서 고른 라벨을 verdict에 넣어 `prepare(verdict=…)`→`adjudicate_turn`으로 같은 초안을 확정·전송한다. 강도가 다시 불확실하면

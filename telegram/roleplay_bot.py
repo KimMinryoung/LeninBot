@@ -497,12 +497,6 @@ async def handle_message(message: Message) -> None:
         return
     await asyncio.to_thread(save_message, user_id, "user", user_text)
     history = await asyncio.to_thread(load_history, user_id)
-    from datetime import datetime, timezone
-    from llm.execution_context import attach_context, context_record
-    time_policy = policy_for(user_text)
-    ctx = new_run_context(interface="telegram", agent_name="roleplay", user_id=str(user_id), is_owner=True,
-                          session_id=f"telegram-roleplay:{message.chat.id}", scope_type="telegram_message",
-                          scope_id=str(message.message_id))
     state = None
     people = None
     try:
@@ -515,35 +509,54 @@ async def handle_message(message: Message) -> None:
     if state is None:
         await message.answer("현재 장면을 읽지 못했어. 잠시 후 다시 시도해 줘.")
         return
+    turn = {"user_text": user_text, "scope_id": str(message.message_id), "chat_id": message.chat.id,
+            "history": history, "state": state, "notes": notes, "people": people}
     try:
         authorization = await asyncio.to_thread(roleplay_turn.authorize, user_text, state, history)
+    except PendingChoice as exc:
+        # Jev could not tell whether this is a scene to play or a question to answer.
+        # Cheap to ask now, before any draft is written.
+        PENDING_CHOICES[user_id] = {**turn, "key": exc.key, "phase": "authorize"}
+        await message.answer(_choice_prompt(exc), reply_markup=_choice_keyboard(turn["scope_id"], exc))
+        return
     except Exception:
         logger.exception("roleplay authorization failed")
         await message.answer("이번에 진행할 장면을 확정하지 못했어. 실행할 행동이나 장면을 구체적으로 말해줘.")
         return
+    await _draft_and_settle(message, user_id, turn, authorization)
+
+
+async def _draft_and_settle(message: Message, user_id: int, turn: dict, authorization: dict) -> None:
+    """Write the draft in isolation, settle it, and send it. ``message`` is only the channel
+    to answer on; the turn's identity is turn['scope_id'] (the user's message id)."""
+    from datetime import datetime, timezone
+    from llm.execution_context import attach_context, context_record
+    user_text, scope_id, state = turn["user_text"], turn["scope_id"], turn["state"]
+    ctx = new_run_context(interface="telegram", agent_name="roleplay", user_id=str(user_id), is_owner=True,
+                          session_id=f"telegram-roleplay:{turn['chat_id']}", scope_type="telegram_message", scope_id=scope_id)
     time_policy = roleplay_turn.policy_for_authorization(authorization)
-    history = attach_context(history, [context_record(
+    history = attach_context(turn["history"], [context_record(
         "runtime_state", "telegram_roleplay_runtime", {
             "model": ROLEPLAY_MODEL, "channel": "telegram_roleplay",
-            "private_notes": notes,
+            "private_notes": turn["notes"],
             # The compact view: replay bookkeeping (event IDs, timestamps) is
             # server state the model never needs and only crowds the prompt.
             "character_state": actor_state_view(state) if state else None,
-            "people": people,
-            "recent_repeated_phrases": repeated_phrases(history),
+            "people": turn["people"],
+            "recent_repeated_phrases": repeated_phrases(turn["history"]),
             "persona_time": "fictional; infer from the roleplay, not the server clock",
             "scene_direction": {"direction": roleplay_turn.direction(authorization, state)},
-        }, scope=f"telegram-roleplay:{message.chat.id}",
+        }, scope=f"telegram-roleplay:{turn['chat_id']}",
         observed_at=datetime.now(timezone.utc), temporal_scope="current turn",
     )])
 
     try:
-        await message.bot.send_chat_action(message.chat.id, "typing")
+        await message.bot.send_chat_action(turn["chat_id"], "typing")
     except Exception:
         pass
 
     # Stream reasoning/tool steps as separate messages; keep the final reply clean.
-    progress_cb = _make_progress_callback(message.bot, message.chat.id)
+    progress_cb = _make_progress_callback(message.bot, turn["chat_id"])
     reply = ""
     settled = None
     try:
@@ -563,26 +576,25 @@ async def handle_message(message: Message) -> None:
                     break
                 try:
                     prepared = await asyncio.to_thread(roleplay_turn.prepare, user_text, state, stage['people'],
-                        history, str(message.message_id), reply, authorization, stage)
+                        history, scope_id, reply, authorization, stage)
                 except PendingChoice as exc:
                     # Jev left one closed choice open. Ask the director instead of
                     # burning a second draft or silently dropping the turn.
                     PENDING_CHOICES[user_id] = {
-                        "user_text": user_text, "state": state, "people": stage['people'], "history": history,
-                        "scope_id": str(message.message_id), "draft": reply, "authorization": authorization,
-                        "stage": stage, "verdict": exc.verdict, "key": exc.key,
+                        **turn, "phase": "settle", "people": stage['people'], "history": history,
+                        "draft": reply, "authorization": authorization, "stage": stage,
+                        "verdict": getattr(exc, "verdict", None), "key": exc.key,
                     }
                     await progress_cb.flush()
-                    await message.answer(_choice_prompt(exc), reply_markup=_choice_keyboard(str(message.message_id), exc))
+                    await message.answer(_choice_prompt(exc), reply_markup=_choice_keyboard(scope_id, exc))
                     return
                 except ValueError as exc:
                     logger.warning("roleplay draft rejected: %s", exc)
                     history = attach_context(history, [context_record('draft_revision','telegram_roleplay_runtime',
                         {'direction':'이전 초안은 폐기됐다. 범위를 지킨 새 초안을 작성하라.', 'issue':str(exc)},
-                        scope=f"telegram-roleplay:{message.chat.id}",observed_at=datetime.now(timezone.utc),temporal_scope='current turn')])
+                        scope=f"telegram-roleplay:{turn['chat_id']}",observed_at=datetime.now(timezone.utc),temporal_scope='current turn')])
                     continue
-                settled = await asyncio.to_thread(adjudicate_turn, user_id, user_text, history,
-                    str(message.message_id), prepared=prepared)
+                settled = await asyncio.to_thread(adjudicate_turn, user_id, user_text, history, scope_id, prepared=prepared)
                 if settled.get('status') in {'applied','unchanged'}:
                     reply = settled['reply']
                 break
@@ -606,15 +618,24 @@ async def _deliver(message: Message, user_id: int, reply: str, settled: dict) ->
 
 
 def _choice_prompt(exc: PendingChoice) -> str:
-    if exc.key == "intensity":
-        return "이 장면의 사건 강도를 판정하지 못했어. 골라 주면 이 초안을 그대로 확정할게."
-    return "이 장면에서 실제로 일어난 사건을 판정하지 못했어. 골라 주면 이 초안을 그대로 확정할게."
+    return {
+        "mode": "이 메시지가 장면 실행인지, 질문·상담인지 판정하지 못했어. 골라 주면 그대로 진행할게.",
+        "within_scope": "쓴 초안이 지시한 장면 범위 안인지 판정하지 못했어. 범위 안이면 이 초안을 그대로 확정할게.",
+        "intensity": "이 장면의 사건 강도를 판정하지 못했어. 골라 주면 이 초안을 그대로 확정할게.",
+    }.get(exc.key, "이 장면에서 실제로 일어난 사건을 판정하지 못했어. 골라 주면 이 초안을 그대로 확정할게.")
+
+
+_CHOICE_LABELS = {
+    "mode": {"scene": "장면 실행", "discussion": "질문·상담", "plan": "예정만 등록", "correction": "수치 정정", "reset": "새 장면"},
+    "within_scope": {"yes": "범위 안 — 이 초안 확정", "no": "범위 밖 — 버리기"},
+}
 
 
 def _choice_keyboard(scope_id: str, exc: PendingChoice) -> InlineKeyboardMarkup:
-    rows = [[InlineKeyboardButton(text=korean, callback_data=f"rp:{scope_id}:{exc.key}:{label}")]
+    names = _CHOICE_LABELS.get(exc.key, {})
+    rows = [[InlineKeyboardButton(text=names.get(label, korean)[:60], callback_data=f"rp:{scope_id}:{exc.key}:{label}")]
             for label, korean in exc.candidates]
-    rows.append([InlineKeyboardButton(text="이 초안 버리기", callback_data=f"rp:{scope_id}:cancel:-")])
+    rows.append([InlineKeyboardButton(text="버리기" if exc.key == "mode" else "이 초안 버리기", callback_data=f"rp:{scope_id}:cancel:-")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -635,14 +656,27 @@ async def on_choice(query: CallbackQuery) -> None:
         await query.answer("이미 처리된 선택이야.")
         return
     await query.answer()
-    verdict = dict(pending["verdict"])
-    verdict["labels"] = {**verdict["labels"], key: value}
-    chosen = next((korean for label, korean in _candidates_of(pending, key) if label == value), value)
+    chosen = _CHOICE_LABELS.get(key, {}).get(value) or next((korean for label, korean in _candidates_of(pending, key) if label == value), value)
+    if key == "mode":
+        PENDING_CHOICES.pop(user_id, None)
+        await query.message.edit_text(f"선택: {chosen}")
+        authorization = {"user_text": pending["user_text"], "labels": {"mode": value, "transition": "current", "span": "brief"},
+                         "player_confirmed": True}
+        await _draft_and_settle(query.message, user_id, pending, authorization)
+        return
+    if key == "within_scope" and value != "yes":
+        PENDING_CHOICES.pop(user_id, None)
+        await query.message.edit_text("이 초안은 버렸어. 어디까지 진행할지 다시 말해줘.")
+        return
+    verdict = None
+    if pending.get("verdict") is not None:
+        verdict = dict(pending["verdict"])
+        verdict["labels"] = {**verdict["labels"], key: value}
     try:
         prepared = await asyncio.to_thread(roleplay_turn.prepare, pending["user_text"], pending["state"], pending["people"],
-            pending["history"], scope_id, pending["draft"], pending["authorization"], pending["stage"], verdict)
+            pending["history"], scope_id, pending["draft"], pending["authorization"], pending["stage"], verdict, key == "within_scope")
     except PendingChoice as exc:
-        pending["verdict"], pending["key"] = exc.verdict, exc.key
+        pending["verdict"], pending["key"] = getattr(exc, "verdict", None), exc.key
         await query.message.edit_text(f"선택: {chosen}\n" + _choice_prompt(exc), reply_markup=_choice_keyboard(scope_id, exc))
         return
     except ValueError as exc:

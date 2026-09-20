@@ -16,7 +16,10 @@ from runtime_tools.roleplay_clock import interpret_clock
 from runtime_tools.roleplay_pacing import policy_for, turn_time_scope, check_time_request, check_time_result
 
 
-def decide(label, payload, questions):
+def decide(label, payload, questions, defaults=None):
+    """Closed-set answers for every question. A key listed in ``defaults`` falls back to the
+    conservative value when Jev stays unsure; any other unsure key becomes a PendingChoice
+    so the player can settle it instead of losing the turn."""
     profile = resolve(jev.FEATURE)
     if not profile.extra.get('enabled', False):
         raise ValueError('판정기가 비활성화됨')
@@ -41,10 +44,15 @@ def decide(label, payload, questions):
             for key in unresolved:
                 value = accepted(retry.decision,key)
                 if value is not None: labels[key] = value
-    missing = set(questions) - set(labels)
-    if missing:
-        raise ValueError('장면 검증 미확정: ' + ','.join(sorted(missing)))
-    return {'labels': labels, 'answers': result.decision.answers, 'review':review, 'model': result.decision.model}
+    defaulted = {}
+    for key in sorted(set(questions) - set(labels)):
+        if defaults and key in defaults:
+            labels[key] = defaulted[key] = defaults[key]
+            continue
+        probabilities = result.decision.probabilities(key)
+        ranked = sorted(questions[key]['criteria'], key=lambda k: -float(probabilities.get(k) or 0))
+        raise jev.PendingChoice(key, [(k, questions[key]['criteria'][k]) for k in ranked[:4]], '장면 검증 미확정: ' + key)
+    return {'labels': labels, 'answers': result.decision.answers, 'review':review, 'model': result.decision.model, 'defaulted': defaulted}
 
 
 def authorize(user_text, state, history):
@@ -66,8 +74,11 @@ def authorize(user_text, state, history):
     morning_directive = bool(re.match(r'^\s*[（(]?\s*(?:다음\s*날\s*|내일\s*)?아침(?:에는|에|\s*장면)', user_text)) and clock.get('daypart') in {'afternoon','evening','night'}
     if morning_directive:
         questions.pop('transition')
+    # Unsure about the workload or a day transition, take the smaller scene; only the
+    # mode itself is worth asking the player about.
     result = decide('roleplay-authorize', {'current_user':user_text,'current':{k:state.get(k) for k in ('clock','scene','location')},
-        'history':[{'role':m['role'],'content':m['content'][-1800:]} for m in history[-2:]]}, questions)
+        'history':[{'role':m['role'],'content':m['content'][-1800:]} for m in history[-2:]]}, questions,
+        defaults={'transition': 'current', 'span': 'brief'})
     if morning_directive:
         result['labels']['transition'] = 'next_morning' if result['labels']['mode'] == 'scene' else 'current'
         result['transition_source'] = 'literal_morning_direction_after_evening; execution_authorized_by_jev'
@@ -155,13 +166,16 @@ def commit_staged(conn, uid, stage):
             conn.executemany(f'INSERT INTO {table} VALUES (?,?,?)',[(str(uid),*row) for row in stage['records'][table]])
 
 
-def prepare(user_text, before, people, history, scope_id, draft, authorization, stage=None, verdict=None):
+def prepare(user_text, before, people, history, scope_id, draft, authorization, stage=None, verdict=None, scope_ok=False):
     """Gate and classify the draft, then project it. A ``verdict`` from an earlier attempt
-    (the player settled a choice Jev left open) skips the scope gate and the classifier."""
+    (the player settled a choice Jev left open) skips the scope gate and the classifier;
+    ``scope_ok`` means the player confirmed the draft stays within the authorized scene."""
     if verdict is None:
+        gate = {'labels': {'within_scope': 'yes'}, 'player_confirmed': True} if scope_ok else None
         guard_questions = {'within_scope': jev.choice('Check the WHOLE draft against the authorized user endpoint. Accept normal staging details inside that action (sitting, speaking, pausing, sipping water, standing or exiting the interrogation room at the end). These are not separate major scenes. Historical source dates are references, not target dates when the user directs reenactment in the next morning scene; reject extra meals, sleep, assaults, next scenes or days not requested. Parenthesized director instructions authorize their specified scene. A mere discussion/plan must not be enacted. Repetition of the already existing scene as context is fine.', {'yes':'Entire proposed response stays within authorized scope','no':'Adds unauthorized events, skips or enacts a discussion/plan'})}
-        gate = decide('roleplay-draft-scope', {'current_user':user_text,'authorization':authorization['labels'],
-            'before':{k:before.get(k) for k in ('clock','location','scene')},'draft':draft}, guard_questions)
+        if gate is None:
+            gate = decide('roleplay-draft-scope', {'current_user':user_text,'authorization':authorization['labels'],
+                'before':{k:before.get(k) for k in ('clock','location','scene')},'draft':draft}, guard_questions)
         if gate['labels']['within_scope'] != 'yes':
             raise ValueError('초안이 사용자 지시의 사건 경계를 넘음')
         verdict = jev.classify(user_text,before,people,history,draft=draft)
