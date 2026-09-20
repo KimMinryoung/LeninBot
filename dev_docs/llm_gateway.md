@@ -341,3 +341,12 @@ DB 싱크 워커는 daemon 스레드다. 오래 사는 서비스에서는 문제
 `llm.call_registry.generate_detailed`는 text/error_kind/error/truncated/usage/attempts/latency_ms/retry_after를 반환한다. 기존 `generate_sync`는 이 결과의 text/None 호환 래퍼다. `profile=` 오버라이드를 사용하는 비교 실행도 같은 정책 검사와 감사 경로를 지난다. 내부 출력 예산 확대 시도는 버린 응답까지 각각 계측하며 상세 결과 usage는 합계다. 기존 요약 호출의 잘린 텍스트 반환 호환성은 유지하되 번역 공통 계층은 truncated를 거부한다. 영구 오류와 일시 오류 구분 및 번역 재시도 소유권은 `translation_runtime/`에 있다.
 
 표준 사료·연구 Markdown·DB JSON 번역은 공통 실행 계층을 사용한다. DeepL 정적 페이지는 별도 HTTP 어댑터이며, 사료 `--probe`는 진단용 executor 직접 호출이라 상세 registry 감사와 구분한다. 모델 기본값·재시도 단계·타이머·실행 명령은 [Translation Pipeline](translation_pipeline.md)을 따른다.
+
+### 루프 소비자별 토큰 계측
+
+`LoopState`는 전달받은 `budget_tracker`에 응답별 `input_tokens`, `output_tokens`,
+`cache_read_tokens`, `cache_create_tokens`, `llm_responses`, `observed_llm_cost_usd`를
+누적한다. 입력 토큰은 프로토콜 간 비교를 위해 캐시를 포함하며, Anthropic 어댑터는
+`token_semantics=anthropic`을 전달한다. 기존 감사 행의 제공자별 토큰 의미와 비용 계산은
+그대로다. 새 계측은 provider fallback에서도 누적되고 예외 시 이미 받은 응답을 보존한다.
+`observed_llm_cost_usd`는 부분 관측치일 수 있으므로 그 값만으로 미정산 예약을 해제하지 않는다.

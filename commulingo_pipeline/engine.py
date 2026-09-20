@@ -16,6 +16,7 @@ class Result:
 @dataclass
 class Usage:
     tracker: dict = field(default_factory=dict)
+    prepared: dict = field(default_factory=dict)
     # Unknown usage after a process/provider failure retains the reservation.
     complete: bool = False
     started: bool = False
@@ -92,16 +93,25 @@ class Engine:
         started_at = asyncio.get_running_loop().time()
         try:
             attempt = await asyncio.to_thread(self.store.start_attempt,job)
+            usage.tracker['attempt_id'] = str(attempt)
             stage = self.stages[job['stage']]
-            if getattr(stage, 'uses_llm', False):
-                reservation = await asyncio.to_thread(self.store.reserve,
-                    self.stage_budget, lane='review' if job['stage']=='review' else job['kind'],
-                    job_id=job['id'], cap=self.cap, review_fraction=self.review_fraction)
-                await asyncio.to_thread(self.store.link_attempt_budget,attempt,reservation)
             detail = await asyncio.to_thread(self.store.detail, job['id'])
             heartbeat = asyncio.create_task(self._heartbeat(job))
-            work = asyncio.create_task(stage(job, detail['artifacts'], usage,
-                                            float(self.stage_budget)))
+            async def execute():
+                nonlocal reservation
+                prepare = getattr(stage, 'prepare', None)
+                if prepare is not None:
+                    early = await prepare(job, detail['artifacts'], usage)
+                    if early is not None:
+                        usage.tracker['preflight_no_model'] = True
+                        return early
+                if getattr(stage, 'uses_llm', False):
+                    reservation = await asyncio.to_thread(self.store.reserve,
+                        self.stage_budget, lane='review' if job['stage']=='review' else job['kind'],
+                        job_id=job['id'], cap=self.cap, review_fraction=self.review_fraction)
+                    await asyncio.to_thread(self.store.link_attempt_budget,attempt,reservation)
+                return await stage(job, detail['artifacts'], usage, float(self.stage_budget))
+            work = asyncio.create_task(execute())
             done, _ = await asyncio.wait({work, heartbeat}, timeout=self.timeout,
                                         return_when=asyncio.FIRST_COMPLETED)
             if heartbeat in done:
@@ -149,6 +159,9 @@ class Engine:
                                             usage.tracker.get('total_cost', 0) if usage.started else 0)
             finally:
                 if attempt:
+                    if reservation and (usage.complete or not usage.started):
+                        usage.tracker['cost_complete'] = True
+                        usage.tracker['actual_cost_usd'] = usage.tracker.get('total_cost', 0) if usage.started else 0
                     await asyncio.to_thread(self.store.finish_attempt,attempt,outcome,next_stage,error,
                         asyncio.get_running_loop().time()-started_at,usage.tracker)
 

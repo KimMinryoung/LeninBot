@@ -270,3 +270,7 @@ Apply the migration and refresh the proxy sink before deploying metadata-produci
 consumers. Existing text responses, status codes, redaction and append-only rules remain.
 
 Paid web search/extraction additionally reserves its cost at the provider boundary inside the dedicated `leninbot-web-gateway.service` through `web_gateway/budget.py`; this is a shared UTC daily budget, independent of tool rate limits and enforce/shadow mode. CallerContext attributes costs to services and task scopes. See [web_research.md](web_research.md).
+
+CommuLingo의 세션 내부 `commulingo_pipeline_review_context`는 `read` 도구이며
+owner 문맥의 `commulingo_reviewer`만 호출할 수 있다. 검토 중인 대상의 기존 필드만
+읽고 외부 원문 확인을 대체하지 않는다. 전역 도구 목록에는 등록하지 않는다.

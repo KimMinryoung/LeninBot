@@ -117,3 +117,50 @@ class CleanupDatabaseTests(unittest.TestCase):
             cur.execute("UPDATE commulingo_people SET bio_en='Body'")
         retire(self.store,apply=True)
         self.assertEqual(self.statuses()[person],'cancelled')
+
+    def test_reconcile_only_explicit_complete_costs_and_keep_unknown_reservations(self):
+        reservations = {}
+        for target, metrics in (
+                ('confirmed', {'cost_complete':True, 'actual_cost_usd':.013,
+                    'input_tokens':1234, 'output_tokens':56, 'cache_read_tokens':1000,
+                    'review_context_original_chars':2000, 'review_context_chars':1000}),
+                ('partial', {'observed_llm_cost_usd':.01, 'input_tokens':500}),
+                ('old', {})):
+            job_id = self.job(target)
+            job = {'id':job_id,'stage':'research'}
+            attempt = self.store.start_attempt(job)
+            reservation = self.store.reserve('.2',lane='term',job_id=job_id,cap='2')
+            reservations[target] = str(reservation)
+            self.store.link_attempt_budget(attempt,reservation)
+            self.store.finish_attempt(attempt,'error',None,'fixture',1,metrics)
+        preview = self.store.reconcile_costs()
+        self.assertEqual(len(preview['candidates']),1)
+        self.assertEqual(len(preview['unresolved_jobs']),2)
+        self.store.reconcile_costs(apply=True)
+        with self.store.transaction() as cur:
+            cur.execute('SELECT id,actual FROM commulingo_pipeline_budget')
+            actual = {str(r['id']):r['actual'] for r in cur.fetchall()}
+        self.assertEqual(float(actual[reservations['confirmed']]),.013)
+        self.assertIsNone(actual[reservations['partial']])
+        self.assertIsNone(actual[reservations['old']])
+        self.assertEqual(self.store.reconcile_costs(apply=True)['candidates'],[])
+        from datetime import datetime, timezone
+        row = self.store.efficiency(datetime(2000,1,1,tzinfo=timezone.utc))[0]
+        self.assertEqual(row['input_tokens'],1734)
+        self.assertEqual(row['token_measured'],2)
+        self.assertEqual(row['review_original_chars'],2000)
+        self.assertEqual(row['review_chars'],1000)
+
+    def test_failure_checkpoint_is_fenced_and_cannot_overwrite_editor_checkpoint(self):
+        from commulingo_pipeline.store import LostLease
+        job_id = self.job('checkpoint')
+        job = self.store.claim(job_id=job_id)
+        self.store.save_editor_checkpoint(job,{'draft':{'fields':{'body':'retained'}}})
+        self.store.save_fetch_failures(job,{'failures':{'url-hash':{'reason':'http_forbidden','until':9999999999}}})
+        detail = self.store.detail(job_id)
+        self.assertEqual([a['stage'] for a in detail['artifacts']],['editor_checkpoint','fetch_failures'])
+        with self.store.transaction() as cur:
+            cur.execute("UPDATE commulingo_pipeline_jobs SET lease_until=now()-interval '1 second' WHERE id=%s",(job_id,))
+        with self.assertRaises(LostLease):
+            self.store.save_fetch_failures(job,{'failures':{}})
+        self.assertEqual(len(self.store.detail(job_id)['artifacts']),2)

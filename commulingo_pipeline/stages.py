@@ -275,6 +275,8 @@ async def model_call(*, spec, prompt, tool, handler, reads, usage, budget, read_
                 agent_name=spec.name,finalization_tools=terminal_names,terminal_tools=terminal_names,
                 terminal_required=True,**binding.reasoning)
     jev_before = usage.tracker.get('jev_cost_usd',0)
+    observed_before = usage.tracker.get('observed_llm_cost_usd',0)
+    cost_before = usage.tracker.get('total_cost',0)
     try:
         await run(spec)
     except Exception as exc:
@@ -288,7 +290,11 @@ async def model_call(*, spec, prompt, tool, handler, reads, usage, budget, read_
     finally:
         # Provider loops replace total_cost on return; add sidecar decisions
         # afterwards so their usage is neither lost nor charged twice.
-        usage.tracker['total_cost'] = usage.tracker.get('total_cost',0) + (
+        # LoopState accumulates received responses even across a provider
+        # fallback; adapter finalization otherwise replaces the first cost.
+        loop_cost = (cost_before + usage.tracker['observed_llm_cost_usd'] - observed_before
+                     if 'observed_llm_cost_usd' in usage.tracker else usage.tracker.get('total_cost',0))
+        usage.tracker['total_cost'] = loop_cost + (
             usage.tracker.get('jev_cost_usd',0)-jev_before)
     usage.complete = True
     if not completed:

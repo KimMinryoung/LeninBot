@@ -14,6 +14,7 @@ class Sources:
         self.sources = sources
         self.passages = Passages()
         self.requests = []
+        self.backoff = None
 
     @classmethod
     async def load(cls, store, job, usage, checkpoint=None):
@@ -82,6 +83,8 @@ class Sources:
                 'oneOf':[{'required':['passages']},{'required':['source_id']}]}},read,False)
 
     def wrap(self, name, call):
+        if self.backoff is not None:
+            call = self.backoff.wrap(name, call)
         async def fetched(**args):
             if name not in {'fetch_url','wiki_get'}:
                 return await call(**args)

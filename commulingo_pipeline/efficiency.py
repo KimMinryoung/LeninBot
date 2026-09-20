@@ -24,6 +24,14 @@ def query(boundary):
             count(*) FILTER (WHERE a.finished_at IS NULL) AS unfinished,
             sum(coalesce(a.duration_seconds,extract(epoch FROM now()-a.started_at))) AS seconds,
             sum(coalesce((a.metrics->>'rounds_used')::integer,0)) AS rounds,
+            count(*) FILTER (WHERE a.metrics ? 'input_tokens') AS token_measured,
+            sum((a.metrics->>'input_tokens')::bigint) AS input_tokens,
+            sum((a.metrics->>'output_tokens')::bigint) AS output_tokens,
+            sum((a.metrics->>'cache_read_tokens')::bigint) AS cache_read_tokens,
+            count(*) FILTER (WHERE a.metrics->>'preflight_no_model'='true') AS preflight_no_model,
+            sum((a.metrics->>'fetch_backoff_hits')::integer) AS fetch_backoff_hits,
+            sum((a.metrics->>'review_context_original_chars')::bigint) AS review_original_chars,
+            sum((a.metrics->>'review_context_chars')::bigint) AS review_chars,
             count(*) FILTER (WHERE a.stage='research') AS research,
             count(*) FILTER (WHERE a.next_stage='research' AND a.stage IN ('draft','validate','review')) AS rework
         FROM commulingo_pipeline_attempts a JOIN commulingo_pipeline_jobs j ON j.id=a.job_id
@@ -61,6 +69,8 @@ def query(boundary):
             c.actual,coalesce(c.reserved,0) AS reserved,coalesce(c.unsettled,0) AS unsettled,
             coalesce(a.attempts,0) AS attempts,coalesce(a.unfinished,0) AS unfinished,
             a.seconds,a.rounds,a.research,a.rework,v.checked,v.first_pass,
+            a.token_measured,a.input_tokens,a.output_tokens,a.cache_read_tokens,
+            a.preflight_no_model,a.fetch_backoff_hits,a.review_original_chars,a.review_chars,
             d.discoveries,d.judgments,e.resolved_issues,e.deferred_issues,e.no_progress_holds,e.factual_revisions
         FROM groups g LEFT JOIN publications p USING(kind,action)
         LEFT JOIN costs c USING(kind,action) LEFT JOIN attempts a USING(kind,action)
@@ -84,6 +94,12 @@ def render(rows):
         if r['checked']:
             lines.append(f"    첫 저장 검증 {r['first_pass']}/{r['checked']} · "
                          f"후보 발견 {r['discoveries'] or 0} · 무편집 판단 {r['judgments'] or 0}")
+        if r.get('token_measured'):
+            lines.append(f"    토큰 계측 {r['token_measured']}시도: 입력 {r['input_tokens']} · 출력 {r['output_tokens']} · 캐시 읽기 {r.get('cache_read_tokens') or 0}")
+        if r.get('review_original_chars'):
+            lines.append(f"    검토 문맥 {r['review_original_chars']}→{r['review_chars']}자 (비용 절감률 아님)")
+        if r.get('preflight_no_model') or r.get('fetch_backoff_hits'):
+            lines.append(f"    유료 예약 전 종료 {r.get('preflight_no_model') or 0} · 실패 URL 재시도 억제 {r.get('fetch_backoff_hits') or 0}")
         if r.get('resolved_issues') or r.get('deferred_issues') or r.get('no_progress_holds'):
             lines.append(f"    승인·반영한 결함 해결 {r.get('resolved_issues') or 0} · 미해결 {r.get('deferred_issues') or 0} · "
                          f"진전 없는 반복 보류 {r.get('no_progress_holds') or 0} · 사실 수정 요청 {r.get('factual_revisions') or 0}")

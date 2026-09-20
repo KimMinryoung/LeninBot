@@ -12,6 +12,9 @@ from .bundles import advance
 class Review:
     uses_llm = True
 
+    def __init__(self, store=None):
+        self.store = store
+
     async def __call__(self, job, artifacts, usage, budget):
         from .stages import latest, current_artifacts, write_request, model_call, stage_evidence, READS
         from agents.commulingo_reviewer import COMMULINGO_REVIEWER
@@ -43,7 +46,10 @@ class Review:
             checks = value.get('checks',[])
             return {**value,'checks':annotate(checks,await check_review_checks(checks,usage=usage,
                 decide=decisions.decide,cache=decisions.citations))}
-        handlers = make_handlers({k:TOOL_HANDLERS[k] for k in READS},proposal,snapshots,box,gate=gate)
+        from .fetch_backoff import FetchBackoff
+        from .store import Store
+        backoff = FetchBackoff(self.store if self.store is not None else Store(), job, usage, artifacts)
+        handlers = make_handlers({k:backoff.wrap(k,TOOL_HANDLERS[k]) for k in READS},proposal,snapshots,box,gate=gate)
         tool = deepcopy(DECISION_TOOL)
         tool['input_schema']['properties'].update({
             'required_corrections':{'type':'array','items':{'type':'object','additionalProperties':False,
@@ -74,6 +80,15 @@ class Review:
                            if a['value'].get('editor_version')==2 and a['value'].get('draft')]
         delta = changes(current, draft['fields'])
         since_review = changes(previous_drafts[-2]['fields'], draft['fields']) if len(previous_drafts)>1 else delta
+        from .review_context import context, context_tool
+        compact = context(proposal, current, previous_drafts[-2]['fields'] if len(previous_drafts)>1 else None)
+        shared = {'issues':draft.get('issues',[]), 'issue_results':draft.get('issue_results',[]),
+                  'previous_reviews':previous}
+        old_context = {'suggestion':proposal,'current':current,'changes':delta,
+                       'changes_since_previous_patch':since_review, **shared}
+        compact.update(shared)
+        usage.tracker['review_context_original_chars'] = len(stage_evidence(old_context))
+        usage.tracker['review_context_chars'] = len(stage_evidence(compact))
         prompt = ('Independently verify the changed facts, bilingual equivalence and their original sources. '
             'Fetch the relevant originals yourself; author excerpts are leads, not independent confirmation. '
             'Review the actual delta. Do not expand the article or request stylistic rewrites. '
@@ -81,14 +96,14 @@ class Review:
             'accepted conclusions unless new conflicting evidence appears. Required corrections are only material '
             'factual errors, unsupported core assertions or bilingual contradictions. Put optional improvements '
             'in optional_suggestions; they must not prevent approval. If an unchanged field is included solely '
-            'to attach missing evidence, verify that evidence without requiring additional prose.\n'
-            + stage_evidence({'suggestion':proposal,'current':current,'changes':delta,
-                'changes_since_previous_patch':since_review,'issues':draft.get('issues',[]),
-                'issue_results':draft.get('issue_results',[]),
-                'previous_reviews':previous}))
+            'to attach missing evidence, verify that evidence without requiring additional prose. '
+            'Proposed values appear once in suggestion.patch_json; changes lists their old values by JSON pointer. '
+            'Use commulingo_pipeline_review_context to inspect other current fields for contradictions or duplicate sections. '
+            'Missing context is not evidence of absence.\n' + stage_evidence(compact))
         await model_call(spec=COMMULINGO_REVIEWER,prompt=prompt,tool=tool,handler=finish,reads=READS,
             read_wrap=lambda name,call:handlers[name],usage=usage,budget=budget,
-            scope_id=f'commulingo_pipeline:{job["id"]}:review',job=job)
+            scope_id=f'commulingo_pipeline:{job["id"]}:review',job=job,
+            local_tools=[context_tool(current)])
         if box['decision']=='revise':
             return Result(box, 'draft')
         return Result(box, 'submit' if box['decision']=='approve' else 'complete',
@@ -150,7 +165,7 @@ def stages(store):
     from .stages import Discover, judge
     editor = Editor(store)
     return {'discover':Discover(), 'research':editor, 'draft':editor, 'judge':judge,
-            'validate':validate, 'review':Review(), 'submit':publish}
+            'validate':validate, 'review':Review(store), 'submit':publish}
 
 
 def routed_stages(store, legacy, preferred):
@@ -159,21 +174,27 @@ def routed_stages(store, legacy, preferred):
         raise ValueError('unknown editorial workflow')
     editor = stages(store)
     routed = {}
+    async def select(job, stage):
+        selected = (job.get('payload') or {}).get('workflow', preferred)
+        if selected not in {'legacy','editor'}:
+            raise ValueError('unknown job workflow')
+        if (selected=='editor' and not (job.get('payload') or {}).get('workflow')
+                and stage not in {'research','draft','discover'}):
+            selected = 'legacy'
+        if selected=='editor' and not (job.get('payload') or {}).get('workflow'):
+            await asyncio.to_thread(store.pin_editor_workflow,job)
+            job['payload'] = {**job.get('payload',{}),'workflow':'editor'}
+        return (editor if selected=='editor' else legacy)[stage]
+
     for name in legacy:
         async def execute(job, artifacts, usage, budget, stage=name):
-            selected = (job.get('payload') or {}).get('workflow', preferred)
-            if selected not in {'legacy','editor'}:
-                raise ValueError('unknown job workflow')
-            if (selected=='editor' and not (job.get('payload') or {}).get('workflow')
-                    and stage not in {'research','draft','discover'}):
-                # An old submit may already have committed its pending proposal.
-                # Finish that bundle with its original receipt keys; upgrade only
-                # at an authoring boundary, never duplicate an in-flight write.
-                selected = 'legacy'
-            if selected=='editor' and not (job.get('payload') or {}).get('workflow'):
-                await asyncio.to_thread(store.pin_editor_workflow,job)
-                job['payload'] = {**job.get('payload',{}),'workflow':'editor'}
-            return await (editor if selected=='editor' else legacy)[stage](job,artifacts,usage,budget)
+            selected = await select(job, stage)
+            return await selected(job,artifacts,usage,budget)
+        async def prepare(job, artifacts, usage, stage=name):
+            selected = await select(job, stage)
+            check = getattr(selected, 'prepare', None)
+            return await check(job, artifacts, usage) if check else None
+        execute.prepare = prepare
         execute.uses_llm = getattr(legacy[name], 'uses_llm', False)
         routed[name] = execute
     return routed

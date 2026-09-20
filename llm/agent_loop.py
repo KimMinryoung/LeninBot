@@ -139,15 +139,24 @@ class LoopState:
     audit event in this one place covers every provider without mirroring.
     """
 
-    def __init__(self, budget_usd: float, *, agent_name: str = "agent"):
+    def __init__(self, budget_usd: float, *, agent_name: str = "agent", budget_tracker=None):
         self.budget_usd = budget_usd
         self.total_cost = 0.0
         self.agent_name = agent_name
+        self.budget_tracker = budget_tracker
 
     def add_cost(self, cost: float, *, model: str | None = None, label: str | None = None,
                  tokens_in: int = 0, tokens_out: int = 0,
-                 cache_read: int = 0, cache_create: int = 0):
+                 cache_read: int = 0, cache_create: int = 0,
+                 token_semantics: str = "openai"):
         self.total_cost += cost
+        if self.budget_tracker is not None:
+            # Normalize input to include cache tokens across both protocols.
+            incoming = tokens_in + (cache_read + cache_create if token_semantics == 'anthropic' else 0)
+            for key, value in {'input_tokens':incoming, 'output_tokens':tokens_out,
+                               'cache_read_tokens':cache_read, 'cache_create_tokens':cache_create,
+                               'llm_responses':1, 'observed_llm_cost_usd':cost}.items():
+                self.budget_tracker[key] = self.budget_tracker.get(key, 0) + value
         record_llm_call(
             surface="loop", caller=self.agent_name, model=model, label=label,
             tokens_in=tokens_in, tokens_out=tokens_out,
@@ -194,7 +203,7 @@ async def run_tool_loop(
     from provenance.runtime import init_provenance_buffer
     init_provenance_buffer(agent=agent_name, mission_id=mission_id)
 
-    state = LoopState(budget_usd, agent_name=agent_name)
+    state = LoopState(budget_usd, agent_name=agent_name, budget_tracker=budget_tracker)
     adapter.bind(state)
 
     working_msgs = adapter.normalize(messages)

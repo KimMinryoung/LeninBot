@@ -12,6 +12,8 @@ def main():
     commands = parser.add_subparsers(dest='command', required=True)
     commands.add_parser('list')
     commands.add_parser('costs')
+    reconciliation = commands.add_parser('reconcile-costs', help='preview settlement from complete attempt receipts')
+    reconciliation.add_argument('--apply', action='store_true')
     commands.add_parser('metrics')
     efficiency = commands.add_parser('efficiency')
     efficiency.add_argument('--since',default='today',help='UTC today or -Nh')
@@ -65,6 +67,8 @@ def main():
         result = retire(store, apply=args.apply, limit=args.limit)
     elif args.command == 'costs':
         result = store.costs()
+    elif args.command == 'reconcile-costs':
+        result = store.reconcile_costs(apply=args.apply)
     elif args.command == 'efficiency':
         from datetime import datetime, timezone, timedelta
         import re
@@ -112,6 +116,7 @@ def main():
         async def run_batch():
             if args.command=='tick':
                 from .planner import Planner
+                await asyncio.to_thread(store.reconcile_costs, apply=True)
                 if config['phase']=='live':
                     await asyncio.to_thread(store.release_publication_waits)
                 await asyncio.to_thread(store.release_budget_waits,cap=config['daily_cap_usd'],

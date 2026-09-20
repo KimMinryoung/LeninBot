@@ -278,6 +278,12 @@ class Store:
 
     def save_editor_checkpoint(self, job, value):
         """Durable rejected patch, fenced by the same lease as stage completion."""
+        self._save_checkpoint(job, 'editor_checkpoint', value)
+
+    def save_fetch_failures(self, job, value):
+        self._save_checkpoint(job, 'fetch_failures', value)
+
+    def _save_checkpoint(self, job, stage, value):
         with self.transaction() as cur:
             cur.execute('''SELECT id FROM commulingo_pipeline_jobs WHERE id=%s
                 AND lease_token=%s AND status='running' AND lease_until>now() FOR UPDATE''',
@@ -285,7 +291,7 @@ class Store:
             if not cur.fetchone():
                 raise LostLease(str(job['id']))
             cur.execute('''INSERT INTO commulingo_pipeline_artifacts(job_id,stage,value)
-                VALUES (%s,'editor_checkpoint',%s)''', (job['id'], Json(value)))
+                VALUES (%s,%s,%s)''', (job['id'], stage, Json(value)))
 
     def pin_editor_workflow(self, job):
         with self.transaction() as cur:
@@ -302,14 +308,18 @@ class Store:
                         (reservation,attempt))
 
     def finish_attempt(self, attempt, outcome, next_stage, error, duration, metrics):
-        # Do not duplicate tool transcripts/source text or ledger cost in metrics.
+        # No transcripts/source text. A complete-cost receipt permits recovery;
+        # the budget ledger remains the authority for settled spend.
         terminal_calls = sum(isinstance(line,str) and any('] '+name+'(' in line for name in
                              ('commulingo_pipeline_result','commulingo_pipeline_repair'))
                              for line in metrics.get('tool_work_details',[]))
         metrics = {k:v for k,v in metrics.items() if k in {
             'rounds_used','input_tokens','output_tokens','model_calls','pipeline_cache_hits',
             'preflight_checks','preflight_failures','preflight_passed','rejections','provider_fallback',
-            'targeted_research','workflow','repair_protocol_errors','jev_calls','jev_cost_usd'}}
+            'targeted_research','workflow','repair_protocol_errors','jev_calls','jev_cost_usd',
+            'attempt_id','cache_read_tokens','cache_create_tokens','llm_responses','observed_llm_cost_usd',
+            'review_context_original_chars','review_context_chars','preflight_no_model',
+            'fetch_backoff_hits','fetch_failures','cost_complete','actual_cost_usd'}}
         metrics['terminal_calls'] = terminal_calls
         if 'rejections' in metrics:
             metrics['rejections'] = metrics['rejections'][-12:]
@@ -508,6 +518,38 @@ class Store:
                 row = cur.fetchone()
                 if not row or row['actual'] != actual:
                     raise ValueError('unknown reservation or conflicting settlement')
+
+    def reconcile_costs(self, *, apply=False):
+        """Settle only finished attempts with an explicit complete-cost receipt.
+
+        Partial tokens, elapsed time and a completed job are never cost proof.
+        Older interrupted attempts without the receipt retain their reservation.
+        """
+        with self.transaction() as cur:
+            if apply:
+                cur.execute("SELECT pg_advisory_xact_lock(hashtext('commulingo-pipeline-budget'))")
+            cur.execute('''SELECT b.id,b.job_id,b.reserved,a.id AS attempt_id,a.metrics
+                FROM commulingo_pipeline_budget b LEFT JOIN commulingo_pipeline_attempts a
+                  ON a.budget_id=b.id AND a.finished_at IS NOT NULL AND a.outcome!='running'
+                WHERE b.actual IS NULL ORDER BY b.created_at''')
+            rows = cur.fetchall()
+            candidates, unresolved = [], []
+            for row in rows:
+                metrics = row['metrics'] or {}
+                value = metrics.get('actual_cost_usd')
+                if metrics.get('cost_complete') is not True or type(value) not in (int,float):
+                    unresolved.append(row['job_id'])
+                    continue
+                actual = Decimal(str(value))
+                if not actual.is_finite() or actual < 0:
+                    unresolved.append(row['job_id'])
+                    continue
+                candidates.append({'reservation_id':str(row['id']), 'job_id':row['job_id'],
+                                   'attempt_id':str(row['attempt_id']), 'actual':float(actual)})
+                if apply:
+                    cur.execute('''UPDATE commulingo_pipeline_budget SET actual=%s,settled_at=now()
+                        WHERE id=%s AND actual IS NULL''',(actual,row['id']))
+            return {'applied':apply, 'candidates':candidates, 'unresolved_jobs':unresolved}
 
     def costs(self):
         with self.transaction() as cur:

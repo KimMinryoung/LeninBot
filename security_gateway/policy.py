@@ -97,6 +97,7 @@ TOOL_RISK_CLASS: dict[str, str] = {
     "commulingo_pipeline_repair": "state",  # edits the private runner-local draft
     "commulingo_pipeline_cached_passages": "read",
     "commulingo_pipeline_context": "read",
+    "commulingo_pipeline_review_context": "read",
     "commulingo_pipeline_research": "state",
     "research_review_verdict": "state",  # reviewer-local verdict record; the author's tool publishes
     "commulingo_person_create": "write",
@@ -185,6 +186,7 @@ OWNER_REQUIRED_TOOLS = frozenset({
     "commulingo_pipeline_repair",
     "commulingo_pipeline_cached_passages",
     "commulingo_pipeline_context",
+    "commulingo_pipeline_review_context",
     "commulingo_pipeline_research",
     "commulingo_review_decision",
     "commulingo_person_create",
@@ -221,6 +223,7 @@ TOOL_CALLER_ALLOWLIST: dict[str, frozenset[str]] = {
     "commulingo_pipeline_repair": frozenset({"commulingo_curator"}),
     "commulingo_pipeline_cached_passages": frozenset({"commulingo_curator"}),
     "commulingo_pipeline_context": frozenset({"commulingo_curator"}),
+    "commulingo_pipeline_review_context": frozenset({"commulingo_reviewer"}),
     "commulingo_pipeline_research": frozenset({"commulingo_curator"}),
 }
 

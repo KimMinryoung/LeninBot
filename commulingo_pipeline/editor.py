@@ -56,13 +56,10 @@ class Editor:
     def __init__(self, store):
         self.store = store
 
-    async def __call__(self, job, artifacts, usage, budget):
+    async def prepare(self, job, artifacts, usage):
+        """Read/commission once under the engine lease, before any paid reservation."""
         usage.tracker['workflow'] = 'editor'
-        from .stages import (latest, current_artifacts, model_call, result_tool, stage_evidence,
-                             write_request, prose_problem, is_probe,
-                             drop_unchanged_term_facts, READS)
-        from .prompts import EDITORIAL, WRITING_RULES
-        from agents.commulingo_curator import COMMULINGO_CURATOR
+        from .stages import latest
         current = await asyncio.to_thread(service.call, {'command':'read','target':job['kind'],'id':job['target']})
         if job['action']=='create' and current:
             return Result({'reason':'target already exists'}, 'complete', 'complete')
@@ -77,9 +74,25 @@ class Editor:
         research = {'current':current, 'baseline':baseline, 'issues':issues, 'claims':[], 'inspected_sources':[]}
         if not issues:
             return Result({**research, 'status':'complete', 'reason':'No concrete missing field or evidence defect remains in the commissioned topics.'}, 'judge')
+        usage.prepared['editor'] = (current, baseline, issues, previous_review, research)
+        return None
+
+    async def __call__(self, job, artifacts, usage, budget):
+        from .stages import (current_artifacts, latest, model_call, result_tool, stage_evidence,
+                             write_request, prose_problem, is_probe,
+                             drop_unchanged_term_facts, READS)
+        from .prompts import EDITORIAL, WRITING_RULES
+        from agents.commulingo_curator import COMMULINGO_CURATOR
+        if 'editor' not in usage.prepared:
+            early = await self.prepare(job, artifacts, usage)
+            if early is not None:
+                return early
+        current, baseline, issues, previous_review, research = usage.prepared.pop('editor')
         checkpoint = next((a['value'] for a in reversed(current_artifacts(artifacts))
                            if a['stage']=='editor_checkpoint' and a['value'].get('baseline')==baseline), {})
         session = await Sources.load(self.store, job, usage, checkpoint)
+        from .fetch_backoff import FetchBackoff
+        session.backoff = FetchBackoff(self.store, job, usage, artifacts)
         catalogs = None
         section = job['kind']=='person' and job['action']=='update' and work_topics(job)==['sections']
         if job['kind']=='person' and not section:

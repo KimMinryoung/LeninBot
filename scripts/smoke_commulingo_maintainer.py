@@ -25,6 +25,7 @@ SMOKE = (
     'test_commulingo_classify',
 )
 EXTENDED = (
+    'test_commulingo_efficiency_improvements',
     'test_commulingo_cleanup',
     'test_commulingo_editor.EditorTests',
     'test_commulingo_editor.ReviewAndPublishTests',
