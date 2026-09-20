@@ -4,7 +4,7 @@ import json
 import hashlib
 from urllib.parse import urlsplit
 
-from commulingo_pipeline.evidence import MAX_PASSAGES, MIN_PASSAGE_CHARS, Passages
+from commulingo_pipeline.evidence import MAX_PASSAGES, Passages
 
 DECISION_TOOL = {"name": "commulingo_review_decision", "description": "Submit one independently researched review decision; does not directly write dictionary content.",
     "input_schema": {"type": "object", "additionalProperties": False,
@@ -73,11 +73,7 @@ def resolve_review_checks(value, proposal, snapshots, passages):
             dropped.append({"check": index, "labels": labels, "reason": "passage label not shown in this review: " + ", ".join(unknown)})
             continue
         for sid, start, end in ranges:
-            quote = snapshots[sid]["body"][start:end]
-            if len(quote.strip()) < MIN_PASSAGE_CHARS:
-                dropped.append({"check": index, "labels": labels, "reason": f"cited passage is shorter than {MIN_PASSAGE_CHARS} characters"})
-                continue
-            kept.append({**check, "source": snapshots[sid]["url"], "quote": quote})
+            kept.append({**check, "source": snapshots[sid]["url"], "quote": snapshots[sid]["body"][start:end]})
     if dropped and not kept:
         available = "; ".join(f"{sid} ({snap['url']})" for sid, snap in snapshots.items()) or "none fetched yet"
         heads = "; ".join(f"check {d['check']}: {d['reason']}" for d in dropped)
@@ -115,8 +111,6 @@ def validate_decision(value, proposal):
             raise ValueError("each check needs citation, source, quote and finding")
         if not external_url(check["source"]):
             raise ValueError(f"check {index}: select an external source fetched during this review")
-        if len(check["quote"].strip()) < MIN_PASSAGE_CHARS:
-            raise ValueError(f"check {index}: the cited passage has fewer than {MIN_PASSAGE_CHARS} characters; cite the paragraph that states the fact")
     if decision in {"approve", "revise", "reject"} and not checks:
         raise ValueError("approve/revise/reject requires retrieved evidence; otherwise escalate")
     if decision == "approve":

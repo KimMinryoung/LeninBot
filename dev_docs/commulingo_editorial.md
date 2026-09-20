@@ -127,7 +127,7 @@ security_gateway/policy.py에 state로 등록하며 소유자와 commulingo_revi
 허용한다. 테스트는 handler 직호출 대신 실제 dispatcher를 거쳐 차단 재발을 검사한다. 검토 실행기는 검증된 판단을
 기존 JS 공통 승인 서비스로 전달한다. Telegram 명령도 같은 서비스를 사용한다.
 
-- 검토기는 checks[].citation_id(S1=source_refs[0])와 **passages**(자기 fetch_url/wiki_get 결과에 표시된 문단 라벨 `R…@offset`, 한 출처의 1~3개), 한국어 finding을 낸다. 실행기는 가져온 슬라이스를 표시할 때 문단마다 라벨을 붙여 두므로(`review_source` → 조사 레인과 공유하는 `evidence.Passages`) 라벨을 그 문단 원문(citation/source/quote/finding 형식)으로 바꾸는 데 복사·매칭이 없다(`resolve_review_checks`). 여러 출처의 라벨은 출처별 check로 나누고, 표시된 적 없는 라벨만 있거나 20자 미만 문단인 check는 결정 전체를 거절하지 않고 그 check만 뺀 뒤 `dropped_checks`(번호·라벨·사유)로 저장 결정에 남긴다 — 확인된 check가 하나도 없을 때만 거절. 인용문 복사+접기 매칭(2026-09-19 하루: 9~39개 check 중 하나가 어긋나면 결정 전체가 사유 표시 없이 떨어져 하루 159건 재제출)과 행 번호 체계(그 전: 주당 87+76건)는 폐기했다. 원문은 현재 검토에서 직접 가져온 것만 인정한다. resolved_risks는 risks 식별자만 담고 설명은 reason/finding에 쓴다.
+- 검토기는 checks[].citation_id(S1=source_refs[0])와 **passages**(자기 fetch_url/wiki_get 결과에 표시된 문단 라벨 `R…@offset`, 한 출처의 1~8개), 한국어 finding을 낸다. 실행기는 가져온 슬라이스를 표시할 때 문단마다 라벨을 붙여 두므로(`review_source` → 조사 레인과 공유하는 `evidence.Passages`) 라벨을 그 문단 원문(citation/source/quote/finding 형식)으로 바꾸는 데 복사·매칭이 없다(`resolve_review_checks`). 여러 출처의 라벨은 출처별 check로 나누고, 표시된 적 없는 라벨만 있는 check는 결정 전체를 거절하지 않고 그 check만 뺀 뒤 `dropped_checks`(번호·라벨·사유)로 저장 결정에 남긴다 — 확인된 check가 하나도 없을 때만 거절. 인용문 복사+접기 매칭(2026-09-19 하루: 9~39개 check 중 하나가 어긋나면 결정 전체가 사유 표시 없이 떨어져 하루 159건 재제출)과 행 번호 체계(그 전: 주당 87+76건)는 폐기했다. 원문은 현재 검토에서 직접 가져온 것만 인정한다. resolved_risks는 risks 식별자만 담고 설명은 reason/finding에 쓴다.
 - 승인: 새로 가져온 원문에 실제로 있는 인용, 모든 제안 출처의 확인, 검토 사유의 해소,
   위키백과 밖의 근거가 필요하다. 검색 요약·작성자가 적은 인용만으로 승인하지 않는다.
 - 수정 요청(`revise`): 검토기가 직접 확인한 근거로 고칠 수 있는 사실 오류·확정 과잉·한영 불일치를 특정하면 작성기로 되돌린다. 출처별 생몰연도 이설은 병기하고 옥사와 처형을 구분한다.
@@ -135,7 +135,7 @@ security_gateway/policy.py에 state로 등록하며 소유자와 commulingo_revi
   LLM 호출 없이 반려한다. 검토 도중 버전 충돌도 반려하며 새 버전을 자동 대입하지 않는다.
 - 판단 불가(`escalate`): 접근할 수 없는 자료나 해결되지 않은 동일인은 내부 보류한다. 사용자에게 판단을 요구하지 않는다.
   시스템이 인용의 원문 포함 여부를 검사해도 역사적 판단의 정확성을 보증하지는 않는다.
-인용 거절은 checks의 1부터 시작하는 항목 번호와 원인을 반환한다. 20자 미만 인용은
+인용 거절은 checks의 1부터 시작하는 항목 번호와 원인을 반환한다. 길이 규칙은 없다 — 한 글자짜리 문단도 인용할 수 있고, 그 문단이 진술을 뒷받침하는지는 Jev 인용 게이트만 판단한다.
 범위를 넓히도록, 원문 불일치는 해당 source_id의 표시 행 범위를 선택하도록 안내한다.
 
 Migration 177의 `commulingo_person_review_jobs`가 작업 상태·근거·판단·오류를 보관한다.

@@ -49,14 +49,14 @@ class EfficiencyTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('source_id',submitted['evidence'][0])
 
     def test_review_checks_cite_displayed_passage_labels(self):
-        body = 'The original archive records the birth — and the “subsequent” appointment.\nAnother paragraph with more words.'
+        body = 'The original archive records the birth — and the “subsequent” appointment.\nAnother paragraph.'
         url = 'https://archive.example/person'
         from commulingo_pipeline.evidence import Passages
         snapshots, passages = {}, Passages()
         source_id, shown = review_source(url, body, snapshots, passages, base=500)
         # Labels carry the slice's offset in its page; the text itself is shown unchanged behind them.
         self.assertEqual(shown, f'[{source_id}@500] The original archive records the birth — and the “subsequent” appointment.\n'
-                                f'[{source_id}@{500+body.index("Another")}] Another paragraph with more words.')
+                                f'[{source_id}@{500+body.index("Another")}] Another paragraph.')
         proposal = {'source_refs':[url+' — biography'], 'risks':[]}
         decision = {'decision':'approve','reason':'Original evidence substantiates the proposed facts.',
             'resolved_risks':[], 'checks':[{'citation_id':'S1','passages':[f'{source_id}@500'],'finding':'The appointment is documented.'}]}

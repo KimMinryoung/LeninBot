@@ -16,7 +16,6 @@ logger = logging.getLogger(__name__)
 
 LABEL = re.compile(r'^(S[0-9]+|R[0-9a-f]{16})@([0-9]+)$')
 MAX_PARAGRAPH_CHARS = 3000   # a longer paragraph is shown as several labelled pieces
-MIN_PASSAGE_CHARS = 20       # a heading-sized fragment is not evidence
 MAX_PASSAGE_CHARS = 6000     # the most one claim may cite (compile_evidence bound)
 MAX_PASSAGES = 8
 _SENTENCE_END = re.compile(r'[.!?。]["\')\]]?\s')
@@ -59,9 +58,6 @@ def label_passages(handle, body, first=0, last=None, base=0):
     """
     lines, shown = [], {}
     for start, end in paragraph_spans(body, first, last):
-        if end - start < MIN_PASSAGE_CHARS:
-            lines.append(body[start:end])   # a bullet, a heading: shown, but not citable evidence
-            continue
         label = f'{handle}@{base + start}'
         shown[label] = (start, end)
         lines.append(f'[{label}] {body[start:end]}')
@@ -135,8 +131,9 @@ def resolve_passages(claims, passages, handles, sources):
     """Replace each claim's passage labels with source snapshots and character ranges.
 
     One resolved claim per range ``passages.resolve`` returns; a claim none of
-    whose labels was shown, or whose range is a heading-sized fragment, is
-    refused by claim number.
+    whose labels was shown is refused by claim number. Whether a cited
+    paragraph, however short, supports the claim is the citation gate's
+    judgement, not a length rule.
     """
     def body_of(handle):
         source = sources.get(handles.ids.get(handle)) or {}
@@ -157,9 +154,6 @@ def resolve_passages(claims, passages, handles, sources):
         if unknown:
             logger.info('claim %d: ignoring passage labels never displayed: %s', index, unknown)
         for handle, start, end in ranges:
-            if end - start < MIN_PASSAGE_CHARS:
-                raise ValueError(f'claim {index}: the cited passage is a heading or fragment of {end - start} '
-                                 'characters; cite the paragraph that states the fact')
             value = {k: v for k, v in claim.items() if k != 'passages'}
             value.update(source_id=sources[handles.ids[handle]]['id'], start=start, end=end)
             resolved.append(value)
@@ -191,8 +185,8 @@ def compile_evidence(claims, sources, changed_fields):
         body = source['body']
         if type(start) is not int or type(end) is not int or not 0 <= start < end <= len(body):
             raise ValueError('invalid source character range')
-        if not MIN_PASSAGE_CHARS <= end-start <= MAX_PASSAGE_CHARS:
-            raise ValueError(f'source range must contain {MIN_PASSAGE_CHARS}..{MAX_PASSAGE_CHARS} characters')
+        if end - start > MAX_PASSAGE_CHARS:
+            raise ValueError(f'source range may contain at most {MAX_PASSAGE_CHARS} characters')
         if claim.get('field') not in changed_fields or not str(claim.get('claim', '')).strip():
             raise ValueError('claim must name a changed field and explain its support')
         stance = claim.get('stance', 'supports')

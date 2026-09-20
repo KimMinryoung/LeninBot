@@ -96,7 +96,7 @@ metrics의 `provider_fallback`으로 식별한다. 다른 오류는 그대로 es
 그 문단의 범위와 텍스트 다이제스트를 기억하므로(`evidence.Passages.show` — 조사·검토 두 레인이 같은 등록부와 해석 규칙
 `Passages.resolve`를 쓴다), claim의 라벨을 문자 범위로 바꾸는 데 복사·매칭·세기가 없다(`evidence.resolve_passages`, 라벨 ≤8개): 여러 출처의 라벨이나 한 범위(6,000자)에 안 들어갈 만큼 떨어진 문단은 같은 field·문장의
 claim 여러 개로 나누고(첫 한 시간 거절 15건이 이 두 모양), 표시된 적 없는 라벨은 다른 라벨이 있으면 무시·없으면 claim 번호를 붙여
-거절한다. 표시 뒤 바뀐 텍스트·20자 미만 제목 문단도 거절. 인용문 복사+접기 매칭(2026-09-19 하루)과 240자 chunk 번호(그 전)는
+거절한다. 표시 뒤 바뀐 텍스트도 거절. 길이 하한은 없다(짧은 줄의 근거도 인용 가능; 뒷받침 여부는 Jev 인용 게이트가 판단). 인용문 복사+접기 매칭(2026-09-19 하루)과 240자 chunk 번호(그 전)는
 폐기했다 — 복사가 한 글자 어긋나거나 번호가 스냅샷과 어긋나 하루 91~159건이 거절됐다(운영자 결정 2026-09-20: 근거는
 형식이 아니라 내용이고, 모델이 읽은 위치는 실행기가 이미 안다). 짧은 핸들(S1)은 내용 hash 기반 영속 ID로 변환해
 artifact에 저장한다. 알 수 없는 ID에는 사용 가능한 ID와 URL을 돌려준다. 조사·작성·공통 저장 검증은
@@ -115,7 +115,7 @@ URL당 스냅샷 상한은 `MAX_SNAPSHOT_CHARS`(200만 자)이며, 저장된 초
 `tests/test_commulingo_source_pages.py`.
 reason이 probe·placeholder·진행 메모("Investigating … before returning")로 시작하는 결과 호출은
 길이와 무관하게 거절한다 — 2026-09-19에 그런 호출 두 건이 `sources_unavailable`로 통과해 작업을
-90일 미뤘다. 원문 일치·만료·20~6000자 인용 검증은 유지한다.
+90일 미뤘다. 원문 일치·만료·6000자 이내 인용 검증은 유지한다.
 추출문에 PostgreSQL text가 수용하지 않는 NUL이 있으면 U+FFFD로 바꾼 뒤 hash와 범위를 계산한다.
 인용 위치 확인 뒤 **인용 지지 게이트**(`citation_gate.py`, registry `commulingo_citation_support`, Jev)가 claim마다
 발췌가 주장을 뒷받침하는지 판정한다(2026-09-19; 선택지 supports/partially_supports/contradicts/unrelated — partially_supports는 복합 주장의 일부만 덮는 발췌로 통과·기록만). 고신뢰 unrelated/contradicts 또는 봇 확인·동의 안내 같은 boilerplate
@@ -134,7 +134,7 @@ reason이 probe·placeholder·진행 메모("Investigating … before returning"
 무관·반박 인용을 가진 결정 호출을 그 check만 지목해 거절한다(`enforce=false`면 기록만).
 인물 초안에서 `citizenship.code`·`fate.kind`(create·update), 인물 create 초안에서 `groupId`·`role`, 용어 create 초안에서 `category`는 작성기가 아니라 실행기가 Jev로 배정한다(`runtime_tools/commulingo_classify.py`,
 `dev_docs/commulingo_editorial.md` "인물 분류 자동 배정"); 판정 수치는 draft artifact `metrics.classification`에 남는다. 작성기는 제한된
-초안 도구와 사전 조회만 받는다. 실행기가 20~6000자의 원문 인용과 기준 revision을 붙인다.
+초안 도구와 사전 조회만 받는다. 실행기가 6000자 이내의 원문 인용과 기준 revision을 붙인다.
 작성 모델에는 evidence/revision을 수정하는 인자가 없다. 인물 상세 절도 같은 경로를 사용한다.
 인물 상세 절 초안은 절 하나(slug·heading·body·sortOrder)만 받는다. 조사가 여러 절이나 기존 절 정정을
 뒷받침하면 가장 중요한 절 하나를 쓰고 나머지는 결과 도구의 `notes`에 적는다. `notes`는 발행 성공 뒤

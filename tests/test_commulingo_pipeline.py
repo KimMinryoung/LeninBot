@@ -44,9 +44,9 @@ class EvidenceTests(unittest.TestCase):
         text = passages.show(handles.handle(source), body)
         later = body.index('Later')
         # Every non-blank line is one labelled paragraph; the label is the handle and the paragraph's offset.
-        # A bullet or heading shorter than the evidence floor is shown without a label.
-        self.assertEqual(list(passages.shown), ['S1@0', 'S1@23', f'S1@{later}'])
-        self.assertTrue(text.startswith('[S1@0] Intro sentence here.\n•\n[S1@23] 그는 1917년에'))
+        # Every non-blank line is citable, a one-character bullet included: whether it supports a claim is the gate's call.
+        self.assertEqual(list(passages.shown), ['S1@0', 'S1@21', 'S1@23', f'S1@{later}'])
+        self.assertTrue(text.startswith('[S1@0] Intro sentence here.\n[S1@21] •\n[S1@23] 그는 1917년에'))
         claim = {'field':'bio','claim':'Joined in 1917','passages':['S1@23']}
         [resolved] = resolve_passages([claim], passages, handles, sources)
         self.assertNotIn('passages', resolved)

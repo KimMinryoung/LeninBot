@@ -87,8 +87,7 @@ class PolicyTests(unittest.IsolatedAsyncioTestCase):
         validate_decision(value,PROPOSAL)
     def test_passage_errors_identify_the_check(self):
         snapshots,passages={},Passages(); sid,_=_review_source(SOURCE,QUOTE+'\nShort title',snapshots,passages)
-        # A heading-sized line is shown without a label, so citing its offset is an unshown label.
-        for label, reason in [(f'{sid}@{len(QUOTE)+1}', f'passage label not shown in this review: {sid}@{len(QUOTE)+1}'),
+        for label, reason in [(f'{sid}@{len(QUOTE)+5}', f'passage label not shown in this review: {sid}@{len(QUOTE)+5}'),
                               (f'{sid}@7', f'passage label not shown in this review: {sid}@7')]:
             value = copy.deepcopy(SUBMITTED)
             value['checks'].append({**value['checks'][0], 'passages':[label]})
