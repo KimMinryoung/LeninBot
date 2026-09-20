@@ -20,16 +20,17 @@
 - `model-only` — 모델명만 여기서 조회, 실행은 자체 클라이언트 (KG graphiti, razvedchik, writer 경량 별칭)
 - `external` — 정보 등재만 (vision 폴백처럼 실행 구조가 특수한 곳)
 
-실패 시 항상 `None` 반환 — 콜사이트가 자체 폴백(추출식 요약, 기본 라벨, 스킵)을 유지한다.
+`generate()` 계열은 실패 시 `None`을 반환하며 콜사이트가 후속 처리를 결정한다.
+System One 호출의 결과·오류 계약과 분류 재시도 정책은 아래를 따른다.
 
 ### System One 판정 호출 (`decide()`)
 
 TypeSafe Jev는 텍스트를 생성하지 않고 typed 판정을 돌려주는 모델이라 `generate()`가 아닌
-별도 진입점을 쓴다 (2026-09-19, `dev_docs/jev_system_one_adoption.md`).
+별도 진입점을 쓴다. 적용 범위와 장애 정책은 [Jev 연동](jev_system_one_adoption.md)을 따른다.
 
 - 항목: `{"provider": "openrouter"|"typesafe", "model": "typesafe/jev-1.13"|"jev-1.13.0", "timeout", "kind": "system_one", "note"}`.
   `openrouter`는 `POST /api/alpha/decisions`, `typesafe`는 `POST /v1/systemone` — body·answers는 동일.
-  2026-09-19 16:39부터 모든 Jev 항목은 `typesafe`(직접 API, `jev-1.13.0` 고정)다; `openrouter`는 예비 경로로 코드와
+  현재 Jev 항목은 `typesafe`(직접 API, `jev-1.13.0` 고정)다; `openrouter`는 예비 경로로 코드와
   프록시 라우트에 남아 있다. `kind`는 표시용이며 실행은 provider가 결정한다.
 - `decide_detailed(feature, state, questions, label=) → DecisionResult`, `decide_sync(...) → Decision | None`,
   `async decide(...)`. `state`는 문자열 또는 JSON 구조(질문에 필요한 필드만), `questions`는
@@ -41,14 +42,12 @@ TypeSafe Jev는 텍스트를 생성하지 않고 typed 판정을 돌려주는 �
 - 감사: `check_llm_call` → 호출 → `record_llm_call`. OpenRouter가 `usage.cost`를 주면 그 값을, 없으면
   gateway의 `SYSTEM_ONE_PRICING`(입력 $0.042/M, 출력 0)으로 추정. 실패는 status=error 행 하나.
 - 실패(`4xx/5xx`, 전송 오류, 질문 형식 오류, 비-System One 항목)는 예외 없이 `decision=None`/`error_kind`로
-  돌아오고 콜사이트는 기존 경로(LLM·기본 라벨)를 유지한다. 429·5xx·연결 거부/끊김은 한 번 더 시도한다(Retry-After
+  돌아온다. 이후 처리는 콜사이트별 정책을 따른다. CommuLingo editor 분류는 초안을 보존하고 재시도하며
+  LLM 분류로 대체하지 않는다. 429·5xx·연결 거부/끊김은 한 번 더 시도한다(Retry-After
   존중, 최대 2초 대기; 항목 `retries`로 조정, 기본 1). 읽기 타임아웃은 재시도하지 않는다 — 첫 요청이 이미 처리됐을
   수 있고 게이트가 단계를 두 배로 세우게 된다. `async decide()`의 바깥 timeout은 항목의 시도 수 전체를 덮는다.
-- 현재 항목: `system_one_smoke`, `commulingo_citation_support`(enforce), `commulingo_review_citation_support`(enforce),
-  `task_routing_decision`. 게이트 항목의 `enabled`/`enforce`/`thresholds`는 핫리로드된다.
-- 스모크: `venv/bin/python scripts/smoke_jev.py` (항목 `system_one_smoke`). 프록시에 credential이 없을 때
-  승인된 1회 프록시 우회 실행은 `TYPESAFE_BASE_URL=https://api.typesafe.ai TYPESAFE_API_KEY=… ` env로
-  (OpenRouter 예비 경로는 `OPENROUTER_BASE_URL`/`OPENROUTER_API_KEY`).
+- 현재 등록 항목은 `config/llm_call_sites.json`을 따른다. 게이트의 `enabled`/`enforce`/`thresholds`는 핫리로드된다.
+- 스모크: `venv/bin/python scripts/smoke_jev.py` (항목 `system_one_smoke`, 실제 외부 호출).
 
 원샷 executor의 endpoint와 credential은 공개 함수
 `resolve_provider_connection(provider)`가 한 번에 해석한다. 이 함수는 direct mode에서는

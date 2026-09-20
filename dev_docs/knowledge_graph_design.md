@@ -109,7 +109,7 @@ See `knowledge_graph_schema.md` for field-level schema details and the mirror ma
   Since 2026-09-19 a **fact filter** (`_filter_fact_lines`, registry `scout_kg_fact_filter`, Jev) judges each extracted line before
   the write: only lines that state a fact about the world (threshold `thresholds.keep`, default 0.8) are stored, at most 7, and a
   report that is all mailbox bookkeeping writes no episode. The group classifier then sees the kept facts, not the raw findings.
-  When the judgement is unavailable every line is kept as before. Baseline: `dev_docs/jev_system_one_adoption.md` 4.10.
+  When the judgement is unavailable every line is kept as before. Baseline: [Jev evaluation limits](jev_system_one_adoption.md#평가-근거와-한계).
 - `write_kg` (LLM extraction tool) stays deprecated.
 
 Typical `group_id` values for agent writes: `geopolitics_conflict`, `diplomacy`, `economy`, `korea_domestic`, `agent_knowledge`. Do not create diary-specific or project-specific groups for ordinary facts.

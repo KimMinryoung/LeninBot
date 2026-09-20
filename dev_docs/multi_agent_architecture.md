@@ -19,7 +19,7 @@ Telegram user
       -> orchestrator report callback to user
 ```
 
-The orchestrator's `route_task` advisor classifies a task with a System One decision first (Jev via `task_routing_decision`, confidence-gated) and falls back to the `task_routing_advisor` LLM call below the threshold; see `jev_system_one_adoption.md` §4.7. The orchestrator's own `delegate()` choice remains final.
+The orchestrator's `route_task` advisor classifies a task with a System One decision first (Jev via `task_routing_decision`, confidence-gated) and falls back to the `task_routing_advisor` LLM call below the threshold; see [Jev task routing](jev_system_one_adoption.md#태스크-라우팅). The orchestrator's own `delegate()` choice remains final.
 
 The orchestrator has a limited tool set and does not directly edit code/files. Code work is delegated to `programmer`, whose current spec is a Codex CLI handoff rather than a normal broad Python tool set.
 

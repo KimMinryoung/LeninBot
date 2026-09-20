@@ -16,7 +16,7 @@
 | `security_gateway.md` | 실행 시점 인자 검증·권한·rate limit·idempotency·감사 |
 | `web_research.md` | 검색·Extract 전용 게이트웨이, 키 격리, 공용 일일 예산과 사용량 집계 |
 | `llm_call_registry.md` | 원샷 호출 등록과 실행 정책·핫리로드 |
-| `jev_system_one_adoption.md` | TypeSafe Jev(System One 판정 모델) 도입 — 후보 지점·통합 구조와 배포된 게이트(인용 지지·검토 인용·라우팅)의 실측 기준선·채택/기각 근거 |
+| `jev_system_one_adoption.md` | Jev 분류·인용 판정, 장애 정책, 라우팅·KG 적용 범위와 평가 한계 |
 | `agent_improvement_roadmap.md` | 구현 현황의 설계 문서 연결과 남은 조건부 검토 |
 | `tool_security_gateway_improvements.md` | tool/security gateway 보안 검토 결과와 우선순위별 개선 체크리스트 |
 | `mcp_gateway.md` | Codex/Claude Code 같은 개발용 MCP client에 노출하는 읽기 중심 gateway |
@@ -39,8 +39,8 @@
 | `translation_pipeline.md` | 사료(RU/ZH/EN/DE/FR/IT→KO)·사이트(KO→EN) 공통 실행, 검증·캐시·TM, 원문 최신성, DB 적용 상태와 평가 |
 | `vector_corpus_reingestion.md` | 코퍼스 manifest·metadata·chunking·재등록과 감사 절차 |
 | `mission_state_machine.md` | Telegram mission context lifecycle |
-| `commulingo_editorial.md` | 인물 공통 저장·출처·검토·보강 상태와 배포 계약 |
-| `commulingo_pipeline.md` | 영속 인물·용어 작업 대기열, 단계별 복구·검토·예산 및 전환 |
+| `commulingo_editorial.md` | 공통 편집 저장·revision·출처·직접 도구의 제안과 검토 계약 |
+| `commulingo_pipeline.md` | 인물·용어 editor 운영, 원문 캐시·부분 수정·독립 검토·자동 공개·복구 |
 | `autonomous_project.md` | hourly autonomous project loop |
 | `skill_import_design.md` | 외부 skill import/conversion 설계 |
 | `x402_design.md` | Base USDC x402 payment demo/runtime |
