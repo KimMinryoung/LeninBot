@@ -8,6 +8,7 @@ import unittest
 import tempfile
 from unittest.mock import AsyncMock, patch
 from types import SimpleNamespace
+from commulingo_test_support import EditorCase
 
 ROOT=Path(os.environ.get('COMMULINGO_REVIEW_SOURCE',Path(__file__).resolve().parents[1]))
 sys.path.insert(0,'/home/grass/leninbot')
@@ -28,8 +29,9 @@ from commulingo_pipeline.evidence import Passages
 LABEL='P1'  # First paragraph displayed in a fresh review registry.
 SUBMITTED={**DECISION,'checks':[{'citation':SOURCE,'passages':[LABEL],'finding':'서로 다른 인물임을 확인'}]}
 
-class PolicyTests(unittest.IsolatedAsyncioTestCase):
+class PolicyTests(EditorCase):
     def setUp(self):
+        super().setUp()
         reservation = patch('commulingo_pipeline.config.legacy_reserve',return_value=None)
         reservation.start()
         self.addCleanup(reservation.stop)
@@ -38,13 +40,6 @@ class PolicyTests(unittest.IsolatedAsyncioTestCase):
         ledger = patch('scripts.commulingo_research_memory.STORE_PATH', Path(directory.name) / 'review.sqlite3')
         ledger.start()
         self.addCleanup(ledger.stop)
-        # All sync dependencies in this suite are mocks. Avoid creating an
-        # executor solely for them (sandbox loop shutdown can lose its wakeup).
-        async def inline(call, *args, **kwargs):
-            return call(*args, **kwargs)
-        threaded = patch('asyncio.to_thread', side_effect=inline)
-        threaded.start()
-        self.addCleanup(threaded.stop)
 
     def test_only_retrieved_passages_resolving_risks_can_approve(self):
         self.assertEqual(validate_decision(DECISION,PROPOSAL),DECISION)
@@ -201,6 +196,8 @@ class PolicyTests(unittest.IsolatedAsyncioTestCase):
             decision,fetched=await worker.research({**PROPOSAL,'id':1},{}, {})
         self.assertEqual(decision['decision'],'approve')
         self.assertIn(QUOTE,fetched[SOURCE])
+        self.assertEqual(self.jev.call_args.args[0], 'commulingo_review_citation_support')
+        self.assertEqual(decision['checks'][0]['citation_check']['support'], 'supports')
     def test_review_decision_is_reviewer_only_and_owner_only(self):
         from security_gateway import CallerContext, authorize
         from security_gateway import policy

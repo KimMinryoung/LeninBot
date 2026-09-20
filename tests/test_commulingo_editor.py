@@ -1,18 +1,9 @@
-import asyncio
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import json
-import subprocess
-import unittest
-import pytest
-
-
-@pytest.fixture(autouse=True)
-def isolate_jev_calls():
-    with patch("commulingo_pipeline.citation_gate.check_claims", new=AsyncMock(return_value=[])), patch("commulingo_pipeline.citation_gate.check_review_checks", new=AsyncMock(return_value=[])):
-        yield
-
 from unittest.mock import AsyncMock, Mock, patch
+
+from commulingo_test_support import EditorCase, citation_result
 
 from commulingo_pipeline.editor import Editor
 from commulingo_pipeline.engine import Usage
@@ -44,7 +35,7 @@ def store_mock():
     return store
 
 
-class SourceAndIssueTests(unittest.IsolatedAsyncioTestCase):
+class SourceAndIssueTests(EditorCase):
     async def test_cached_passage_read_keeps_labels_and_rejects_expiry(self):
         page = snapshot(URL,BODY)
         session = Sources(store_mock(),JOB,Usage(),{page['id']:page})
@@ -120,7 +111,56 @@ class SourceAndIssueTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotEqual(patch_hash(patch_data), before)
 
 
-class EditorTests(unittest.IsolatedAsyncioTestCase):
+class EditorTests(EditorCase):
+    async def test_citation_rejection_preserves_draft_and_requires_supported_repair(self):
+        store, usage = store_mock(), Usage()
+        async def model(**kwargs):
+            await kwargs['read_wrap']('fetch_url', AsyncMock(
+                return_value=f'<external source="web">\n{BODY}\n</external>'))(url=URL)
+            self.jev.side_effect = lambda *args: citation_result(*args, support='unrelated')
+            value = candidate()
+            value['claims'][0]['claim'] = 'An unrelated invented claim.'
+            with self.assertRaisesRegex(ValueError, 'citation check failed'):
+                await kwargs['handler'](value)
+            self.assertEqual(store.save_editor_checkpoint.call_args.args[1]['draft']['args']['fields'], value['fields'])
+            self.jev.side_effect = citation_result
+            await kwargs['handler']({'repairs': [{'op': 'set', 'path': '/claims/0/claim',
+                                                  'value': candidate()['claims'][0]['claim']}]})
+        with patch('commulingo_pipeline.service.call', return_value=CURRENT) as rpc, \
+             patch('commulingo_pipeline.stages.model_call', side_effect=model):
+            result = await Editor(store)(JOB, [], usage, .2)
+        self.assertEqual(result.next_stage, 'review')
+        self.assertEqual([call.args[0]['command'] for call in rpc.call_args_list], ['read', 'validate'])
+        self.assertEqual(usage.tracker['citation_rejections'], 1)
+        self.assertEqual(usage.tracker['jev_calls'], 2)
+        self.assertEqual(result.value['research']['claims'][0]['citation_check']['support'], 'supports')
+
+    async def test_classification_outage_retains_new_term_draft_without_publication(self):
+        store = store_mock()
+        job = {**JOB, 'action': 'create'}
+        async def model(**kwargs):
+            await kwargs['read_wrap']('fetch_url', AsyncMock(
+                return_value=f'<external source="web">\n{BODY}\n</external>'))(url=URL)
+            await kwargs['handler']({
+                'status': 'ready', 'reason': 'The source supports the new term definition.',
+                'fields': {'term': {'ko': '검증 용어', 'en': 'Fixture term'},
+                           'definition': {'ko': '검증한 개념이다.', 'en': 'A documented concept.'},
+                           'aliases': {'ko': [], 'en': []},
+                           'period': {'ko': '개념', 'en': 'Concept'}},
+                'claims': [{'field': field, 'claim': 'This field is documented.', 'passages': ['P1']}
+                           for field in ('definition', 'period')],
+                'issue_results': [{'id': 'register', 'status': 'resolved', 'reason': 'Supported bilingual entry.'}],
+            })
+        with patch('commulingo_pipeline.service.call', return_value=None) as rpc, \
+             patch('runtime_tools.commulingo_classify.classify_term', return_value=None), \
+             patch('commulingo_pipeline.stages.model_call', side_effect=model):
+            with self.assertRaisesRegex(RuntimeError, 'classification unavailable'):
+                await Editor(store)(job, [], Usage(), .2)
+        self.assertEqual([call.args[0]['command'] for call in rpc.call_args_list], ['read'])
+        saved = store.save_editor_checkpoint.call_args.args[1]
+        self.assertEqual(saved['draft']['args']['fields']['term']['en'], 'Fixture term')
+        self.assertNotIn('category', saved['draft']['args']['fields'])
+
     async def test_context_restores_notes_sections_and_original_proposal(self):
         current = {**CURRENT,'notes':'Earlier author unresolved question',
                    'sections':[{'slug':'prior-theme'}]}
@@ -310,7 +350,7 @@ class EditorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.next_stage,'judge'); model.assert_not_called()
 
 
-class ReviewAndPublishTests(unittest.IsolatedAsyncioTestCase):
+class ReviewAndPublishTests(EditorCase):
     async def test_workflow_switch_preserves_old_submit_receipts_and_pins_new_authoring(self):
         store = Mock()
         legacy = {name:AsyncMock(return_value='legacy') for name in ('research','submit')}

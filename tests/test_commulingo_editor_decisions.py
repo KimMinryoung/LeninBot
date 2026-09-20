@@ -1,13 +1,13 @@
-import unittest
 from unittest.mock import AsyncMock, Mock, patch
 from types import SimpleNamespace
+from commulingo_test_support import HermeticAsyncCase
 from commulingo_pipeline.decisions import Decisions
 from commulingo_pipeline.editor_context import RepairReads, prose_budgets
 from commulingo_pipeline.engine import Usage
 from tool_gateway.results import ToolRejection
 
 
-class DecisionTests(unittest.IsolatedAsyncioTestCase):
+class DecisionTests(HermeticAsyncCase):
     async def test_jev_classification_is_memoized_and_has_no_generation_fallback(self):
         usage = Usage()
         helper = Decisions({'kind':'term','action':'create'},None,None,usage)

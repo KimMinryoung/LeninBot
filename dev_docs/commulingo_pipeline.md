@@ -141,6 +141,29 @@ pipeline이 사용하는 `scripts/commulingo_person_reviewer.py`의 검토 함�
 
 ## 검증과 효율 지표
 
+빠른 공통 계약 검사와 확장 editor 검사는 같은 unittest 사례를 사용한다.
+
+```bash
+venv/bin/python scripts/smoke_commulingo_maintainer.py
+venv/bin/python scripts/smoke_commulingo_maintainer.py --extended
+# 실제 executor도 확인할 때: cross-thread wakeup이 허용되는 실행 환경에서만
+venv/bin/python scripts/smoke_commulingo_maintainer.py --extended --real-threads
+```
+
+기본 검사는 작성 schema와 저장 검증의 경계, 원문 캐시, 분류, 초안 수정을 다룬다.
+작성자는 분류 라벨을 제공하고 runner가 코드를 채우므로 작성 schema에 category/code를
+요구하지 않는다. 저장 경계의 분류 필수 검사는 별도로 유지한다.
+`--extended`는 실제 editor·인용 게이트·독립 검토·공개 승인 해시 경로까지 검사한다.
+Jev 응답·모델·저장소·검색은 모의 구현하며 HTTP·DB·외부 프로세스의 미처리 호출은
+즉시 실패한다. 오류를 잡아서 판정 불가로 처리하더라도 검사 종료 시 실패로 보고한다.
+운영 credential 없이 실행할 수 있고, import 시 분류 목록은 내장 fallback을 사용한다.
+전체 제한 시간은 기본 60초이며 `--timeout`으로 조정한다. 초과하면 traceback과 실패 종료를 남긴다.
+
+`tests/commulingo_test_support.py`의 unittest fixture는 pytest에서도 동일하게 적용된다.
+기본 단위 검사는 mock 동기 의존성을 inline으로 실행한다. 제한된 sandbox에서 단순한
+`asyncio.to_thread`도 executor 종료 wakeup을 받지 못하는 현상과 editor 실패를 구분하기 위한 것이다.
+실제 thread 실행은 `--real-threads`로 별도 확인하며, 운영 실행 코드는 바꾸지 않는다.
+
 `tests/test_commulingo_editor.py`, `test_commulingo_editor_decisions.py`, `test_commulingo_draft_repair.py`는
 수정·복구·분류 경계를 검사한다. `test_commulingo_pipeline.py`와 `test_commulingo_pipeline_efficiency.py`는
 대기열 및 비용 집계를 검사한다. `test_commulingo_editor_db.py`는

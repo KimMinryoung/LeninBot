@@ -86,6 +86,8 @@ private RPC의 코드 반영 경계는 [파이프라인 배포](commulingo_pipel
 롤백 때도 기존 근거·보강 상태·검토·대기열 테이블은 보존한다.
 
 `tests/test_commulingo_evidence_diagnostics.py`는 DB 없이 제출 진단을 검사한다.
+`scripts/smoke_commulingo_maintainer.py`는 폐기한 lane의 실행 정책 대신 현재 공통 작성·저장 계약을
+검사한다. `--extended`의 editor 검증 범위와 격리 방식은 [파이프라인 검증](commulingo_pipeline.md#검증과-효율-지표)을 따른다.
 `tests/test_commulingo_editorial_selection.py`는 기존 도구의 선택·완료·pending 종료를 검사한다.
 `tests/test_commulingo_person_rpc.py`의 실제 저장·충돌·승인 검사는 격리 컨테이너와 독립 DB에서만 실행한다.
 frontend `test-commulingo-editorial-db.js`는 근거·검토·롤백·상태 전이를 검사한다.
