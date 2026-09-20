@@ -159,6 +159,46 @@ def codes_result(**answers):
         k: {'choice': c, 'confidence': p, 'probabilities': {c: p}} for k, (c, p) in answers.items()}, model='typesafe/jev-test'))
 
 
+class ClassifyCardTests(unittest.TestCase):
+    def setUp(self):
+        p = patch('llm.call_registry.resolve', return_value=PROFILE); p.start(); self.addCleanup(p.stop)
+
+    def test_one_request_asks_codes_group_and_both_role_variants_and_consumes_by_citizenship(self):
+        card = {k: v for k, v in FIELDS.items() if k != 'citizenship'}
+        card.update(citizenship={'label': {'ko': '소련', 'en': 'Soviet'}}, fate={'label': {'ko': '자연사', 'en': 'Natural'}})
+        seen = {}
+        def decide(feature, state, questions, label=None):
+            seen.update(feature=feature, state=state, questions=questions, label=label)
+            answers = {'citizenship': ('soviet', 0.98), 'fate': ('natural', 0.9), 'group': ('thaw', 0.95),
+                       'role_soviet': ('nationalities-federal', 0.9), 'role_non_soviet': ('socialist-bloc-leader', 0.8)}
+            return DecisionResult(decision=Decision(answers={k: {'choice': c, 'confidence': p, 'probabilities': {c: p}}
+                                                             for k, (c, p) in answers.items()}, model='typesafe/jev-test'))
+        out = cc.classify_person_card(card, catalogs=CATALOGS, claims={'fate': [{'claim': 'died at home', 'excerpt': 'умер'}]}, decide=decide)
+        self.assertEqual(seen['feature'], cc.FEATURE)
+        self.assertEqual(seen['label'], 'person-card')
+        self.assertEqual(set(seen['questions']), {'citizenship', 'fate', 'group', 'role_soviet', 'role_non_soviet'})
+        self.assertIn('nationalities-federal', seen['questions']['role_soviet']['criteria'])
+        self.assertNotIn('nationalities-federal', seen['questions']['role_non_soviet']['criteria'])
+        self.assertEqual(seen['state']['fate_claims'][0]['excerpt'], 'умер')
+        self.assertIn('bio_ko', seen['state']); self.assertIn('career', seen['state'])
+        # Citizenship decided in the same request is soviet, so the office variant of the role counts.
+        self.assertEqual(out['codes']['citizenship']['code'], 'soviet')
+        self.assertEqual(out['codes']['fate']['kind'], 'natural')
+        self.assertEqual(out['person']['role'], {'officeId': 'nationalities-federal'})
+        self.assertEqual(out['person']['confidence'], {'group': 0.95, 'role': 0.9})
+        # A citizenship outside the Soviet state and its successors takes the categories-only answer.
+        def foreign(feature, state, questions, label=None):
+            answers = {'citizenship': ('hungary', 0.97), 'fate': ('natural', 0.9), 'group': ('international-revolutionary', 0.95),
+                       'role_soviet': ('nationalities-federal', 0.9), 'role_non_soviet': ('socialist-bloc-leader', 0.85)}
+            return DecisionResult(decision=Decision(answers={k: {'choice': c, 'confidence': p, 'probabilities': {c: p}}
+                                                             for k, (c, p) in answers.items()}, model='m'))
+        out = cc.classify_person_card(card, catalogs=CATALOGS, decide=foreign)
+        self.assertEqual(out['person']['role'], {'category': 'socialist-bloc-leader'})
+        self.assertEqual(out['person']['confidence']['role'], 0.85)
+        self.assertIsNone(cc.classify_person_card(card, catalogs=CATALOGS,
+                                                  decide=lambda *a, **k: DecisionResult(error_kind='server', error='503')))
+
+
 class ClassifyCodesTests(unittest.TestCase):
     def setUp(self):
         p = patch('llm.call_registry.resolve', return_value=CODES_PROFILE); p.start(); self.addCleanup(p.stop)

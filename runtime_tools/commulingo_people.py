@@ -2938,20 +2938,28 @@ def _run_edit(target_type: str, action: str, target_id: str, patch: dict,
             fields["role"] = {**fields["role"], "category": fields["role"]["categoryId"]}
             fields["role"].pop("categoryId")
         if target_type == "person":
-            from runtime_tools.commulingo_classify import classify_person_codes, fill_person_codes, missing_person_codes
-            if missing_person_codes(fields):
-                codes = classify_person_codes(fields)
+            from runtime_tools.commulingo_classify import (classify_person, classify_person_card, classify_person_codes,
+                                                          fill_classification, fill_person_codes, missing_person_codes)
+            needs_group = action == "create" and not (fields.get("groupId") and fields.get("role"))
+            classification = None
+            if missing_person_codes(fields) and needs_group:
+                # One request for the whole card (commulingo_classify.classify_person_card).
+                card = classify_person_card(fields)
+                codes, classification = (card or {}).get("codes"), (card or {}).get("person")
                 fields = fill_person_codes(fields, codes)
-                if missing_person_codes(fields):
-                    return "Error: the classification service is unavailable right now; retry this write later."
-        if target_type == "person" and action == "create" and not (fields.get("groupId") and fields.get("role")):
-            from runtime_tools.commulingo_classify import classify_person, fill_classification
-            classification = classify_person(fields)
-            if classification is None:
-                return "Error: the classification service is unavailable right now; retry this create later."
-            fields = fill_classification(fields, classification)
-            if classification["low_confidence"]:
-                logger.info("person %s classified with low confidence: %s", target_id, classification["confidence"])
+                needs_group = False
+            elif missing_person_codes(fields):
+                fields = fill_person_codes(fields, classify_person_codes(fields))
+            if missing_person_codes(fields):
+                return "Error: the classification service is unavailable right now; retry this write later."
+            if needs_group:
+                classification = classify_person(fields)
+            if action == "create" and not (fields.get("groupId") and fields.get("role")):
+                if classification is None:
+                    return "Error: the classification service is unavailable right now; retry this create later."
+                fields = fill_classification(fields, classification)
+                if classification["low_confidence"]:
+                    logger.info("person %s classified with low confidence: %s", target_id, classification["confidence"])
         evidence_errors = _person_evidence_errors(fields, sources)
         if evidence_errors:
             return "Error: evidence validation: " + "; ".join(evidence_errors)

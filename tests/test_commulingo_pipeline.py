@@ -61,8 +61,18 @@ class EvidenceTests(unittest.TestCase):
         shown.update({label:(start, end, other['body'][start:end]) for label,(start,end) in more.items()})
         with self.assertRaisesRegex(ValueError, "claim 1: passage label 'S1@999' was not displayed"):
             resolve_passages([{**claim,'passages':['S1@999']}], shown, handles, sources)
-        with self.assertRaisesRegex(ValueError, 'claim 2: passages must come from one source'):
-            resolve_passages([claim, {**claim,'passages':['S1@21','S2@16']}], shown, handles, sources)
+        # Labels of two sources become two claims; a label never shown is ignored beside shown ones.
+        split = resolve_passages([claim, {**claim,'passages':['S1@21','S2@16','S1@999']}], shown, handles, sources)
+        self.assertEqual([(c['source_id'], c['start']) for c in split], [(source['id'], 21), (source['id'], 21), (other['id'], 16)])
+        # Paragraphs too far apart for one evidence range become one claim per cluster.
+        far = snapshot('https://example.org/far', 'First paragraph of a long page.\n' + 'x' * 7000 + '\nLast paragraph states the fact.')
+        sources[far['id']] = far
+        _, far_labels = label_passages(handles.handle(far), far['body'])
+        shown.update({label:(start, end, far['body'][start:end]) for label,(start,end) in far_labels.items()})
+        pieces = resolve_passages([{**claim,'passages':list(far_labels)}], shown, handles, sources)
+        ranges = [(c['start'], c['end']) for c in pieces]
+        self.assertTrue(len(ranges) >= 2 and ranges[0][0] == 0 and ranges[-1][1] == len(far['body']))
+        self.assertTrue(all(end - start <= 6000 for start, end in ranges), ranges)
         shown['S1@21'] = (21, body.index('Later'), 'edited text that the source no longer shows')
         with self.assertRaisesRegex(ValueError, 'changed since those passages were shown'):
             resolve_passages([claim], shown, handles, sources)
@@ -797,10 +807,10 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
         with patch('runtime_tools.commulingo_people._list_groups',return_value=groups), \
              patch('runtime_tools.commulingo_people._list_categories',return_value=[{'id':'bolshevik'}]), \
              patch('runtime_tools.commulingo_people._list_offices',return_value=[]), \
-             patch('runtime_tools.commulingo_classify.classify_person',return_value={'groupId':'bolshevik','role':{'category':'bolshevik'},
-                   'confidence':{'group':0.9,'role':0.8},'low_confidence':False}), \
-             patch('runtime_tools.commulingo_classify.classify_person_codes',return_value={'citizenship':{'code':'soviet','confidence':1.0,'low_confidence':False},
-                   'nationalOrigin':{'code':'russia','confidence':0.9,'low_confidence':False}}), \
+             patch('runtime_tools.commulingo_classify.classify_person_card',return_value={'person':{'groupId':'bolshevik','role':{'category':'bolshevik'},
+                   'confidence':{'group':0.9,'role':0.8},'low_confidence':False},
+                   'codes':{'citizenship':{'code':'soviet','confidence':1.0,'low_confidence':False},
+                   'nationalOrigin':{'code':'russia','confidence':0.9,'low_confidence':False}}}), \
              patch('commulingo_pipeline.stages.model_call',side_effect=model), patch('commulingo_pipeline.stages.service.call',return_value={}):
             result=await Draft(store)({'id':3,'kind':'person','action':'create','topic':'basics','target':'new-person'},
                 [{'stage':'research','value':{'baseline':'','claims':claims}}],Usage(),.2)
@@ -818,13 +828,11 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
         source=snapshot('https://example.org/p','Documented fact. '*40)
         store.sources.return_value={source['id']:source}
         claims=[{'field':f,'claim':'x','source_id':source['id'],'start':0,'end':20} for f in ('bio','citizenship','nationalOrigin')]
-        calls={'person':0,'codes':0}
-        def classify(fields,catalogs=None,claims=None):
-            calls['person']+=1
-            return {'groupId':'bolshevik','role':{'category':'bolshevik'},'confidence':{'group':0.9,'role':0.8},'low_confidence':False}
-        def codes(fields,claims=None):
-            calls['codes']+=1
-            return {'citizenship':{'code':'soviet','confidence':1.0,'low_confidence':False},'nationalOrigin':{'code':'russia','confidence':0.9,'low_confidence':False}}
+        calls={'card':0}
+        def card(fields,catalogs=None,claims=None):
+            calls['card']+=1
+            return {'person':{'groupId':'bolshevik','role':{'category':'bolshevik'},'confidence':{'group':0.9,'role':0.8},'low_confidence':False},
+                    'codes':{'citizenship':{'code':'soviet','confidence':1.0,'low_confidence':False},'nationalOrigin':{'code':'russia','confidence':0.9,'low_confidence':False}}}
         base={'epithet':{'ko':'수식','en':'Epithet'},'bio':{'ko':['문장.'],'en':['Sentence.']},'career':[],
               'citizenship':{'label':{'ko':'소련','en':'Soviet'}},'nationalOrigin':{'label':{'ko':'러시아','en':'Russia'}},
               'familyName':{'ko':'성','en':'Family'},'years':'1895–1940'}
@@ -832,15 +840,14 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
             h=kwargs['handler']
             with self.assertRaises(ValueError):   # em dash: prose bounce before any decision
                 await h({'fields':{**base,'epithet':{'ko':'수식 — 부제','en':'Epithet — sub'}}})
-            self.assertEqual(calls,{'person':0,'codes':0})
+            self.assertEqual(calls,{'card':0})
             await h({'fields':base})
             await h({'fields':{**base,'notes':'same classified inputs, a note changed'}}) if False else None
-            self.assertEqual(calls,{'person':1,'codes':1})
+            self.assertEqual(calls,{'card':1})
         with patch('runtime_tools.commulingo_people._list_groups',return_value=[{'id':'bolshevik','title_ko':'볼','blurb_ko':''}]), \
              patch('runtime_tools.commulingo_people._list_categories',return_value=[{'id':'bolshevik'}]), \
              patch('runtime_tools.commulingo_people._list_offices',return_value=[]), \
-             patch('runtime_tools.commulingo_classify.classify_person',side_effect=classify), \
-             patch('runtime_tools.commulingo_classify.classify_person_codes',side_effect=codes), \
+             patch('runtime_tools.commulingo_classify.classify_person_card',side_effect=card), \
              patch('commulingo_pipeline.stages.model_call',side_effect=model), patch('commulingo_pipeline.stages.service.call',return_value={}):
             result=await Draft(store)({'id':5,'kind':'person','action':'create','topic':'basics','target':'p'},
                 [{'stage':'research','value':{'baseline':'','claims':claims}}],Usage(),.2)
@@ -862,7 +869,7 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
         with patch('runtime_tools.commulingo_people._list_groups',return_value=[{'id':'bolshevik','title_ko':'볼','blurb_ko':''}]), \
              patch('runtime_tools.commulingo_people._list_categories',return_value=[{'id':'bolshevik'}]), \
              patch('runtime_tools.commulingo_people._list_offices',return_value=[]), \
-             patch('runtime_tools.commulingo_classify.classify_person_codes',return_value=None), \
+             patch('runtime_tools.commulingo_classify.classify_person_card',return_value=None), \
              patch('commulingo_pipeline.stages.model_call',side_effect=model), patch('commulingo_pipeline.stages.service.call',return_value={}):
             with self.assertRaisesRegex(RuntimeError,'classification service unavailable'):
                 await Draft(store)({'id':4,'kind':'person','action':'create','topic':'basics','target':'p'},

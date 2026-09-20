@@ -228,6 +228,26 @@ def person_code_state(fields: dict, claims: dict | None) -> dict:
             "fate_claims": claims.get("fate", [])[:4]}
 
 
+def _codes_from(decision, questions, fields, accept):
+    """Code verdicts from a decision that answered person_code_questions."""
+    from runtime_tools.commulingo_people import _NATIONAL_ORIGIN_CODES, _NATIONALITY_CODES
+    out = {}
+    if isinstance(fields.get("fate"), dict) and _living(fields.get("years")):
+        out["fate"] = {"kind": "", "confidence": 1.0, "low_confidence": False}
+    if "nationalOrigin" in questions and decision.choice("nationalOrigin") in _NATIONAL_ORIGIN_CODES:
+        conf = round(decision.confidence("nationalOrigin") or 0.0, 3)
+        out["nationalOrigin"] = {"code": decision.choice("nationalOrigin"), "confidence": conf, "low_confidence": conf < accept}
+    if "citizenship" in questions and decision.choice("citizenship") in _NATIONALITY_CODES:
+        conf = round(decision.confidence("citizenship") or 0.0, 3)
+        out["citizenship"] = {"code": decision.choice("citizenship"), "confidence": conf, "low_confidence": conf < accept}
+    if "fate" in questions and decision.choice("fate") in FATE_CRITERIA:
+        conf = round(decision.confidence("fate") or 0.0, 3)
+        kind = decision.choice("fate")
+        out["fate"] = {"kind": "" if kind == "unconfirmed" else kind, "confidence": conf, "low_confidence": conf < accept}
+    out["model"] = decision.model
+    return out
+
+
 def classify_person_codes(fields: dict, *, claims: dict | None = None, decide=None) -> dict | None:
     """{"citizenship": {"code", "confidence", "low_confidence"}, "fate": {"kind", ...}} for the code
     objects present on the card, or None when the model is unavailable. A living
@@ -241,11 +261,11 @@ def classify_person_codes(fields: dict, *, claims: dict | None = None, decide=No
     if not extra.get("enabled", True):
         return None
     accept = float((extra.get("thresholds") or {}).get("accept", DEFAULT_ACCEPT))
-    out = {}
-    if isinstance(fields.get("fate"), dict) and _living(fields.get("years")):
-        out["fate"] = {"kind": "", "confidence": 1.0, "low_confidence": False}
     questions = person_code_questions(fields, sorted(_NATIONALITY_CODES), sorted(_NATIONAL_ORIGIN_CODES))
     if not questions:
+        out = {}
+        if isinstance(fields.get("fate"), dict) and _living(fields.get("years")):
+            out["fate"] = {"kind": "", "confidence": 1.0, "low_confidence": False}
         return out
     result = (decide or decide_detailed)(CODES_FEATURE, person_code_state(fields, claims), questions,
                                          label="person-codes")
@@ -253,18 +273,7 @@ def classify_person_codes(fields: dict, *, claims: dict | None = None, decide=No
     if decision is None:
         logger.warning("person code classification unavailable: %s", result.error)
         return None
-    if "nationalOrigin" in questions and decision.choice("nationalOrigin") in _NATIONAL_ORIGIN_CODES:
-        conf = round(decision.confidence("nationalOrigin") or 0.0, 3)
-        out["nationalOrigin"] = {"code": decision.choice("nationalOrigin"), "confidence": conf, "low_confidence": conf < accept}
-    if "citizenship" in questions and decision.choice("citizenship") in _NATIONALITY_CODES:
-        conf = round(decision.confidence("citizenship") or 0.0, 3)
-        out["citizenship"] = {"code": decision.choice("citizenship"), "confidence": conf, "low_confidence": conf < accept}
-    if "fate" in questions and decision.choice("fate") in FATE_CRITERIA:
-        conf = round(decision.confidence("fate") or 0.0, 3)
-        kind = decision.choice("fate")
-        out["fate"] = {"kind": "" if kind == "unconfirmed" else kind, "confidence": conf, "low_confidence": conf < accept}
-    out["model"] = decision.model
-    return out
+    return _codes_from(decision, questions, fields, accept)
 
 
 def fill_person_codes(fields: dict, codes: dict | None) -> dict:
@@ -406,6 +415,70 @@ def classify_person(fields: dict, *, catalogs=None, claims: dict | None = None, 
     conf = {"group": round(decision.confidence("group") or 0.0, 3), "role": round(decision.confidence("role") or 0.0, 3)}
     return {"groupId": group, "role": {"officeId": role} if role in office_ids else {"category": role},
             "confidence": conf, "low_confidence": min(conf.values()) < accept, "model": decision.model}
+
+
+def person_card_state(fields: dict, claims: dict | None) -> dict:
+    """The group/role state plus the code labels and their excerpts: one state for the whole card."""
+    state = state_from_fields(fields)
+    evidence = evidence_for(claims)
+    if evidence:
+        state["research_excerpts"] = evidence
+    codes = person_code_state(fields, claims)
+    for key in ("citizenship_label", "citizenship_claims", "origin_label", "origin_claims", "fate_label", "fate_claims"):
+        state[key] = codes[key]
+    return state
+
+
+def person_card_questions(fields: dict, groups, offices, categories, citizenship_codes, origin_codes) -> dict:
+    """Codes, group, and the role asked both ways. Which role answer counts
+    depends on the citizenship this same request decides (offices are Soviet
+    institutions), so both variants are asked up front and code picks one."""
+    questions = person_code_questions(fields, citizenship_codes, origin_codes)
+    soviet = build_questions(groups, offices, categories, soviet=True)
+    questions["group"] = soviet["group"]
+    questions["role_soviet"] = soviet["role"]
+    questions["role_non_soviet"] = build_questions(groups, offices, categories, soviet=False)["role"]
+    return questions
+
+
+def classify_person_card(fields: dict, *, catalogs=None, claims: dict | None = None, decide=None) -> dict | None:
+    """One request for a new person's card: {"codes": classify_person_codes shape,
+    "person": classify_person shape}, or None when the model is unavailable.
+
+    Two requests (codes, then group/role once the citizenship was known) sent
+    the same ~8k-token card twice and doubled the latency. The card is now
+    sent once with every question; the role is asked with Soviet offices and
+    with categories only, and the answer matching the decided citizenship is
+    used (speculative fan-out).
+    """
+    from llm.call_registry import decide_detailed, resolve
+    from runtime_tools.commulingo_people import _NATIONAL_ORIGIN_CODES, _NATIONALITY_CODES
+
+    profile = resolve(FEATURE)
+    extra = profile.extra or {}
+    if not extra.get("enabled", True):
+        return None
+    accept = float((extra.get("thresholds") or {}).get("accept", DEFAULT_ACCEPT))
+    groups, offices, categories = catalogs or load_catalogs()
+    if not groups or not categories:
+        return None
+    questions = person_card_questions(fields, groups, offices, categories, sorted(_NATIONALITY_CODES), sorted(_NATIONAL_ORIGIN_CODES))
+    result = (decide or decide_detailed)(FEATURE, person_card_state(fields, claims), questions, label="person-card")
+    decision = result.decision
+    if decision is None:
+        logger.warning("person card classification unavailable: %s", result.error)
+        return None
+    codes = _codes_from(decision, questions, fields, accept)
+    citizenship = (fields.get("citizenship") or {}).get("code") or (codes.get("citizenship") or {}).get("code")
+    role_key = "role_soviet" if offices_allowed(citizenship) else "role_non_soviet"
+    group, role = decision.choice("group"), decision.choice(role_key)
+    office_ids = {o["id"] for o in offices}
+    person = None
+    if group in {g["id"] for g in groups} and role in office_ids | {c["id"] for c in categories}:
+        conf = {"group": round(decision.confidence("group") or 0.0, 3), "role": round(decision.confidence(role_key) or 0.0, 3)}
+        person = {"groupId": group, "role": {"officeId": role} if role in office_ids else {"category": role},
+                  "confidence": conf, "low_confidence": min(conf.values()) < accept, "model": decision.model}
+    return {"codes": codes, "person": person}
 
 
 def fill_classification(fields: dict, classification: dict | None) -> dict:

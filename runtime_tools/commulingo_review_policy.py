@@ -68,28 +68,25 @@ def resolve_review_checks(value, proposal, snapshots):
             kept.append(check)   # already resolved (source and quote present)
             continue
         labels = [str(label) for label in (check.pop("passages") or [])]
-        spans, sids, missing = [], set(), []
+        by_source, missing = {}, []
         for label in labels:
             match = LABEL.match(label)
             span = ((snapshots.get(match[1]) or {}).get("passages") or {}).get(label) if match else None
             if span is None:
                 missing.append(label)
             else:
-                sids.add(match[1]); spans.append(span)
-        if missing:
+                by_source.setdefault(match[1], []).append(span)
+        if not by_source:
             dropped.append({"check": index, "labels": labels, "reason": "passage label not shown in this review: " + ", ".join(missing)})
             continue
-        if len(sids) > 1:
-            dropped.append({"check": index, "labels": labels, "reason": "passages from different sources"})
-            continue
-        snapshot = snapshots[sids.pop()]
-        quote = "\n".join(snapshot["body"][s:e] for s, e in sorted(spans))
-        if len(quote.strip()) < 20:
-            dropped.append({"check": index, "labels": labels, "reason": "cited passage is shorter than 20 characters"})
-            continue
-        check["source"] = snapshot["url"]
-        check["quote"] = quote
-        kept.append(check)
+        # Labels from several retrieved sources become one check per source.
+        for sid, spans in by_source.items():
+            snapshot = snapshots[sid]
+            quote = "\n".join(snapshot["body"][s:e] for s, e in sorted(set(spans)))
+            if len(quote.strip()) < 20:
+                dropped.append({"check": index, "labels": labels, "reason": "cited passage is shorter than 20 characters"})
+                continue
+            kept.append({**check, "source": snapshot["url"], "quote": quote})
     if dropped and not kept:
         available = "; ".join(f"{sid} ({snap['url']})" for sid, snap in snapshots.items()) or "none fetched yet"
         heads = "; ".join(f"check {d['check']}: {d['reason']}" for d in dropped)

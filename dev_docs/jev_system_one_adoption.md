@@ -348,6 +348,11 @@ international-revolutionary 0.94), 이반 파블로프(생리학자)가 `theoris
 불가면 작성 모델에 직접 지정 요구). 라이브 확인: 카다르 → international-revolutionary 1.0 / bloc-reform-leader 0.47(플래그),
 쿠나예프 → thaw 0.9 / nationalities-federal 0.96. 감사 스크립트는 같은 criteria를 import한다.
 
+**한 요청 fan-out (2026-09-20, 사용자 지시).** 신규 인물은 `classify_person_card`가 코드 3개·group·role을 **한 요청**으로 묻는다. role 선택지가
+citizenship 답에 달려 있으므로(관직은 소련·후계국만) role을 소련용(관직+카테고리)·비소련용(카테고리만) 두 벌로 미리 묻고 같은 요청이 정한
+citizenship으로 하나를 고른다(공식 speculative fan-out 패턴). 그전엔 코드 요청 → group/role 요청 순으로 같은 ~8k 토큰 카드를 두 번 보냈다.
+파이프라인 draft(`assign_classification`)와 create 도구 모두 적용; 코드만 빠진 update는 `classify_person_codes` 단독 그대로. 감사 라벨 `person-card`.
+
 **용어 category (2026-09-19).** 같은 방식으로 `classify_term`을 용어 create(월 2,924건)에 넣었다. 저장 용어 1,086건 기준선 —
 라벨만 813·지역 우선 규칙 746·주제 우선 규칙 813(채택; conf ≥0.85 628/714, ≥0.95 521/565). 저장값이 작성 모델의 선택이라
 서로 모순되는 사례가 많아(포옹 전술=당·국가 기구, RD-107 엔진=현대 자본주의) 75%는 관행 재현율이지 정확도 상한이 아니다.

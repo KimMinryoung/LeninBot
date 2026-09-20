@@ -725,16 +725,31 @@ class Draft:
                     if verdicts['term'] is None:
                         raise ClassificationUnavailable('term category')
                 staged = fields
-                if classify_codes is not None and any(isinstance(fields.get(k),dict) for k in ('citizenship','nationalOrigin','fate')):
-                    from runtime_tools.commulingo_classify import fill_person_codes, missing_person_codes
-                    verdicts['codes'] = await asyncio.to_thread(classify_codes, fields, claims=excerpts)
-                    staged = fill_person_codes(fields, verdicts['codes'])
-                    if missing_person_codes(staged):
+                has_codes = classify_codes is not None and any(isinstance(fields.get(k),dict) for k in ('citizenship','nationalOrigin','fate'))
+                if has_codes and classify is not None:
+                    # A new person: codes and group/role in one request (the role is
+                    # asked for both citizenship cases; commulingo_classify.classify_person_card).
+                    from runtime_tools.commulingo_classify import classify_person_card, fill_person_codes, missing_person_codes
+                    card = await asyncio.to_thread(classify_person_card, fields, catalogs=catalogs, claims=excerpts)
+                    if card is None:
+                        raise ClassificationUnavailable('person card')
+                    verdicts['codes'] = card['codes']
+                    if missing_person_codes(fill_person_codes(fields, card['codes'])):
                         raise ClassificationUnavailable('person codes')
-                if classify is not None:
-                    verdicts['person'] = await asyncio.to_thread(classify, staged, catalogs=catalogs, claims=excerpts)
+                    verdicts['person'] = card['person']
                     if verdicts['person'] is None:
                         raise ClassificationUnavailable('person group/role')
+                else:
+                    if has_codes:
+                        from runtime_tools.commulingo_classify import fill_person_codes, missing_person_codes
+                        verdicts['codes'] = await asyncio.to_thread(classify_codes, fields, claims=excerpts)
+                        staged = fill_person_codes(fields, verdicts['codes'])
+                        if missing_person_codes(staged):
+                            raise ClassificationUnavailable('person codes')
+                    if classify is not None:
+                        verdicts['person'] = await asyncio.to_thread(classify, staged, catalogs=catalogs, claims=excerpts)
+                        if verdicts['person'] is None:
+                            raise ClassificationUnavailable('person group/role')
                 class_memo[key] = verdicts
             info = usage.tracker.setdefault('classification',{})
             if verdicts.get('term'):

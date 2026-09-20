@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 LABEL = re.compile(r'^(S[0-9]+|R[0-9a-f]{16})@([0-9]+)$')
 MAX_PARAGRAPH_CHARS = 3000   # a longer paragraph is shown as several labelled pieces
 MAX_PASSAGE_CHARS = 6000     # the most one claim may cite (compile_evidence bound)
-MAX_PASSAGES = 3
+MAX_PASSAGES = 8
 _SENTENCE_END = re.compile(r'[.!?。]["\')\]]?\s')
 
 
@@ -65,10 +65,15 @@ def label_passages(handle, body, first=0, last=None, base=0):
 
 
 def resolve_passages(claims, shown, handles, sources):
-    """Replace each claim's passage labels with its source snapshot and character range.
+    """Replace each claim's passage labels with source snapshots and character ranges.
 
     ``shown`` maps every label displayed in this attempt to (start, end, text).
-    The range spans the cited paragraphs of one source; nothing is searched.
+    Nothing is searched. Labels from several sources, or paragraphs too far
+    apart to fit one MAX_PASSAGE_CHARS range, become separate claims with the
+    same field and text rather than a rejection (the first live hour bounced
+    15 results on exactly those two shapes); a label never shown is ignored
+    when the claim has other shown labels and refused by claim number when
+    it has none.
     """
     resolved = []
     for index, claim in enumerate(claims, 1):
@@ -76,36 +81,48 @@ def resolve_passages(claims, shown, handles, sources):
         if not labels:
             raise ValueError(f'claim {index}: passages must list the labels shown in brackets before the paragraphs '
                              'that state it (for example S2@12303)')
-        handle_set, spans = set(), []
+        by_handle, unknown = {}, []
         for label in labels:
             match = LABEL.match(label)
             entry = shown.get(label) if match else None
             if entry is None:
-                raise ValueError(f'claim {index}: passage label {label!r} was not displayed in this research; copy a '
-                                 'label exactly as shown in brackets at the start of a paragraph')
-            handle_set.add(match[1])
-            spans.append(entry)
-        if len(handle_set) > 1:
-            raise ValueError(f'claim {index}: passages must come from one source; cite the other source in a separate claim')
-        handle = handle_set.pop()
-        source = sources.get(handles.ids.get(handle))
-        if not source or not source.get('body'):
-            raise ValueError(f'claim {index}: source {handle} is not available; retrieve it again')
-        start, end = min(s for s, _, _ in spans), max(e for _, e, _ in spans)
-        body = source['body']
-        if end > len(body) or any(body[s:e] != text for s, e, text in spans):
-            raise ValueError(f'claim {index}: the text of {handle} changed since those passages were shown; retrieve it '
-                             'again and cite the new labels')
-        if end - start < 20:
-            raise ValueError(f'claim {index}: the cited passage is a heading or fragment of {end - start} characters; '
-                             'cite the paragraph that states the fact')
-        if end - start > MAX_PASSAGE_CHARS:
-            raise ValueError(f'claim {index}: the cited passages span {end - start} characters; cite at most '
-                             f'{MAX_PASSAGE_CHARS} (fewer or nearer paragraphs)')
-        value = {k: v for k, v in claim.items() if k != 'passages'}
-        value.update(source_id=source['id'], start=start, end=end)
-        resolved.append(value)
+                unknown.append(label)
+            else:
+                by_handle.setdefault(match[1], []).append(entry)
+        if not by_handle:
+            raise ValueError(f'claim {index}: passage label {unknown[0]!r} was not displayed in this research; copy a '
+                             'label exactly as shown in brackets at the start of a paragraph')
+        if unknown:
+            logger.info('claim %d: ignoring passage labels never displayed: %s', index, unknown)
+        for handle, spans in by_handle.items():
+            source = sources.get(handles.ids.get(handle))
+            if not source or not source.get('body'):
+                raise ValueError(f'claim {index}: source {handle} is not available; retrieve it again')
+            body = source['body']
+            spans = sorted(set(spans))
+            if spans[-1][1] > len(body) or any(body[s:e] != text for s, e, text in spans):
+                raise ValueError(f'claim {index}: the text of {handle} changed since those passages were shown; retrieve '
+                                 'it again and cite the new labels')
+            for cluster in _clusters(spans, MAX_PASSAGE_CHARS):
+                start, end = cluster[0][0], cluster[-1][1]
+                if end - start < 20:
+                    raise ValueError(f'claim {index}: the cited passage is a heading or fragment of {end - start} '
+                                     'characters; cite the paragraph that states the fact')
+                value = {k: v for k, v in claim.items() if k != 'passages'}
+                value.update(source_id=source['id'], start=start, end=end)
+                resolved.append(value)
     return resolved
+
+
+def _clusters(spans, limit):
+    """Consecutive (start, end, text) spans grouped so each group's range stays within ``limit``."""
+    groups = []
+    for span in spans:
+        if groups and span[1] - groups[-1][0][0] <= limit:
+            groups[-1].append(span)
+        else:
+            groups.append([span])
+    return groups
 
 
 def snapshot(url, body, now=None):

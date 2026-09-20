@@ -73,6 +73,10 @@ class EfficiencyTests(unittest.IsolatedAsyncioTestCase):
         partial = deepcopy(decision); partial['checks'].append({'citation_id':'S1','passages':['R0000000000000000@0'],'finding':'x'})
         survived = resolve_review_checks(partial, proposal, snapshots)
         self.assertEqual(len(survived['checks']), 1)
+        # Labels of two retrieved sources become one check per source.
+        other_id, _ = review_source('https://other.example/page', 'Different page with enough text to cite.', snapshots)
+        two = deepcopy(decision); two['checks'][0]['passages'] = [f'{source_id}@500', f'{other_id}@0']
+        self.assertEqual([c['source'] for c in resolve_review_checks(two, proposal, snapshots)['checks']], [url, 'https://other.example/page'])
         self.assertEqual(survived['dropped_checks'], [{'check':2,'labels':['R0000000000000000@0'],
                                                        'reason':'passage label not shown in this review: R0000000000000000@0'}])
         self.assertEqual(validate_decision(survived, proposal, {url:body}), survived)
