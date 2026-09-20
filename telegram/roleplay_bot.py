@@ -37,7 +37,7 @@ from runtime_tools import roleplay_turn
 from runtime_tools.roleplay_dynamics import with_defaults, holdout_titles, open_bargains, routine_occurrences
 from runtime_tools.roleplay_pacing import policy_for, turn_time_scope
 from runtime_tools.roleplay_memory import (load_notes, load_state, load_people, people_context, excluded_history_ids,
-                                           get_preference, set_preference, mutate_state, set_routine)
+                                           get_preference, set_preference, mutate_state, set_routine, exclude_history_message)
 from runtime_tools import roleplay_track
 from runtime_tools.registry import TOOLS, TOOL_HANDLERS
 from tool_gateway.profiles import ROLEPLAY_TELEGRAM_TOOLS
@@ -118,11 +118,21 @@ def _clear_after_id(user_id: int) -> int:
     return int(rows[0]["clear_after_id"]) if rows else 0
 
 
-def save_message(user_id: int, role: str, content: str) -> None:
-    _execute(
-        "INSERT INTO roleplay_chat_history (user_id, role, content) VALUES (%s, %s, %s)",
+def save_message(user_id: int, role: str, content: str) -> int | None:
+    rows = _query(
+        "INSERT INTO roleplay_chat_history (user_id, role, content) VALUES (%s, %s, %s) RETURNING id",
         (user_id, role, content),
     )
+    return int(rows[0]["id"]) if rows else None
+
+
+def _drop_unsettled(user_id: int, turn: dict, reason: str) -> None:
+    """A directive that never settled is not part of the story; keep it out of the next draft's history."""
+    if turn.get("history_id"):
+        try:
+            exclude_history_message(user_id, turn["history_id"], reason)
+        except Exception:
+            logger.exception("roleplay history exclusion failed")
 
 
 def history_window_offset(total: int, cap: int = HISTORY_CAP, step: int = HISTORY_STEP) -> int:
@@ -495,7 +505,7 @@ async def handle_message(message: Message) -> None:
         for chunk in _split_message(cached_reply):
             await message.answer(chunk)
         return
-    await asyncio.to_thread(save_message, user_id, "user", user_text)
+    history_id = await asyncio.to_thread(save_message, user_id, "user", user_text)
     history = await asyncio.to_thread(load_history, user_id)
     state = None
     people = None
@@ -509,7 +519,7 @@ async def handle_message(message: Message) -> None:
     if state is None:
         await message.answer("현재 장면을 읽지 못했어. 잠시 후 다시 시도해 줘.")
         return
-    turn = {"user_text": user_text, "scope_id": str(message.message_id), "chat_id": message.chat.id,
+    turn = {"user_text": user_text, "scope_id": str(message.message_id), "chat_id": message.chat.id, "history_id": history_id,
             "history": history, "state": state, "notes": notes, "people": people}
     try:
         authorization = await asyncio.to_thread(roleplay_turn.authorize, user_text, state, history)
@@ -521,6 +531,7 @@ async def handle_message(message: Message) -> None:
         return
     except Exception as exc:
         logger.exception("roleplay authorization failed")
+        await asyncio.to_thread(_drop_unsettled, user_id, turn, f"허가 판정 실패: {_issue_text(exc)}")
         await message.answer(f"이번에 진행할 장면을 확정하지 못했어.\n막힌 부분: {_issue_text(exc)}\n실행할 행동이나 장면을 구체적으로 말해줘.")
         return
     await _draft_and_settle(message, user_id, turn, authorization)
@@ -587,13 +598,15 @@ async def _draft_and_settle(message: Message, user_id: int, turn: dict, authoriz
                         "verdict": getattr(exc, "verdict", None), "key": exc.key,
                     }
                     await progress_cb.flush()
+                    await _show_draft(message, reply)
                     await message.answer(_choice_prompt(exc), reply_markup=_choice_keyboard(scope_id, exc))
                     return
                 except ValueError as exc:
                     logger.warning("roleplay draft rejected: %s", exc)
                     issues.append(f"초안 {attempt + 1} 거절: {_issue_text(exc)}")
                     history = attach_context(history, [context_record('draft_revision','telegram_roleplay_runtime',
-                        {'direction':'이전 초안은 폐기됐다. 범위를 지킨 새 초안을 작성하라.', 'issue':str(exc)},
+                        {'direction': f'이전 초안은 폐기됐다. 이번 사용자 메시지 "{user_text[:200]}"의 사건 하나만 다루는 새 초안을 작성하라. 이전에 답하지 못한 지시는 실행하지 않는다.',
+                         'scene_direction': roleplay_turn.direction(authorization, state), 'issue': _issue_text(exc)},
                         scope=f"telegram-roleplay:{turn['chat_id']}",observed_at=datetime.now(timezone.utc),temporal_scope='current turn')])
                     continue
                 settled = await asyncio.to_thread(adjudicate_turn, user_id, user_text, history, scope_id, prepared=prepared)
@@ -610,6 +623,7 @@ async def _draft_and_settle(message: Message, user_id: int, turn: dict, authoriz
     finally:
         await progress_cb.flush()
     if settled is None or settled.get('status') not in {'applied','unchanged'}:
+        await asyncio.to_thread(_drop_unsettled, user_id, turn, "미확정 턴: " + " / ".join(issues)[:150])
         await message.answer("장면을 확정하지 못해서 이번 진행은 저장하지 않았어.\n막힌 부분: "
                              + (" / ".join(issues) if issues else "이유가 기록되지 않음") + "\n어디까지 진행할지 다시 말해줘.")
         return
@@ -637,6 +651,13 @@ async def _deliver(message: Message, user_id: int, reply: str, settled: dict) ->
     if await asyncio.to_thread(get_preference, user_id, FEEDBACK_PREFERENCE, "on") != "off":
         state = await asyncio.to_thread(load_state, user_id)
         await message.answer(roleplay_turn.feedback_line(settled, state))
+
+
+async def _show_draft(message: Message, draft: str) -> None:
+    """The player judges a draft they can read. It is not saved and not yet the reply."""
+    chunks = _split_message(draft)
+    for i, chunk in enumerate(chunks):
+        await message.answer(("【미확정 초안 — 아직 저장되지 않음】\n" if i == 0 else "") + chunk)
 
 
 def _choice_prompt(exc: PendingChoice) -> str:
@@ -672,6 +693,7 @@ async def on_choice(query: CallbackQuery) -> None:
     if key == "cancel":
         PENDING_CHOICES.pop(user_id, None)
         await query.answer()
+        await asyncio.to_thread(_drop_unsettled, user_id, pending, "플레이어가 버림")
         await query.message.edit_text("이 초안은 버렸어. 어디까지 진행할지 다시 말해줘.")
         return
     if key != pending["key"]:
@@ -688,6 +710,7 @@ async def on_choice(query: CallbackQuery) -> None:
         return
     if key == "within_scope" and value != "yes":
         PENDING_CHOICES.pop(user_id, None)
+        await asyncio.to_thread(_drop_unsettled, user_id, pending, "플레이어가 범위 밖으로 판정")
         await query.message.edit_text("이 초안은 버렸어. 어디까지 진행할지 다시 말해줘.")
         return
     verdict = None
@@ -704,17 +727,20 @@ async def on_choice(query: CallbackQuery) -> None:
     except ValueError as exc:
         PENDING_CHOICES.pop(user_id, None)
         logger.warning("roleplay choice completion rejected: %s", exc)
-        await query.message.edit_text(f"선택: {chosen}\n그래도 초안을 확정하지 못했어 ({exc}). 다시 말해줘.")
+        await asyncio.to_thread(_drop_unsettled, user_id, pending, f"선택 후 확정 실패: {_issue_text(exc)}")
+        await query.message.edit_text(f"선택: {chosen}\n그래도 초안을 확정하지 못했어.\n막힌 부분: {_issue_text(exc)}\n다시 말해줘.")
         return
     except Exception:
         PENDING_CHOICES.pop(user_id, None)
         logger.exception("roleplay choice completion failed")
+        await asyncio.to_thread(_drop_unsettled, user_id, pending, "선택 후 내부 오류")
         await query.message.edit_text("확정 중 오류가 났어. 메시지를 다시 보내줘.")
         return
     PENDING_CHOICES.pop(user_id, None)
     settled = await asyncio.to_thread(adjudicate_turn, user_id, pending["user_text"], pending["history"], scope_id, prepared=prepared)
     if settled.get("status") not in {"applied", "unchanged"}:
-        await query.message.edit_text(f"선택: {chosen}\n장면을 확정하지 못해서 저장하지 않았어 ({settled.get('reason')}).")
+        await asyncio.to_thread(_drop_unsettled, user_id, pending, f"정산 보류: {settled.get('reason')}")
+        await query.message.edit_text(f"선택: {chosen}\n장면을 확정하지 못해서 저장하지 않았어.\n막힌 부분: {settled.get('reason')}")
         return
     await query.message.edit_text(f"선택: {chosen}")
     await _deliver(query.message, user_id, settled["reply"], settled)

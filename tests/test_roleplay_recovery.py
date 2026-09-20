@@ -102,3 +102,37 @@ class HistoryWindowTests(unittest.TestCase):
             self.assertLessEqual(offset, max(0, n - 40))
             self.assertLess(n - offset, 60)
 
+
+
+class UnsettledDirectiveTests(unittest.IsolatedAsyncioTestCase):
+    async def test_unsettled_user_message_leaves_roleplay_context(self):
+        from contextlib import contextmanager
+        message = SimpleNamespace(from_user=SimpleNamespace(id=1), text="의사 재방문", message_id=3,
+                                  chat=SimpleNamespace(id=1), answer=AsyncMock(), bot=SimpleNamespace(send_chat_action=AsyncMock()))
+        async def inline_thread(func, *args, **kwargs):
+            return func(*args, **kwargs)
+        @contextmanager
+        def fake_stage(uid):
+            yield {"people": []}
+        authorization = {"user_text": "의사 재방문", "labels": {"mode": "scene", "transition": "current", "span": "brief"}}
+        with patch.object(bot.asyncio, "to_thread", side_effect=inline_thread), \
+             patch.object(bot.roleplay_turn, "committed_reply", return_value=None), \
+             patch.object(bot.roleplay_turn, "authorize", return_value=authorization), \
+             patch.object(bot.roleplay_turn, "staged_memory", side_effect=fake_stage), \
+             patch.object(bot.roleplay_turn, "prepare", side_effect=ValueError("초안이 사용자 지시의 사건 경계를 넘음")), \
+             patch.object(bot, "save_message", return_value=997) as save, \
+             patch.object(bot, "exclude_history_message") as exclude, \
+             patch.object(bot, "load_history", return_value=[]), patch.object(bot, "load_notes", return_value=[]), \
+             patch.object(bot, "load_state", return_value={"hunger": 25}), \
+             patch.object(bot, "people_context", return_value={"index": [], "present": []}), \
+             patch.object(bot, "build_system_prompt", return_value="sys"), \
+             patch.object(bot, "_make_progress_callback", return_value=SimpleNamespace(flush=AsyncMock())), \
+             patch.object(bot, "chat_with_tools", new_callable=AsyncMock, return_value="초안"):
+            await bot.handle_message(message)
+        save.assert_called_once_with(1, "user", "의사 재방문")
+        exclude.assert_called_once()
+        self.assertEqual(exclude.call_args.args[:2], (1, 997))
+        final = message.answer.call_args.args[0]
+        self.assertIn("막힌 부분", final)
+        self.assertIn("초안 1 거절: 초안이 사용자 지시의 사건 경계를 넘음", final)
+        self.assertIn("초안 2 거절", final)

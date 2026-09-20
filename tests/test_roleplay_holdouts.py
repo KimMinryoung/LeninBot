@@ -206,6 +206,8 @@ class BotChoiceFlowTests(unittest.IsolatedAsyncioTestCase):
              patch.object(bot, 'chat_with_tools', new_callable=AsyncMock, return_value='초안 본문'):
             await bot.handle_message(message)
             self.assertEqual(save.call_count, 1)  # only the user's message so far
+            self.assertTrue(message.answer.await_args_list[0].args[0].startswith('【미확정 초안'))
+            self.assertIn('초안 본문', message.answer.await_args_list[0].args[0])
             markup = message.answer.call_args.kwargs['reply_markup']
             self.assertEqual([b.callback_data for row in markup.inline_keyboard for b in row],
                              ['rp:5:event:interrogation', 'rp:5:event:none', 'rp:5:cancel:-'])

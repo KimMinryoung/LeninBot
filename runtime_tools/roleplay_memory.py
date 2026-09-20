@@ -108,6 +108,13 @@ def excluded_history_ids(user_id: str | int) -> list[int]:
         return [r[0] for r in conn.execute("SELECT message_id FROM history_exclusions WHERE user_id = ? ORDER BY message_id", (str(user_id),))]
 
 
+def exclude_history_message(user_id: str | int, message_id: int, reason: str) -> None:
+    """Keep the PostgreSQL row, drop it from roleplay context: an unsettled directive must not
+    linger as an unanswered order that the next draft tries to fulfil."""
+    with _connection() as conn:
+        conn.execute("INSERT OR IGNORE INTO history_exclusions VALUES (?, ?, ?)", (str(user_id), int(message_id), reason[:200]))
+
+
 def load_notes(user_id: str | int) -> list[dict]:
     with _connection() as conn:
         rows = conn.execute("SELECT key, content FROM notes WHERE user_id = ? ORDER BY key", (str(user_id),)).fetchall()
