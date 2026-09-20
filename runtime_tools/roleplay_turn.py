@@ -170,7 +170,7 @@ def commit_staged(conn, uid, stage):
             conn.executemany(f'INSERT INTO {table} VALUES (?,?,?)',[(str(uid),*row) for row in stage['records'][table]])
 
 
-def prepare(user_text, before, people, history, scope_id, draft, authorization, stage=None, verdict=None, scope_ok=False):
+def prepare(user_text, before, people, history, scope_id, draft, authorization, stage=None, verdict=None, scope_ok=False, final_attempt=False):
     """Gate and classify the draft, then project it. A ``verdict`` from an earlier attempt
     (the player settled a choice Jev left open) skips the scope gate and the classifier;
     ``scope_ok`` means the player confirmed the draft stays within the authorized scene."""
@@ -187,7 +187,11 @@ def prepare(user_text, before, people, history, scope_id, draft, authorization, 
                 defaults={'within_scope': 'yes'})
             gate['uncertain'] = 'within_scope' in gate.get('defaulted', {})
         if gate['labels']['within_scope'] != 'yes':
-            raise ValueError('초안이 사용자 지시의 사건 경계를 넘음')
+            # A first draft that overran gets one rewrite; the last draft is kept and
+            # flagged, because a turn that never settles is worse than an overrun scene.
+            if not final_attempt:
+                raise ValueError('초안이 사용자 지시의 사건 경계를 넘음')
+            gate['breach'] = True
         verdict = jev.classify(user_text,before,people,history,draft=draft)
         if verdict['status'] != 'classified':
             raise ValueError('초안 사건 판정 실패')
@@ -265,7 +269,11 @@ def prepare(user_text, before, people, history, scope_id, draft, authorization, 
             applied = {**applied,'no_change':False,'narrative_only':True}
     review = review_reply(draft, before, projected, stage)
     if not review['approved']:
-        raise ValueError('초안 또는 기록이 정산 결과와 모순됨: ' + '; '.join(review['issues']))
+        if not final_attempt:
+            raise ValueError('초안 또는 기록이 정산 결과와 모순됨: ' + '; '.join(review['issues']))
+        applied = {**applied, 'review_issues': [issue[:160] for issue in review['issues']][:3]}
+    if (verdict.get('scope_review') or {}).get('breach'):
+        applied = {**applied, 'scope_breach': True}
     verdict['final_review']=review
     return {'before_revision':before['revision'],'state':projected,'applied':applied,
             'verdict':verdict,'reply':draft,'stage':stage}
@@ -348,6 +356,10 @@ def feedback_line(outcome, state=None):
         parts.append('기록만 갱신')
     if applied.get('scope_uncertain'):
         parts.append('범위 판정 불확실이라 통과시킴')
+    if applied.get('scope_breach'):
+        parts.append('지시 범위를 넘은 듯하지만 두 번째 초안이라 확정')
+    if applied.get('review_issues'):
+        parts.append('서술 검토 지적(확정함): ' + ' / '.join(applied['review_issues']))
     if applied.get('auto_settled'):
         korean = {'mode': '모드', 'event': '사건', 'intensity': '강도', 'activity': '활동', 'within_scope': '범위'}
         values = {**names, 'scene': '장면 실행', 'discussion': '질문·상담', 'plan': '예정 등록', 'mild': '스침', 'moderate': '보통', 'severe': '극심',

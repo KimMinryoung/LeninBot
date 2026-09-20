@@ -69,6 +69,19 @@ class PostDraftTests(unittest.TestCase):
         self.assertEqual(memory.load_notes('1'),[]);self.assertEqual(memory.load_people('1'),[])
         self.assertIsNone(turn.committed_reply('1','77'))
 
+    def test_final_attempt_keeps_an_overrunning_or_contradicted_draft_with_flags(self):
+        stage=self.stage()
+        with patch.object(turn,'decide',return_value={'labels':{'within_scope':'no'}}), patch.object(turn,'review_reply',return_value={'approved':False,'issues':['위치 모순']}), \
+             patch.object(jev,'classify',return_value=deepcopy(self.verdict)), patch.object(jev,'estimate_duration',return_value={'elapsed_minutes':90}):
+            with self.assertRaises(ValueError):
+                turn.prepare(self.text,self.before,stage['people'],[],'77','초안',self.auth,stage)
+            prepared=turn.prepare(self.text,self.before,stage['people'],[],'77','초안',self.auth,stage,None,False,True)
+        self.assertTrue(prepared['applied']['scope_breach'])
+        self.assertEqual(prepared['applied']['review_issues'],['위치 모순'])
+        self.assertFalse(prepared['verdict']['final_review']['approved'])
+        line=turn.feedback_line({'status':'applied','applied':prepared['applied']},prepared['state'])
+        self.assertIn('두 번째 초안이라 확정',line); self.assertIn('서술 검토 지적(확정함): 위치 모순',line)
+
     def test_unauthorized_draft_is_rejected_before_effects(self):
         with patch.object(turn,'decide',return_value={'labels':{'within_scope':'no'}}),patch.object(jev,'classify') as classify:
             with self.assertRaises(ValueError):turn.prepare('감방으로 보내',self.before,[],[],'77','감방에서 자고 다음 날 식사했다',self.auth)

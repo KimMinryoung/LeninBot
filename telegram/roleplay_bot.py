@@ -614,7 +614,7 @@ async def _draft_and_settle(message: Message, user_id: int, turn: dict, authoriz
                     break
                 try:
                     prepared = await asyncio.to_thread(roleplay_turn.prepare, user_text, state, stage['people'],
-                        history, scope_id, reply, authorization, stage)
+                        history, scope_id, reply, authorization, stage, None, False, attempt == 1)
                 except PendingChoice as exc:
                     # Jev left one closed choice open. Either ask the director (buttons on)
                     # or take the most probable value and say so in the settlement line.
@@ -629,7 +629,7 @@ async def _draft_and_settle(message: Message, user_id: int, turn: dict, authoriz
                         await message.answer(_choice_prompt(exc), reply_markup=_choice_keyboard(scope_id, exc))
                         return
                     try:
-                        prepared = await asyncio.to_thread(_auto_settle, exc, user_text, state, stage['people'], history, scope_id, reply, authorization, stage)
+                        prepared = await asyncio.to_thread(_auto_settle, exc, user_text, state, stage['people'], history, scope_id, reply, authorization, stage, attempt == 1)
                     except ValueError as inner:
                         logger.warning("roleplay draft rejected after auto settlement: %s", inner)
                         issues.append(f"초안 {attempt + 1} 거절: {_issue_text(inner)}")
@@ -657,6 +657,8 @@ async def _draft_and_settle(message: Message, user_id: int, turn: dict, authoriz
         await progress_cb.flush()
     if settled is None or settled.get('status') not in {'applied','unchanged'}:
         await asyncio.to_thread(_drop_unsettled, user_id, turn, "미확정 턴: " + " / ".join(issues)[:150])
+        if reply.strip() and reply.strip() != EMPTY_RESPONSE_FALLBACK:
+            await _show_draft(message, reply)  # the player at least sees what was written
         await message.answer("장면을 확정하지 못해서 이번 진행은 저장하지 않았어.\n막힌 부분: "
                              + (" / ".join(issues) if issues else "이유가 기록되지 않음") + "\n어디까지 진행할지 다시 말해줘.")
         return
@@ -686,7 +688,7 @@ async def _deliver(message: Message, user_id: int, reply: str, settled: dict) ->
         await message.answer(roleplay_turn.feedback_line(settled, state))
 
 
-def _auto_settle(exc: PendingChoice, user_text, state, people, history, scope_id, draft, authorization, stage):
+def _auto_settle(exc: PendingChoice, user_text, state, people, history, scope_id, draft, authorization, stage, final_attempt=False):
     """Buttons off: fill each open label with Jev's most probable candidate, at most a few rounds."""
     picks = dict((authorization or {}).get("auto_settled") or {})
     for _ in range(AUTO_SETTLE_ROUNDS):
@@ -698,7 +700,7 @@ def _auto_settle(exc: PendingChoice, user_text, state, people, history, scope_id
         if verdict is not None:
             verdict = {**verdict, "labels": {**verdict["labels"], exc.key: pick}, "player_settled": True}
         try:
-            prepared = roleplay_turn.prepare(user_text, state, people, history, scope_id, draft, authorization, stage, verdict, exc.key == "within_scope")
+            prepared = roleplay_turn.prepare(user_text, state, people, history, scope_id, draft, authorization, stage, verdict, exc.key == "within_scope", final_attempt)
         except PendingChoice as again:
             exc = again
             continue

@@ -133,6 +133,7 @@ class UnsettledDirectiveTests(unittest.IsolatedAsyncioTestCase):
         exclude.assert_called_once()
         self.assertEqual(exclude.call_args.args[:2], (1, 997))
         final = message.answer.call_args.args[0]
+        self.assertTrue(message.answer.await_args_list[-2].args[0].startswith("【미확정 초안"))
         self.assertIn("막힌 부분", final)
         self.assertIn("초안 1 거절: 초안이 사용자 지시의 사건 경계를 넘음", final)
         self.assertIn("초안 2 거절", final)
