@@ -105,6 +105,14 @@ RP_TOOLS, RP_HANDLERS = _select_tools()
 # process memory only: after a restart the player simply resends the message.
 PENDING_CHOICES: dict[int, dict] = {}
 FEEDBACK_PREFERENCE = "feedback_line"
+# Buttons are off by default: an unsure Jev label takes its most probable value and the
+# settlement line says so. /ask 켜기 brings the buttons back for a player who wants them.
+ASK_PREFERENCE = "ask_player"
+AUTO_SETTLE_ROUNDS = 4
+
+
+def _asks_player(user_id: int) -> bool:
+    return get_preference(user_id, ASK_PREFERENCE, "off") == "on"
 
 
 # ── Persistence (own tables → session isolation) ─────────────────────
@@ -254,6 +262,7 @@ async def cmd_help(message: Message) -> None:
         "• /status — 핵심 상태, /status 상세 — 계산 근거·세부 상태. 수정·초기화는 대화로 요청해.\n"
         "• /people — 저장된 인물 목록, /people 이름 — 인물 기록 확인\n"
         "• /feedback 켜기|끄기 — 답변 뒤에 엔진이 확정한 사건·시간을 한 줄로 표시 (기본 켜짐)\n"
+        "• /ask 켜기|끄기 — 판정이 애매할 때 버튼으로 물을지 (기본 꺼짐: 가장 그럴듯한 값으로 자동 처리하고 한 줄에 표시)\n"
         "• /routine — 감옥 일과 보기, /routine 추가 06:00 아침 배식, /routine 삭제 1, /routine 비우기\n"
         "• /track 켜기|끄기 — 실존 연표(4/30 66명 조서 … 1940-02-04 처형)를 예정 사건으로 깔고 일치·이탈을 표시\n"
         "• 판정이 애매하면 버튼으로 사건을 골라 그 초안을 그대로 확정할 수 있어.\n"
@@ -280,6 +289,20 @@ async def cmd_feedback(message: Message) -> None:
     else:
         current = await asyncio.to_thread(get_preference, message.from_user.id, FEEDBACK_PREFERENCE, "on")
         await message.answer(f"확정 한 줄 표시: {'켜짐' if current != 'off' else '꺼짐'}. /feedback 켜기 또는 /feedback 끄기")
+
+
+@router.message(Command("ask"))
+async def cmd_ask(message: Message) -> None:
+    arg = ((message.text or "").split(maxsplit=1)[1:] or [""])[0].strip().casefold()
+    if arg in {"켜기", "on", "켜"}:
+        await asyncio.to_thread(set_preference, message.from_user.id, ASK_PREFERENCE, "on")
+        await message.answer("판정이 애매하면 버튼으로 물을게.")
+    elif arg in {"끄기", "off", "꺼"}:
+        await asyncio.to_thread(set_preference, message.from_user.id, ASK_PREFERENCE, "off")
+        await message.answer("버튼 없이 가장 그럴듯한 값으로 자동 처리하고 확정 한 줄에 표시할게.")
+    else:
+        current = await asyncio.to_thread(_asks_player, message.from_user.id)
+        await message.answer(f"판정 버튼: {'켜짐' if current else '꺼짐(자동 처리)'}. /ask 켜기 또는 /ask 끄기")
 
 
 @router.message(Command("routine"))
@@ -525,10 +548,13 @@ async def handle_message(message: Message) -> None:
         authorization = await asyncio.to_thread(roleplay_turn.authorize, user_text, state, history)
     except PendingChoice as exc:
         # Jev could not tell whether this is a scene to play or a question to answer.
-        # Cheap to ask now, before any draft is written.
-        PENDING_CHOICES[user_id] = {**turn, "key": exc.key, "phase": "authorize", "candidates": exc.candidates}
-        await message.answer(_choice_prompt(exc), reply_markup=_choice_keyboard(turn["scope_id"], exc))
-        return
+        if await asyncio.to_thread(_asks_player, user_id):
+            PENDING_CHOICES[user_id] = {**turn, "key": exc.key, "phase": "authorize", "candidates": exc.candidates}
+            await message.answer(_choice_prompt(exc), reply_markup=_choice_keyboard(turn["scope_id"], exc))
+            return
+        pick = exc.candidates[0][0] if exc.candidates else "scene"
+        authorization = {"user_text": user_text, "labels": {"mode": pick, "transition": "current", "span": "brief"},
+                         "auto_settled": {exc.key: pick}}
     except Exception as exc:
         logger.exception("roleplay authorization failed")
         await asyncio.to_thread(_drop_unsettled, user_id, turn, f"허가 판정 실패: {_issue_text(exc)}")
@@ -590,17 +616,24 @@ async def _draft_and_settle(message: Message, user_id: int, turn: dict, authoriz
                     prepared = await asyncio.to_thread(roleplay_turn.prepare, user_text, state, stage['people'],
                         history, scope_id, reply, authorization, stage)
                 except PendingChoice as exc:
-                    # Jev left one closed choice open. Ask the director instead of
-                    # burning a second draft or silently dropping the turn.
-                    PENDING_CHOICES[user_id] = {
-                        **turn, "phase": "settle", "people": stage['people'], "history": history,
-                        "draft": reply, "authorization": authorization, "stage": stage,
-                        "verdict": getattr(exc, "verdict", None), "key": exc.key, "candidates": exc.candidates,
-                    }
-                    await progress_cb.flush()
-                    await _show_draft(message, reply)
-                    await message.answer(_choice_prompt(exc), reply_markup=_choice_keyboard(scope_id, exc))
-                    return
+                    # Jev left one closed choice open. Either ask the director (buttons on)
+                    # or take the most probable value and say so in the settlement line.
+                    if await asyncio.to_thread(_asks_player, user_id):
+                        PENDING_CHOICES[user_id] = {
+                            **turn, "phase": "settle", "people": stage['people'], "history": history,
+                            "draft": reply, "authorization": authorization, "stage": stage,
+                            "verdict": getattr(exc, "verdict", None), "key": exc.key, "candidates": exc.candidates,
+                        }
+                        await progress_cb.flush()
+                        await _show_draft(message, reply)
+                        await message.answer(_choice_prompt(exc), reply_markup=_choice_keyboard(scope_id, exc))
+                        return
+                    try:
+                        prepared = await asyncio.to_thread(_auto_settle, exc, user_text, state, stage['people'], history, scope_id, reply, authorization, stage)
+                    except ValueError as inner:
+                        logger.warning("roleplay draft rejected after auto settlement: %s", inner)
+                        issues.append(f"초안 {attempt + 1} 거절: {_issue_text(inner)}")
+                        continue
                 except ValueError as exc:
                     logger.warning("roleplay draft rejected: %s", exc)
                     issues.append(f"초안 {attempt + 1} 거절: {_issue_text(exc)}")
@@ -651,6 +684,27 @@ async def _deliver(message: Message, user_id: int, reply: str, settled: dict) ->
     if await asyncio.to_thread(get_preference, user_id, FEEDBACK_PREFERENCE, "on") != "off":
         state = await asyncio.to_thread(load_state, user_id)
         await message.answer(roleplay_turn.feedback_line(settled, state))
+
+
+def _auto_settle(exc: PendingChoice, user_text, state, people, history, scope_id, draft, authorization, stage):
+    """Buttons off: fill each open label with Jev's most probable candidate, at most a few rounds."""
+    picks = dict((authorization or {}).get("auto_settled") or {})
+    for _ in range(AUTO_SETTLE_ROUNDS):
+        pick = exc.candidates[0][0] if exc.candidates else None
+        if pick is None:
+            raise ValueError(str(exc))
+        picks[exc.key] = pick
+        verdict = getattr(exc, "verdict", None)
+        if verdict is not None:
+            verdict = {**verdict, "labels": {**verdict["labels"], exc.key: pick}, "player_settled": True}
+        try:
+            prepared = roleplay_turn.prepare(user_text, state, people, history, scope_id, draft, authorization, stage, verdict, exc.key == "within_scope")
+        except PendingChoice as again:
+            exc = again
+            continue
+        prepared["applied"] = {**prepared["applied"], "auto_settled": picks}
+        return prepared
+    raise ValueError("판정 자동 처리 한도 초과: " + str(exc))
 
 
 async def _show_draft(message: Message, draft: str) -> None:

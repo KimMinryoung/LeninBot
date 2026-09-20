@@ -246,6 +246,8 @@ def prepare(user_text, before, people, history, scope_id, draft, authorization, 
         projected['location'] = '미확인 — 확정된 장면 서술 참조'
     if (verdict.get('scope_review') or {}).get('uncertain'):
         applied = {**applied, 'scope_uncertain': True}
+    if authorization.get('auto_settled'):
+        applied = {**applied, 'auto_settled': {**authorization['auto_settled'], **(applied.get('auto_settled') or {})}}
     if applied.get('interrupted') and not (mode == 'scene' and verdict['labels'].get('elapsed') == 'explicit'):
         raise ValueError('예정 사건 도래로 초안 끝까지 실행할 수 없음. 도래 장면에서 멈춰야 함')
     # An explicit passage was told where it stops (see direction/expected_stop); the settled
@@ -346,6 +348,11 @@ def feedback_line(outcome, state=None):
         parts.append('기록만 갱신')
     if applied.get('scope_uncertain'):
         parts.append('범위 판정 불확실이라 통과시킴')
+    if applied.get('auto_settled'):
+        korean = {'mode': '모드', 'event': '사건', 'intensity': '강도', 'activity': '활동', 'within_scope': '범위'}
+        values = {**names, 'scene': '장면 실행', 'discussion': '질문·상담', 'plan': '예정 등록', 'mild': '스침', 'moderate': '보통', 'severe': '극심',
+                  'light': '가벼운 움직임', 'rest': '휴식', 'yes': '안'}
+        parts.append('애매해서 자동 처리: ' + ', '.join(f"{korean.get(k, k)}={values.get(v, v)}" for k, v in applied['auto_settled'].items()))
     return '⚙ ' + ' · '.join(parts)
 
 

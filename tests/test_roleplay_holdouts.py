@@ -322,6 +322,7 @@ class BotAuthorizeChoiceTests(unittest.IsolatedAsyncioTestCase):
              patch.object(bot.roleplay_turn, 'authorize', side_effect=pending), \
              patch.object(bot, '_draft_and_settle', new_callable=AsyncMock) as run, \
              patch.object(bot, 'save_message'), patch.object(bot, 'load_history', return_value=[]), \
+             patch.object(bot, 'get_preference', return_value='on'), \
              patch.object(bot, 'load_notes', return_value=[]), patch.object(bot, 'load_state', return_value={'hunger': 25}), \
              patch.object(bot, 'people_context', return_value={'index': [], 'present': []}):
             await bot.handle_message(message)
@@ -336,3 +337,42 @@ class BotAuthorizeChoiceTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(turn_ctx['scope_id'], '8')
             self.assertEqual(authorization['labels'], {'mode': 'scene', 'transition': 'current', 'span': 'brief'})
             self.assertNotIn(1, bot.PENDING_CHOICES)
+
+
+class AutoSettleTests(unittest.IsolatedAsyncioTestCase):
+    async def test_buttons_off_takes_the_most_probable_value_and_says_so(self):
+        from telegram import roleplay_bot as bot
+        message = SimpleNamespace(from_user=SimpleNamespace(id=1), text='죽을 건넸다', message_id=9, chat=SimpleNamespace(id=1),
+                                  answer=AsyncMock(), bot=SimpleNamespace(send_chat_action=AsyncMock()))
+        async def inline_thread(func, *args, **kwargs):
+            return func(*args, **kwargs)
+        @contextmanager
+        def fake_stage(uid):
+            yield {'people': []}
+        auth = {'user_text': '죽을 건넸다', 'labels': {'mode': 'scene', 'transition': 'current', 'span': 'brief'}}
+        pending = jev.PendingChoice('event', [('kindness', '배려·양보'), ('none', '뚜렷한 사건 없음')], '불확실')
+        pending.verdict = {'labels': {'mode': 'scene', 'event_intake': 'meal'}, 'answers': {}}
+        prepared = {'reply': '초안', 'applied': {'event': 'kindness', 'events': ['kindness', 'meal'], 'minutes': 3}}
+        with patch.object(bot.asyncio, 'to_thread', side_effect=inline_thread), \
+             patch.object(bot.roleplay_turn, 'committed_reply', return_value=None), \
+             patch.object(bot.roleplay_turn, 'authorize', return_value=auth), \
+             patch.object(bot.roleplay_turn, 'staged_memory', side_effect=fake_stage), \
+             patch.object(bot.roleplay_turn, 'prepare', side_effect=[pending, prepared]) as prepare, \
+             patch.object(bot, 'adjudicate_turn', side_effect=lambda *a, **k: {'status': 'applied', 'reply': '초안', 'applied': k['prepared']['applied']}) as settle, \
+             patch.object(bot, 'save_message', return_value=5), patch.object(bot, 'load_history', return_value=[]), \
+             patch.object(bot, 'get_preference', side_effect=lambda uid, key, default='': 'off' if key == bot.ASK_PREFERENCE else 'on'), \
+             patch.object(bot, 'load_notes', return_value=[]), patch.object(bot, 'load_state', return_value={'hunger': 25, 'clock': {}}), \
+             patch.object(bot, 'people_context', return_value={'index': [], 'present': []}), \
+             patch.object(bot, 'build_system_prompt', return_value='sys'), \
+             patch.object(bot, '_make_progress_callback', return_value=SimpleNamespace(flush=AsyncMock())), \
+             patch.object(bot, 'chat_with_tools', new_callable=AsyncMock, return_value='초안'):
+            await bot.handle_message(message)
+        self.assertEqual(prepare.call_count, 2)
+        second = prepare.call_args_list[1].args
+        self.assertEqual(second[8]['labels']['event'], 'kindness')
+        self.assertTrue(second[8]['player_settled'])
+        self.assertNotIn(1, bot.PENDING_CHOICES)
+        sent = [c.args[0] for c in message.answer.await_args_list]
+        self.assertEqual(sent[0], '초안')
+        self.assertIn('애매해서 자동 처리: 사건=배려·양보', sent[1])
+        self.assertFalse(any('reply_markup' in c.kwargs for c in message.answer.await_args_list))
