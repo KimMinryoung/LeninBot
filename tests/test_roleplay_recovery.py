@@ -1,5 +1,6 @@
 """Roleplay failure notices must not become conversation history."""
 import unittest
+from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -14,10 +15,20 @@ class TestReplyPersistence(unittest.IsolatedAsyncioTestCase):
             bot=SimpleNamespace(send_chat_action=AsyncMock()),
         )
         progress = SimpleNamespace(flush=AsyncMock())
-        async def inline_thread(func, *args):
-            return func(*args)
+        async def inline_thread(func, *args, **kwargs):
+            return func(*args, **kwargs)
+
+        @contextmanager
+        def fake_stage(uid):
+            yield {"people":[]}
+        authorization={"user_text":"질문","labels":{"mode":"discussion","transition":"current","span":"brief"}}
 
         with patch.object(bot.asyncio, "to_thread", side_effect=inline_thread), \
+             patch.object(bot, "adjudicate_turn", return_value={"status": "unchanged", "reply":reply}), \
+             patch.object(bot.roleplay_turn, "committed_reply", return_value=None), \
+             patch.object(bot.roleplay_turn, "authorize", return_value=authorization), \
+             patch.object(bot.roleplay_turn, "staged_memory", side_effect=fake_stage), \
+             patch.object(bot.roleplay_turn, "prepare", return_value={}), \
              patch.object(bot, "save_message") as save, \
              patch.object(bot, "load_history", return_value=[{"role": "user", "content": "질문"}]), \
              patch.object(bot, "load_notes", return_value=[{"key": "관계", "content": "친구"}]), \
@@ -42,7 +53,11 @@ class TestReplyPersistence(unittest.IsolatedAsyncioTestCase):
         save, message, chat = await self.run_turn("완성된 답변")
         payload = chat.call_args.args[0][-1]["_runtime_events"][0]["payload"]
         self.assertEqual(payload["private_notes"][0]["content"], "친구")
-        self.assertEqual(payload["character_state"]["hunger"], 25)
+        self.assertEqual(payload["character_state"]["acting_cues"]["허기"], "허기가 느껴짐")
+        self.assertNotIn("hunger", payload["character_state"])
+        self.assertIn("direction", payload["scene_direction"])
+        self.assertNotIn("automatic_adjudication", payload)
+        self.assertNotIn("time_policy", payload)
         self.assertNotIn("recent_events", payload["character_state"])
         self.assertNotIn("event_timestamps", payload["character_state"])
         self.assertEqual(payload["people"]["index"][0]["person_id"], "ivan")

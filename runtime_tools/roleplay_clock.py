@@ -122,7 +122,7 @@ def interpret_clock(state, temporal, advance_fn):
             else:
                 minutes = temporal['elapsed_minutes']
             result = advance_fn(state, state['last_calculated_minute'] + minutes, temporal['interpretation'])
-            clock = move_minutes(clock, minutes, temporal['certainty'])
+            clock = move_minutes(clock, result['last_calculated_minute'] - state['last_calculated_minute'], temporal['certainty'])
         elif operation == 'next_day':
             if clock['date']:
                 clock['date'] = (date.fromisoformat(clock['date']) + timedelta(days=1)).isoformat()

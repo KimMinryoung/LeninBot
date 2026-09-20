@@ -8,27 +8,35 @@ import re
 import sqlite3
 import unicodedata
 from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 
 from tool_gateway.security import get_caller
+from runtime_tools.roleplay_pacing import check_time_request, check_time_result, check_reset_request
+from runtime_tools.roleplay_story import STORY_UPDATES_SCHEMA, apply_story_updates, advance_to_event
 from runtime_tools.roleplay_clock import TEMPORAL_SCHEMA, interpret_clock, validate_temporal
-from runtime_tools.roleplay_dynamics import (METRICS, CONDITION_SCHEMA, RESOLVE_EVENT_KINDS, RESOLVE_INTENSITY,
+from runtime_tools.roleplay_dynamics import (METRICS, CONDITION_SCHEMA, REQUIRED_CONDITIONS, RESOLVE_EVENT_KINDS, RESOLVE_INTENSITY,
                                              RESOLVE_EVENT_HISTORY, with_defaults, validate_conditions, advance,
                                              carry_injury_progress, injury_pain_floor, reconcile_injuries,
                                              isolation_stage, resolve_event_delta)
 
 MEMORY_PATH = Path(__file__).resolve().parents[1] / "output" / "roleplay_memory.sqlite3"
+MEMORY_OVERRIDE = ContextVar("roleplay_draft_memory", default=None)
 MAX_NOTES = 30
 
 
 @contextmanager
 def _connection():
-    MEMORY_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(MEMORY_PATH, timeout=10)
+    path = MEMORY_OVERRIDE.get() or MEMORY_PATH
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(path, timeout=10)
     try:
         with conn:
             conn.execute("CREATE TABLE IF NOT EXISTS notes (user_id TEXT NOT NULL, key TEXT NOT NULL, content TEXT NOT NULL, PRIMARY KEY(user_id, key))")
             conn.execute("CREATE TABLE IF NOT EXISTS character_state (user_id TEXT PRIMARY KEY, payload TEXT NOT NULL)")
+            conn.execute("CREATE TABLE IF NOT EXISTS automatic_turns (user_id TEXT NOT NULL, scope_id TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(user_id, scope_id))")
+            conn.execute("CREATE TABLE IF NOT EXISTS turn_retractions (user_id TEXT NOT NULL, scope_id TEXT NOT NULL, reason TEXT NOT NULL, PRIMARY KEY(user_id, scope_id))")
+            conn.execute("CREATE TABLE IF NOT EXISTS history_exclusions (user_id TEXT NOT NULL, message_id INTEGER NOT NULL, reason TEXT NOT NULL, PRIMARY KEY(user_id, message_id))")
             conn.execute("CREATE TABLE IF NOT EXISTS people (user_id TEXT NOT NULL, person_id TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(user_id, person_id))")
             conn.execute("CREATE TABLE IF NOT EXISTS state_history (id INTEGER PRIMARY KEY, user_id TEXT NOT NULL, revision INTEGER NOT NULL, payload TEXT NOT NULL)")
             yield conn
@@ -41,6 +49,12 @@ def _owner_id() -> str:
     if caller.interface != "telegram" or caller.agent_name != "roleplay" or not caller.is_owner or not caller.user_id:
         raise PermissionError("Roleplay owner context required")
     return str(caller.user_id)
+
+
+def excluded_history_ids(user_id: str | int) -> list[int]:
+    """Retracted turns stay in PostgreSQL for audit, but are not roleplay context."""
+    with _connection() as conn:
+        return [r[0] for r in conn.execute("SELECT message_id FROM history_exclusions WHERE user_id = ? ORDER BY message_id", (str(user_id),))]
 
 
 def load_notes(user_id: str | int) -> list[dict]:
@@ -258,13 +272,13 @@ def load_state(user_id: str | int) -> dict:
 
 
 def state_view(state: dict) -> dict:
-    """The model-facing state: everything it decides with, none of the replay bookkeeping."""
+    """Internal diagnostic view. The Telegram actor uses actor_state_view instead."""
     view = {"revision": state.get("revision", 0)}
     for key in METRICS:
         value = state.get(key)
         view[key] = None if value is None else round(value, 1)
     for key in ("body", "mood", "scene", *sorted(SCENE_TEXT_FIELDS), "participants", "activity", "sleep_quality",
-                "threat", "injuries", "conditions_initialized", "scene_minute", "last_calculated_minute", "time_basis", "reason"):
+                "threat", "injuries", "social_contact", "isolation_mode", "conditions_initialized", "scene_minute", "last_calculated_minute", "time_basis", "reason"):
         view[key] = state.get(key)
     if not view.get("period"):
         view.pop("period", None)
@@ -283,11 +297,16 @@ def state_view(state: dict) -> dict:
     view["isolation_hours"] = round(state.get("isolation_minutes", 0) / 60, 1)
     stage = isolation_stage(state.get("isolation_minutes", 0))
     view["isolation_stage"] = f"{stage['label']}: {stage['description']}" if stage else None
+    view["wakefulness_hours"] = round(state.get("wakefulness_minutes", 0) / 60, 1)
+    view["story_events"] = [e for e in state.get("story_events", []) if e["status"] in {"pending", "ready"}]
+    view["recent_story_outcomes"] = [e for e in state.get("story_events", []) if e["status"] in {"completed", "cancelled"}][-5:]
+    if state.get("story_interrupt"):
+        view["story_interrupt"] = state["story_interrupt"]
     unset = [key for key in METRICS if state.get(key) is None]
     if unset:
         # A null among numbers is easy to skim past; name the gap and what closes it.
         view["unset_metrics"] = unset
-        view["unset_metrics_note"] = "미설정 수치는 시간 계산에서 제외됨. 장면 근거로 changes에 값을 넣어 initialize"
+        view["unset_metrics_note"] = "미설정 수치는 시간 계산에서 제외되며 자동 판정 전에는 알 수 없음"
     return view
 
 
@@ -347,8 +366,8 @@ def _normalize_temporal(temporal, warnings: list[str]) -> dict:
     return temporal
 
 
-def _auto_event_id(scope_id, action: str, changes: dict, temporal) -> str:
-    digest = hashlib.sha1(json.dumps({"a": action, "c": changes, "t": temporal}, sort_keys=True,
+def _auto_event_id(scope_id, action: str, changes: dict, temporal, details=None) -> str:
+    digest = hashlib.sha1(json.dumps({"a": action, "c": changes, "t": temporal, "details": details}, sort_keys=True,
                                      ensure_ascii=False, default=str).encode()).hexdigest()[:10]
     return f"auto-{scope_id or 'noscope'}-{digest}"
 
@@ -376,6 +395,14 @@ def _apply_changes(base: dict, changes: dict, *, adjustment: str, metric_reasons
     """Apply an immediate update on top of ``base`` (the saved state, or the state after an interval)."""
     numeric = set(changes) & set(METRICS)
     state = {**base, **{k: v for k, v in changes.items() if k not in numeric}}
+    if "participants" in changes and changes["participants"] != base.get("participants", []):
+        state["alone_rest_minutes"] = 0
+        if "social_contact" not in changes:
+            state["social_contact"] = "unknown" if changes["participants"] else "none"
+    if "activity" in changes and changes["activity"] not in {"rest", "sleep"}:
+        state["alone_rest_minutes"] = 0
+    if changes.get("threat") in {"threatening", "immediate"} and changes["threat"] != base.get("threat"):
+        state["alone_rest_minutes"] = 0
     if not numeric:
         return state, adjustment, metric_reasons
     if not adjustment:
@@ -403,9 +430,11 @@ def _apply_changes(base: dict, changes: dict, *, adjustment: str, metric_reasons
             kept.append(key)
             continue
         state[key] = changes[key]
+        state["metric_remainders"] = {k: v for k, v in state.get("metric_remainders", {}).items() if k != key}
     # A shock (a wound, or tension pushed up by an event) ends the calm streak that eases tension.
     if adjustment == "event" and (event_type == "injury" or ("tension" in numeric and base["tension"] is not None and changes["tension"] > base["tension"])):
         state["calm_minutes"] = 0
+        state["alone_rest_minutes"] = 0
     if kept:
         warnings.append(f"initialize는 미설정 값만 채움: {kept}는 기존 값 유지 (바꾸려면 adjustment=event 또는 correction)")
     state["recent_events"] = (base["recent_events"] + [event_id])[-100:] if event_id not in base["recent_events"] else base["recent_events"]
@@ -451,6 +480,7 @@ def _apply_resolve_event(state: dict, event: dict, *, event_id: str, reason: str
     delta, factors = resolve_event_delta(state, event["kind"], event["intensity"])
     before = state["resolve"]
     state["resolve"] = round(max(0, min(100, before + delta)), 4)
+    state["metric_remainders"] = {k: v for k, v in state.get("metric_remainders", {}).items() if k != "resolve"}
     record = {"event_id": event_id, "kind": event["kind"], "intensity": event["intensity"], "delta": delta,
               "from": before, "to": state["resolve"], "factors": factors, "scene_minute": state["scene_minute"],
               "note": event["note"] or reason}
@@ -464,19 +494,32 @@ def roleplay_state(action: str, changes: dict | None = None, reason: str = "", *
                    metric_reasons: dict | None = None, temporal: dict | None = None,
                    event_type: str = "other", interval_conditions: dict | None = None,
                    person_updates: list | None = None, person_review: str = "",
-                   resolve_event: dict | None = None, **extra) -> str:
+                   resolve_event: dict | None = None, story_updates: list | None = None, **extra) -> str:
     caller = get_caller()
     user_id = _owner_id()
+    from runtime_tools.roleplay_actor import actor_state_view
+    view_state = actor_state_view if caller.scope_type == "telegram_message" else state_view
     if action == "read":
-        return json.dumps(state_view(load_state(user_id)), ensure_ascii=False)
+        return json.dumps(view_state(load_state(user_id)), ensure_ascii=False)
     if action == "history":
         with _connection() as conn:
-            rows = conn.execute("SELECT payload FROM state_history WHERE user_id = ? ORDER BY id DESC LIMIT 20", (user_id,)).fetchall()
-        records = [json.loads(row[0]) for row in rows]
+            retracted = {r[0] for r in conn.execute("SELECT scope_id FROM turn_retractions WHERE user_id = ?", (user_id,))}
+            rows = conn.execute("SELECT payload FROM state_history WHERE user_id = ? ORDER BY id DESC LIMIT 1000", (user_id,)).fetchall()
+        records = [record for row in rows if (record := json.loads(row[0])).get("source_scope_id") not in retracted][:20]
+        if caller.scope_type == "telegram_message":
+            return json.dumps([actor_state_view(record.get("after", {})) for record in records], ensure_ascii=False)
         for record in records:
             for side in ("before", "after"):
                 record[side] = {k: record[side].get(k) for k in (*METRICS, "scene_minute", "activity", "sleep_quality", "threat", "injuries", "clock")}
         return json.dumps(records, ensure_ascii=False)
+    if caller.scope_type == "telegram_message":
+        narrative = {"goal", "avoid", "next_action", "unresolved", "body", "mood", "scene"}
+        if (action != "update" or not isinstance(changes, dict) or set(changes) - narrative
+                or temporal is not None or interval_conditions is not None or resolve_event is not None
+                or story_updates is not None or adjustment or metric_reasons or extra or person_updates is not None):
+            raise PermissionError("수치·시간·활동·인물 출입·이벤트는 Jev 자동 판정 전용. 에이전트는 read/history 또는 목적·기분 등 서술만 update 가능")
+    if action == "reset":
+        check_reset_request()
     if action not in {"update", "reset", "time"}:
         raise ValueError("Unknown state action: read/history/update/time/reset")
 
@@ -497,7 +540,9 @@ def roleplay_state(action: str, changes: dict | None = None, reason: str = "", *
         warnings.append("changes 안의 metric_reasons는 최상위 인자로 옮겨 적용함")
     changes, inner_reason, injury_upserts = _normalize_changes(changes, extra, warnings)
     if extra:
-        raise ValueError(f"Unknown argument(s) {sorted(extra)}. Accepted: action, changes, reason, expected_revision, temporal, interval_conditions, person_updates, person_review, adjustment, event_id, metric_reasons, event_type, resolve_event")
+        raise ValueError(f"Unknown argument(s) {sorted(extra)}. Accepted: action, changes, reason, expected_revision, temporal, interval_conditions, person_updates, person_review, adjustment, event_id, metric_reasons, event_type, resolve_event, story_updates")
+    if story_updates is not None and action != "update":
+        raise ValueError("story_updates require action=update; register plans before advancing time")
     resolve_event = _normalize_resolve_event(resolve_event, action, warnings)
     person_updates, person_review = _normalize_person_updates(person_updates, person_review, warnings)
     if action == "time":
@@ -524,14 +569,15 @@ def roleplay_state(action: str, changes: dict | None = None, reason: str = "", *
             interval_conditions = {k: changes[k] for k in CONDITION_SCHEMA if k in changes}
             warnings.append("interval_conditions 미지정: changes의 활동·조건을 지난 구간에도 적용함. 지난 구간이 달랐다면 interval_conditions로 구분")
         if not isinstance(interval_conditions, dict) or "activity" not in interval_conditions or set(interval_conditions) - set(CONDITION_SCHEMA):
-            raise ValueError("Supply interval_conditions={activity: rest/light/moderate/strenuous/sleep, sleep_quality?, threat?, injuries?} describing the interval that just elapsed; changes describe the state after it")
+            raise ValueError("Supply interval_conditions={activity: rest/light/moderate/strenuous/sleep/restrained/self_care/focused_work, sleep_quality?, threat?, injuries?} describing the interval that just elapsed; changes describe the state after it")
         validate_conditions(interval_conditions)
     elif interval_conditions is not None:
         warnings.append("interval_conditions는 현재 시간의 advance/until에만 쓰이므로 무시함")
         interval_conditions = None
     if not isinstance(event_id, str) or not 1 <= len(event_id.strip()) <= 100:
-        if action == "time" or set(changes) & set(METRICS) or resolve_event:
-            event_id = _auto_event_id(caller.scope_id, action, changes, temporal)
+        if action == "time" or set(changes) & set(METRICS) or resolve_event or story_updates:
+            event_id = _auto_event_id(caller.scope_id, action, changes, temporal,
+                                      {"interval": interval_conditions, "resolve": resolve_event, "story": story_updates})
             warnings.append(f"event_id 미지정: {event_id}로 자동 생성함. 같은 사건을 재시도할 때만 재사용")
         else:
             event_id = ""
@@ -544,7 +590,7 @@ def roleplay_state(action: str, changes: dict | None = None, reason: str = "", *
         before = with_defaults({**STATE_DEFAULTS, **(json.loads(row[0]) if row else {})})
         # Safe replay of an already applied absolute time/event never adds a second delta.
         if event_id and event_id in before["recent_events"]:
-            return json.dumps({**state_view(before), "replayed": True,
+            return json.dumps({**view_state(before), "replayed": True,
                                "note": f"event_id '{event_id}'는 이미 반영되어 다시 적용하지 않음. 새 사건이면 다른 event_id를 사용"}, ensure_ascii=False)
         if expected_revision != before["revision"]:
             if caller.scope_id and before.get("last_scope_id") == caller.scope_id:
@@ -560,15 +606,30 @@ def roleplay_state(action: str, changes: dict | None = None, reason: str = "", *
             validate_conditions({"injuries": changes["injuries"]})
         if interval_conditions and "injuries" in interval_conditions:
             interval_conditions["injuries"] = carry_injury_progress(before["injuries"], interval_conditions["injuries"])
+        deferred_effects = None
         if action == "time":
+            pacing_policy = check_time_request(before, temporal, caller.scope_id)
+            if (temporal["relation"] == "current" and temporal["operation"] == "next_day"
+                    and any(e["status"] in {"pending", "ready"} for e in before.get("story_events", []))):
+                raise ValueError("예정 사건이 있어 경과량 미상의 next_day로 건너뛸 수 없음. 근거 있는 advance/until로 진행하거나 무효인 사건을 취소")
             interval_state = {**before, **(interval_conditions or {})}
-            if interval_conditions and all(k in interval_conditions for k in CONDITION_SCHEMA):
+            if interval_conditions and all(k in interval_conditions for k in REQUIRED_CONDITIONS):
                 interval_state["conditions_initialized"] = True
-            base = interpret_clock(interval_state, temporal, advance)
+            base = interpret_clock(interval_state, temporal,
+                                   lambda state, target, basis: advance_to_event(state, target, basis, advance))
+            check_time_result(before, base, temporal, caller.scope_id, pacing_policy)
+            if timed_interval and base.get("story_interrupt"):
+                deferred_effects = {"changes": changes, "person_updates": person_updates, "resolve_event": resolve_event}
+                changes = {}
+                person_updates = None
+                resolve_event = None
+                warnings.append("예정 사건에서 시간 진행을 멈춤. 요청한 구간 끝의 changes/person_updates/resolve_event는 적용하지 않음. "
+                                "ready 사건을 장면으로 다루고 실제 결과를 complete 또는 cancel로 기록한 뒤 남은 시간을 새 호출로 진행")
             base["recent_events"] = (before["recent_events"] + [event_id])[-100:]
-            if (base.get("last_calculation") or {}).get("threat_relieved"):
-                warnings.append(f"현장에 아무도 없는 {base['last_calculation']['to_minute'] - base['last_calculation']['from_minute']}분의 휴식·수면 구간이라 "
-                                f"위협 {interval_state['threat']}은 uncertain으로 계산·저장함. 방문·호출 예고 같은 실제 위협이 이어지면 changes.threat로 되돌리고 그 근거를 reason에 적음")
+            if (timed_interval and base["scene_minute"] > before["scene_minute"]
+                    and (base.get("last_calculation") or {}).get("threat_relieved")):
+                warnings.append("연속 혼자 휴식·수면이 60분에 도달해 그 시점부터 위협을 uncertain으로 낮춤. "
+                                "앞선 구간의 위협 효과는 유지함")
             if "injuries" in changes:
                 changes["injuries"] = reconcile_injuries(interval_state["injuries"], base["injuries"], changes["injuries"])
         elif action == "reset":
@@ -578,13 +639,17 @@ def roleplay_state(action: str, changes: dict | None = None, reason: str = "", *
             base = before
             if "injuries" in changes:
                 changes["injuries"] = carry_injury_progress(before["injuries"], changes["injuries"])
+        if story_updates is not None:
+            base = apply_story_updates(base, story_updates)
         state, adjustment, metric_reasons = _apply_changes(
             base, changes, adjustment=adjustment, metric_reasons=metric_reasons, reason=reason,
             event_id=event_id, event_type=event_type, warnings=warnings)
-        if all(k in changes or k in (interval_conditions or {}) for k in CONDITION_SCHEMA):
+        if all(k in changes or k in (interval_conditions or {}) for k in REQUIRED_CONDITIONS):
             state["conditions_initialized"] = True
         applied_resolve = _apply_resolve_event(state, resolve_event, event_id=event_id, reason=reason) if resolve_event else None
         applied_people = _apply_person_updates(conn, user_id, person_updates or [], warnings)
+        if event_id and event_id not in state["recent_events"]:
+            state["recent_events"] = (state["recent_events"] + [event_id])[-100:]
         state["revision"] = before["revision"] + 1
         state["reason"] = reason
         state["last_scope_id"] = caller.scope_id
@@ -592,7 +657,7 @@ def roleplay_state(action: str, changes: dict | None = None, reason: str = "", *
                  "adjustment": adjustment, "event_id": event_id, "metric_reasons": metric_reasons,
                  "temporal": temporal, "interval_conditions": interval_conditions,
                  "person_updates": applied_people, "person_review": person_review, "warnings": warnings,
-                 "resolve_event": applied_resolve,
+                 "resolve_event": applied_resolve, "story_updates": story_updates, "deferred_effects": deferred_effects,
                  "source_scope_id": caller.scope_id, "before": before, "after": state}
         conn.execute("INSERT INTO state_history(user_id, revision, payload) VALUES (?, ?, ?)",
                      (user_id, state["revision"], json.dumps(audit, ensure_ascii=False)))
@@ -601,11 +666,11 @@ def roleplay_state(action: str, changes: dict | None = None, reason: str = "", *
                      (user_id, json.dumps(state, ensure_ascii=False)))
         present = [json.loads(r[0]).get("name", pid) for pid in state["participants"]
                    for r in conn.execute("SELECT payload FROM people WHERE user_id = ? AND person_id = ?", (user_id, pid))]
-    result = state_view(state)
+    result = view_state(state)
     review_needed = timed_interval or (action == "update" and bool(set(changes) & REVIEW_TRIGGERS))
     if review_needed and person_updates is None and not (person_review or "").strip():
         who = f"현장 인물 {present}의" if present else "관련 인물의"
-        result["people_reminder"] = f"인물 기록 검토 없이 저장함. {who} 새 행동·발언·관계 변화가 있으면 person_updates 또는 roleplay_person(save)로 갱신"
+        result["people_reminder"] = f"인물 기록 검토 없이 저장함. {who} 새 행동·발언·관계 변화가 있으면 roleplay_person(save)로 갱신"
     if warnings:
         result["warnings"] = warnings
     return json.dumps(result, ensure_ascii=False)
@@ -613,37 +678,16 @@ def roleplay_state(action: str, changes: dict | None = None, reason: str = "", *
 
 ROLEPLAY_STATE_TOOL = {
     "name": "roleplay_state",
-    "description": "역할극 인물의 지속 상태표. read=현재 상태, history=최근 변경, update=즉시 변경, time=장면 시간 진행(+같은 호출의 changes로 그 뒤의 상태), reset=새 장면. 한 사건은 한 호출로: time에는 temporal(source_quote/interpretation/relation current·past·plan/certainty/operation anchor·advance·until·next_day·correct·reference)과 지난 구간의 interval_conditions.activity, 그리고 구간 뒤 달라진 것을 changes에 함께 넣는다. changes: hunger/fatigue/pain/tension과 정신 수치 clarity(명료함)/humiliation(굴욕)(0–100, 시간 경과가 아닌 식사·부상·굴욕 사건 같은 즉시 사건만; resolve(의지)는 initialize/correction만 직접 쓰고 사건은 resolve_event={kind,intensity}로 보내 코드가 계산), body/mood/scene, location/participants(등록된 인물 ID)/last_event/unresolved/goal/avoid/next_action, activity/sleep_quality/threat/injuries(전체 목록 교체). 빈 문자열·빈 배열로 해소된 항목을 비운다. expected_revision=현재 revision. person_updates=[{person_id, changes:{observed/reported/relationship/inferred}}]로 인물 기록을 같은 트랜잭션에서 갱신하고, 새 정보가 없으면 person_review에 이유. 누락·형식 차이는 가능한 한 해석해 적용하고 결과의 warnings에 알린다.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "action": {"type": "string", "enum": ["read", "history", "update", "reset", "time"]},
-            "changes": {"type": "object", "properties": {
-                **CONDITION_SCHEMA,
-                **{k: {"type": "number", "minimum": 0, "maximum": 100} for k in METRICS},
-                **{k: {"type": "string", "maxLength": 300} for k in ["body", "mood", "scene", *sorted(SCENE_TEXT_FIELDS)]},
-                "participants": {"type": "array", "items": {"type": "string"}, "maxItems": 12, "uniqueItems": True},
-            }, "additionalProperties": True},
-            "reason": {"type": "string", "maxLength": 300, "description": "장면 속 변경 이유 (최상위 인자)"},
-            "expected_revision": {"type": "integer", "minimum": 0},
-            "temporal": TEMPORAL_SCHEMA,
-            "interval_conditions": {"type": "object", "properties": CONDITION_SCHEMA, "additionalProperties": False,
-                                    "description": "방금 지나간 구간의 활동·수면·위협·부상 (activity 필수)"},
-            "person_updates": PERSON_UPDATES_SCHEMA,
-            "person_review": {"type": "string", "maxLength": 300},
-            "event_type": {"type": "string", "enum": sorted(EVENT_TYPES)},
-            "adjustment": {"type": "string", "enum": sorted(ADJUSTMENTS)},
-            "event_id": {"type": "string", "maxLength": 100},
-            "metric_reasons": {"type": "object", "properties": {k: {"type": "string", "maxLength": 300} for k in METRICS}, "additionalProperties": False},
-            "resolve_event": {"type": "object", "properties": {
-                "kind": {"type": "string", "enum": list(RESOLVE_EVENT_KINDS),
-                         "description": "; ".join(f"{k}={v[1]}" for k, v in RESOLVE_EVENT_KINDS.items())},
-                "intensity": {"type": "integer", "minimum": 1, "maximum": 3, "description": "1 스침, 2 보통, 3 극심"},
-                "note": {"type": "string", "maxLength": 300, "description": "이 사건이 의지에 미친 영향의 장면 근거"},
-            }, "required": ["kind", "intensity"], "additionalProperties": False,
-                "description": "의지(resolve)를 깎거나 돌리는 사건. 수치는 코드가 종류·강도·상태(통증 60↑, 피로 70↑, 고립)·반복으로 계산한다"},
-        }, "required": ["action"], "additionalProperties": True,
-    },
+    "description": "현재 연기 지침과 장면 이력 조회. read/history로 읽고 update는 goal/avoid/next_action/unresolved/body/mood/scene 서술만 가능. 수치·시간·이벤트·활동·부상·접촉·등장인물은 직접 설정할 수 없음. 자동 판정이 보류됐으면 현재 장면에서 멈춤.",
+    "input_schema": {"type": "object", "properties": {
+        "action": {"type": "string", "enum": ["read", "history", "update"]},
+        "changes": {"type": "object", "properties": {
+            key: {"type": "string", "maxLength": 300}
+            for key in ("goal", "avoid", "next_action", "unresolved", "body", "mood", "scene")
+        }, "additionalProperties": False},
+        "reason": {"type": "string", "maxLength": 300},
+        "expected_revision": {"type": "integer", "minimum": 0},
+    }, "required": ["action"], "additionalProperties": False},
 }
 
 
@@ -662,6 +706,8 @@ def roleplay_person(action: str, person_id: str = "", query: str = "", changes: 
         return json.dumps({"matches": people, "ambiguous": action == "read" and len(people) > 1}, ensure_ascii=False)
     if action not in {"save", "delete"}:
         raise ValueError("Unknown person action")
+    if action == "delete" and get_caller().scope_type == "telegram_message":
+        raise PermissionError("인물 삭제에 따른 현장 상태 변경은 자동 판정 밖에서 실행할 수 없습니다")
     warnings = []
     normalized = _normalize_person_id(person_id)
     if not normalized:

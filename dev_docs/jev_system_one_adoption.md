@@ -91,3 +91,7 @@ Scout의 KG 그룹 분류를 Jev로 대체하는 안은 채택하지 않았으�
 검증은 `tests/test_commulingo_classify.py`, `test_commulingo_editor_decisions.py`,
 `test_commulingo_citation_gate.py`, `test_commulingo_classification_audit.py`,
 `test_scout_kg_fact_filter.py`를 사용한다. 모의 판정 기반 회귀 검사와 실제 모델 표본 평가는 구분한다.
+
+## 역할극 자동 판정
+
+`roleplay_scene_adjudication`은 Jev 고정 선택지 분류이며, `roleplay_duration_estimate`는 단일 사건 소요 분만 생성하는 별도 호출이다. 수치 계산·저장은 코드가 수행한다. 계약과 실패 정책은 [roleplay_jev.md](roleplay_jev.md)를 따른다.

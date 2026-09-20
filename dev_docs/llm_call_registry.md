@@ -96,3 +96,11 @@ registry 항목의 max_tokens는 여전히 첫 시도 예산이다. 추론 호�
 - `vision_fallback`은 조회용 등재만 — 실제 모델은 bot_config 티어 시스템이 결정.
 
 2026-09-10부터 DeepSeek executor 모델 ID는 `deepseek-flash`(V4.1 Flash)다. Writer의 model-only 기본 선택은 `deepseek_flash`이며 옛 Pro 선택 호환은 Writer 입력 경계에서 처리한다.
+
+## 역할극 자동 판정
+
+`roleplay_scene_adjudication`은 Jev 고정 선택지 분류이며, `roleplay_duration_estimate`는 단일 사건 소요 분만 생성하는 별도 호출이다. 수치 계산·저장은 코드가 수행한다. 계약과 실패 정책은 [roleplay_jev.md](roleplay_jev.md)를 따른다.
+
+`roleplay_scene_consistency`는 역할극의 초안과 질적 정산 결과의 서술 모순 검토용이다.
+기존 연기 모델과 동일한 DeepSeek Anthropic endpoint를 강제하며 전체 메모 대신 이번 변경만 전달한다.
+현재 enabled=true이며 비활성화하면 실행은 거절한다. 사건·활동 분류와 계산은 맡기지 않는다.

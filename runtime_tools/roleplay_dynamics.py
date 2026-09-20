@@ -12,7 +12,7 @@ SLEEP_CLARITY_RATE = 4.0
 # a shaken mind but never manufacture a perfect one. Drains are not scaled.
 MENTAL_RECOVERY_CEILING = 90.0
 MENTAL_RECOVERY_SPAN = 40.0
-ACTIVITIES = {"rest": -2.0, "light": 2.0, "moderate": 5.0, "strenuous": 10.0, "sleep": -8.0}
+ACTIVITIES = {"rest": -2.0, "light": 2.0, "moderate": 5.0, "strenuous": 10.0, "sleep": -8.0, "restrained": 2.0, "self_care": 1.0, "focused_work": 3.0}
 SLEEP_QUALITY = {"poor": 0.25, "normal": 1.0, "good": 1.25}
 THREAT_TARGETS = {"safe": 10.0, "uncertain": 40.0, "threatening": 75.0, "immediate": 90.0}
 # Tension settles toward a target that threat sets but quiet hours, resolve,
@@ -28,17 +28,17 @@ PAIN_FLOOR_BY_SEVERITY = {1: 4.0, 2: 8.0, 3: 14.0}
 TREATED_FLOOR_FACTOR = 0.75
 PAIN_FLOOR_APPROACH = 3.0  # per hour, when an event left pain below the floor
 PAIN_DRIFT = {"worsening": {True: 0.25, False: 0.5}, "recovering": {True: -0.25, False: -0.15}, "stable": {True: 0.0, False: 0.0}}
-MOVEMENT_PAIN = {"rest": 0, "sleep": 0, "light": 0.1, "moderate": 0.5, "strenuous": 1.5}
+MOVEMENT_PAIN = {"rest": 0, "sleep": 0, "light": 0.1, "moderate": 0.5, "strenuous": 1.5, "restrained": 0, "self_care": 0.05, "focused_work": 0.1}
 # Scene minutes of recovering/worsening before severity moves one step.
 HEALING_STEP = {True: 1440, False: 2880}
 WORSENING_STEP = {True: 2880, False: 1440}
 PAIN_HINDERS_REST = 50  # at or above this, rest and sleep recover half the fatigue
 # Pain above the floor the wounds imply is acute (a blow, a struggle) and subsides
 # on its own: it halves every N hours by activity, never during exertion.
-ACUTE_PAIN_HALF_LIFE_HOURS = {"rest": 2.0, "sleep": 2.0, "light": 3.0, "moderate": 6.0, "strenuous": None}
+ACUTE_PAIN_HALF_LIFE_HOURS = {"rest": 2.0, "sleep": 2.0, "light": 3.0, "moderate": 6.0, "strenuous": None, "restrained": None, "self_care": 3.0, "focused_work": 3.0}
 # Long passages are computed in steps so thresholds crossed inside them (pain
 # easing below 60, an isolation stage starting, calm hours piling up) count.
-CALCULATION_STEP_MINUTES = 60
+CALCULATION_STEP_MINUTES = 1
 # Resting or sleeping with nobody present for at least this long means the
 # threat is not in the room: threatening/immediate compute as uncertain and the
 # stored threat eases too (a visitor's return is a tension event, then a new threat).
@@ -48,11 +48,24 @@ ALONE_THREAT_RELIEF_ACTIVITIES = ("rest", "sleep")
 # a table, not the model's mood: the model names the kind and how hard it hit.
 RESOLVE_EVENT_KINDS = {  # kind: (base delta at intensity 2, label)
     "beating": (-10.0, "구타·고문"),
-    "sexual_coercion": (-8.0, "성적 강요"),
+    "sexual_coercion": (-8.0, "성적 강요(구형 미분류 기록)"),
+    "sexual_harassment": (-1.0, "비접촉 성희롱"),
+    "sexual_assault": (-3.0, "비삽입 성추행"),
+    "rape": (-8.0, "삽입을 동반한 성폭행"),
     "public_submission": (-5.0, "증인 앞 복종·공개 굴욕"),
     "threat_to_kin": (-6.0, "가족·측근 언급 협박"),
     "futile_effort": (-3.0, "자술서 물리기·헛수고"),
-    "kindness": (3.0, "작은 배려·양보"),
+    "kindness": (3.0, "배려·양보"),
+    "recognition": (5.0, "능력·기여·쓸모 인정"),
+    "agency": (6.0, "작은 선택권 행사"),
+    "small_success": (5.0, "작은 과제의 성취"),
+    "boundary_respected": (6.0, "거절·경계의 존중"),
+    "support": (4.0, "지지적인 교류"),
+    "setback": (-3.0, "구체적인 시도 실패"),
+    "betrayal": (-6.0, "믿었던 약속의 파기"),
+    "interrogation": (-2.0, "집중 심문"),
+    "coerced_confession": (-4.0, "강요된 자백"),
+    "implicating_others": (-5.0, "타인 연루 진술"),
 }
 RESOLVE_INTENSITY = {1: 0.5, 2: 1.0, 3: 1.5}  # 스침 / 보통 / 극심
 RESOLVE_EVENT_CAP = 15.0            # one event never takes more than this
@@ -61,16 +74,17 @@ RESOLVE_PAIN_THRESHOLD = 60
 RESOLVE_FATIGUE_THRESHOLD = 70
 RESOLVE_REPEAT_WINDOW_MINUTES = 120  # the same kind again within this window counts half
 RESOLVE_REPEAT_FACTOR = 0.5
-RESOLVE_EVENT_HISTORY = 20
-# Solitary confinement: hours without anyone present accumulate; a visit of
-# 30 minutes or more breaks the streak, a shorter one (a meal pushed through
-# the door) only takes a few hours off it. Effects add to the other drifts.
-ISOLATION_RESET_MINUTES = 30
-ISOLATION_BRIEF_CONTACT_RELIEF = 240
+RESOLVE_EVENT_HISTORY = 100
+# Contact quality, not bodies in the room, determines isolation relief. These
+# coefficients describe fictional accumulated burden, not clinical exposure hours.
+SOCIAL_CONTACTS = ("unknown", "none", "incidental", "hostile", "meaningful")
+ISOLATION_MODES = ("unknown", "solitary", "ordinary")
+REQUIRED_CONDITIONS = ("activity", "sleep_quality", "threat", "injuries")
+ISOLATION_RECOVERY_RATE = 2
 ISOLATION_STAGES = (  # (from_hours, label, description, clarity/h, resolve/h, tension target)
-    (168, "왜곡", "지각 왜곡·환각의 경계, 무감동 또는 충동성", -0.75, -0.5, 15.0),
-    (72, "침식", "침입적 사고 반복, 사소한 접촉 과대평가, 집중 붕괴", -0.5, -0.25, 10.0),
-    (24, "단절", "시간 감각 흐려짐, 소리·발소리에 과민, 상상 대화", -0.25, 0.0, 5.0),
+    (168, "왜곡", "지각 착오·무감동·충동성 등이 나타날 가능성", -0.75, -0.5, 15.0),
+    (72, "침식", "생각의 반복·접촉에 대한 민감함·집중 저하 가능성", -0.5, -0.25, 10.0),
+    (24, "단절", "시간감각 변화·소리에 대한 과민·혼잣말 가능성", -0.25, 0.0, 5.0),
 )
 DYNAMICS_DEFAULTS = {
     **{key: None for key in METRICS},  # legacy states lack the mental axes; unset stays unset
@@ -79,6 +93,8 @@ DYNAMICS_DEFAULTS = {
     "activity": "rest", "sleep_quality": "normal", "threat": "uncertain",
     "injuries": [], "conditions_initialized": False, "recent_events": [], "calm_minutes": 0, "isolation_minutes": 0,
     "last_calculation": None, "clock": None, "event_timestamps": [], "resolve_events": [],
+    "social_contact": "unknown", "isolation_mode": "unknown", "alone_rest_minutes": 0,
+    "wakefulness_minutes": 0, "story_events": [], "story_interrupt": None, "metric_remainders": {},
 }
 
 
@@ -89,7 +105,8 @@ def with_defaults(state):
 
 
 def validate_conditions(changes):
-    enums = {"activity": ACTIVITIES, "sleep_quality": SLEEP_QUALITY, "threat": THREAT_TARGETS}
+    enums = {"activity": ACTIVITIES, "sleep_quality": SLEEP_QUALITY, "threat": THREAT_TARGETS,
+             "social_contact": SOCIAL_CONTACTS, "isolation_mode": ISOLATION_MODES}
     for key, allowed in enums.items():
         if key in changes and changes[key] not in allowed:
             raise ValueError(f"Invalid {key}")
@@ -117,14 +134,14 @@ def validate_conditions(changes):
 
 def mental_rates(state):
     """Hourly drift of the mental axes from the conditions at the start of the interval.
-    Gains thin out near the ceiling (see _diminish); drains always apply in full."""
+    Gains thin out near the ceiling; low resolve softens further losses."""
     fatigue = state["fatigue"] if state["fatigue"] is not None else 0
     pain = state["pain"] if state["pain"] is not None else 0
     threat, activity = state["threat"], state["activity"]
     sleeping = activity == "sleep"
     stage = isolation_stage(state.get("isolation_minutes", 0)) or {"resolve": 0.0, "clarity": 0.0}
     by_threat = RESOLVE_BY_THREAT[threat]
-    resolve_gain = max(0.0, by_threat) + (1 if sleeping and state["sleep_quality"] != "poor" else 0)
+    resolve_gain = max(0.0, by_threat) + (1 if sleeping and threat in ("safe", "uncertain") and state["sleep_quality"] != "poor" else 0)
     resolve_drain = min(0.0, by_threat) - (1 if fatigue > 70 else 0) - (1 if pain > 60 else 0) + stage["resolve"]
     if sleeping:
         clarity_gain = SLEEP_CLARITY_RATE * SLEEP_QUALITY[state["sleep_quality"]]
@@ -134,9 +151,22 @@ def mental_rates(state):
         clarity_gain = 1.0 if activity == "rest" and fatigue <= 60 and not stage.get("label") else 0.0
         clarity_drain = -(2 if fatigue > 80 else 1 if fatigue > 60 else 0) - (1 if pain > 60 else 0) - (1 if threat == "immediate" else 0)
     clarity_drain += stage["clarity"]
+    # Low resolve limits further losses; an unthreatened recovery activity must
+    # provide a playable route out of collapse even before complete safety.
+    quiet = threat in ('safe', 'uncertain') and activity != 'restrained'
+    if quiet and activity in ('rest', 'sleep', 'self_care', 'focused_work'):
+        resolve_gain += 1.5 * max(0, 1 - (state['resolve'] or 0) / 30)
+    recovery = {'self_care': (3.0, 2.0, 5.0), 'focused_work': (2.0, 3.0, 2.0)}.get(activity)
+    humiliation_rate = -1.5 if threat == 'safe' else (-0.75 if quiet and activity in ('rest','sleep') else 0.0)
+    if quiet and recovery:
+        strain = .5 if fatigue > 70 or pain > 60 else 1.0
+        resolve_gain += recovery[0] * strain
+        clarity_gain += recovery[1] * strain
+        humiliation_rate -= recovery[2] * strain
+    resolve_drain *= resolve_loss_scale(state.get('resolve'))
     return {"resolve": _diminish(resolve_gain, state["resolve"]) + resolve_drain,
             "clarity": _diminish(clarity_gain, state["clarity"]) + clarity_drain,
-            "humiliation": -0.5 if threat == "safe" else 0.0}
+            "humiliation": humiliation_rate}
 
 
 def _diminish(rate, value):
@@ -217,10 +247,23 @@ def progress_injuries(injuries, minutes):
     return updated, changes
 
 
+def resolve_loss_scale(value):
+    return 1.0 if value is None else .25 + .75 * min(1.0, max(0.0, value) / 40)
+
+
+def event_repeat_scale(state, kind):
+    """Repeated rewards within 3h: full, half, quarter, then no extra reward."""
+    positive = RESOLVE_EVENT_KINDS.get(kind, (0, ''))[0] > 0
+    window = 180 if positive else RESOLVE_REPEAT_WINDOW_MINUTES
+    count = sum(e.get('kind') == kind and 0 <= state.get('scene_minute', 0) - e.get('scene_minute', 0) <= window
+                for e in state.get('resolve_events', []))
+    return ((1.0, .5, .25)[count] if count < 3 else 0.0) if positive else (.5 if count else 1.0)
+
+
 def resolve_event_delta(state, kind, intensity):
     """What an event of this kind takes from (or gives to) resolve under the current state.
     Returns (delta, factors): drains scale with pain/fatigue/isolation and halve when the
-    same kind repeats within the window; gains do not scale; drains stop at the cap."""
+    same kind repeats within the window; positive repeats diminish too; drains stop at the cap."""
     if kind not in RESOLVE_EVENT_KINDS:
         raise ValueError(f"resolve_event.kind must be one of {sorted(RESOLVE_EVENT_KINDS)}")
     if type(intensity) is not int or intensity not in RESOLVE_INTENSITY:
@@ -228,7 +271,18 @@ def resolve_event_delta(state, kind, intensity):
     base, label = RESOLVE_EVENT_KINDS[kind]
     delta = base * RESOLVE_INTENSITY[intensity]
     factors = {"base": base, "intensity": RESOLVE_INTENSITY[intensity]}
+    if delta > 0:
+        factor = event_repeat_scale(state, kind)
+        delta *= factor
+        if factor != 1:
+            factors['repeat'] = factor
+        value = state.get('resolve')
+        delta *= 1.0 if value is None else max(0.0, min(1.0, (95 - value) / 20))
     if delta < 0:
+        landing = resolve_loss_scale(state.get('resolve'))
+        delta *= landing
+        if landing != 1:
+            factors['low_resolve'] = landing
         pain = state.get("pain") or 0
         fatigue = state.get("fatigue") or 0
         weights = {"pain": pain >= RESOLVE_PAIN_THRESHOLD, "fatigue": fatigue >= RESOLVE_FATIGUE_THRESHOLD,
@@ -257,14 +311,22 @@ def isolation_stage(minutes):
     return None
 
 
-def isolation_after(state, minutes):
-    """Minutes alone after an interval: someone present resets or relieves the streak."""
-    current = state.get("isolation_minutes", 0)
+def effective_contact(state):
+    contact = state.get("social_contact", "unknown")
+    # A stale meaningful-contact condition must not survive someone's departure.
     if not state.get("participants"):
-        return current + minutes
-    if minutes >= ISOLATION_RESET_MINUTES:
-        return 0
-    return max(0, current - ISOLATION_BRIEF_CONTACT_RELIEF)
+        return "none"
+    return "incidental" if contact == "unknown" else contact
+
+
+def isolation_after(state, minutes):
+    """Accumulate burden through routine/hostile contact; recover gradually."""
+    current = state.get("isolation_minutes", 0)
+    if effective_contact(state) == "meaningful":
+        return max(0, current - minutes * ISOLATION_RECOVERY_RATE)
+    if state.get("isolation_mode") == "ordinary":
+        return max(0, current - minutes)
+    return current + minutes
 
 
 def tension_target(state):
@@ -297,21 +359,26 @@ def advance(state, target_minute, time_basis):
         raise ValueError("Time cannot be calculated until activity, sleep_quality, threat and injuries are all set for this scene: pass all four in interval_conditions (or set them with update first)")
     if not isinstance(time_basis, str) or not 1 <= len(time_basis.strip()) <= 300:
         raise ValueError("Explain the fictional elapsed time in time_basis (1–300 characters)")
-    minutes = target_minute - start
-    threat_relieved = (not state.get("participants") and minutes >= ALONE_THREAT_RELIEF_MINUTES
-                       and state["activity"] in ALONE_THREAT_RELIEF_ACTIVITIES
-                       and state["threat"] in ("threatening", "immediate"))
-    conditions = {k: deepcopy(state[k]) for k in ("activity", "sleep_quality", "threat", "injuries")}
-    if threat_relieved:
-        conditions["threat"] = "uncertain"
+    threat_relieved = False
+    conditions = {k: deepcopy(state[k]) for k in REQUIRED_CONDITIONS}
+    conditions.update({k: state.get(k, "unknown") for k in ("social_contact", "isolation_mode")})
     result = deepcopy(state)
-    result["threat"] = conditions["threat"]
     injury_changes = []
-    targets, tension_targets = [], []
+    tension_targets = []
     cursor = start
     while cursor < target_minute:
         step_end = min(target_minute, cursor + CALCULATION_STEP_MINUTES)
+        alone_rest = not result.get("participants") and result["activity"] in ALONE_THREAT_RELIEF_ACTIVITIES
+        if (alone_rest and result.get("alone_rest_minutes", 0) >= ALONE_THREAT_RELIEF_MINUTES
+                and result["threat"] in ("threatening", "immediate")):
+            result["threat"] = "uncertain"
+            threat_relieved = True
+        result["alone_rest_minutes"] = result.get("alone_rest_minutes", 0) + step_end - cursor if alone_rest else 0
         result, step_changes, target = _step(result, step_end - cursor)
+        if (alone_rest and result["alone_rest_minutes"] >= ALONE_THREAT_RELIEF_MINUTES
+                and result["threat"] in ("threatening", "immediate")):
+            result["threat"] = "uncertain"
+            threat_relieved = True
         injury_changes.extend(step_changes)
         tension_targets.append(target)
         cursor = step_end
@@ -322,7 +389,7 @@ def advance(state, target_minute, time_basis):
         "before": {k: state[k] for k in METRICS}, "after": {k: result[k] for k in METRICS},
         "pain_floor": injury_pain_floor(state["injuries"]), "tension_target": tension_targets[-1],
         "injury_changes": _merge_injury_changes(injury_changes),
-        "isolation_stage": (isolation_stage(state.get("isolation_minutes", 0)) or {}).get("label"),
+        "isolation_stage": (isolation_stage(result.get("isolation_minutes", 0)) or {}).get("label"),
         "healed": [c["id"] for c in _merge_injury_changes(injury_changes) if c["to"] == 0],
         "threat_relieved": threat_relieved,
     }
@@ -339,11 +406,25 @@ def _merge_injury_changes(changes):
 
 def _step(state, minutes):
     """One calculation step from the conditions at its start; returns (state, injury changes, tension target)."""
+    # Preserve sub-display precision across calls, so splitting a passage cannot
+    # change either rounding or the minute-by-minute integration path.
+    state = {**state, **{key: state[key] + state.get("metric_remainders", {}).get(key, 0)
+                        for key in METRICS if state[key] is not None}}
     result = deepcopy(state)
     hours = minutes / 60
     activity = state["activity"]
     pain = state["pain"]
     fatigue_rate = ACTIVITIES[activity]
+    awake = state.get("wakefulness_minutes", 0)
+    result["wakefulness_minutes"] = (max(0, awake - minutes * 2 * SLEEP_QUALITY[state["sleep_quality"]])
+                                      if activity == "sleep" else awake + minutes)
+    if activity == "rest" and state["fatigue"] is not None:
+        # Quiet waking rest cannot substitute for sleep. Its recovery floor rises
+        # with accumulated waking time, and prolonged wakefulness adds fatigue.
+        floor = min(80, awake / 60 * 2)
+        fatigue_rate = -2.0 if state["fatigue"] > floor else (2.0 if awake >= 16 * 60 else 0.0)
+        if fatigue_rate < 0:
+            fatigue_rate = max(fatigue_rate, (floor - state["fatigue"]) / hours)
     if activity == "sleep":
         fatigue_rate *= SLEEP_QUALITY[state["sleep_quality"]]
     if activity in ("rest", "sleep") and pain is not None and pain >= PAIN_HINDERS_REST:
@@ -370,12 +451,18 @@ def _step(state, minutes):
     deltas.update({k: v * hours for k, v in mental_rates(state).items()})
     for key, delta in deltas.items():
         if state[key] is not None:
-            result[key] = round(max(0, min(100, state[key] + delta)), 4)
+            raw = max(0, min(100, state[key] + delta))
+            result[key] = round(raw, 4)
+            result.setdefault("metric_remainders", {})[key] = raw - result[key]
     result["injuries"], injury_changes = progress_injuries(state["injuries"], minutes)
     return result, injury_changes, target
 
 
 CONDITION_SCHEMA = {
+    "social_contact": {"type": "string", "enum": list(SOCIAL_CONTACTS),
+                       "description": "none 고립 / incidental 배식·점검 / hostile 심문·위협 / meaningful 지속적 지지 대화 / unknown 미확인. 사람의 존재만으로 meaningful로 두지 않음"},
+    "isolation_mode": {"type": "string", "enum": list(ISOLATION_MODES),
+                       "description": "solitary 강제 독방·사회적 격리 / ordinary 일상적 생활 / unknown 미확인. ordinary는 잔여 고립 부담을 서서히 회복"},
     "activity": {"type": "string", "enum": list(ACTIVITIES)},
     "sleep_quality": {"type": "string", "enum": list(SLEEP_QUALITY)},
     "threat": {"type": "string", "enum": list(THREAT_TARGETS)},

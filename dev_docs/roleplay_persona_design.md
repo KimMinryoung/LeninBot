@@ -1,6 +1,9 @@
 # 예조프 역할극의 인물 모델
 
+현재 Telegram 상태 판정은 [roleplay_jev.md](roleplay_jev.md)가 기준이다. JEV가 분류하고 별도 LLM이 단일 사건의 소요 분만 추정하며 코드가 수치를 계산한다. 아래 time/update의 수치·조건·사건 인자는 내부 유지보수 API이며 연기 모델에 노출하지 않는다.
+
 운영 명세: `identity/roleplay_persona.md`. 읽기 경계: `hot_reload_prompts.md`.
+예정 사건·자발적 행동·고립 계산의 현재 계약: [roleplay_progression.md](roleplay_progression.md).
 이 문서는 명세의 근거와 수정 기준이며 시스템 프롬프트에 자동으로 추가되지 않는다.
 
 ## 목적과 자료 판독
@@ -150,12 +153,12 @@ observed/reported/inferred로 직접 관찰·출처 있는 전언·추측을 나
 | 항목 | 시간당 게임 규칙 |
 |---|---|
 | 허기 | +3, 식사 직후 감소는 별도의 즉시 사건 |
-| 피로 | 휴식 −2, 가벼운 활동 +2, 보통 +5, 격한 활동 +10, 수면 −8 × 수면의 질(0.25/1/1.25) |
+| 피로 | 휴식 최대 −2(각성 누적에 따른 회복 하한, 16시간 이상 깨어 있고 하한 이하이면 +2), 가벼운 활동 +2, 보통 +5, 격한 활동 +10, 수면 −8 × 수면의 질(0.25/1/1.25) |
 | 통증 | 부상 드리프트 + 급성 통증 감쇠. 드리프트는 부상별 severity × (경과 계수 + 활동 계수)의 합: stable=0, worsening=미처치 0.5/처치 0.25, recovering=처치 −0.25/미처치 −0.15, 활동 계수는 휴식·수면 0, 가벼움 0.1, 보통 0.5, 격함 1.5. 기저값(아래) 초과분은 급성 통증으로 휴식·수면 2시간, 가벼운 활동 3시간, 보통 활동 6시간마다 절반이 되고 격한 활동 중에는 유지된다. 부상 기저값 아래로는 내려가지 않고, 기저값 아래에 있으면 시간당 3씩 기저값으로 복귀 |
 | 피로(통증 영향) | 통증 ≥ 50이면 휴식·수면의 회복률 절반 |
 | 긴장 | 목표값 쪽으로 시간당 최대 6씩 접근. 목표 = 위협 단계 10/40/75/90 − 습관화(safe/uncertain 구간의 누적 `calm_minutes`, 시간당 1, 최대 10) − (의지−50)/50×8 − 수면 중 10 + 통증≥50이면 5 + 고립 단계 5/10/15, 5–95로 제한. threatening/immediate 구간, 부상 event, 긴장을 올리는 event는 `calm_minutes`를 0으로 되돌린다. 2026-09-18 이전에는 위협 목표값만 있어 uncertain에서 40에 고정됐다 |
 | 의지 resolve (100=굳건) | 위협별 safe +2 / uncertain +0.5 / threatening −1.5 / immediate −3; 피로>70 −1, 통증>60 −1; 수면(poor 제외) +1 |
-| 명료함 clarity (100=또렷) | 수면 +6 × 수면의 질; 깨어 있을 때 피로>60 −1(>80 −2), 통증>60 −1, immediate −1; 피로≤60 휴식 +1 |
+| 명료함 clarity (100=또렷) | 수면 +4 × 수면의 질; 깨어 있을 때 피로>60 −1(>80 −2), 통증>60 −1, immediate −1; 피로≤60 휴식 +1 |
 | 굴욕 humiliation (100=극심) | safe −0.5, 그 외 0. 사건(event)으로만 상승 |
 
 의지·명료함의 **상승분**은 `(90 − 현재값)/40`(0–1)로 줄어들어 90 근처에서 0이 된다. 하락분은 그대로다.
@@ -164,9 +167,13 @@ observed/reported/inferred로 직접 관찰·출처 있는 전언·추측을 나
 
 #### 독방 고립
 
-`isolation_minutes`(서버 유지): 구간 시작 시 `participants`가 비어 있으면 구간 길이만큼 누적, 누군가 있으면
-30분 이상 구간은 0으로 리셋하고 30분 미만(배식·점검)은 240분만 차감한다. 가해자의 방문도 접촉이다 — 독방의
-왜곡된 역학(어떤 접촉이든 갈망하게 됨)을 코드가 아닌 지침이 연기 근거로 쓴다.
+`isolation_minutes`는 실제 독방 체류시간이 아닌 게임상 누적 부담이다. `isolation_mode=solitary/unknown`에서는
+의미 있는 교류가 없는 구간을 분 단위로 누적한다. `social_contact=incidental`(배식·점검), `hostile`(심문·위협)은
+부담을 차감하지 않는다. `meaningful`(지속적 지지 교류)은 실제 접촉 1분당 부담 2분, `ordinary`(일상 생활)는
+1분당 1분을 회복하며 0 아래로 내려가지 않는다. 둘이 겹치면 meaningful의 2분만 적용한다. 이는 게임 계수다.
+현장 인물이 없으면 meaningful이 남아 있어도 none으로 계산한다. 출입으로 participants가 바뀌면 명시하지 않은
+접촉 조건을 none/unknown으로 돌린다. unknown은 사람 유무를 회복의 증거로 사용하지 않는다.
+기존 저장값은 보존하며 과거 접촉의 질을 추측해 소급 복원하지 않는다. 자세한 근거·한계는 `roleplay_progression.md`.
 
 | 누적 | 단계 | 명료함/h | 의지/h | 긴장 목표 |
 |---|---|---|---|---|
@@ -176,8 +183,7 @@ observed/reported/inferred로 직접 관찰·출처 있는 전언·추측을 나
 
 단계가 시작되면 깨어 있는 휴식의 명료함 +1은 사라진다(독방의 빈 시간은 회복이 아니다). 결과 뷰와 `/status 상세`에
 `isolation_hours`·단계 라벨·설명을 표시한다. 환각·해리를 코드가 생성하지 않으며 단계 라벨과 지침만 준다.
-8일 시뮬레이션(uncertain, 하루 12h 휴식+8h 수면, 접촉 없음): 의지 74→87(3일)→79(8일), 명료함 92→77,
-긴장 25→35. 검증: `tests/test_roleplay_dynamics.py`의 단계·접촉·휴식 보너스 억제·감쇠 테스트.
+검증: `tests/test_roleplay_dynamics.py`의 단계·접촉·휴식 보너스 억제·감쇠 테스트.
 
 #### 부상 회복 모델
 
@@ -208,14 +214,14 @@ threatening으로 넘겨 의지가 −2.5/h로 0까지 소모됐다. 다음 규�
 
 - 급성 통증: 기저값 초과분은 활동별 반감기(`ACUTE_PAIN_HALF_LIFE_HOURS`: 휴식·수면 2h, 가벼움 3h, 보통 6h, 격함 없음)로
   줄고 부상 드리프트가 그 위에 더해진다. 폭행 뒤 통증 68·기저 10인 밤(7.5h 선잠)은 아침에 기저값+2 안팎이 된다.
-- 혼자 있는 휴식·수면: 구간 시작 시 `participants`가 비어 있고 활동이 rest/sleep이며 60분 이상이면
-  (`ALONE_THREAT_RELIEF_MINUTES`) threatening/immediate를 uncertain으로 계산하고 저장된 threat도 uncertain으로
-  바꾼다. `last_calculation.threat_relieved`와 도구 warnings로 알리며, 같은 호출의 `changes.threat`가 우선한다.
-  격한 활동·짧은 부재·현장 인물이 있는 구간은 그대로다. 방문자가 돌아오는 충격은 tension event와 새 threat로 넣는다.
+- 혼자 있는 휴식·수면: `alone_rest_minutes`가 연속 60분에 도달하면 그때부터 threatening/immediate를
+  uncertain으로 낮춘다. 구간 앞부분의 위협 효과는 유지한다. 나눠 호출해도 연속 시간이 이어진다.
+  사람이 출입하거나 rest/sleep 이외 활동을 하면 연속 시간이 끊긴다. `last_calculation.conditions`는 시작 조건,
+  `threat_relieved`는 이번 구간에서 실제 완화됐는지를 뜻한다. 명시적 `changes.threat`는 구간 뒤에 적용된다.
 - `changes` 안에 넣은 `metric_reasons`는 최상위 인자로 옮겨 적용한다(오류 대신 warnings).
 
 검증: `test_acute_pain_subsides_by_activity`, `test_alone_at_rest_relieves_threat`,
-`test_alone_interval_warning_and_inner_metric_reasons`. 피로가 rest −2/h로 며칠 내내 0에 머무는 점은 이번에 바꾸지 않았다.
+`test_alone_interval_warning_and_inner_metric_reasons`. 깨어 있는 휴식의 피로 회복 하한과 각성 누적은 `roleplay_progression.md`를 따른다.
 
 #### 사건에 따른 의지 감소표 (2026-09-19)
 
@@ -226,11 +232,12 @@ threatening으로 넘겨 의지가 −2.5/h로 0까지 소모됐다. 다음 규�
 | kind | 기본치(강도 2) |
 |---|---|
 | beating 구타·고문 | −10 |
-| sexual_coercion 성적 강요 | −8 |
+| sexual_coercion 성적 강요(구형 기록) | −8 |
 | threat_to_kin 가족·측근 언급 협박 | −6 |
 | public_submission 증인 앞 복종·공개 굴욕 | −5 |
 | futile_effort 자술서 물리기·헛수고 | −3 |
-| kindness 작은 배려·양보 | +3 |
+| kindness 배려·양보 | +3 |
+| recognition 능력·기여·쓸모 인정 | +5 |
 
 강도 1/2/3은 ×0.5/×1/×1.5. 감소에만 상태 가중치가 붙는다: 통증 ≥60, 피로 ≥70, 고립 단계 각각 ×1.25(복합 최대 ×1.95).
 같은 kind가 장면 시간 120분 안에 되풀이되면 ×0.5(한 턴에 나눠 부르는 급락 방지). 한 사건의 감소 상한은 15.
@@ -243,13 +250,13 @@ threatening으로 넘겨 의지가 −2.5/h로 0까지 소모됐다. 다음 규�
 검증: `test_resolve_event_table`, `test_resolve_events_go_through_the_table`.
 
 정신 3축은 2026-09-18에 추가했다. 조건 판정은 각 계산 단계 시작 시점의 피로·통증·위협을 쓴다. 한 구간은 내부에서
-60분 단위(`CALCULATION_STEP_MINUTES`)로 나눠 계산하므로 구간 중에 통증이 60 아래로 내려가거나 고립 단계·습관화가
+1분 단위(`CALCULATION_STEP_MINUTES`)로 나눠 계산하므로 구간 중에 통증이 60 아래로 내려가거나 고립 단계·습관화가
 바뀌면 그 뒤 단계부터 반영된다(2026-09-19 이전에는 구간 시작 조건이 구간 전체에 적용됐다). 기존 저장 상태와 legacy JSON에는 없는 키이며 null(미설정)로 읽고 자동 생성하지 않는다.
 `/status`는 두 번째 줄에 정신 수치를 표시한다. 수치는 대사의 결정 규칙이 아니라 연기 참고값이며,
 기분(mood) 서술과 중복되지 않도록 지침에서 분리했다.
 
 이 수치는 의학적 추정이 아닌 조정 가능한 연기용 규칙이다. 미처치만으로 악화 추세를 선택하지 않는다.
-값은 0–100으로 제한하고 내부에는 소수 넷째 자리까지 유지한다. 미설정(null) 값은 자동 생성하지 않는다.
+값은 0–100으로 제한하고 저장 수치는 소수 넷째 자리이며, 반올림 잔여는 서버용 `metric_remainders`에 보존해 호출 분할에 따른 오차를 방지한다. 미설정(null) 값은 자동 생성하지 않는다.
 `/status`는 소수 첫째 자리까지(정수의 .0은 생략)와 현재 활동을 표시한다.
 시간 근거·수면·위협·부상별 조건은 `/status 상세`에서 확인한다.
 
@@ -277,9 +284,9 @@ threatening으로 넘겨 의지가 −2.5/h로 0까지 소모됐다. 다음 규�
 
 `runtime_tools/roleplay_clock.py`는 `clock`에 date/year/time/daypart, 상대 일자,
 certainty, 미계산 시간 공백, 마지막 시간 해석을 관리한다. 초기값은 미상이다.
-모델은 별도 추출 호출 없이 본래 도구 루프에서 temporal을 제출한다. 필수 필드는
+Telegram 자동 판정기가 검증한 경과량으로 temporal을 구성한다. 내부 API의 필수 필드는
 source_quote/interpretation/relation(current,past,plan)/certainty(explicit,estimated,unknown)/operation.
-인용의 원문 일치와 시간 의미의 정확성은 자동 검증하지 않는다. 대화 메시지 식별자는 이력에 저장한다.
+Telegram에서는 이번 사용자 원문과 source_quote의 일치를 검증하고 사건당 진행을 제한한다(`roleplay_progression.md`). 시간 의미 전체의 정확성까지 검증하지는 않는다. 대화 메시지 식별자는 이력에 저장한다.
 
 - anchor: 알려진 현재 시각 설정·보충. 기존 날짜·시각과 다른 값을 조용히 덮어쓰지 않는다.
 - correct: 사용자의 시간 정정. 시계만 변경하고 기존 신체 상태 연산은 소급 취소하지 않는다.
@@ -359,7 +366,7 @@ commulingo_url은 검증된 ID에서 생성하여 문맥의 인물 목록·상�
 
 | 모델의 호출 | 처리 |
 |---|---|
-| `time` + `changes` | 구간 수치를 먼저 계산한 뒤 changes를 그 결과에 적용. 수치 항목은 구간 뒤의 즉시 사건으로 기록 |
+| `time` + `changes` | 구간 수치를 먼저 계산한 뒤 changes를 그 결과에 적용. 예정 사건에서 중단되면 끝 시점 changes·인물 변경·의지 사건을 보류. 수치 항목은 구간 뒤의 즉시 사건으로 기록 |
 | `reset` + `changes` | 초기화 뒤 새 장면의 초기 상태로 적용 |
 | `time`에 `interval_conditions` 없음, `changes.activity` 있음 | changes의 조건을 지난 구간에도 적용하고 경고. 둘 다 없으면 오류 |
 | `changes.reason`, 최상위 `avoid`/`goal` 등 | 정식 위치로 이동 |
@@ -380,3 +387,12 @@ commulingo_url은 검증된 ID에서 생성하여 문맥의 인물 목록·상�
 검증: `tests/test_roleplay_dynamics.py`의 한 호출 구간+변경, 같은 턴 revision 허용, 부분 initialize,
 reset+초기 장면, 부상 병합과 `tests/test_roleplay_memory.py`의 ID 정규화·검토 형태·유사 key·축약 뷰.
 
+
+성적 가해의 현재 세부 분류와 restrained 활동은 `roleplay_jev.md`를 따른다. 구형 sexual_coercion을 새 사건에 선택하지 않는다.
+
+연기 에이전트에는 `roleplay_actor.py`의 질적 acting_cues와 scene_direction만 전달한다. 수치 임계값은 코드에서 지침으로 변환하며 시스템 프롬프트에 나열하지 않는다. 아래/기존 수치 설명은 내부 계산·사용자 상태 표시의 계약이며 연기 모델에 보내는 필드 목록이 아니다.
+
+현재 사건·활동 밸런스와 극단값 완화는 `roleplay_game_balance.md`를 따른다. 과거 수치표와 충돌하면 해당 문서 및 현재 코드를 기준으로 한다.
+
+새 초안 사후 정산 절차·심문 사건 3종·다음 아침 시간의 미상 구간 처리 및 현재 활성화 상태는
+[초안 사후 정산](roleplay_postdraft.md)을 참조한다. 연기 모델의 기록은 최종 확정 전 임시 저장된다.

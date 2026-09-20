@@ -31,7 +31,12 @@ from db import query as _query, execute as _execute
 from bot_config import _deepseek_anthropic_client, _resolve_deepseek_model
 from llm.claude_loop import chat_with_tools
 from llm.tool_loop_common import EMPTY_RESPONSE_FALLBACK
-from runtime_tools.roleplay_memory import load_notes, load_state, load_people, people_context, state_view
+from runtime_tools.roleplay_jev import adjudicate_turn
+from runtime_tools.roleplay_actor import actor_state_view
+from runtime_tools import roleplay_turn
+from runtime_tools.roleplay_dynamics import with_defaults
+from runtime_tools.roleplay_pacing import policy_for, turn_time_scope
+from runtime_tools.roleplay_memory import load_notes, load_state, load_people, people_context, excluded_history_ids
 from runtime_tools.registry import TOOLS, TOOL_HANDLERS
 from tool_gateway.profiles import ROLEPLAY_TELEGRAM_TOOLS
 from tool_gateway.security import caller_scope, new_run_context
@@ -125,8 +130,8 @@ def load_history(user_id: int) -> list[dict]:
     with a window start that is stable across turns (see HISTORY_STEP)."""
     min_id = _clear_after_id(user_id)
     condition = ("FROM roleplay_chat_history WHERE user_id = %s AND id > %s "
-                 "AND NOT (role = 'assistant' AND content = %s)")
-    params = (user_id, min_id, EMPTY_RESPONSE_FALLBACK)
+                 "AND NOT (role = 'assistant' AND content = %s) AND NOT (id = ANY(%s))")
+    params = (user_id, min_id, EMPTY_RESPONSE_FALLBACK, excluded_history_ids(user_id))
     total = int(_query(f"SELECT COUNT(*) AS n {condition}", params)[0]["n"])
     rows = _query(
         f"SELECT role, content {condition} ORDER BY id ASC OFFSET %s",
@@ -250,7 +255,7 @@ async def cmd_status(message: Message) -> None:
     names = {p["person_id"]: p["name"] for p in people.get("index", [])}
     state["participants"] = ", ".join(names.get(pid, pid) for pid in state.get("participants", [])) or "아직 지정되지 않음"
     state["saved_people"] = f"{len(names)}명 — /people로 확인"
-    activities = {"rest": "휴식", "light": "가벼운 활동", "moderate": "보통 활동", "strenuous": "격한 활동", "sleep": "수면"}
+    activities = {"rest": "휴식", "light": "가벼운 활동", "moderate": "보통 활동", "strenuous": "격한 활동", "sleep": "수면", "restrained": "억제·동결 상태", "self_care": "자기 돌봄", "focused_work": "목적 있는 작업"}
     threats = {"safe": "안전", "uncertain": "불확실", "threatening": "위협 지속", "immediate": "즉각적 위협"}
     state["activity"] = activities.get(state.get("activity"), "미설정")
     state["threat"] = threats.get(state.get("threat"), "미설정")
@@ -262,6 +267,19 @@ async def cmd_status(message: Message) -> None:
     stage = isolation_stage(state.get("isolation_minutes", 0))
     state["isolation"] = f"{state.get('isolation_minutes', 0) / 60:g}시간" + (f" — {stage['label']}: {stage['description']}" if stage else "")
     state["calm"] = f"{state.get('calm_minutes', 0) / 60:g}시간"
+    state["contact_display"] = {"unknown": "미확인", "none": "교류 없음", "incidental": "배식·점검 등 짧은 접촉",
+                                "hostile": "위협적 접촉", "meaningful": "지지적인 교류"}.get(state.get("social_contact", "unknown"))
+    state["isolation_display"] = {"unknown": "미확인", "solitary": "강제 독방·격리", "ordinary": "일상 생활"}.get(state.get("isolation_mode", "unknown"))
+    state["wakefulness"] = f"{state.get('wakefulness_minutes', 0) / 60:g}시간 상당"
+    active_events = [e for e in state.get("story_events", []) if e["status"] in {"pending", "ready"}]
+    event_lines = []
+    for event in active_events:
+        timing = "지금 다룰 사건" if event["status"] == "ready" else (
+            f"{max(0, event['due_minute'] - state['scene_minute'])}분 뒤" if 'due_minute' in event else "선행 사건 뒤")
+        if event.get("after_event"):
+            timing += f" · {event['after_event']} 완료 조건"
+        event_lines.append(f"{event['title']} ({timing})")
+    state["upcoming"] = "; ".join(event_lines[:5]) + (f" 외 {len(event_lines) - 5}건" if len(event_lines) > 5 else "")
     last_resolve = (state.get("resolve_events") or [None])[-1]
     if last_resolve:
         factors = last_resolve.get("factors", {})
@@ -286,7 +304,8 @@ async def cmd_status(message: Message) -> None:
     state["time_certainty"] = {"explicit": "명시된 범위", "estimated": "추정 포함", "unknown": "미상"}[clock["certainty"]]
     interpretation = clock["last_interpretation"]
     state["time_evidence"] = f"{interpretation['source_quote']} → {interpretation['interpretation']}" if interpretation else "아직 없음"
-    state["time_gaps"] = f"{clock['unquantified_gaps']}개 구간의 경과 분량 미상 (상태 미반영)" if not clock["elapsed_complete"] else "없음"
+    gaps = clock.get('uncalculated_minutes', 0)
+    state["time_gaps"] = (f"{clock['unquantified_gaps']}개 구간의 활동 미상 (시간 추정 {gaps}분, 상태 미반영)" if gaps else f"{clock['unquantified_gaps']}개 구간의 경과 분량 미상 (상태 미반영)") if not clock["elapsed_complete"] else "없음"
     metrics = {"hunger": "허기", "fatigue": "피로", "pain": "통증", "tension": "긴장"}
     def display(value):
         if value is None or value == "":
@@ -301,7 +320,7 @@ async def cmd_status(message: Message) -> None:
              " · ".join(f"{label}: {display(state.get(key))}" for key, label in mental.items())]
     labels = {"calendar_display": "시각", "location": "장소", "participants": "현재 장면 인물", "saved_people": "저장된 인물",
               "body": "몸 상태", "mood": "기분", "activity": "활동",
-              "last_event": "직전 사건", "goal": "목적", "unresolved": "미해결"}
+              "last_event": "직전 사건", "goal": "목적", "unresolved": "미해결", "upcoming": "예정 사건"}
     if not state.get("conditions_initialized"):
         state["activity"] = "미확인"
     if not clock["elapsed_complete"]:
@@ -309,14 +328,17 @@ async def cmd_status(message: Message) -> None:
     if detailed:
         labels.update({"avoid": "피하려는 결과", "next_action": "다음 시도",
                        "time_certainty": "시간 확실성", "relative_day": "상대 일자",
-                       "time_evidence": "최근 시간 해석", "scene_minute": "계산된 경과(분)",
+                       "time_evidence": "최근 시간 해석", "scene_minute": "장면 경과(미상 구간 추정 포함, 분)",
                        "last_calculated_minute": "마지막 계산(분)", "time_basis": "시간 근거",
                        "sleep_quality": "수면의 질", "threat": "위협 상태",
                        "injuries": "세부 부상", "pain_floor": "부상 기저 통증",
-                       "isolation": "홀로 지낸 시간", "calm": "조용한 시간", "resolve_event": "최근 의지 사건",
+                       "isolation": "고립 누적 부담(게임 환산)", "contact_display": "교류",
+                       "isolation_display": "고립 환경", "wakefulness": "각성 누적", "calm": "조용한 시간", "resolve_event": "최근 의지 사건",
                        "reason": "최근 변경 이유"})
     lines.extend(f"{label}: {display(state.get(key))}" for key, label in labels.items()
                  if key in {"calendar_display", "location", "participants"} or state.get(key) not in (None, "", "미설정"))
+    if (state.get("resolve") is not None and state["resolve"] <= 25) or (state.get("humiliation") is not None and state["humiliation"] >= 75):
+        lines.append("회복 경로: 작은 선택·과제 완수·경계 존중·지지 대화. 여건이 되면 자기 돌봄이나 목적 있는 작업도 가능.")
     if not detailed:
         lines.append("계산 근거·세부 부상: /status 상세")
 
@@ -368,29 +390,49 @@ async def handle_message(message: Message) -> None:
     if not user_text.strip():
         return
 
+    cached_reply = await asyncio.to_thread(roleplay_turn.committed_reply, user_id, str(message.message_id))
+    if cached_reply:
+        for chunk in _split_message(cached_reply):
+            await message.answer(chunk)
+        return
     await asyncio.to_thread(save_message, user_id, "user", user_text)
     history = await asyncio.to_thread(load_history, user_id)
     from datetime import datetime, timezone
     from llm.execution_context import attach_context, context_record
+    time_policy = policy_for(user_text)
+    ctx = new_run_context(interface="telegram", agent_name="roleplay", user_id=str(user_id), is_owner=True,
+                          session_id=f"telegram-roleplay:{message.chat.id}", scope_type="telegram_message",
+                          scope_id=str(message.message_id))
     state = None
     people = None
     try:
-        state = await asyncio.to_thread(load_state, user_id)
+        state = with_defaults(await asyncio.to_thread(load_state, user_id))
         notes = await asyncio.to_thread(load_notes, user_id)
         people = await asyncio.to_thread(people_context, user_id, state.get("participants", []))
     except Exception:
         logger.exception("roleplay memory load failed")
         notes = []
+    if state is None:
+        await message.answer("현재 장면을 읽지 못했어. 잠시 후 다시 시도해 줘.")
+        return
+    try:
+        authorization = await asyncio.to_thread(roleplay_turn.authorize, user_text, state, history)
+    except Exception:
+        logger.exception("roleplay authorization failed")
+        await message.answer("이번에 진행할 장면을 확정하지 못했어. 실행할 행동이나 장면을 구체적으로 말해줘.")
+        return
+    time_policy = roleplay_turn.policy_for_authorization(authorization)
     history = attach_context(history, [context_record(
         "runtime_state", "telegram_roleplay_runtime", {
             "model": ROLEPLAY_MODEL, "channel": "telegram_roleplay",
             "private_notes": notes,
             # The compact view: replay bookkeeping (event IDs, timestamps) is
             # server state the model never needs and only crowds the prompt.
-            "character_state": state_view(state) if state else None,
+            "character_state": actor_state_view(state) if state else None,
             "people": people,
             "recent_repeated_phrases": repeated_phrases(history),
             "persona_time": "fictional; infer from the roleplay, not the server clock",
+            "scene_direction": {"direction": roleplay_turn.direction(authorization)},
         }, scope=f"telegram-roleplay:{message.chat.id}",
         observed_at=datetime.now(timezone.utc), temporal_scope="current turn",
     )])
@@ -402,44 +444,43 @@ async def handle_message(message: Message) -> None:
 
     # Stream reasoning/tool steps as separate messages; keep the final reply clean.
     progress_cb = _make_progress_callback(message.bot, message.chat.id)
+    reply = ""
+    settled = None
     try:
-        ctx = new_run_context(
-            interface="telegram",
-            agent_name="roleplay",
-            user_id=str(user_id),
-            is_owner=True,
-            session_id=f"telegram-roleplay:{message.chat.id}",
-            scope_type="telegram_message",
-            scope_id=str(message.message_id),
-        )
-        with caller_scope(ctx):
-            reply = await chat_with_tools(
-                history,
-                client=_deepseek_anthropic_client,
-                model=ROLEPLAY_MODEL,
-                tools=RP_TOOLS,
-                tool_handlers=RP_HANDLERS,
-                system_prompt=build_system_prompt(),
-                max_rounds=ROLEPLAY_MAX_ROUNDS,
-                max_tokens=ROLEPLAY_MAX_TOKENS,
-                continue_on_length=True,
-                max_length_continuations=1,
-                budget_usd=ROLEPLAY_BUDGET_USD,
-                on_progress=progress_cb,
-                agent_name="roleplay",
-                thinking={"type": "enabled"},
-                output_config={"effort": "high"},
-            )
-    except Exception as e:
-        logger.exception("roleplay turn failed: %s", e)
-        await message.answer("…(잠깐 말이 막혔어. 다시 한 번 말해줄래?)")
-        return
+        for attempt in range(2):
+            with caller_scope(ctx), turn_time_scope(time_policy):
+                with roleplay_turn.staged_memory(user_id) as stage:
+                    reply = await chat_with_tools(
+                        history, client=_deepseek_anthropic_client, model=ROLEPLAY_MODEL,
+                        tools=RP_TOOLS, tool_handlers=RP_HANDLERS,
+                        system_prompt=build_system_prompt() + "\n지금은 비공개 초안을 작성한다. 도구 저장도 검증 전 임시 기록이다. 사용자의 장면 범위를 지키고 계산 결과를 추측하지 않는다.",
+                        max_rounds=ROLEPLAY_MAX_ROUNDS, max_tokens=ROLEPLAY_MAX_TOKENS,
+                        continue_on_length=True, max_length_continuations=1,
+                        budget_usd=ROLEPLAY_BUDGET_USD, on_progress=progress_cb,
+                        agent_name="roleplay", thinking={"type":"enabled"}, output_config={"effort":"high"},
+                    )
+                if not reply.strip() or reply.strip() == EMPTY_RESPONSE_FALLBACK:
+                    break
+                try:
+                    prepared = await asyncio.to_thread(roleplay_turn.prepare, user_text, state, stage['people'],
+                        history, str(message.message_id), reply, authorization, stage)
+                except ValueError as exc:
+                    logger.warning("roleplay draft rejected: %s", exc)
+                    history = attach_context(history, [context_record('draft_revision','telegram_roleplay_runtime',
+                        {'direction':'이전 초안은 폐기됐다. 범위를 지킨 새 초안을 작성하라.', 'issue':str(exc)},
+                        scope=f"telegram-roleplay:{message.chat.id}",observed_at=datetime.now(timezone.utc),temporal_scope='current turn')])
+                    continue
+                settled = await asyncio.to_thread(adjudicate_turn, user_id, user_text, history,
+                    str(message.message_id), prepared=prepared)
+                if settled.get('status') in {'applied','unchanged'}:
+                    reply = settled['reply']
+                break
+    except Exception:
+        logger.exception("roleplay draft/settlement failed")
     finally:
         await progress_cb.flush()
-
-    if not reply.strip() or reply.strip() == EMPTY_RESPONSE_FALLBACK:
-        logger.warning("roleplay turn ended without visible text after recovery")
-        await message.answer("답변을 완성하지 못했어. 한 번 더 말해줄래?")
+    if settled is None or settled.get('status') not in {'applied','unchanged'}:
+        await message.answer("장면을 확정하지 못해서 이번 진행은 저장하지 않았어. 어디까지 진행할지 다시 말해줘.")
         return
 
     await asyncio.to_thread(save_message, user_id, "assistant", reply)
