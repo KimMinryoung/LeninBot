@@ -97,4 +97,27 @@ class DraftRepairTests(unittest.IsolatedAsyncioTestCase):
             session.prepare({'repairs':[{'op':'set','path':'/fields','value':{'unexpected':1}}]})
 
 
+    def test_repairs_append_list_items_with_dash_or_next_index(self):
+        # The editor asks for claims to be added in-session; a rejected draft
+        # must gain one without resending the whole array (jobs 753/676, 2026-09-20).
+        session=DraftRepair({'name':'commulingo_pipeline_result','input_schema':{
+            'type':'object','additionalProperties':False,'required':['fields','claims'],
+            'properties':{'fields':{'type':'object','additionalProperties':False,
+                'properties':{'bio':{'type':'object','additionalProperties':False,
+                    'properties':{'en':{'type':'string','maxLength':20}}}}},
+                'claims':{'type':'array','maxItems':3,'items':{'type':'string'}}}}})
+        with self.assertRaises(ValueError):
+            session.prepare({'fields':{'bio':{'en':'Long prose that exceeds the original limit'}},'claims':['P1']})
+        self.assertEqual(session.prepare({'repairs':[
+            {'op':'set','path':'/claims/-','value':'P2'},
+            {'op':'set','path':'/claims/2','value':'P3'},
+            {'op':'set','path':'/fields/bio/en','value':'Short'}]}),
+            {'fields':{'bio':{'en':'Short'}},'claims':['P1','P2','P3']})
+        with self.assertRaises(ValueError) as caught:
+            session.prepare({'repairs':[{'op':'set','path':'/claims/7','value':'P9'}]})
+        self.assertIn('append with /-', str(caught.exception))
+        with self.assertRaises(ValueError):
+            session.prepare({'repairs':[{'op':'remove','path':'/claims/-'}]})
+
+
 if __name__=='__main__':unittest.main()

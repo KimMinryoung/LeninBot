@@ -56,9 +56,16 @@ def prepare_write(name, args, draft, schema=None, baseline=None):
             try:
                 for part in parts[:-1]:
                     node = node[int(part)] if isinstance(node, list) else node[part]
-                key = int(parts[-1]) if isinstance(node, list) else parts[-1]
-                if isinstance(key, int) and not 0 <= key < len(node):
-                    raise KeyError(key)
+                key = parts[-1]
+                if isinstance(node, list):
+                    # RFC 6901 "-" or the next index appends: a rejected draft
+                    # gains a claim without resending the whole array.
+                    key = len(node) if key == "-" else int(key)
+                    if edit["op"] == "set" and key == len(node) and "value" in edit:
+                        node.append(edit["value"])
+                        continue
+                    if not 0 <= key < len(node):
+                        raise KeyError(key)
                 if edit["op"] == "remove":
                     del node[key]
                 elif edit["op"] == "set" and "value" in edit:
@@ -66,7 +73,8 @@ def prepare_write(name, args, draft, schema=None, baseline=None):
                 else:
                     raise KeyError("set requires value")
             except (KeyError, IndexError, TypeError, ValueError) as exc:
-                raise ToolRejection(f"invalid repair path or value: {edit['path']}") from exc
+                raise ToolRejection(f"invalid repair path or value: {edit['path']} "
+                                    "(set a list item by its existing index, or append with /- or the next index)") from exc
         # Whole-object replacement must not indirectly change immutable fields.
         for path in (("person_id",), ("event_id",), ("term_id",), ("target_id",), ("action",),
                      ("expected_revision",), ("fields", "expectedRevision")):

@@ -51,7 +51,7 @@ DB의 research/draft 단계명은 호환용이며 둘 다 Editor를 실행한다
 | 세션 내부 도구 | 역할 |
 |---|---|
 | `commulingo_pipeline_result` | 전체 수정안 제출 |
-| `commulingo_pipeline_repair` | JSON pointer의 set/remove로 부분 수정; 검증 성공 시 종료 |
+| `commulingo_pipeline_repair` | JSON pointer의 set/remove로 부분 수정, 배열은 `/-`나 다음 인덱스 set으로 추가; 검증 성공 시 종료 |
 | `commulingo_pipeline_cached_passages` | 기존 P 라벨의 유효한 원문을 네트워크 없이 조회 |
 | `commulingo_pipeline_context` | 추가 필드 schema·현재 값 조회 |
 | `commulingo_pipeline_research` | 필드와 이유를 명시해 사실 조사 재개 |
