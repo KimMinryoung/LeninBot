@@ -215,7 +215,7 @@ N 5건의 실체: Britannica 봇 확인 페이지(acmeism), 저자 명단 주장
 
 `commulingo_pipeline/citation_gate.py`, registry 항목 `commulingo_citation_support`. 조사 단계 `finish`에서
 `resolve_passages` 직후 이번 호출의 claim마다 Jev에 `{field, claim, source_url, excerpt}`를 주고
-`support` choice + `specific`·`boilerplate` noul을 받는다(동시 8, claim당 ~$0.00002).
+`support` choice + `specific`·`boilerplate` noul을 받는다(claim당 ~$0.00002). 2026-09-20부터 **배치**: 한 결과 호출의 claim을 요청당 ≤12개·state ≤24k자로 묶어 `items.c1…`에 넣고 질문은 `c1_support…`로 항목별로 붙인다(TypeSafe는 한 요청의 질문을 병렬 평가하므로 지연은 요청 수에 비례 — cookbook `parallel_questions`; claim당 요청 하나는 28-claim 호출에 ~600ms 라운드트립 8동시×4회였다). 비용은 발췌가 claim마다 다르므로 같고, 검토 게이트도 같은 `_judge`를 쓴다.
 `unrelated/contradicts` conf ≥ `thresholds.reject`(0.85) 또는 `boilerplate` ≥ 0.9면 결과 호출을 거절하고
 해당 claim만 지목한 메시지("다른 인용·다른 출처·claim 삭제")를 돌려준다. 판정 수치(support·confidence·specific·
 boilerplate)는 각 claim에 `citation_check`로 붙어 artifact에 저장된다 — claim과 함께 움직이므로 targeted research의

@@ -26,6 +26,7 @@ it enforces from the start.
 dev_docs/jev_system_one_adoption.md §4.5 and §4.8 have the measured baselines.
 """
 import asyncio
+import json
 import logging
 
 from llm.call_registry import resolve
@@ -167,44 +168,81 @@ def annotate(claims, checks):
     return out
 
 
+BATCH_CHARS = 24_000   # state characters per request; 60k of Cyrillic exceeded the model's ceiling
+BATCH_ITEMS = 12
+
+
+def _batches(entries, state):
+    """Group (key, item) pairs into requests: each item's state under its own id,
+    bounded by BATCH_CHARS/BATCH_ITEMS so one request stays under the ceiling."""
+    batches, batch, size = [], [], 0
+    for k, item in entries:
+        st = state(item)
+        chars = len(json.dumps(st, ensure_ascii=False))
+        if batch and (size + chars > BATCH_CHARS or len(batch) >= BATCH_ITEMS):
+            batches.append(batch); batch, size = [], 0
+        batch.append((k, item, st)); size += chars
+    if batch:
+        batches.append(batch)
+    return batches
+
+
 async def _judge(feature, questions, items, *, key, state, skip, describe, usage=None, decide=None, cache=None,
                  tracker_prefix='', noun='claim'):
     """Shared core: one check per item, index-aligned; raises when enforce is on
     and a verdict is a confident rejection. ``skip(item)`` names why an item
     cannot be judged (None to judge it), ``describe(i, item)`` labels it in
-    the rejection message."""
+    the rejection message.
+
+    Items are judged in batches: one request carries several items' states
+    under ``items.c1``, ``items.c2``, ... and every question for each of them
+    (TypeSafe evaluates the questions of one request in parallel; requests,
+    not questions, cost latency). One request per claim took 8 concurrent
+    round trips of ~600 ms for a 28-claim result call.
+    """
     conf = settings(feature)
     if not conf['enabled'] or not items:
         return []
     if decide is None:
         from llm.call_registry import decide as registry_decide
         decide = registry_decide
+    from llm.call_registry import Decision
     cache = cache if cache is not None else {}
     gate = asyncio.Semaphore(CONCURRENCY)
 
-    async def one(item):
-        reason = skip(item)
-        if reason:
-            return {'support': None, 'error': reason}
-        async with gate:
-            decision = await decide(feature, state(item), questions)
-        if decision is None:
-            return {'support': None, 'error': 'decision unavailable'}
-        return verdict(decision, conf['thresholds'], item.get('stance') or 'supports')
-
-    # One paid decision per distinct item: duplicates within the batch share
-    # the first item's task, and anything already judged comes from the cache.
-    pending = {}
+    # One paid judgement per distinct item: duplicates within the batch share
+    # the first item's slot, and anything already judged comes from the cache.
+    results, pending = {}, {}
     for item in items:
         k = key(item)
-        if k not in cache and k not in pending:
-            pending[k] = asyncio.ensure_future(one(item))
-    for k, task in pending.items():
-        result = await task
+        if k in cache or k in results or k in pending:
+            continue
+        reason = skip(item)
+        if reason:
+            results[k] = {'support': None, 'error': reason}
+        else:
+            pending[k] = item
+
+    async def run(batch):
+        ids = [f'c{i + 1}' for i in range(len(batch))]
+        request_state = {'items': {cid: st for cid, (_, _, st) in zip(ids, batch)}}
+        request_questions = {f'{cid}_{q}': {**question, 'instructions': f'About `items.{cid}`: ' + question['instructions']}
+                             for cid in ids for q, question in questions.items()}
+        async with gate:
+            decision = await decide(feature, request_state, request_questions)
+        for cid, (k, item, _) in zip(ids, batch):
+            if decision is None:
+                results[k] = {'support': None, 'error': 'decision unavailable'}
+                continue
+            own = Decision(answers={q: decision.answers.get(f'{cid}_{q}') for q in questions}, model=decision.model,
+                           usage=decision.usage, latency_ms=decision.latency_ms, cost_usd=decision.cost_usd)
+            results[k] = verdict(own, conf['thresholds'], item.get('stance') or 'supports')
+
+    await asyncio.gather(*(run(batch) for batch in _batches(list(pending.items()), state)))
+    for k, result in results.items():
         if result.get('support') is not None:
             cache[k] = result
-        pending[k] = result
-    checks = [cache.get(key(item)) or pending[key(item)] for item in items]
+    checks = [cache.get(key(item)) or results[key(item)] for item in items]
     if usage is not None:
         tracker = usage.tracker
         tracker[f'{tracker_prefix}citation_checks'] = tracker.get(f'{tracker_prefix}citation_checks', 0) + len(checks)

@@ -21,6 +21,21 @@ def decision(support, confidence, specific=0.9, boilerplate=0.0):
 SETTINGS = {'enabled': True, 'enforce': True, 'thresholds': {'reject': 0.85, 'boilerplate': 0.9}}
 
 
+def batched(decide_one):
+    """A batched decide from a per-item fake: the gate sends every item of a result
+    call in one request (items.c1, items.c2, ... with questions c1_support, ...)."""
+    async def decide(feature, state, questions):
+        answers = {}
+        for cid, item_state in state['items'].items():
+            own = {k[len(cid) + 1:]: q for k, q in questions.items() if k.startswith(cid + '_')}
+            d = await decide_one(feature, item_state, own)
+            if d is None:
+                return None
+            answers.update({f'{cid}_{q}': a for q, a in d.answers.items()})
+        return Decision(answers=answers, model='typesafe/jev-1.13-test')
+    return decide
+
+
 class CitationGateTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.source = snapshot('https://example.org/a', 'Kosygin was born in 1904 in Saint Petersburg. He chaired the Council.')
@@ -37,9 +52,10 @@ class CitationGateTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(feature, 'commulingo_citation_support')
             self.assertEqual(set(state), {'field', 'claim', 'source_url', 'excerpt'})
             self.assertEqual(set(questions), {'support', 'specific', 'boilerplate'})
+            self.assertTrue(questions['support']['instructions'].startswith('About `items.c'))
             return decision('supports', 0.97)
         usage = Usage()
-        checks = await check_claims(self.claims, self.sources, usage=usage, decide=decide)
+        checks = await check_claims(self.claims, self.sources, usage=usage, decide=batched(decide))
         self.assertEqual([c['support'] for c in checks], ['supports', 'supports'])
         self.assertEqual(usage.tracker['citation_checks'], 2)
         self.assertNotIn('citation_rejections', usage.tracker)
@@ -49,7 +65,7 @@ class CitationGateTests(unittest.IsolatedAsyncioTestCase):
             return decision('unrelated', 0.99) if state['claim'] == 'Executed in 1938' else decision('supports', 0.95)
         usage = Usage()
         with self.assertRaises(ValueError) as ctx:
-            await check_claims(self.claims, self.sources, usage=usage, decide=decide)
+            await check_claims(self.claims, self.sources, usage=usage, decide=batched(decide))
         message = str(ctx.exception)
         self.assertIn('one claim', message)
         self.assertIn("claim 2 (body, 'Executed in 1938')", message)
@@ -62,7 +78,7 @@ class CitationGateTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn('partially_supports', questions['support']['criteria'])
             return decision('partially_supports', 0.97)
         usage = Usage()
-        checks = await check_claims(self.claims, self.sources, usage=usage, decide=decide)
+        checks = await check_claims(self.claims, self.sources, usage=usage, decide=batched(decide))
         self.assertEqual([c['support'] for c in checks], ['partially_supports', 'partially_supports'])
         self.assertTrue(all('reject' not in c for c in checks))
         self.assertNotIn('citation_rejections', usage.tracker)
@@ -70,7 +86,7 @@ class CitationGateTests(unittest.IsolatedAsyncioTestCase):
     async def test_low_confidence_unrelated_passes(self):
         async def decide(feature, state, questions):
             return decision('unrelated', 0.41)
-        checks = await check_claims(self.claims, self.sources, decide=decide)
+        checks = await check_claims(self.claims, self.sources, decide=batched(decide))
         self.assertEqual([c['support'] for c in checks], ['unrelated', 'unrelated'])
         self.assertTrue(all('reject' not in c for c in checks))
 
@@ -78,14 +94,14 @@ class CitationGateTests(unittest.IsolatedAsyncioTestCase):
         async def decide(feature, state, questions):
             return decision('unrelated', 0.5, boilerplate=0.97)
         with self.assertRaisesRegex(ValueError, 'access check, consent notice or other boilerplate'):
-            await check_claims(self.claims[:1], self.sources, decide=decide)
+            await check_claims(self.claims[:1], self.sources, decide=batched(decide))
 
     async def test_shadow_mode_records_without_raising(self):
         citation_gate.settings.return_value = {**SETTINGS, 'enforce': False}
         async def decide(feature, state, questions):
             return decision('contradicts', 0.95)
         usage = Usage()
-        checks = await check_claims(self.claims, self.sources, usage=usage, decide=decide)
+        checks = await check_claims(self.claims, self.sources, usage=usage, decide=batched(decide))
         self.assertTrue(all(c.get('reject') for c in checks))
         self.assertEqual(usage.tracker['citation_rejections'], 2)
 
@@ -93,7 +109,7 @@ class CitationGateTests(unittest.IsolatedAsyncioTestCase):
         async def decide(feature, state, questions):
             return None
         usage = Usage()
-        checks = await check_claims(self.claims, self.sources, usage=usage, decide=decide)
+        checks = await check_claims(self.claims, self.sources, usage=usage, decide=batched(decide))
         self.assertEqual(checks, [{'support': None, 'error': 'decision unavailable'}] * 2)
         self.assertEqual(usage.tracker['citation_unavailable'], 2)
 
@@ -101,18 +117,36 @@ class CitationGateTests(unittest.IsolatedAsyncioTestCase):
         citation_gate.settings.return_value = {**SETTINGS, 'enabled': False}
         async def decide(feature, state, questions):
             raise AssertionError('must not be called')
-        self.assertEqual(await check_claims(self.claims, self.sources, decide=decide), [])
+        self.assertEqual(await check_claims(self.claims, self.sources, decide=batched(decide)), [])
 
     async def test_disputing_claim_may_cite_a_contradicting_source(self):
         disputing = [{**self.claims[0], 'stance': 'disputes'}]
         async def decide(feature, state, questions):
             return decision('contradicts', 0.99)
-        [check] = await check_claims(disputing, self.sources, decide=decide)
+        [check] = await check_claims(disputing, self.sources, decide=batched(decide))
         self.assertNotIn('reject', check)
         async def unrelated(feature, state, questions):
             return decision('unrelated', 0.99)
         with self.assertRaisesRegex(ValueError, 'judged unrelated'):
-            await check_claims(disputing, self.sources, decide=unrelated)
+            await check_claims(disputing, self.sources, decide=batched(unrelated))
+
+    async def test_items_are_batched_per_request_within_the_size_bound(self):
+        requests = []
+        async def decide(feature, state, questions):
+            requests.append(state)
+            answers = {}
+            for cid in state['items']:
+                answers.update({f'{cid}_{q}': a for q, a in decision('supports', 0.9).answers.items()})
+            return Decision(answers=answers, model='m')
+        many = [{**self.claims[0], 'claim': f'Claim {i}'} for i in range(30)]
+        checks = await check_claims(many, self.sources, decide=decide)
+        self.assertEqual(len(checks), 30)
+        self.assertEqual([len(r['items']) for r in requests], [12, 12, 6])
+        self.assertEqual(set(requests[0]['items']), {f'c{i}' for i in range(1, 13)})
+        with patch.object(citation_gate, 'BATCH_CHARS', 300):
+            requests.clear()
+            await check_claims(many[:5], self.sources, decide=decide)
+            self.assertTrue(all(len(r['items']) <= 2 for r in requests) and len(requests) >= 3)
 
     async def test_cache_keeps_verdicts_for_unchanged_claims(self):
         calls = []
@@ -121,13 +155,13 @@ class CitationGateTests(unittest.IsolatedAsyncioTestCase):
             return decision('unrelated', 0.99) if state['claim'] == 'Executed in 1938' else decision('supports', 0.9)
         cache = {}
         with self.assertRaises(ValueError):
-            await check_claims(self.claims, self.sources, decide=decide, cache=cache)
+            await check_claims(self.claims, self.sources, decide=batched(decide), cache=cache)
         # The model fixes claim 2 and resubmits claim 1 unchanged: only the new claim is judged.
         fixed = [self.claims[0], {**self.claims[1], 'claim': 'Chaired the Council', 'start': 46, 'end': 70}]
         async def decide2(feature, state, questions):
             calls.append(state['claim'])
             return decision('supports', 0.95)
-        checks = await check_claims(fixed, self.sources, decide=decide2, cache=cache)
+        checks = await check_claims(fixed, self.sources, decide=batched(decide2), cache=cache)
         self.assertEqual(calls, ['Born 1904', 'Executed in 1938', 'Chaired the Council'])
         self.assertEqual([c['support'] for c in checks], ['supports', 'supports'])
 
@@ -147,7 +181,7 @@ class CitationGateTests(unittest.IsolatedAsyncioTestCase):
             return decision('unrelated', 0.98) if state['finding'].startswith('1938') else decision('supports', 0.95)
         citation_gate.settings.return_value = {**SETTINGS, 'enforce': False}
         usage = Usage()
-        judged = await check_review_checks(checks, usage=usage, decide=decide)
+        judged = await check_review_checks(checks, usage=usage, decide=batched(decide))
         self.assertEqual([f for f, _ in seen], ['commulingo_review_citation_support'] * 2)
         self.assertEqual([c['support'] for c in judged], ['supports', 'unrelated', None])
         self.assertTrue(judged[1].get('reject'))
@@ -162,14 +196,14 @@ class CitationGateTests(unittest.IsolatedAsyncioTestCase):
         # Enforce names the failing check with the check noun.
         citation_gate.settings.return_value = dict(SETTINGS)
         with self.assertRaisesRegex(ValueError, r"one check; the other checks are fine(.|\n)*check 2 \('1938년 처형 확인'\)"):
-            await check_review_checks(checks, decide=decide)
+            await check_review_checks(checks, decide=batched(decide))
 
     async def test_duplicate_items_in_one_batch_share_one_decision(self):
         calls = []
         async def decide(feature, state, questions):
             calls.append(state['claim'])
             return decision('supports', 0.9)
-        checks = await check_claims([self.claims[0], self.claims[0], self.claims[1]], self.sources, decide=decide)
+        checks = await check_claims([self.claims[0], self.claims[0], self.claims[1]], self.sources, decide=batched(decide))
         self.assertEqual(calls, ['Born 1904', 'Executed in 1938'])
         self.assertEqual([c['support'] for c in checks], ['supports'] * 3)
 
@@ -180,7 +214,7 @@ class CitationGateTests(unittest.IsolatedAsyncioTestCase):
         async def decide(feature, state, questions):
             return decision('supports', 0.93)
         usage = Usage()
-        with patch('llm.call_registry.decide', decide):
+        with patch('llm.call_registry.decide', batched(decide)):
             out = await review_gate(usage)(value)
         self.assertEqual(out['checks'][0]['citation_check']['support'], 'supports')
         self.assertNotIn('citation_check', value['checks'][0])
