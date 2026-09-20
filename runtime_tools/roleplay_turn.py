@@ -178,8 +178,14 @@ def prepare(user_text, before, people, history, scope_id, draft, authorization, 
         gate = {'labels': {'within_scope': 'yes'}, 'player_confirmed': True} if scope_ok else None
         guard_questions = {'within_scope': jev.choice('Check the WHOLE draft against the authorized user endpoint. Accept normal staging details inside that action (sitting, speaking, pausing, sipping water, standing or exiting the interrogation room at the end). These are not separate major scenes. Historical source dates are references, not target dates when the user directs reenactment in the next morning scene; reject extra meals, sleep, assaults, next scenes or days not requested. Parenthesized director instructions authorize their specified scene. A mere discussion/plan must not be enacted. Repetition of the already existing scene as context is fine.', {'yes':'Entire proposed response stays within authorized scope','no':'Adds unauthorized events, skips or enacts a discussion/plan'})}
         if gate is None:
+            # Only a confident 'no' rejects a draft. An unsure scope check passes with a
+            # flag: the classifier, the location label and the consistency review still
+            # settle what the draft actually did, and a button here cost the player more
+            # than the occasional over-long scene.
             gate = decide('roleplay-draft-scope', {'current_user':user_text,'authorization':authorization['labels'],
-                'before':{k:before.get(k) for k in ('clock','location','scene')},'draft':draft}, guard_questions)
+                'before':{k:before.get(k) for k in ('clock','location','scene')},'draft':draft}, guard_questions,
+                defaults={'within_scope': 'yes'})
+            gate['uncertain'] = 'within_scope' in gate.get('defaulted', {})
         if gate['labels']['within_scope'] != 'yes':
             raise ValueError('초안이 사용자 지시의 사건 경계를 넘음')
         verdict = jev.classify(user_text,before,people,history,draft=draft)
@@ -238,6 +244,8 @@ def prepare(user_text, before, people, history, scope_id, draft, authorization, 
             raise
     if mode == 'scene' and verdict['labels'].get('location') in {None, 'unknown'}:
         projected['location'] = '미확인 — 확정된 장면 서술 참조'
+    if (verdict.get('scope_review') or {}).get('uncertain'):
+        applied = {**applied, 'scope_uncertain': True}
     if applied.get('interrupted') and not (mode == 'scene' and verdict['labels'].get('elapsed') == 'explicit'):
         raise ValueError('예정 사건 도래로 초안 끝까지 실행할 수 없음. 도래 장면에서 멈춰야 함')
     # An explicit passage was told where it stops (see direction/expected_stop); the settled
@@ -336,6 +344,8 @@ def feedback_line(outcome, state=None):
         parts.append('미뤄 둔 반응 해소')
     if applied.get('narrative_only'):
         parts.append('기록만 갱신')
+    if applied.get('scope_uncertain'):
+        parts.append('범위 판정 불확실이라 통과시킴')
     return '⚙ ' + ' · '.join(parts)
 
 

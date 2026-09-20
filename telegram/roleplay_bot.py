@@ -677,8 +677,10 @@ _CHOICE_LABELS = {
 
 def _choice_keyboard(scope_id: str, exc: PendingChoice) -> InlineKeyboardMarkup:
     names = _CHOICE_LABELS.get(exc.key, {})
+    # "범위 밖" and the discard button meant the same thing; keep one.
+    candidates = [(label, korean) for label, korean in exc.candidates if not (exc.key == "within_scope" and label == "no")]
     rows = [[InlineKeyboardButton(text=names.get(label, korean)[:60], callback_data=f"rp:{scope_id}:{exc.key}:{label}")]
-            for label, korean in exc.candidates]
+            for label, korean in candidates]
     rows.append([InlineKeyboardButton(text="버리기" if exc.key == "mode" else "이 초안 버리기", callback_data=f"rp:{scope_id}:cancel:-")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
