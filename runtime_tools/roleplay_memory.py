@@ -624,8 +624,17 @@ def roleplay_state(action: str, changes: dict | None = None, reason: str = "", *
             for side in ("before", "after"):
                 record[side] = {k: record[side].get(k) for k in (*METRICS, "scene_minute", "activity", "sleep_quality", "threat", "injuries", "clock")}
         return json.dumps(records, ensure_ascii=False)
-    if caller.scope_type == "telegram_message":
+    actor_scope = caller.scope_type == "telegram_message"
+    actor_warnings: list[str] = []
+    if actor_scope:
         narrative = {"goal", "avoid", "next_action", "unresolved", "body", "mood", "scene", "holdouts", "bargain"}
+        # Stray string arguments (change_note, notes…) are folded into the reason instead of
+        # costing the actor a round; anything numeric or structural is still refused.
+        stray = {k: v for k, v in extra.items() if isinstance(v, str)}
+        if stray:
+            reason = (reason or "") + " " + " ".join(f"{k}: {v}" for k, v in stray.items())
+            actor_warnings.append(f"알 수 없는 인자 {sorted(stray)}는 reason에 합쳐 저장함")
+            extra = {k: v for k, v in extra.items() if k not in stray}
         if (action != "update" or not isinstance(changes, dict) or set(changes) - narrative
                 or temporal is not None or interval_conditions is not None or resolve_event is not None
                 or story_updates is not None or adjustment or metric_reasons or extra or person_updates is not None):
@@ -636,7 +645,7 @@ def roleplay_state(action: str, changes: dict | None = None, reason: str = "", *
         raise ValueError("Unknown state action: read/history/update/time/reset")
 
     # ── Normalize the call into the canonical shape, recording what was reinterpreted.
-    warnings: list[str] = []
+    warnings: list[str] = list(actor_warnings)
     extra = dict(extra)
     for alias in list(extra):
         if alias in PERSON_REVIEW_ALIASES:
@@ -709,6 +718,9 @@ def roleplay_state(action: str, changes: dict | None = None, reason: str = "", *
                 warnings.append(f"expected_revision {expected_revision}은 오래됐지만 같은 턴의 연속 변경이라 현재 revision {before['revision']}에 적용함")
             elif expected_revision is None and before["revision"] == 0:
                 pass
+            elif actor_scope:
+                # Narrative fields cannot clobber a computed number; a stale token is not worth a retry round.
+                warnings.append(f"expected_revision {expected_revision}은 오래됐지만 서술 필드만 바꾸므로 현재 revision {before['revision']}에 적용함")
             else:
                 raise ValueError(f"Read current state and retry with expected_revision={before['revision']}")
         if "participants" in changes:
@@ -805,7 +817,7 @@ ROLEPLAY_STATE_TOOL = {
         }, "additionalProperties": False},
         "reason": {"type": "string", "maxLength": 300},
         "expected_revision": {"type": "integer", "minimum": 0},
-    }, "required": ["action"], "additionalProperties": False},
+    }, "required": ["action"], "additionalProperties": True},
 }
 
 

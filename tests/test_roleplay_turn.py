@@ -62,24 +62,16 @@ class PostDraftTests(unittest.TestCase):
         self.assertTrue(again['replayed']);self.assertEqual(memory.load_state('1'),state)
         self.assertEqual(turn.committed_reply('1','77'),result['reply'])
 
-    def test_failed_final_review_leaves_everything_unchanged(self):
+    def test_review_findings_are_advisory_and_nothing_is_saved_before_commit(self):
         stage=self.stage()
-        with self.assertRaises(ValueError):self.prepare(stage,final=False)
+        prepared=self.prepare(stage,final=False)
+        self.assertEqual(prepared['applied']['review_issues'],['contradiction'])
+        self.assertFalse(prepared['verdict']['final_review']['approved'])
+        self.assertIn('서술 검토 지적: contradiction',turn.feedback_line({'status':'applied','applied':prepared['applied']},prepared['state']))
+        # Preparing commits nothing; the staged records and state wait for adjudicate_turn.
         self.assertEqual(memory.load_state('1'),self.before)
         self.assertEqual(memory.load_notes('1'),[]);self.assertEqual(memory.load_people('1'),[])
         self.assertIsNone(turn.committed_reply('1','77'))
-
-    def test_final_attempt_keeps_an_overrunning_or_contradicted_draft_with_flags(self):
-        stage=self.stage()
-        with patch.object(turn,'review_reply',return_value={'approved':False,'issues':['위치 모순']}), \
-             patch.object(jev,'classify',return_value=deepcopy(self.verdict)), patch.object(jev,'estimate_duration',return_value={'elapsed_minutes':90}):
-            with self.assertRaises(ValueError):
-                turn.prepare(self.text,self.before,stage['people'],[],'77','초안',self.auth,stage)
-            prepared=turn.prepare(self.text,self.before,stage['people'],[],'77','초안',self.auth,stage,None,False,True)
-        self.assertEqual(prepared['applied']['review_issues'],['위치 모순'])
-        self.assertFalse(prepared['verdict']['final_review']['approved'])
-        line=turn.feedback_line({'status':'applied','applied':prepared['applied']},prepared['state'])
-        self.assertIn('서술 검토 지적(확정함): 위치 모순',line)
 
     def test_no_scope_gate_the_classifier_settles_the_draft(self):
         with patch.object(turn,'decide') as gate, patch.object(jev,'classify',return_value=deepcopy(self.verdict)), \

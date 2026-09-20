@@ -118,3 +118,14 @@ class PacingTests(unittest.TestCase):
             self.assertEqual(bot.load_history(1), [{'role': 'user', 'content': '유효한 대화'}])
         self.assertIn('id = ANY(%s)', query.call_args.args[0])
         self.assertEqual(query.call_args.args[1][-2], [976])
+
+
+class OpenEndedRestTests(unittest.TestCase):
+    def test_rest_left_to_the_character_allows_a_session_budget(self):
+        from runtime_tools.roleplay_pacing import policy_for
+        free = policy_for('(예조프야 맘대로 쉬어라)')
+        self.assertEqual((free.max_minutes, free.explicit_passage, free.calendar_skip), (180, False, False))
+        plain = policy_for('감방에서 쉬어')
+        self.assertEqual((plain.max_minutes, plain.explicit_passage), (10, False))
+        timed = policy_for('한 시간 푹 쉬어')
+        self.assertEqual((timed.max_minutes, timed.explicit_passage), (60, True))

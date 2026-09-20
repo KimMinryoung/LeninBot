@@ -327,6 +327,27 @@ class BotAuthorizeChoiceTests(unittest.IsolatedAsyncioTestCase):
 
 
 class AutoSettleTests(unittest.IsolatedAsyncioTestCase):
+    async def test_unsure_mode_plays_the_scene_when_buttons_are_off(self):
+        from telegram import roleplay_bot as bot
+        message = SimpleNamespace(from_user=SimpleNamespace(id=1), text='(맘대로 쉬어라)', message_id=4, chat=SimpleNamespace(id=1),
+                                  answer=AsyncMock(), bot=SimpleNamespace(send_chat_action=AsyncMock()))
+        async def inline_thread(func, *args, **kwargs):
+            return func(*args, **kwargs)
+        pending = jev.PendingChoice('mode', [('discussion', 'Discuss'), ('scene', 'Perform')], '불확정')
+        with patch.object(bot.asyncio, 'to_thread', side_effect=inline_thread), \
+             patch.object(bot.roleplay_turn, 'committed_reply', return_value=None), \
+             patch.object(bot.roleplay_turn, 'authorize', side_effect=pending), \
+             patch.object(bot, '_draft_and_settle', new_callable=AsyncMock) as run, \
+             patch.object(bot, 'save_message', return_value=1), patch.object(bot, 'load_history', return_value=[]), \
+             patch.object(bot, 'get_preference', return_value='off'), \
+             patch.object(bot, 'load_notes', return_value=[]), patch.object(bot, 'load_state', return_value={'hunger': 25}), \
+             patch.object(bot, 'people_context', return_value={'index': [], 'present': []}):
+            await bot.handle_message(message)
+        authorization = run.await_args.args[3]
+        self.assertEqual(authorization['labels']['mode'], 'scene')
+        self.assertEqual(authorization['auto_settled'], {'mode': 'scene'})
+        message.answer.assert_not_awaited()
+
     async def test_buttons_off_takes_the_most_probable_value_and_says_so(self):
         from telegram import roleplay_bot as bot
         message = SimpleNamespace(from_user=SimpleNamespace(id=1), text='죽을 건넸다', message_id=9, chat=SimpleNamespace(id=1),

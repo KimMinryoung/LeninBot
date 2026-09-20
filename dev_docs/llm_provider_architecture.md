@@ -68,7 +68,7 @@ The personal fiction writer (`/writer`, `api_routes/writer.py`, `services/novel_
 
 코드의 `local` 선택지는 호환 경로로 남아 있다. 현재 운영 대상으로 사용하지 않는다(2026-09-07 사용자 확인).
 
-Roleplay output recovery (2026-09-11): `ROLEPLAY_MAX_TOKENS` defaults to 32768 (raised from 16384 on 2026-09-20 after a long scene draft was cut off in its first round) because reasoning and visible text share the output allowance. The bot enables `continue_on_length` with at most one continuation. The Anthropic adapter asks for brief reasoning and a concise answer when truncation leaves only thinking blocks; partial visible answers use the existing continuation path. Recovery preserves thinking privacy. Empty/fallback replies are not saved as assistant history, and existing exact `EMPTY_RESPONSE_FALLBACK` rows are excluded when loading context (the stored rows remain intact). Changing Python defaults requires restarting `leninbot-roleplay.service`; an explicit environment override still takes precedence.
+Roleplay output recovery (2026-09-11): `ROLEPLAY_MAX_TOKENS` defaults to 32768 because reasoning and visible text share the output allowance. The bot enables `continue_on_length` with at most one continuation. The Anthropic adapter asks for brief reasoning and a concise answer when truncation leaves only thinking blocks; partial visible answers use the existing continuation path. Recovery preserves thinking privacy. Empty/fallback replies are not saved as assistant history, and existing exact `EMPTY_RESPONSE_FALLBACK` rows are excluded when loading context (the stored rows remain intact). Changing Python defaults requires restarting `leninbot-roleplay.service`; an explicit environment override still takes precedence.
 
 ## Runtime Config Keys
 

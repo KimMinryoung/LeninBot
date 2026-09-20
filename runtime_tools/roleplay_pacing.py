@@ -17,6 +17,8 @@ _DISCUSSION = re.compile(r'어떻게|어떨|할까|해볼까|좋을까|나을까
 _PROGRESS = re.compile(r'넘겨|넘기|건너뛰|진행|흘렀|흘러|지났다|지났어|지났고|지나갔|기다려|기다린|기다렸|쉬어|쉬자|쉰다|쉬었다|쉬었|잤다|잤어|잤고|잠을\s*잔다|보냈|보낸다|보내자|보내라|보내줘|씻어|씻었다|정돈해|정돈한다|읽어|읽었다|정리해|정리했다|가다듬어|가다듬었다')
 _DAY_SKIP = re.compile(r'다음\s*날|다음날|내일|아침까지|밤새|밤을\s*넘')
 _CORRECTION = re.compile(r'정정|수정|바로잡|되돌|잘못|아니라|틀렸')
+# "맘대로 쉬어" leaves the length to the character: allow a session-sized estimate.
+_OPEN_ENDED = re.compile(r'맘대로|마음대로|알아서|원하는\s*만큼|충분히|실컷|푹')
 
 
 def normalized(text):
@@ -61,7 +63,8 @@ def policy_for(user_text):
     explicit = not discussion and bool(_PROGRESS.search(text))
     total = duration_minutes(text) if explicit else 0
     calendar = not discussion and bool(_DAY_SKIP.search(text)) and (explicit or bool(re.search(r'다음\s*날(?:이다|이\s*되|\s*아침)|아침이\s*되', text)))
-    budget = min(MAX_EXPLICIT_MINUTES, max(DEFAULT_TURN_MINUTES, total, 1440 if calendar else 0))
+    open_ended = explicit and not total and bool(_OPEN_ENDED.search(text))
+    budget = min(MAX_EXPLICIT_MINUTES, max(DEFAULT_TURN_MINUTES, total, 1440 if calendar else 0, 180 if open_ended else 0))
     return TurnTimePolicy(text, budget, calendar, bool(_CORRECTION.search(text)), bool(total or calendar))
 
 

@@ -552,7 +552,10 @@ async def handle_message(message: Message) -> None:
             PENDING_CHOICES[user_id] = {**turn, "key": exc.key, "phase": "authorize", "candidates": exc.candidates}
             await message.answer(_choice_prompt(exc), reply_markup=_choice_keyboard(turn["scope_id"], exc))
             return
-        pick = exc.candidates[0][0] if exc.candidates else "scene"
+        # A director line that might be a scene is played as one: a discussion draft can
+        # never move the story, while a scene draft with nothing in it settles harmlessly.
+        candidates = [label for label, _ in exc.candidates]
+        pick = "scene" if "scene" in candidates or not candidates else candidates[0]
         authorization = {"user_text": user_text, "labels": {"mode": pick, "transition": "current", "span": "brief"},
                          "auto_settled": {exc.key: pick}}
     except Exception as exc:

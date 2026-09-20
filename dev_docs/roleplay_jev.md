@@ -13,26 +13,25 @@ Telegram의 새 처리 절차는 사용자 허용 범위를 확인하고 초안�
 | 초안 연기·목적·기분·질적 관찰 | 기존 연기 모델 |
 | 정산 결과와 초안/새 기록의 서술 모순 검사 | 같은 제공자의 별도 검토 호출 |
 
-분류는 `roleplay_scene_adjudication` 등록을 사용하며 세 호출로 나뉜다(`question_group`): `roleplay-scene`(mode/elapsed/plan_action/event/
-sexual_act/intensity/활동/수면/위협/접촉/고립/장소/새 부상, 현재 상태에서 15문항), `roleplay-people`(인물별 출입, 저장 인물 수만큼),
-`roleplay-records`(부상·예정 사건·holdout·bargain). 2026-09-20 이전에는 한 호출에 33문항(사건 선택지 25개, 설명 5천 자)을 얹어 항목당 확신이
-옅어졌다. people/records 호출이 실패하면 그 키만 미확정으로 남고 장면 판정은 진행된다. 수락 기준은 핵심 라벨(mode/event/elapsed/
-intensity/sexual_act/plan_action) 0.65, 보조 라벨 0.5다(`CORE_LABELS`, thresholds.accept/secondary; 확정 턴의 실측치는 쉬운 항목 0.80~0.92,
-애매한 항목 0.57~0.59였다). 핵심 라벨이 핵심 mode/event/elapsed가
-불확실하면 원칙적으로 변경을 보류한다. 단, mode/event/intensity가 확정된 즉시 사건(kindness/recognition/sexual_harassment/sexual_assault/rape/threat_to_kin/public_submission/futile_effort)은 elapsed만 불확실할 때 해당 효과를 적용하고 시간과 장면 조건은 보류한다. applied.deferred_components에 이를 표시한다. 그 외 불확실한 선택지는 기존 값을 유지하거나 초기화를 보류한다.
-분류 장애를 생성 모델로 대체하지 않는다. 이동+회복 상담은 이동 한 사건만 처리한다.
+분류는 `roleplay_scene_adjudication` 등록을 사용하며 세 호출로 나뉜다(`question_group`): `roleplay-scene`(mode/elapsed/plan_action/
+사건 축 5개/sexual_act/intensity/활동/수면/위협/접촉/고립/장소/새 부상), `roleplay-people`(인물별 출입), `roleplay-records`(부상·예정 사건·
+holdout·bargain). people/records 호출이 실패하면 그 키만 미확정으로 남고 장면 판정은 진행된다. 수락 기준은 핵심 라벨(mode/사건 축/elapsed/
+intensity/sexual_act/plan_action) 0.65, 보조 라벨 0.5다(`CORE_LABELS`, thresholds.accept/secondary). 핵심 라벨이 재판정 뒤에도 불확실하면
+`PendingChoice`가 나고 봇이 자동 처리하거나 버튼으로 묻는다([roleplay_postdraft.md](roleplay_postdraft.md)). mode/사건/강도가 확정된 즉시 사건은
+elapsed만 불확실할 때 해당 효과를 적용하고 시간과 장면 조건은 보류한다(applied.deferred_components). 그 외 불확실한 보조 선택지는 기존 값을
+유지한다. 분류 장애를 생성 모델로 대체하지 않는다. 이동+회복 상담은 이동 한 사건만 처리한다.
 
 시간 LLM에는 원문·실제 초안·기존 장소/장면·Jev 라벨을 전달한다. 출력은 정수 elapsed_minutes와 reason만
-허용한다. 기본 한도는 0~10분(허용된 긴 세션은 최대 180분)이며 한도를 넘는 추정(-1 포함)은 한도로 절단해 진행한다(2026-09-20까지는 보류).
-잘못된 JSON·잘린 출력·오류·범위 밖 값도 보류한다. 명시적인 ‘한 시간 쉬어’는 이 호출 없이 60분이다.
+허용한다. 기본 한도는 0~10분(허용된 긴 세션·개방형 휴식은 최대 180분)이며 한도를 넘는 추정(-1 포함)은 한도로 절단해 진행한다.
+잘못된 JSON·잘린 출력·오류는 초안 실패다. 명시적인 ‘한 시간 쉬어’는 이 호출 없이 60분이다.
 Jev가 상담/과거/계획으로 판정하면 실제 경과를 적용하지 않는다. 생성 모델은 사건과 수치 계수를 선택하지 못한다.
 
-사건은 다섯 독립 축으로 판정한다(`EVENT_FAMILIES`, 2026-09-20). 물질적 축 harm(부상·구타·성적 가해)/care(처치)/intake(식사·간식·물)와
+사건은 다섯 독립 축으로 판정한다(`EVENT_FAMILIES`). 물질적 축 harm(부상·구타·성적 가해)/care(처치)/intake(식사·간식·물)와
 영향 축 pressure(심문·자백·연루·협박·공개 굴욕·헛수고·실패·파기)/relief(배려·인정·선택권·성취·경계 존중·지지)는 서로 독립이며, 한 축 안에서는
 가장 구체적인 결과 하나만 고른다. 간수가 죽을 건네고 먹은 장면은 intake=meal과 relief=kindness가 함께 성립한다. 각 축은 none을 포함한 별도
 질문(`event_<family>`)이고, 코드는 확정된 축들을 우선순위(harm > pressure > relief > care > intake)로 정렬해 `events` 목록과 대표 라벨 `event`를 만든다
-(`resolve_events`). 불확실한 축이 none 쪽으로 기울면(none 확률 ≥ 0.5) none으로 확정하고, 다른 결과 쪽으로 기울면 그 축만 미확정으로 남겨 플레이어 버튼
-후보(`event_candidates`: 미확정 축의 상위 결과 + 없음)로 넘긴다. 플레이어가 하나를 고르면 그 축이 채워지고 남은 미확정 축은 none이 된다.
+(`resolve_events`). 불확실한 축이 none 쪽으로 기울면(none 확률 ≥ 0.5) none으로 확정하고, 다른 결과 쪽으로 기울면 그 축만 미확정으로 남겨 후보
+(`event_candidates`: 미확정 축의 상위 결과 + 없음)를 만든다. 자동 처리나 플레이어가 하나를 고르면 그 축이 채워지고 남은 미확정 축은 none이 된다.
 효과는 축마다 적용한다: 수치 변화(`EVENT_DELTAS`)·의지 사건은 사건별로, 강도는 공통, 굴욕 포화·평온 초기화·위협 전환은 어느 하나라도 해당하면 적용한다.
 확정 한 줄과 연기 지침에는 "배려·양보 + 식사"처럼 모두 표시한다.
 
@@ -57,7 +56,7 @@ time/update/reset 계약을 유지한다. 다른 문서의 내부 도구 예시�
 
 현재 인물 대사 속 인정·허락은 현재 사건이다. 발언에 내일의 협조 조건이 있어도 현재의 인정 효과를 미래 계획으로 바꾸지 않는다. `recognition`은 능력·기여·쓸모 인정, `kindness`는 배려·양보다. 같은 발언의 인정+양보는 recognition 하나로 처리한다. 현재 회복 보상은 종류별 고정값이며 recognition은 의지 +5/굴욕 -6/긴장 -3, kindness는 의지 +3/굴욕 -3/긴장 -3이다. 반복 보상과 활동 규칙은 [roleplay_game_balance.md](roleplay_game_balance.md)를 따른다. 인정이 안전·신뢰 회복을 자동 보장하지 않는다.
 
-mode/event/intensity가 불확실하면 사용자 원문과 직전 장면, 이미 수락한 사건 라벨만으로 Jev에 한 번 집중 재판정을 요청한다. 같은 0.75 기준을 유지하며 재판정 답변도 감사 기록에 보존한다. 그래도 사건/강도가 불확실하면 임의 가산하지 않는다.
+mode/사건 축/intensity가 불확실하면 사용자 원문과 직전 장면, 이미 수락한 라벨만으로 Jev에 한 번 집중 재판정을 요청한다. 같은 기준을 유지하며 재판정 답변도 감사 기록에 보존한다.
 
 ## 지키는 것·미뤄 둔 반응·플레이어 선택
 
@@ -66,10 +65,9 @@ held 상태의 holdout마다 `holdout_<i>`(keep/lost), ready 상태의 `when_alo
 
 열린 거래마다 `bargain_<i>`(keep/paid/kept/broken), `kind=routine`·`track` 예정 사건에는 각각의 완료 기준을 가진 `story_<i>` 질문이 붙는다.
 
-event 또는 intensity가 재판정 뒤에도 불확실하면 `project`는 `PendingChoice(key, candidates)`를 던진다. candidates는 JEV의 event 확률
-상위 3개(+none) 또는 강도 3단계다. Telegram은 이를 버튼으로 플레이어에게 묻고, 고른 라벨을 같은 verdict에 넣어 동일 초안을
-다시 정산한다(`roleplay_turn.prepare(verdict=…)`는 범위 검사·분류·시간 추정을 반복하지 않는다). 다른 불확실성(elapsed·activity·location 등)은
-이전처럼 보류다. 플레이어 선택은 감사 기록의 verdict.labels에 남는다. 흐름은 [roleplay_postdraft.md](roleplay_postdraft.md).
+사건 축·강도·활동이 재판정 뒤에도 불확실하면 `project`는 `PendingChoice(key, candidates)`를 던진다. candidates는 미확정 축의 확률 상위 3개(+none),
+강도 3단계, 활동 8종이다. 처리(자동 또는 버튼)는 [roleplay_postdraft.md](roleplay_postdraft.md). 같은 verdict로 다시 정산할 때
+`roleplay_turn.prepare(verdict=…)`는 분류·시간 추정을 반복하지 않는다. 선택은 감사 기록의 verdict.labels에 남는다.
 
 ## 성적 가해와 당사자 활동
 

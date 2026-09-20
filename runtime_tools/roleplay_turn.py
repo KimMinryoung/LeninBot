@@ -252,10 +252,11 @@ def prepare(user_text, before, people, history, scope_id, draft, authorization, 
                                      for h in stage['state'].get('holdouts', [])]
         if mode != 'scene' and (projected != before or stage['records'] != stage['baseline']):
             applied = {**applied,'no_change':False,'narrative_only':True}
+    # The consistency review is advisory: its findings ride on the settlement line and
+    # the player corrects what matters. Rewriting a whole draft over "someone coughed
+    # upstairs" cost more than any contradiction it caught.
     review = review_reply(draft, before, projected, stage)
     if not review['approved']:
-        if not final_attempt:
-            raise ValueError('초안 또는 기록이 정산 결과와 모순됨: ' + '; '.join(review['issues']))
         applied = {**applied, 'review_issues': [issue[:160] for issue in review['issues']][:3]}
     verdict['final_review']=review
     return {'before_revision':before['revision'],'state':projected,'applied':applied,
@@ -338,7 +339,7 @@ def feedback_line(outcome, state=None):
     if applied.get('narrative_only'):
         parts.append('기록만 갱신')
     if applied.get('review_issues'):
-        parts.append('서술 검토 지적(확정함): ' + ' / '.join(applied['review_issues']))
+        parts.append('서술 검토 지적: ' + ' / '.join(applied['review_issues']))
     if applied.get('auto_settled'):
         korean = {'mode': '모드', 'event': '사건', 'intensity': '강도', 'activity': '활동', 'within_scope': '범위'}
         values = {**names, 'scene': '장면 실행', 'discussion': '질문·상담', 'plan': '예정 등록', 'mild': '스침', 'moderate': '보통', 'severe': '극심',

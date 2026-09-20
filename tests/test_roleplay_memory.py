@@ -193,3 +193,19 @@ class RoleplayMemoryTests(unittest.TestCase):
             self.assertEqual(saved['commulingo_id'], 'boris-rodos')
             memory.roleplay_person('save', 'rodos', changes={'commulingo_id': ''})
             self.assertEqual(memory.load_people(1)[0]['commulingo_url'], '')
+
+
+class ActorToleranceTests(unittest.TestCase):
+    def test_stale_revision_and_stray_string_args_do_not_cost_the_actor_a_round(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(memory, 'MEMORY_PATH', Path(tmp) / 'm.sqlite3'):
+            with memory._connection() as conn:
+                conn.execute('INSERT INTO character_state VALUES (?,?)', ('1', json.dumps({**memory.STATE_DEFAULTS, 'revision': 224, 'hunger': 30})))
+            with caller_scope(new_run_context(interface='telegram', agent_name='roleplay', user_id='1', is_owner=True, scope_type='telegram_message', scope_id='t1')):
+                result = json.loads(memory.roleplay_state('update', changes={'mood': '기다림'}, reason='장면', expected_revision=200, change_note='위치 정정'))
+                self.assertTrue(any('오래됐지만 서술 필드만' in w for w in result['warnings']))
+                self.assertTrue(any('change_note' in w for w in result['warnings']))
+                with self.assertRaises(PermissionError):
+                    memory.roleplay_state('update', changes={'mood': '기다림'}, reason='장면', expected_revision=225, hunger=5)
+            state = memory.load_state('1')
+            self.assertEqual((state['revision'], state['mood'], state['hunger']), (225, '기다림', 30))
+            self.assertIn('change_note: 위치 정정', state['reason'])
