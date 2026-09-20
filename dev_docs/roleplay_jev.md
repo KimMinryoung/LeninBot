@@ -13,7 +13,12 @@ Telegram의 새 처리 절차는 사용자 허용 범위를 확인하고 초안�
 | 초안 연기·목적·기분·질적 관찰 | 기존 연기 모델 |
 | 정산 결과와 초안/새 기록의 서술 모순 검사 | 같은 제공자의 별도 검토 호출 |
 
-분류는 `roleplay_scene_adjudication` 등록을 사용한다. 수락 기준은 핵심 라벨(mode/event/elapsed/intensity/sexual_act/plan_action) 0.75, 보조 라벨(활동·장소·접촉·수면·부상·인물·예정 사건·holdout·bargain) 0.6이다(`CORE_LABELS`, thresholds.secondary; 2026-09-20 실제 확정 턴에서 보조 라벨 확신이 0.57~0.59로 나와 쉬운 판정이 보류되던 문제). 핵심 라벨이 핵심 mode/event/elapsed가
+분류는 `roleplay_scene_adjudication` 등록을 사용하며 세 호출로 나뉜다(`question_group`): `roleplay-scene`(mode/elapsed/plan_action/event/
+sexual_act/intensity/활동/수면/위협/접촉/고립/장소/새 부상, 현재 상태에서 15문항), `roleplay-people`(인물별 출입, 저장 인물 수만큼),
+`roleplay-records`(부상·예정 사건·holdout·bargain). 2026-09-20 이전에는 한 호출에 33문항(사건 선택지 25개, 설명 5천 자)을 얹어 항목당 확신이
+옅어졌다. people/records 호출이 실패하면 그 키만 미확정으로 남고 장면 판정은 진행된다. 수락 기준은 핵심 라벨(mode/event/elapsed/
+intensity/sexual_act/plan_action) 0.65, 보조 라벨 0.5다(`CORE_LABELS`, thresholds.accept/secondary; 확정 턴의 실측치는 쉬운 항목 0.80~0.92,
+애매한 항목 0.57~0.59였다). 핵심 라벨이 핵심 mode/event/elapsed가
 불확실하면 원칙적으로 변경을 보류한다. 단, mode/event/intensity가 확정된 즉시 사건(kindness/recognition/sexual_harassment/sexual_assault/rape/threat_to_kin/public_submission/futile_effort)은 elapsed만 불확실할 때 해당 효과를 적용하고 시간과 장면 조건은 보류한다. applied.deferred_components에 이를 표시한다. 그 외 불확실한 선택지는 기존 값을 유지하거나 초기화를 보류한다.
 분류 장애를 생성 모델로 대체하지 않는다. 이동+회복 상담은 이동 한 사건만 처리한다.
 

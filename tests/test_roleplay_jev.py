@@ -210,7 +210,7 @@ class AutomaticTransactionTests(unittest.TestCase):
 
     def test_focused_jev_retry_preserves_confident_event(self):
         def answer(label, confidence): return {'choice': label, 'confidence': confidence}
-        first = Decision(answers={'mode':answer('scene',.99), 'event':answer('public_submission',.9), 'intensity':answer('moderate',.7)}, model='jev')
+        first = Decision(answers={'mode':answer('scene',.99), 'event':answer('public_submission',.9), 'intensity':answer('moderate',.5)}, model='jev')
         second = Decision(answers={'intensity':answer('moderate',.9)}, model='jev')
         with patch.object(jev, 'decide_detailed', side_effect=[DecisionResult(decision=first),DecisionResult(decision=second)]) as decide:
             result = jev.classify('잘해 줬으니 소원을 들어주지', initial(), [], [])
