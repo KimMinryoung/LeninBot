@@ -271,7 +271,11 @@ class AuthorizeToleranceTests(unittest.TestCase):
                 'transition': {'choice': 'current', 'confidence': .5}, 'span': {'choice': 'session', 'confidence': .55}}
         profile = SimpleNamespace(extra={'enabled': True, 'thresholds': {'accept': .75}})
         with patch.object(turn, 'resolve', return_value=profile), patch.object(turn, 'decide_detailed', side_effect=[self.decision(sure), self.decision(sure)]):
-            result = turn.authorize('아침 배식이나 해라', initial(), [])
+            result = turn.decide('compatibility', {}, {k: jev.choice(k, options) for k, options in {
+                'mode': {'scene': 'scene'}, 'transition': {'current': 'current'},
+                'span': {'brief': 'brief', 'session': 'session'}, 'time_scope': {'none': 'none'}}.items()},
+                defaults={'transition': 'current', 'span': 'brief', 'time_scope': 'none'})
+            result['user_text'] = '아침 배식이나 해라'
         self.assertEqual(result['labels'], {'mode': 'scene', 'transition': 'current', 'span': 'brief', 'time_scope': 'none'})
         self.assertEqual(result['defaulted'], {'transition': 'current', 'span': 'brief', 'time_scope': 'none'})
         self.assertEqual(turn.policy_for_authorization(result).max_minutes, 10)
@@ -282,7 +286,7 @@ class AuthorizeToleranceTests(unittest.TestCase):
         profile = SimpleNamespace(extra={'enabled': True, 'thresholds': {'accept': .75}})
         with patch.object(turn, 'resolve', return_value=profile), patch.object(turn, 'decide_detailed', side_effect=[self.decision(unsure), self.decision(unsure)]):
             with self.assertRaises(jev.PendingChoice) as caught:
-                turn.authorize('의사 재방문', initial(), [])
+                turn.decide('compatibility', {}, {'mode': jev.choice('mode', {k: k for k in ('scene', 'discussion', 'plan', 'correction', 'reset')})})
         self.assertEqual(caught.exception.key, 'mode')
         self.assertEqual([k for k, _ in caught.exception.candidates], ['scene', 'discussion', 'plan', 'correction'])
         auth = {'user_text': '의사 재방문', 'labels': {'mode': 'scene', 'transition': 'current', 'span': 'brief'}}

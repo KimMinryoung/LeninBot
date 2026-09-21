@@ -24,6 +24,7 @@ class TurnTimePolicy:
     correction: bool
     explicit_passage: bool
     reset: bool = False
+    explicit_minutes: int | None = None
 
     def view(self):
         return {'max_elapsed_minutes_this_turn': self.max_minutes,
@@ -35,6 +36,9 @@ class TurnTimePolicy:
 
 def duration_minutes(user_text):
     """Parse literal durations; meaning/authorization is adjudicated separately."""
+    active = _POLICY.get()
+    if active is not None and active.user_text == normalized(user_text) and active.explicit_minutes is not None:
+        return active.explicit_minutes
     text, total = normalized(user_text), 0
     for match in _DURATION.finditer(text):
         if re.match(r'\s*(?:전|후에\s*할|뒤에\s*할)', text[match.end():]):
@@ -53,10 +57,11 @@ SESSION_MINUTES = 180
 TIME_SCOPES = ('none', 'explicit', 'open_ended', 'day_skip')
 
 
-def policy_for(user_text, *, mode='scene', time_scope='auto', span='brief', transition='current'):
-    """The turn's time permission from Jev's authorization labels. Nothing here reads
+def policy_for(user_text, *, mode='scene', time_scope='auto', span='brief', transition='current', explicit_minutes=None):
+    """The turn's time permission from the authorization LLM. Nothing here reads
     meaning out of keywords: the only text parsing is the number+unit duration
-    ("2시간", "이틀"), and even that only when the message is a scene.
+    ("2시간", "이틀") is retained for offline/legacy callers only. Telegram supplies
+    explicit_minutes from the LLM, including zero, bypassing the text parser.
 
     time_scope: none / explicit (a stated duration) / open_ended (length left to the
     character) / day_skip (move to the next day). 'auto' means explicit when a number
@@ -65,9 +70,11 @@ def policy_for(user_text, *, mode='scene', time_scope='auto', span='brief', tran
     if active is not None and active.user_text == normalized(user_text) and time_scope == 'auto' and mode == 'scene':
         return active
     text = normalized(user_text)
+    if explicit_minutes is not None and (type(explicit_minutes) is not int or not 0 <= explicit_minutes <= MAX_EXPLICIT_MINUTES):
+        raise ValueError('Invalid authorized duration')
     if mode != 'scene':
-        return TurnTimePolicy(text, DEFAULT_TURN_MINUTES, False, mode == 'correction', False, mode == 'reset')
-    total = duration_minutes(text)
+        return TurnTimePolicy(text, DEFAULT_TURN_MINUTES, False, mode == 'correction', False, mode == 'reset', explicit_minutes)
+    total = duration_minutes(text) if explicit_minutes is None else explicit_minutes
     if time_scope == 'auto':
         time_scope = 'explicit' if total else 'none'
     if time_scope not in TIME_SCOPES:
@@ -78,7 +85,7 @@ def policy_for(user_text, *, mode='scene', time_scope='auto', span='brief', tran
     if calendar:
         budget += 1440  # the skipped day itself, on top of whatever the scene then spends
     return TurnTimePolicy(text, min(MAX_EXPLICIT_MINUTES, budget), calendar, False,
-                          bool(time_scope == 'explicit' and total) or calendar)
+                          bool(time_scope == 'explicit' and total) or calendar, explicit_minutes=explicit_minutes)
 
 
 @contextmanager

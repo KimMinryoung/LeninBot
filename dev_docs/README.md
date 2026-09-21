@@ -22,6 +22,7 @@
 | `mcp_gateway.md` | Codex/Claude Code 같은 개발용 MCP client에 노출하는 읽기 중심 gateway |
 | `hot_reload_prompts.md` | 런타임 prompt overlay와 재시작 필요 경계 |
 | `roleplay_game_balance.md` | 역할극 회복 이벤트·활동 비용·반복 보상 제한·극단값 완화 |
+| `roleplay_illness.md` | 폐렴의 별도 질병 상태·판정·시간 효과·연기 및 상태 표시 |
 | `roleplay_jev.md` | 예조프 JEV 자동 분류·LLM 시간 추정·코드 수치 계산 |
 | `roleplay_progression.md` | 예조프 장면 시간·고립 부담·예정 사건·자발적 행동 |
 | `roleplay_postdraft.md` | 초안 생성 후 사건·시간 정산, 임시 기록·최종 서술 검토와 배포 상태 |

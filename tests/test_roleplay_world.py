@@ -108,7 +108,7 @@ class EventAxesTests(unittest.TestCase):
         # Leaning to none settles silently.
         lean = {'mode': 'scene', 'elapsed': '0'}
         unsure = list(jev.FAMILY_KEYS)
-        jev.settle_event_families(lean, unsure, {k: {'choice': 'none', 'confidence': .4} for k in jev.FAMILY_KEYS})
+        jev.settle_event_families(lean, unsure, {k: {'choice': 'none', 'confidence': .4, 'probabilities': {'none': .6}} for k in jev.FAMILY_KEYS})
         self.assertEqual((lean['event'], lean['events'], unsure), ('none', [], []))
 
 
@@ -129,7 +129,7 @@ class RoutineTests(unittest.TestCase):
 
     def test_explicit_passage_stops_at_routine_and_actor_is_told(self):
         state = self.routine()
-        auth = {'user_text': '밤을 넘겨 12시간 쉬어', 'labels': {'mode': 'scene', 'transition': 'current', 'span': 'brief'}}
+        auth = {'user_text': '밤을 넘겨 12시간 쉬어', 'labels': {'mode': 'scene', 'transition': 'current', 'span': 'brief', 'time_scope': 'explicit'}}
         text = '12시간 쉬어'
         auth['user_text'] = text
         self.assertEqual(turn.expected_stop(auth, state), {'title': '06:00 아침 배식', 'minutes': 600})
@@ -153,7 +153,7 @@ class RoutineTests(unittest.TestCase):
     def test_prepare_accepts_an_announced_stop_only_for_explicit_passages(self):
         state = self.routine()
         state['participants'] = []
-        auth = {'user_text': '12시간 쉬어', 'labels': {'mode': 'scene', 'transition': 'current', 'span': 'brief'}}
+        auth = {'user_text': '12시간 쉬어', 'labels': {'mode': 'scene', 'transition': 'current', 'span': 'brief', 'time_scope': 'explicit'}}
         verdict = {'status': 'classified', 'labels': {'mode': 'scene', 'event': 'none', 'activity': 'rest', 'location': 'keep'}, 'uncertain': [], 'answers': {}, 'model': 't', 'draft': '초안'}
         with patch.object(turn, 'review_reply', return_value={'approved': True, 'issues': []}):
             prepared = turn.prepare('12시간 쉬어', state, [], [], '9', '초안', auth, None, verdict)

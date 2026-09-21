@@ -1,6 +1,7 @@
 """Deterministic fictional state progression; rates are game tuning, not medicine."""
 from copy import deepcopy
 from runtime_tools.roleplay_clock import clock_defaults
+from runtime_tools import roleplay_illness as illness
 
 PHYSICAL_METRICS = ("hunger", "fatigue", "pain", "tension")
 # Mental axes: resolve/clarity read 100 = strong/lucid, humiliation reads 100 = extreme.
@@ -126,7 +127,7 @@ DYNAMICS_DEFAULTS = {
     "revision": 0, "scene_minute": 0, "last_calculated_minute": 0,
     "time_basis": "현재 저장 상태를 기준 시점(0분)으로 삼음. 이전 경과 시간은 재계산하지 않음.",
     "activity": "rest", "sleep_quality": "normal", "threat": "uncertain",
-    "injuries": [], "conditions_initialized": False, "recent_events": [], "calm_minutes": 0, "isolation_minutes": 0,
+    "illnesses": [], "injuries": [], "conditions_initialized": False, "recent_events": [], "calm_minutes": 0, "isolation_minutes": 0,
     "last_calculation": None, "clock": None, "event_timestamps": [], "resolve_events": [],
     "social_contact": "unknown", "isolation_mode": "unknown", "alone_rest_minutes": 0,
     "wakefulness_minutes": 0, "story_events": [], "story_interrupt": None, "metric_remainders": {},
@@ -143,6 +144,8 @@ def with_defaults(state):
 
 
 def validate_conditions(changes):
+    if "illnesses" in changes:
+        illness.validate_illnesses(changes["illnesses"])
     enums = {"activity": ACTIVITIES, "sleep_quality": SLEEP_QUALITY, "threat": THREAT_TARGETS,
              "social_contact": SOCIAL_CONTACTS, "isolation_mode": ISOLATION_MODES}
     for key, allowed in enums.items():
@@ -218,7 +221,7 @@ def clarity_drain_rate(state):
         drain += CLARITY_IMMEDIATE_THREAT_DRAIN
     if any(i["severity"] == 3 and i["trend"] == "worsening" and not i["treated"] for i in state.get("injuries", [])):
         drain += CLARITY_FEVER_DRAIN
-    return drain
+    return drain + illness.rates(state.get("illnesses", []))["clarity"]
 
 
 def holdout_titles(state, status="held"):
@@ -451,6 +454,7 @@ def advance(state, target_minute, time_basis):
         raise ValueError("Explain the fictional elapsed time in time_basis (1–300 characters)")
     threat_relieved = False
     conditions = {k: deepcopy(state[k]) for k in REQUIRED_CONDITIONS}
+    conditions["illnesses"] = deepcopy(state.get("illnesses", []))
     conditions.update({k: state.get(k, "unknown") for k in ("social_contact", "isolation_mode")})
     result = deepcopy(state)
     injury_changes = []
@@ -519,6 +523,7 @@ def _step(state, minutes):
         fatigue_rate *= SLEEP_QUALITY[state["sleep_quality"]]
     if activity in ("rest", "sleep") and pain is not None and pain >= PAIN_HINDERS_REST:
         fatigue_rate /= 2
+    fatigue_rate += illness.rates(state.get("illnesses", []))["fatigue"]
     movement = MOVEMENT_PAIN[activity]
     pain_rate = sum(i["severity"] * (PAIN_DRIFT[i["trend"]][i["treated"]] + movement) for i in state["injuries"])
     floor = injury_pain_floor(state["injuries"])
@@ -547,6 +552,7 @@ def _step(state, minutes):
                 raw = max(raw, min(state[key], CLARITY_DRAIN_FLOOR))
             result[key] = round(raw, 4)
             result.setdefault("metric_remainders", {})[key] = raw - result[key]
+    result["illnesses"] = illness.advance_illnesses(state.get("illnesses", []), minutes)
     result["injuries"], injury_changes = progress_injuries(state["injuries"], minutes)
     return result, injury_changes, target
 

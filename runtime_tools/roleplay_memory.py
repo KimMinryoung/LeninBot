@@ -336,7 +336,7 @@ def state_view(state: dict) -> dict:
         value = state.get(key)
         view[key] = None if value is None else round(value, 1)
     for key in ("body", "mood", "scene", *sorted(SCENE_TEXT_FIELDS), "participants", "activity", "sleep_quality",
-                "threat", "injuries", "social_contact", "isolation_mode", "conditions_initialized", "scene_minute", "last_calculated_minute", "time_basis", "reason"):
+                "threat", "illnesses", "injuries", "social_contact", "isolation_mode", "conditions_initialized", "scene_minute", "last_calculated_minute", "time_basis", "reason"):
         view[key] = state.get(key)
     if not view.get("period"):
         view.pop("period", None)
@@ -622,7 +622,7 @@ def roleplay_state(action: str, changes: dict | None = None, reason: str = "", *
             return json.dumps([actor_state_view(record.get("after", {})) for record in records], ensure_ascii=False)
         for record in records:
             for side in ("before", "after"):
-                record[side] = {k: record[side].get(k) for k in (*METRICS, "scene_minute", "activity", "sleep_quality", "threat", "injuries", "clock")}
+                record[side] = {k: record[side].get(k) for k in (*METRICS, "scene_minute", "activity", "sleep_quality", "threat", "illnesses", "injuries", "clock")}
         return json.dumps(records, ensure_ascii=False)
     actor_scope = caller.scope_type == "telegram_message"
     actor_warnings: list[str] = []

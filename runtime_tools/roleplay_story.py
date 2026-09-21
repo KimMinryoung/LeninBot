@@ -135,7 +135,8 @@ def advance_to_event(state, target, basis, advance_fn):
     result = advance_fn(state, stop, basis)
     result["story_interrupt"] = None
     refresh_events(result)
-    ready = [e["id"] for e in result.get("story_events", []) if e["status"] == "ready"]
+    # Narrative cues may also be ready, but must never become clock barriers.
+    ready = [e["id"] for e in blocking_events(result, 0) if e["status"] == "ready"]
     if ready:
         result["story_interrupt"] = {"event_ids": ready, "requested_minute": target,
                                      "stopped_minute": stop, "remaining_minutes": target - stop}

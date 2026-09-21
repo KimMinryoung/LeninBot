@@ -35,6 +35,8 @@ def actor_state_view(state):
     view['activity'] = {'rest':'깨어 쉬는 중', 'light':'가벼운 움직임·대화', 'moderate':'몸을 쓰는 활동',
                         'strenuous':'격렬히 움직이는 중', 'sleep':'잠든 상태', 'restrained':'억제되거나 얼어붙어 움직이지 못하는 상태', 'self_care':'스스로 몸과 마음을 돌보는 중', 'focused_work':'작은 목적 있는 일에 집중하는 중'}.get(state.get('activity'), '미확인')
     view['threat'] = {'safe':'현재 드러난 위협 없음', 'uncertain':'안전을 확신할 수 없음', 'threatening':'위협이 존재함', 'immediate':'당장의 위협 아래 있음'}.get(state.get('threat'), '미확인')
+    from runtime_tools.roleplay_illness import actor_view
+    view['illnesses'] = actor_view(state.get('illnesses', []))
     view['injuries'] = [{'description': injury.get('description'),
                         'severity': {1:'경미', 2:'뚜렷함', 3:'심함'}.get(injury.get('severity'), '미확인'),
                         'condition': {'stable':'지속', 'recovering':'회복 중', 'worsening':'악화 중'}.get(injury.get('trend'), '미확인'),

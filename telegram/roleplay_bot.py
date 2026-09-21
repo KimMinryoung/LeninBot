@@ -34,6 +34,7 @@ from llm.tool_loop_common import EMPTY_RESPONSE_FALLBACK
 from runtime_tools.roleplay_jev import adjudicate_turn, PendingChoice
 from runtime_tools.roleplay_actor import actor_state_view
 from runtime_tools import roleplay_turn
+from runtime_tools.roleplay_time import TimeAuthorizationUnavailable
 from runtime_tools.roleplay_dynamics import with_defaults, holdout_titles, open_bargains, routine_occurrences
 from runtime_tools.roleplay_pacing import policy_for, turn_time_scope
 from runtime_tools.roleplay_memory import (load_notes, load_state, load_people, people_context, excluded_history_ids,
@@ -376,11 +377,12 @@ def _track_display(state: dict) -> str:
 @router.message(Command("status"))
 async def cmd_status(message: Message) -> None:
     state = dict(await asyncio.to_thread(load_state, message.from_user.id))
-    detailed = (getattr(message, "text", "") or "").split()[1:] in (["상세"], ["detail"])
     people = await asyncio.to_thread(people_context, message.from_user.id, state.get("participants", []))
     names = {p["person_id"]: p["name"] for p in people.get("index", [])}
     state["participants"] = ", ".join(names.get(pid, pid) for pid in state.get("participants", [])) or "아직 지정되지 않음"
     state["saved_people"] = f"{len(names)}명 — /people로 확인"
+    from runtime_tools.roleplay_illness import display as illness_display
+    state["illness_display"] = illness_display(state.get("illnesses", []))
     activities = {"rest": "휴식", "light": "가벼운 활동", "moderate": "보통 활동", "strenuous": "격한 활동", "sleep": "수면", "restrained": "억제·동결 상태", "self_care": "자기 돌봄", "focused_work": "목적 있는 작업"}
     threats = {"safe": "안전", "uncertain": "불확실", "threatening": "위협 지속", "immediate": "즉각적 위협"}
     state["activity"] = activities.get(state.get("activity"), "미설정")
@@ -405,7 +407,7 @@ async def cmd_status(message: Message) -> None:
         if event.get("after_event"):
             timing += f" · {event['after_event']} 완료 조건"
         event_lines.append(f"{event['title']} ({timing})")
-    state["upcoming"] = "; ".join(event_lines[:5]) + (f" 외 {len(event_lines) - 5}건" if len(event_lines) > 5 else "")
+    state["upcoming"] = "\n".join("• " + line for line in event_lines) or "등록 없음"
     held, lost = holdout_titles(state, "held"), holdout_titles(state, "lost")
     state["holdouts_display"] = ("; ".join(held) if held else "등록 없음") + (f" / 넘긴 것: {'; '.join(lost)}" if lost else "")
     state["bargains_display"] = "; ".join(f"{b['request']} ← {b['price']}" + (" (값 치름)" if b.get("paid") else "") for b in open_bargains(state)) or "등록 없음"
@@ -417,7 +419,7 @@ async def cmd_status(message: Message) -> None:
         applied = [k for k in ("pain", "fatigue", "isolation", "repeat", "cap") if k in factors]
         state["resolve_event"] = (f"{factors.get('label', last_resolve['kind'])} 강도 {last_resolve['intensity']} → {last_resolve['delta']:+g} "
                                   f"({last_resolve['from']:g}→{last_resolve['to']:g})" + (f", 적용 배율: {', '.join(applied)}" if applied else ""))
-    state["injuries"] = "; ".join(f"{i['description']} (심각도 {i['severity']}, {trends[i['trend']]}, {'처치함' if i['treated'] else '미처치'})" for i in state.get("injuries", [])) or "등록 없음"
+    state["injuries"] = "\n".join(f"• {i['description']}\n  심각도 {i['severity']}/3 · {trends[i['trend']]} · {'처치함' if i['treated'] else '미처치'}" for i in state.get("injuries", [])) or "등록 없음"
     if not state.get("conditions_initialized"):
         state["injuries"] += " — 시간 계산 조건 미확인"
     from runtime_tools.roleplay_dynamics import METRICS
@@ -446,34 +448,40 @@ async def cmd_status(message: Message) -> None:
         return str(value)
 
     mental = {"resolve": "의지", "clarity": "명료함", "humiliation": "굴욕"}
-    lines = ["인물 상태 (0–100)", " · ".join(f"{label}: {display(state.get(key))}" for key, label in metrics.items()),
-             "정신 상태 (의지·명료함 100=굳건·또렷, 굴욕 100=극심)",
-             " · ".join(f"{label}: {display(state.get(key))}" for key, label in mental.items())]
-    labels = {"calendar_display": "시각", "location": "장소", "participants": "현재 장면 인물", "saved_people": "저장된 인물",
-              "body": "몸 상태", "mood": "기분", "activity": "활동",
-              "last_event": "직전 사건", "goal": "목적", "unresolved": "미해결", "upcoming": "예정 사건",
-              "holdouts_display": "아직 지키는 것", "bargains_display": "열린 거래", "track_display": "실존 궤도"}
     if not state.get("conditions_initialized"):
         state["activity"] = "미확인"
-    if not clock["elapsed_complete"]:
-        labels["time_gaps"] = "시간 계산 공백"
-    if detailed:
-        labels.update({"avoid": "피하려는 결과", "next_action": "다음 시도",
-                       "time_certainty": "시간 확실성", "relative_day": "상대 일자",
-                       "time_evidence": "최근 시간 해석", "scene_minute": "장면 경과(미상 구간 추정 포함, 분)",
-                       "last_calculated_minute": "마지막 계산(분)", "time_basis": "시간 근거",
-                       "sleep_quality": "수면의 질", "threat": "위협 상태",
-                       "injuries": "세부 부상", "pain_floor": "부상 기저 통증",
-                       "isolation": "고립 누적 부담(게임 환산)", "contact_display": "교류",
-                       "isolation_display": "고립 환경", "wakefulness": "각성 누적", "calm": "조용한 시간", "resolve_event": "최근 의지 사건",
-                       "routine_display": "감옥 일과",
-                       "reason": "최근 변경 이유"})
-    lines.extend(f"{label}: {display(state.get(key))}" for key, label in labels.items()
-                 if key in {"calendar_display", "location", "participants"} or state.get(key) not in (None, "", "미설정", "등록 없음"))
+    lines = ["📋 예조프 상태", state["calendar_display"],
+             f"장소: {display(state.get('location'))}",
+             "", "📊 수치 · 0–100",
+             " · ".join(f"{label}: {display(state.get(key))}" for key, label in metrics.items()),
+             " · ".join(f"{label}: {display(state.get(key))}" for key, label in mental.items()),
+             "의지·명료함은 높을수록 굳건·또렷, 굴욕은 높을수록 심함"]
+
+    def section(title, fields):
+        lines.extend(["", title])
+        for key, label in fields:
+            value = state.get(key)
+            shown = "기록 없음" if value in (None, "", "미설정") else display(value)
+            lines.append(f"{label}:\n{shown}" if "\n" in shown else f"{label}: {shown}")
+
+    section("🩺 몸과 질병", [("illness_display", "질병"), ("body", "몸 상태"),
+            ("injuries", "세부 부상"), ("pain_floor", "부상 기저 통증")])
+    section("🛏 활동과 환경", [("activity", "활동"), ("sleep_quality", "수면의 질"),
+            ("threat", "위협 상태"), ("participants", "현재 장면 인물"),
+            ("contact_display", "교류"), ("isolation_display", "고립 환경"),
+            ("isolation", "고립 누적 부담(게임 환산)"), ("wakefulness", "각성 누적"), ("calm", "조용한 시간")])
+    section("💭 마음과 장면", [("mood", "기분"), ("scene", "현재 장면"), ("last_event", "직전 사건"),
+            ("goal", "목적"), ("avoid", "피하려는 결과"), ("next_action", "다음 시도"),
+            ("unresolved", "미해결"), ("holdouts_display", "아직 지키는 것"),
+            ("bargains_display", "열린 거래"), ("resolve_event", "최근 의지 사건")])
+    section("📅 예정과 기록", [("upcoming", "예정 사건"), ("routine_display", "감옥 일과"),
+            ("track_display", "실존 궤도"), ("saved_people", "저장된 인물")])
+    section("⏱ 시간 계산 근거", [("time_certainty", "시간 확실성"), ("relative_day", "상대 일자"),
+            ("scene_minute", "장면 경과(미상 구간 추정 포함, 분)"), ("last_calculated_minute", "마지막 계산(분)"),
+            ("time_gaps", "시간 계산 공백"), ("time_evidence", "최근 시간 해석"),
+            ("time_basis", "시간 근거"), ("reason", "최근 변경 이유")])
     if (state.get("resolve") is not None and state["resolve"] <= 25) or (state.get("humiliation") is not None and state["humiliation"] >= 75):
-        lines.append("회복 경로: 작은 선택·과제 완수·경계 존중·지지 대화. 여건이 되면 자기 돌봄이나 목적 있는 작업도 가능.")
-    if not detailed:
-        lines.append("계산 근거·세부 부상: /status 상세")
+        lines.extend(["", "회복 경로: 작은 선택·과제 완수·경계 존중·지지 대화. 여건이 되면 자기 돌봄이나 목적 있는 작업도 가능."])
 
     for chunk in split_message("\n".join(lines)):
         await message.answer(chunk)
@@ -546,6 +554,12 @@ async def handle_message(message: Message) -> None:
             "history": history, "state": state, "notes": notes, "people": people}
     try:
         authorization = await asyncio.to_thread(roleplay_turn.authorize, user_text, state, history)
+    except TimeAuthorizationUnavailable as exc:
+        logger.exception("roleplay time provider unavailable")
+        await asyncio.to_thread(_drop_unsettled, user_id, turn, str(exc))
+        await message.answer("시간 판정 모델 서비스에 연결하지 못해 이번 진행은 저장하지 않았어. "
+                             "지시 내용이 잘못된 건 아니야. 잠시 후 같은 메시지를 다시 보내줘.")
+        return
     except PendingChoice as exc:
         # Jev could not tell whether this is a scene to play or a question to answer.
         if await asyncio.to_thread(_asks_player, user_id):

@@ -25,6 +25,33 @@ def verdict(**labels):
 
 
 class ProjectionTests(unittest.TestCase):
+    def test_location_options_do_not_depend_on_literal_spelling(self):
+        for text in ('취조실로 데려가', 'Return to the cell', '그곳으로 돌아간다'):
+            options = jev.build_questions(initial(), [], text)['location']['criteria']
+            self.assertTrue(set(jev.LOCATIONS) <= options.keys())
+
+    def test_low_confidence_none_does_not_erase_an_event(self):
+        for probability in (None, .3, float('nan'), 2):
+            labels, uncertain = {}, ['event_harm']
+            jev.settle_event_families(labels, uncertain, {'event_harm': {
+                'choice': 'none', 'confidence': .2, 'probabilities': {'none': probability}}})
+            self.assertNotIn('event_harm', labels)
+            self.assertIn('event_harm', uncertain)
+
+    def test_fixed_reward_does_not_reduce_simultaneous_harm_intensity(self):
+        state, _ = self.project('현재 장면', event='beating', event_harm='beating',
+                                event_relief='kindness', intensity='severe', elapsed='0')
+        self.assertEqual(state['pain'], initial()['pain'] + 15)
+        with self.assertRaises(jev.PendingChoice):
+            self.project('현재 장면', event='beating', event_harm='beating',
+                         event_relief='kindness', elapsed='0')
+
+    def test_past_negation_does_not_override_current_act_label(self):
+        state, applied = self.project('과거 기록에는 no penetration이라고 적혀 있다. 현재 사건은 별도로 판정한다.',
+                                      event='rape', sexual_act='penetration', intensity='moderate', elapsed='0')
+        self.assertEqual(applied['event'], 'rape')
+        self.assertLess(state['resolve'], initial()['resolve'])
+
     def project(self, text, state=None, **labels):
         with turn_time_scope(policy_for(text, mode=labels.get('mode', 'scene'))):
             return jev.project(state or initial(), text, [], verdict(**labels), 'test')
@@ -108,7 +135,7 @@ class ProjectionTests(unittest.TestCase):
         self.assertNotIn('sexual_coercion', jev.build_questions(initial(),[])['event_harm']['criteria'])
 
     def test_no_penetration_and_unknown_act_cannot_be_rape(self):
-        for text, event, act in [('삽입 없음','rape','penetration'),('삽입은 하지 않았다','rape','penetration'),('추행했다','rape','touch'),('성적 가해','sexual_unspecified','unknown')]:
+        for text, event, act in [('삽입 없음','rape','touch'),('삽입은 하지 않았다','rape','none'),('추행했다','rape','touch'),('성적 가해','sexual_unspecified','unknown')]:
             with self.assertRaises(ValueError): self.project(text, event=event, sexual_act=act, intensity='moderate', elapsed='0')
 
     def test_confirmed_nonpenetrative_event_survives_unknown_time(self):
@@ -131,9 +158,13 @@ class ProjectionTests(unittest.TestCase):
         with self.assertRaises(ValueError): self.project('가해가 계속됐다',event='rape',sexual_act='penetration',intensity='moderate',activity='rest')
 
     def test_correction_and_unknown_initial_values(self):
-        fixed, _ = self.project('의지를 40으로 정정해',mode='correction')
+        text = '의지를 40으로 정정해'
+        v = verdict(mode='correction')
+        v['authorization'] = {'user_text': text, 'labels': {'mode': 'correction'}, 'corrections': {'resolve': 40}}
+        with turn_time_scope(policy_for(text, mode='correction')):
+            fixed, _ = jev.project(initial(), text, [], v, 'fix')
         self.assertEqual(fixed['resolve'],40)
-        # Whether a message is a correction is Jev's mode label, not a keyword; a question settles as no change.
+        # Discussion mode never applies a numeric correction.
         asked, applied = self.project('의지 40이면 어떻게 돼?',mode='discussion')
         self.assertTrue(applied['no_change']); self.assertEqual(asked['resolve'], initial()['resolve'])
         with self.assertRaises(ValueError):
@@ -214,15 +245,16 @@ class AutomaticTransactionTests(unittest.TestCase):
     def test_focused_jev_retry_preserves_confident_event(self):
         def answer(label, confidence): return {'choice': label, 'confidence': confidence}
         first = Decision(answers={'mode':answer('scene',.99), 'event_pressure':answer('public_submission',.9), 'intensity':answer('moderate',.5),
-                                 **{k:answer('none',.9) for k in jev.FAMILY_KEYS if k != 'event_pressure'}}, model='jev')
-        second = Decision(answers={'intensity':answer('moderate',.9)}, model='jev')
-        with patch.object(jev, 'decide_detailed', side_effect=[DecisionResult(decision=first),DecisionResult(decision=second)]) as decide:
+                                 **{k:answer('none',.9) for k in jev.FAMILY_KEYS if k != 'event_pressure'}}, model='jev', cost_usd=.001)
+        second = Decision(answers={'intensity':answer('moderate',.9)}, model='jev', cost_usd=.002)
+        with patch.object(jev, 'decide_detailed', side_effect=[DecisionResult(decision=first),DecisionResult(decision=Decision(answers={}, model="jev")),DecisionResult(decision=second)]) as decide:
             result = jev.classify('잘해 줬으니 소원을 들어주지', initial(), [], [])
         self.assertEqual(result['labels']['event'], 'public_submission')
         self.assertEqual(result['labels']['events'], ['public_submission'])
         self.assertEqual(result['labels']['intensity'], 'moderate')
-        self.assertEqual(set(decide.call_args_list[1].args[2]), {'intensity'})
+        self.assertEqual(set(decide.call_args_list[2].args[2]), {'intensity'})
         self.assertEqual(result['event_review']['answers'], second.answers)
+        self.assertAlmostEqual(result['cost_usd'], .003)
 
     def test_real_adapter_rejects_malformed_and_low_confidence(self):
         d=Decision(answers={'mode':{'choice':'scene','confidence':.2},'event':{'choice':'invented','confidence':1}},model='jev')

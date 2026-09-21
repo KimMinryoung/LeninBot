@@ -5,6 +5,7 @@ from copy import deepcopy
 from pathlib import Path
 from unittest.mock import patch
 from types import SimpleNamespace
+from llm.call_registry import Decision, DecisionResult
 
 from runtime_tools import roleplay_memory as memory, roleplay_turn as turn, roleplay_jev as jev
 from runtime_tools.roleplay_dynamics import with_defaults
@@ -12,6 +13,17 @@ from tool_gateway.security import caller_scope, new_run_context
 
 
 class PostDraftTests(unittest.TestCase):
+    def test_pending_candidates_use_latest_retry_probabilities(self):
+        results = [DecisionResult(decision=Decision(model='test', answers={'mode': {
+            'choice': label, 'confidence': .4, 'probabilities': probabilities}}))
+            for label, probabilities in [('scene', {'scene': .6, 'discussion': .4}),
+                                          ('discussion', {'scene': .3, 'discussion': .7})]]
+        with patch.object(turn, 'resolve', return_value=SimpleNamespace(extra={'enabled': True})), \
+             patch.object(turn, 'decide_detailed', side_effect=results), \
+             self.assertRaises(jev.PendingChoice) as caught:
+            turn.decide('test', {}, {'mode': jev.choice('mode', {'scene': 'scene', 'discussion': 'discussion'})})
+        self.assertEqual(caught.exception.candidates[0][0], 'discussion')
+
     def setUp(self):
         temp=tempfile.TemporaryDirectory();self.addCleanup(temp.cleanup)
         p=patch.object(memory,'MEMORY_PATH',Path(temp.name)/'state.sqlite3');p.start();self.addCleanup(p.stop)
@@ -78,6 +90,35 @@ class PostDraftTests(unittest.TestCase):
              patch.object(jev,'estimate_duration',return_value={'elapsed_minutes':90}), patch.object(turn,'review_reply',return_value={'approved':True,'issues':[]}):
             prepared=turn.prepare(self.text,self.before,[],[],'77','감방에서 자고 다음 날 식사했다',self.auth)
         gate.assert_not_called(); self.assertTrue(prepared['verdict']['scope_review']['skipped'])
+
+    def test_review_failure_does_not_discard_or_falsely_approve_turn(self):
+        with patch.object(jev, 'classify', return_value=deepcopy(self.verdict)), \
+             patch.object(jev, 'estimate_duration', return_value={'elapsed_minutes': 5}), \
+             patch.object(turn, 'review_reply', side_effect=ValueError('최종 서술 검토 응답 형식 오류')):
+            prepared = turn.prepare(self.text, self.before, [], [], 'review-down', '초안', self.auth)
+        self.assertIsNone(prepared['verdict']['final_review']['approved'])
+        self.assertTrue(prepared['applied']['review_unavailable'])
+        self.assertEqual(memory.load_state('1'), self.before)
+        committed = jev.adjudicate_turn('1', self.text, [], 'review-down', prepared=prepared)
+        self.assertEqual(committed['status'], 'applied')
+        self.assertEqual(committed['reply'], '초안')
+
+    def test_ready_narrative_cue_does_not_block_short_scene_or_next_morning(self):
+        from runtime_tools.roleplay_story import apply_story_updates
+        before = apply_story_updates({**self.before, 'participants': []}, [{
+            'op': 'schedule', 'id': 'delayed-reaction-1565', 'when_alone': True,
+            'title': '혼자 있을 때 반응', 'source': '포화'}])
+        for transition in ('current', 'next_morning'):
+            auth = {'user_text': '몸을 살핀다', 'labels': {'mode': 'scene', 'transition': transition,
+                    'time_scope': 'none' if transition == 'current' else 'day_skip', 'span': 'brief'}}
+            v = {'status': 'classified', 'labels': {'mode': 'scene', 'event': 'none', 'activity': 'light'},
+                 'uncertain': [], 'model': 'test'}
+            with self.subTest(transition=transition), patch.object(jev, 'classify', return_value=v), \
+                 patch.object(jev, 'estimate_duration', return_value={'elapsed_minutes': 5}), \
+                 patch.object(turn, 'review_reply', return_value={'approved': True, 'issues': []}):
+                prepared = turn.prepare('몸을 살핀다', before, [], [], 'cue', '몸을 살폈다', auth)
+            self.assertFalse(prepared['applied'].get('interrupted'))
+            self.assertEqual(prepared['applied']['minutes'], 5)
         self.assertEqual(memory.load_state('1'),self.before)
 
     def test_concurrent_notes_conflict_rolls_back_state_and_records(self):

@@ -453,7 +453,7 @@
     "thinking": {
       "type": "disabled"
     },
-    "note": "단일 사건 소요 분만 추정. 분류·수치 변화는 선택하지 않음. 명시적 시간은 코드가 원문에서 파싱. dev_docs/roleplay_jev.md"
+    "note": "초안의 실제 단일 사건 소요 분만 추정. 명시 기간과 시간 허가는 roleplay_time_authorization의 LLM 판정 사용."
   },
   "roleplay_scene_consistency": {
     "provider": "deepseek_anthropic",
@@ -465,6 +465,31 @@
       "type": "disabled"
     },
     "note": "기존 역할극 연기 모델과 동일한 endpoint. 초안·질적 상태·이번에 변경한 기록만 서술 모순 검사. 사건/활동 분류와 수치 계산 금지.",
-    "enabled": true
+    "enabled": true,
+    "jev_precheck": true
+  },
+  "roleplay_consistency_screen": {
+    "provider": "typesafe",
+    "model": "jev-1.13.0",
+    "timeout": 10,
+    "retries": 0,
+    "kind": "system_one",
+    "enabled": true,
+    "thresholds": {
+      "accept": 0.9
+    },
+    "note": "예조프 서술 모순 선별. 확신 있는 consistent만 생성 검토 생략. 모순·저신뢰·장애는 기존 DeepSeek 상세 검토. 재시도 없음."
+  },
+  "roleplay_time_authorization": {
+    "provider": "deepseek",
+    "model": "deepseek-flash",
+    "temperature": 0,
+    "max_tokens": 768,
+    "timeout": 20,
+    "json_mode": true,
+    "thinking": {
+      "type": "disabled"
+    },
+    "note": "시간 허가·장면 범위·선택된 명시 기간은 초안 전 LLM 한 번으로 판정. 과거/부정/계획 기간을 합산하지 않는다. 초안 후 실제 소요 추정은 별도 호출."
   }
 }
