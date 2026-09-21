@@ -11,6 +11,35 @@ from llm.call_registry import Decision, DecisionResult
 
 
 class TimeAuthorizationTests(unittest.TestCase):
+    def test_evening_endpoint_uses_routine_and_passes_the_full_explicit_interval(self):
+        before = initial()
+        before['clock'].update(date='1939-04-28', time='14:35')
+        before['routine'] = [{'id': 'dinner', 'time': '18:00', 'title': '저녁 배식', 'kind': 'meal'}]
+        text = '(저녁까지 시간을 보낸다)'
+        value = dict(mode='scene', transition='current', span='brief', time_scope='explicit',
+                     duration_minutes=205, corrections={}, appointment=None, reason='18:00 저녁 배식까지')
+        result = SimpleNamespace(text=json.dumps(value), error_kind=None, truncated=False, latency_ms=1)
+        with patch.object(timing, 'generate_detailed', return_value=result) as generate:
+            auth = turn.authorize(text, before, [])
+        self.assertEqual(json.loads(generate.call_args.args[1])['current']['routine'], before['routine'])
+        self.assertEqual(turn.policy_for_authorization(auth).max_minutes, 205)
+        self.assertEqual(turn.expected_stop(auth, before), {'title': '18:00 저녁 배식', 'minutes': 205})
+        verdict = {'status': 'classified', 'labels': {'mode': 'scene', 'event': 'none', 'activity': 'rest'}}
+        with patch.object(jev, 'classify', return_value=verdict), patch.object(jev, 'estimate_duration') as estimate, \
+             patch.object(turn, 'review_reply', return_value={'approved': True, 'issues': []}):
+            prepared = turn.prepare(text, before, [], [], 'evening', '저녁 배식이 왔다.', auth)
+        estimate.assert_not_called()
+        self.assertEqual(prepared['applied']['minutes'], 205)
+        self.assertEqual(prepared['state']['clock']['time'], '18:00')
+
+    def test_open_rest_direction_cannot_reach_a_later_mentioned_appointment(self):
+        auth = self.authorize('(밥 먹고 쉬어. 밤 9시에 심문이 있다.)', time_scope='open_ended', duration_minutes=0)
+        before = initial()
+        before['clock'].update(date='1939-04-28', time='17:35')
+        direction = turn.direction(auth, before)
+        self.assertIn('1939-04-28 17:35', direction)
+        self.assertIn('1939-04-28 20:35', direction)
+
     def authorize(self, text, **changes):
         value = dict(mode='scene', transition='current', span='brief', time_scope='explicit',
                      duration_minutes=20, corrections={}, appointment=None, reason='Only the current rest is authorized')

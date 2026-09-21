@@ -143,10 +143,21 @@ class PostDraftTests(unittest.TestCase):
             with self.subTest(text=text,truncated=truncated,error=error), patch.object(turn,'resolve',return_value=profile), patch.object(turn,'resolve_provider_connection',return_value=connection), patch.object(turn,'generate_detailed',return_value=SimpleNamespace(text=text,truncated=truncated,error_kind=error)):
                 with self.assertRaises(ValueError):turn.review_reply('draft',self.before,self.before)
 
-    def test_review_export_is_disabled_until_approved(self):
-        with patch.object(turn,'resolve',return_value=SimpleNamespace(extra={'enabled':False})), patch.object(turn,'generate_detailed') as generate:
-            with self.assertRaises(ValueError):turn.review_reply('draft',self.before,self.before)
+    def test_disabled_review_skips_both_models_without_warning_or_false_approval(self):
+        with patch.object(turn,'resolve',return_value=SimpleNamespace(extra={'enabled':False})), \
+             patch.object(turn,'generate_detailed') as generate, patch.object(turn,'screen_reply') as screen, \
+             patch.object(jev,'classify',return_value=deepcopy(self.verdict)), \
+             patch.object(jev,'estimate_duration',return_value={'elapsed_minutes':5}):
+            prepared=turn.prepare(self.text,self.before,[],[],'review-off','초안',self.auth)
         generate.assert_not_called()
+        screen.assert_not_called()
+        self.assertEqual(prepared['verdict']['final_review'],
+                         {'approved':None,'issues':[],'status':'skipped','reason':'disabled'})
+        self.assertNotIn('review_unavailable',prepared['applied'])
+        self.assertNotIn('review_issues',prepared['applied'])
+        committed=jev.adjudicate_turn('1',self.text,[],'review-off',prepared=prepared)
+        self.assertEqual(committed['status'],'applied')
+        self.assertEqual(committed['reply'],'초안')
 
     def test_review_requires_actor_endpoint_and_only_sends_changed_records(self):
         import bot_config

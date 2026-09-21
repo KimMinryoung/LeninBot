@@ -42,13 +42,16 @@ class ReviewScreenTests(unittest.TestCase):
         state = with_defaults(dict(STATE_DEFAULTS))
         stage = {'baseline': {'notes': [('old', 'private')]},
                  'records': {'notes': [('old', 'private'), ('new', 'changed')]}}
+        state['location'] = '감방'
+        contradiction = {'explanation': 'location conflict', 'claims': [
+            {'source': 'draft', 'quote': '심문실'}, {'source': 'settled_state', 'quote': '감방'}]}
         for clean in (True, False):
             with self.subTest(clean=clean), patch.object(turn, 'resolve', return_value=profile), \
                  patch.object(turn, 'resolve_provider_connection', return_value=connection), \
                  patch.object(turn, 'screen_reply', return_value={'clean': clean}) as screen, \
                  patch.object(turn, 'generate_detailed', return_value=SimpleNamespace(
-                     text='{"approved":false,"issues":["location conflict"]}', error_kind=None, truncated=False)) as generate:
-                result = turn.review_reply('draft', state, state, stage, applied={'events': ['water'], 'minutes': 45, 'intensity': 'mild'})
+                     text=json.dumps({'approved': False, 'issues': [contradiction]}), error_kind=None, truncated=False)) as generate:
+                result = turn.review_reply('심문실', state, state, stage, applied={'events': ['water'], 'minutes': 45, 'intensity': 'mild'})
                 self.assertEqual(generate.call_count, int(not clean))
                 self.assertEqual(result['approved'], clean)
                 self.assertEqual(result['screen'], {'clean': clean})
@@ -61,3 +64,36 @@ class ReviewScreenTests(unittest.TestCase):
                     self.assertEqual(json.loads(generate.call_args.args[1])['settled_events'], ['물'])
                 if not clean:
                     self.assertEqual(result['issues'], ['location conflict'])
+                    self.assertEqual(result['evidence'], [contradiction])
+
+    def test_unrecorded_past_visit_cannot_supply_a_conflicting_quote(self):
+        payload = {'draft': '24일에 앉았던 방이다.', 'settled_state': {'location': '심문실'}}
+        issue = {'explanation': '과거 방문이 기록에 없다.', 'claims': [
+            {'source': 'draft', 'quote': '24일에 앉았던 방이다.'},
+            {'source': 'settled_state', 'quote': '24일에 방문하지 않았다'}]}
+        with self.assertRaises(ValueError):
+            review.validate_review({'approved': False, 'issues': [issue]}, payload)
+
+    def test_stale_before_location_is_not_endpoint_evidence(self):
+        payload = {'draft': '지하 2층 심문실', 'before': {'location': '감방'},
+                   'settled_state': {'location': '심문실'}}
+        issue = {'explanation': '장소 충돌', 'claims': [
+            {'source': 'draft', 'quote': '지하 2층 심문실'}, {'source': 'before', 'quote': '감방'}]}
+        with self.assertRaises(ValueError):
+            review.validate_review({'approved': False, 'issues': [issue]}, payload)
+
+    def test_actual_clock_conflict_and_changed_record_keep_their_evidence(self):
+        payload = {'draft': '18:00에 도착했다.', 'settled_state': {'clock': {'time': '17:35'}},
+                   'new_records': {'notes': [('장면', '18:00에 도착했다.')]}}
+        for source in ('draft', 'new_records'):
+            issue = {'explanation': '도착 시각이 다름', 'claims': [
+                {'source': source, 'quote': '18:00에 도착했다.'},
+                {'source': 'settled_state', 'quote': '17:35'}]}
+            result = review.validate_review({'approved': False, 'issues': [issue]}, payload)
+            self.assertEqual(result['issues'], ['도착 시각이 다름'])
+            self.assertEqual(result['evidence'], [issue])
+
+    def test_empty_or_unstructured_rejection_is_not_a_valid_review(self):
+        for issues in ([], ['unsupported assertion'], [{'explanation': 'x', 'claims': []}]):
+            with self.subTest(issues=issues), self.assertRaises(ValueError):
+                review.validate_review({'approved': False, 'issues': issues}, {})

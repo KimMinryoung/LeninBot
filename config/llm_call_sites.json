@@ -464,9 +464,9 @@
     "thinking": {
       "type": "disabled"
     },
-    "note": "기존 역할극 연기 모델과 동일한 endpoint. 초안·질적 상태·이번에 변경한 기록만 서술 모순 검사. 사건/활동 분류와 수치 계산 금지.",
-    "enabled": true,
-    "jev_precheck": true
+    "note": "선택적 서술 검토. 현재 비활성: 사건·시간 정산 뒤 초안을 바로 확정한다. 다시 켜면 기존 연기 모델 endpoint에서 서술 모순만 검사한다.",
+    "enabled": false,
+    "jev_precheck": false
   },
   "roleplay_consistency_screen": {
     "provider": "typesafe",
@@ -474,7 +474,7 @@
     "timeout": 10,
     "retries": 0,
     "kind": "system_one",
-    "enabled": true,
+    "enabled": false,
     "thresholds": {
       "accept": 0.9
     },

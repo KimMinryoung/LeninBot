@@ -12,7 +12,7 @@ Telegram의 새 처리 절차는 사용자 허용 범위를 확인하고 초안�
 | 시간 허가(진행·개방형 휴식·다음 날·정정·초기화) | 초안 전 LLM의 라벨과 선택된 duration_minutes; Python은 형식·범위·일관성 검증 |
 | 수치 변화·시간 적분·달력·예정 사건 도래·저장 | Python 코드 |
 | 초안 연기·목적·기분·질적 관찰 | 기존 연기 모델 |
-| 정산 결과와 초안/새 기록의 서술 모순 검사 | Jev 선별 후 필요할 때 기존 연기 제공자의 상세 검토 |
+| 정산 결과와 초안/새 기록의 서술 모순 검사 | 현재 비활성. 선택적으로 Jev 선별·기존 연기 제공자 상세 검토를 켤 수 있음 |
 
 분류는 `roleplay_scene_adjudication` 등록을 사용하며 세 호출로 나뉜다(`question_group`): `roleplay-scene`(mode/elapsed/plan_action/
 사건 축 5개/sexual_act/intensity/활동/수면/위협/접촉/고립/장소/새 부상), `roleplay-people`(인물별 출입), `roleplay-records`(부상·예정 사건·
@@ -122,6 +122,7 @@ state_view는 내부 진단용 숫자 뷰이며 Telegram 연기 문맥에는 사
 
 ## 검토 비용 선별
 
+현재 서술 검토와 Jev 검토 선별은 꺼져 있으며 아래는 선택적으로 다시 활성화했을 때의 동작이다.
 매 턴 생성 모델로 서술 검토를 하기 전에 Jev 고정 선택지로 무모순 여부를 선별한다.
 고신뢰 무모순만 생성 호출을 생략하며, 자세한 장애·설정 계약은 [초안 사후 정산](roleplay_postdraft.md)을 따른다.
 장면 판정의 `cost_usd`에는 scene/people/records뿐 아니라 집중 재판정 `event_review`의 비용도 포함한다.

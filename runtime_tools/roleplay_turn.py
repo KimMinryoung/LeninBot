@@ -2,6 +2,7 @@
 from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import replace
+from datetime import datetime, timedelta
 import json
 import math
 import sqlite3
@@ -11,7 +12,7 @@ from pathlib import Path
 from llm.call_registry import decide_detailed, generate_detailed, resolve, resolve_provider_connection
 from runtime_tools import roleplay_memory as memory, roleplay_jev as jev
 from runtime_tools.roleplay_actor import actor_state_view
-from runtime_tools.roleplay_review import REVIEW_RULES, screen_reply
+from runtime_tools.roleplay_review import REVIEW_RULES, screen_reply, validate_review
 from runtime_tools.roleplay_clock import interpret_clock
 from runtime_tools.roleplay_story import blocking_events
 from runtime_tools.roleplay_pacing import policy_for, turn_time_scope, check_time_request, check_time_result
@@ -77,12 +78,21 @@ def direction(authorization, state=None):
         return '장면을 진행하지 않고 질문·회상·계획·정정 요청에 답하는 초안을 쓴다. 새 사건이 일어났다고 서술하지 않는다.'
     text = '사용자가 지정한 한 장면의 초안을 쓴다. 다음 아침으로의 전환이 허용되면 아침 장면에서 바로 시작하고, 생략된 밤의 수면·회복·사건을 만들어 넣지 않는다. 지정한 종료점에서 멈추고 후속 사건을 붙이지 않는다. 아직 저장·확정되지 않은 초안이다.'
     if state is not None:
+        clock = state.get('clock') or {}
+        text += (f" 현재 기준 시계는 {clock.get('date') or '날짜 미상'} {clock.get('time') or '시각 미상'}이다."
+                 " 과거 답변의 OOC 시각이나 오래된 장면 요약으로 이 시계를 덮어쓰지 않는다.")
         location = state.get('location') or '미확인'
         text += (f" 현재 위치는 \"{location}\"이며, 사용자가 이동을 지시하지 않았으면 사건은 그 자리에서 일어난다. 감방으로 돌아가는 길·계단·다른 방을 지어내지 않는다."
                  " 초안은 이 사건 하나와 그 직후의 반응까지다. 한두 문단이면 충분하고, 그 뒤의 식사·수면·다음 방문·다음 날은 쓰지 않는다.")
     stop = expected_stop(authorization, state) if state is not None else None
     if stop:
         text += f" 이 장면은 {stop['title']}({stop['minutes']}분 뒤)에서 멈춘다. 그 도래 장면까지만 쓰고 그 뒤는 쓰지 않는다."
+    elif state is not None and authorization['labels'].get('transition', 'current') == 'current':
+        policy = policy_for_authorization(authorization)
+        if clock.get('date') and clock.get('time'):
+            minutes = policy.explicit_minutes if policy.explicit_passage and policy.explicit_minutes else policy.max_minutes
+            endpoint = datetime.fromisoformat(f"{clock['date']}T{clock['time']}") + timedelta(minutes=minutes)
+            text += f" 이번 장면은 늦어도 {endpoint:%Y-%m-%d %H:%M} 안에 끝낸다. 그보다 먼 배식·방문·시각에 도달했다고 쓰지 않는다."
     return text
 
 
@@ -266,7 +276,7 @@ def review_reply(draft, before, projected, stage=None, *, applied=None):
     feature = 'roleplay_scene_consistency'
     profile = resolve(feature)
     if not profile.extra.get('enabled', False):
-        raise ValueError('최종 서술 검토 호출 활성화 대기')
+        return {'approved': None, 'issues': [], 'status': 'skipped', 'reason': 'disabled'}
     if profile.provider != 'deepseek_anthropic' or resolve_provider_connection(profile.provider).base_url.rstrip('/') != bot_config.DEEPSEEK_ANTHROPIC_BASE_URL.rstrip('/'):
         raise ValueError('서술 검토 경로가 기존 연기 모델 경로와 다름')
     changes = {}
@@ -283,16 +293,16 @@ def review_reply(draft, before, projected, stage=None, *, applied=None):
     if screen and screen['clean']:
         return {'approved': True, 'issues': [], 'screen': screen, 'reviewer': 'jev'}
     result = generate_detailed(feature, json.dumps(payload,ensure_ascii=False), profile=profile,
-        system=REVIEW_RULES + ' Return only JSON {"approved":true,"issues":[]} or {"approved":false,"issues":["specific contradiction"]}. Write issues in Korean, each naming both explicit conflicting claims; do not report unsupported details as conflicts.',
+        system=REVIEW_RULES + ' Return only JSON {"approved":true,"issues":[]} or '
+        '{"approved":false,"issues":[{"explanation":"한국어 모순 설명","claims":['
+        '{"source":"draft","quote":"exact substring"},{"source":"settled_state","quote":"exact substring"}]}]}. '
+        'Each issue must quote one string value from settled_state and one from draft or new_records. '
+        'Do not cite before or invent a quote. If you cannot quote both incompatible claims, omit the issue.',
         label=feature)
     if result.error_kind or result.truncated or not result.text:
         raise ValueError('최종 서술 검토를 완료하지 못함')
     try:
-        review = json.loads(result.text)
-        if not isinstance(review,dict) or type(review.get('approved')) is not bool or not isinstance(review.get('issues'),list) or not all(isinstance(item,str) for item in review['issues']):
-            raise ValueError('invalid review')
-        if review['approved'] and review['issues']:
-            raise ValueError('inconsistent review')
+        review = validate_review(json.loads(result.text), payload)
     except (ValueError,TypeError) as exc:
         raise ValueError('최종 서술 검토 응답 형식 오류') from exc
     if screen is not None:
