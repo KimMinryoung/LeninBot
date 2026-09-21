@@ -1,7 +1,7 @@
 """Assign a CommuLingo person's group and role with a System One model.
 
 The person create API used to require the writing model to pick ``groupId``
-(9 groups) and ``role`` (16 Soviet offices or 10 categories) beside the prose.
+(13 groups) and ``role`` (16 Soviet offices or 11 categories) beside the prose.
 Those are closed-set editorial judgements: on 2026-09-19 a Jev audit of all
 2,341 stored people found 106 misfiled ones, and the operator decided the
 runner should assign the classification after the draft instead of the
@@ -40,10 +40,23 @@ GROUP_RULES = {
     "thaw": "Soviet citizens whose public role peaked 1953–1985: thaw and stagnation, space and science, reformers, dissidents.",
     "perestroika": "Soviet citizens whose public role peaked 1985–1991 or who presided over the end of the USSR and the first "
                    "post-Soviet years.",
-    "international-revolutionary": "Anyone OUTSIDE the Soviet state apparatus on the revolutionary or socialist side: "
-                                   "communists, socialists, leaders and officials of socialist states (Poland, Hungary, "
-                                   "Czechoslovakia, East Germany, China, Cuba, Vietnam...), their reformers and dissidents. "
-                                   "A non-Soviet citizen never belongs to a Soviet era group.",
+    "china-old-regime": "Chinese citizens on the side the Communists fought, 1894–1949: late-Qing officials and generals "
+                        "(Yuan Shikai), warlords (Zhang Zuolin), Kuomintang politicians, diplomats and generals (Chiang "
+                        "Kai-shek, Wang Jingwei, T. V. Soong). NOT the Communists' foreign statesmen counterparts.",
+    "china-revolution": "Chinese Communists and their allies whose public role peaked 1911–1949 or who MADE the revolution "
+                        "(May Fourth radicals, party founders, Long March leaders, Yan'an leadership): Chen Duxiu, Li Dazhao, "
+                        "Qu Qiubai, Wang Ming, Mao, Zhou Enlai, Zhu De, Liu Shaoqi; Sun Yat-sen and the republican "
+                        "revolutionaries of 1911 too. Founders stay here even when they ruled the People's Republic later.",
+    "china-mao-era": "Chinese citizens whose public role peaked 1949–1976: officials, commanders, writers and victims of "
+                     "land reform, the anti-rightist campaign, the Great Leap and the Cultural Revolution (Peng Dehuai, Lin "
+                     "Biao, Kang Sheng, Jiang Qing, Hua Guofeng).",
+    "china-reform": "Chinese citizens whose public role peaked after 1976: the reform leadership (Deng Xiaoping, Hu Yaobang, "
+                    "Zhao Ziyang, Jiang Zemin), the dissidents of Democracy Wall and 1989, and the post-1989 leadership.",
+    "international-revolutionary": "Anyone OUTSIDE the Soviet and Chinese state apparatus on the revolutionary or socialist "
+                                   "side: communists, socialists, leaders and officials of socialist states (Poland, Hungary, "
+                                   "Czechoslovakia, East Germany, Cuba, Vietnam...), their reformers and dissidents, and "
+                                   "foreign advisers to the Chinese revolution (Borodin, Otto Braun). A non-Soviet citizen "
+                                   "never belongs to a Soviet era group; a Chinese citizen belongs to a china-* group.",
     "foreign-statesmen": "Non-communist politicians, diplomats and generals of other states who negotiated with or confronted "
                          "the USSR: presidents, prime ministers, foreign ministers, ambassadors, monarchs.",
     "international-counterrevolutionary": "Rulers, soldiers and movements outside the USSR that fought revolution and the "
@@ -321,8 +334,8 @@ def build_questions(groups: list[dict], offices: list[dict], categories: list[di
     return {
         "group": {"type": "choice", "criteria": group_criteria,
                   "instructions": "Which dictionary group does this person belong to? Soviet citizens go to the era in which "
-                                  "their public role peaked; people outside the Soviet state go to one of the four "
-                                  "non-Soviet groups."},
+                                  "their public role peaked; Chinese citizens go to the china-* group of their era or side; "
+                                  "people outside both states go to one of the four non-Soviet groups."},
         "role": {"type": "choice", "criteria": role_criteria,
                  "instructions": ("Which single role identifies this person? Choose a catalogued OFFICE only when the career "
                                   "shows they held it; otherwise the closest CATEGORY." if soviet else
