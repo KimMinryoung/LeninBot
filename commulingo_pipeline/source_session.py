@@ -1,5 +1,6 @@
 """Reuse the existing persistent fetch cache; never concatenate source pages."""
 import asyncio
+import json
 import re
 from datetime import datetime, timezone
 
@@ -32,25 +33,30 @@ class Sources:
             raise ValueError('source page is too large; request a smaller page')
         self.sources[source['id']] = source
         labelled = self.passages.show(source['id'], source['body'])
-        return (f"URL: {source['url']}\nRetrieved: {source['fetched_at']}\n"
+        return (f"Source ID: {source['id']}\nURL: {source['url']}\nRetrieved: {source['fetched_at']}\n"
                 'Cite the immutable passage labels shown before the paragraphs.\n'
                 '<external source="pipeline-source">\n' + labelled + '\n</external>')
 
     def context(self):
+        now = datetime.now(timezone.utc)
         return {'available_pages': [{'source_id':s['id'],'url':s['url'],'fetched_at':s['fetched_at'],
                                      'expires_at':s['expires_at'],
                                      'passage_labels':[label for label,entry in self.passages.shown.items() if entry[0]==s['id']]}
-                                    for s in self.sources.values() if s.get('body')],
+                                    for s in self.sources.values() if s.get('body') and s['expires_at'] > now
+                                    and len(s['body']) <= MAX_SNAPSHOT_CHARS],
                 'previous_fetches': self.requests[-30:]}
 
     def cached_tool(self, on_read=None):
         async def read(passages=None, source_id=None):
-            if (passages is None) == (source_id is None):
+            if passages is None and source_id is None:
+                return json.dumps(self.context(), default=str, ensure_ascii=False)
+            if passages is not None and source_id is not None:
                 raise ValueError('Supply exactly one of passages or source_id from source_cache.available_pages')
             if source_id is not None:
                 source = self.sources.get(source_id)
                 if not source:
-                    raise ValueError('Unknown source_id; use source_cache.available_pages')
+                    raise ValueError('Unknown source_id; copy an exact source_id from available_pages: '
+                                     + json.dumps(self.context()['available_pages'], default=str, ensure_ascii=False))
                 text = self.display(source)
                 if on_read:
                     await on_read()
@@ -66,7 +72,8 @@ class Sources:
                                  and self.sources[sid]['expires_at'] > now]
                     raise ValueError(f'unknown cached passage: {label}; available labels: {available[:16]}. '
                                      'Use source_id from source_cache.available_pages to open an unlabelled page; '
-                                     'if no valid page exists, fetch the original first. Never guess P1.')
+                                     'if no valid page exists, fetch the original first. Never guess P1. '
+                                     'Call this tool with {} to list current available_pages and exact source IDs.')
                 source_id, start, end = self.passages.shown[label]
                 source = self.sources.get(source_id)
                 if not source or not source.get('body') or source['expires_at'] <= now:
@@ -75,12 +82,12 @@ class Sources:
                 output.append(f"[{label}] URL: {source['url']}\n" + source['body'][start:end])
             return '<external source="pipeline-cache">\n'+'\n\n'.join(output)+'\n</external>'
         return ({'name':'commulingo_pipeline_cached_passages',
-            'description':'Read cached originals without network access. Supply existing passages OR a source_id from source_cache.available_pages to display a page and obtain its labels. Never guess labels. Retrieval timestamps are unchanged.',
+            'description':'Read cached originals without network access. Call with {} to list current available_pages. Supply existing passages OR an exact source_id from that list to display a page and obtain its labels. Never guess IDs or labels. Retrieval timestamps are unchanged.',
             'input_schema':{'type':'object','additionalProperties':False,
                 'properties':{'passages':{'type':'array','minItems':1,'maxItems':8,
                     'items':{'type':'string','pattern':'^P[1-9][0-9]*$'}},
                     'source_id':{'type':'string','minLength':1}},
-                'oneOf':[{'required':['passages']},{'required':['source_id']}]}},read,False)
+                'not':{'required':['passages','source_id']}}},read,False)
 
     def wrap(self, name, call):
         if self.backoff is not None:

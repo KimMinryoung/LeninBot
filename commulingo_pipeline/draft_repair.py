@@ -56,6 +56,14 @@ class DraftRepair:
         if self.capture_invalid and 'repairs' not in value:
             # A full draft sometimes echoes its prior ID. It is not a repair.
             value = {k:v for k,v in value.items() if k!='draft_id'}
+        if not value:
+            # An empty/undecodable call is not a replacement editorial draft.
+            # Preserve the scratchpad and keep it out of stagnation counting.
+            instruction = ('Use commulingo_pipeline_repair with only repairs.'
+                           if self.separate_tools and self.draft else
+                           'Resend the intended arguments as valid JSON.')
+            raise RepairProtocolError(self.feedback(
+                'Empty arguments do not replace the saved draft. ' + instruction))
         try:
             prepared = prepare_write(self.name,value,self.draft,schema=self.canonical)
             self.draft = {'tool':self.name, 'args':deepcopy(prepared)}
@@ -68,7 +76,7 @@ class DraftRepair:
             raise error(self.feedback(str(exc))) from exc
 
     def feedback(self, message):
-        if self.draft and 'Saved draft_id=' not in message and '"next_tool": "commulingo_pipeline_repair"' not in message:
+        if self.draft and 'Saved draft_id=' not in message and '"submission_tool": "commulingo_pipeline_repair"' not in message:
             if self.separate_tools:
                 errors = []
                 for error in Draft202012Validator(self.canonical).iter_errors(self.draft['args']):
@@ -81,7 +89,7 @@ class DraftRepair:
                     errors.append({'path':path,'rule':error.validator,'expected':error.validator_value,
                                    'current':str(error.instance)[:240],'message':error.message[:350]})
                 return message + '\n' + json.dumps({'draft_id':draft_id(self.draft),
-                    'errors':errors[:12], 'next_tool':'commulingo_pipeline_repair',
+                    'errors':errors[:12], 'submission_tool':'commulingo_pipeline_repair',
                     'instruction':'Send only repairs. The draft and all untouched claims are retained.'},ensure_ascii=False)
             example = '/fields/bio/ko' if self.capture_invalid else '/fields/bio/ko/2'
             message += (f'\nSaved draft_id={draft_id(self.draft)}. Send only repairs (JSON pointers such as '

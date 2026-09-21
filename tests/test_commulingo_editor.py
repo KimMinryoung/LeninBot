@@ -48,7 +48,8 @@ class SourceAndIssueTests(EditorCase):
         from jsonschema import validate, ValidationError
         validate({'source_id':page['id']}, tool['input_schema'])
         validate({'passages':['P1']}, tool['input_schema'])
-        for args in ({}, {'source_id':page['id'],'passages':['P1']}):
+        validate({}, tool['input_schema'])
+        for args in ({'source_id':page['id'],'passages':['P1']},):
             with self.assertRaises(ValidationError):
                 validate(args, tool['input_schema'])
         with self.assertRaisesRegex(ValueError, 'source_id.*Never guess P1'):
@@ -63,6 +64,26 @@ class SourceAndIssueTests(EditorCase):
         page['expires_at'] = datetime.now(timezone.utc)-timedelta(seconds=1)
         with self.assertRaisesRegex(ValueError, 'expired'):
             await reread(source_id=page['id'])
+
+    async def test_cache_discovery_tracks_new_pages_and_excludes_unusable_sources(self):
+        page = snapshot(URL, BODY)
+        expired = snapshot(URL + '/expired', BODY + ' Old.')
+        expired['expires_at'] = datetime.now(timezone.utc)-timedelta(seconds=1)
+        session = Sources(store_mock(), JOB, Usage(), {expired['id']:expired})
+        _, read, _ = session.cached_tool()
+        self.assertEqual(json.loads(await read())['available_pages'], [])
+        shown = session.display(page)
+        self.assertIn(page['id'], shown)
+        before = deepcopy(session.passages.shown)
+        catalog = json.loads(await read())['available_pages']
+        self.assertEqual([p['source_id'] for p in catalog], [page['id']])
+        self.assertEqual(catalog[0]['passage_labels'], ['P1'])
+        with self.assertRaises(ValueError) as error:
+            await read(source_id='S1')
+        self.assertIn(page['id'], str(error.exception))
+        self.assertEqual(session.passages.shown, before)
+        with self.assertRaisesRegex(ValueError, 'exactly one'):
+            await read(source_id=page['id'], passages=['P1'])
 
     async def test_cached_passage_read_keeps_labels_and_rejects_expiry(self):
         page = snapshot(URL,BODY)
@@ -140,6 +161,54 @@ class SourceAndIssueTests(EditorCase):
 
 
 class EditorTests(EditorCase):
+    async def test_format_state_survives_restart_and_research_reopen_is_saved(self):
+        store = store_mock()
+        async def first(**kwargs):
+            self.assertIn('"draft_saved": false', kwargs['prompt'])
+            await kwargs['read_wrap']('fetch_url', AsyncMock(
+                return_value=f'<external source="web">\n{BODY}\n</external>'))(url=URL)
+            value = candidate()
+            value['fields']['body']['en'] = 'A clause — another clause.'
+            with self.assertRaises(ValueError) as failure:
+                await kwargs['handler'](value)
+            state = json.loads(str(failure.exception).splitlines()[-1])['work_status']
+            self.assertEqual(state['mode'], 'format_repair')
+            self.assertTrue(state['draft_saved'])
+            self.assertEqual(state['saved_fields'], ['body'])
+            self.assertEqual(state['next_tool'], 'commulingo_pipeline_repair')
+            raise RuntimeError('disconnect')
+        with patch('commulingo_pipeline.service.call', return_value=CURRENT), \
+             patch('commulingo_pipeline.stages.model_call', side_effect=first):
+            with self.assertRaisesRegex(RuntimeError, 'disconnect'):
+                await Editor(store)(JOB, [], Usage(), .2)
+        checkpoint = deepcopy(store.save_editor_checkpoint.call_args.args[1])
+        page = store.save_source.call_args.args[0]
+        store.job_sources.return_value = {page['id']:page}
+        async def resume(**kwargs):
+            self.assertIn('"mode": "format_repair"', kwargs['prompt'])
+            self.assertIn('"draft_saved": true', kwargs['prompt'])
+            call = AsyncMock()
+            from tool_gateway.results import ToolRejection
+            with self.assertRaises(ToolRejection) as blocked:
+                await kwargs['read_wrap']('web_search', call)(query='date')
+            call.assert_not_awaited()
+            self.assertIn('"mode": "format_repair"', str(blocked.exception))
+            read = next(t[1] for t in kwargs['local_tools']
+                        if t[0]['name']=='commulingo_pipeline_cached_passages')
+            await read(source_id=page['id'])
+            self.assertEqual(store.save_editor_checkpoint.call_args.args[1]['error'], checkpoint['error'])
+            reopen = next(t[1] for t in kwargs['local_tools']
+                          if t[0]['name']=='commulingo_pipeline_research')
+            response = await reopen(fields=['body'], reason='Check a conflicting historical fact.')
+            self.assertIn('"mode": "research_allowed"', response)
+            self.assertFalse(store.save_editor_checkpoint.call_args.args[1]['repair_only'])
+            await kwargs['handler']({'repairs':[{'op':'set','path':'/fields/body/en',
+                                               'value':candidate()['fields']['body']['en']}]})
+        with patch('commulingo_pipeline.service.call', return_value=CURRENT), \
+             patch('commulingo_pipeline.stages.model_call', side_effect=resume):
+            result = await Editor(store)(JOB, [{'stage':'editor_checkpoint','value':checkpoint}], Usage(), .2)
+        self.assertEqual(result.next_stage, 'review')
+
     async def test_cached_source_labels_are_checkpointed_before_first_draft(self):
         store = store_mock()
         page = snapshot(URL, BODY)
@@ -165,8 +234,14 @@ class EditorTests(EditorCase):
             self.jev.side_effect = lambda *args: citation_result(*args, support='unrelated')
             value = candidate()
             value['claims'][0]['claim'] = 'An unrelated invented claim.'
-            with self.assertRaisesRegex(ValueError, 'citation check failed'):
+            with self.assertRaisesRegex(ValueError, 'citation check failed') as failure:
                 await kwargs['handler'](value)
+            state = json.loads(str(failure.exception).splitlines()[-1])['work_status']
+            self.assertEqual(state['error_kind'], 'citation')
+            self.assertEqual(state['mode'], 'research_allowed')
+            self.assertEqual(state['next_tool'], 'commulingo_pipeline_cached_passages')
+            self.assertEqual(state['submission_tool'], 'commulingo_pipeline_repair')
+            self.assertEqual(state['saved_claim_count'], 1)
             self.assertEqual(store.save_editor_checkpoint.call_args.args[1]['draft']['args']['fields'], value['fields'])
             self.jev.side_effect = citation_result
             await kwargs['handler']({'repairs': [{'op': 'set', 'path': '/claims/0/claim',
@@ -208,11 +283,21 @@ class EditorTests(EditorCase):
 
     async def test_context_restores_notes_sections_and_original_proposal(self):
         current = {**CURRENT,'notes':'Earlier author unresolved question',
+                   'definition':{'ko':'기존 정의','en':'Existing definition to preserve'},
                    'sections':[{'slug':'prior-theme'}]}
         job = {**JOB,'payload':{'original_proposal':{'patch_json':{'slug':'fixed-theme'}}}}
         async def model(**kwargs):
             for text in ('Earlier author unresolved question','prior-theme','fixed-theme','prose_budgets'):
                 self.assertIn(text,kwargs['prompt'])
+            self.assertIn('"surrounding_context": {"definition":', kwargs['prompt'])
+            self.assertIn('Existing definition to preserve', kwargs['prompt'])
+            context_tool, read_context, _ = next(t for t in kwargs['local_tools']
+                                                if t[0]['name']=='commulingo_pipeline_context')
+            from jsonschema import validate
+            fields = context_tool['input_schema']['properties']['fields']['items']['enum']
+            self.assertGreater(len(fields), 10)
+            validate({'fields':fields}, context_tool['input_schema'])
+            self.assertIn('Earlier author unresolved question', await read_context(fields))
             self.assertIn('Do not use an em dash',kwargs['spec'].render_prompt(provider='deepseek'))
             await kwargs['read_wrap']('fetch_url',AsyncMock(return_value=f'<external source="web">\n{BODY}\n</external>'))(url=URL)
             value = candidate(); value['fields']['notes']='Private deferred detail'
@@ -336,12 +421,15 @@ class EditorTests(EditorCase):
             for _ in range(3):
                 with self.assertRaises(ValueError):
                     await edit(repairs=[{'op':'set','path':'/claims','value':candidate()['claims']}],reason='unexpected')
+                with self.assertRaises(ValueError):
+                    await kwargs['handler']({})
+                self.assertEqual(store.save_editor_checkpoint.call_args.args[1]['draft']['args'], value)
             await edit(repairs=[{'op':'set','path':'/claims','value':candidate()['claims']}])
         usage = Usage()
         with patch('commulingo_pipeline.service.call',return_value=CURRENT), patch('commulingo_pipeline.stages.model_call',side_effect=model):
             result = await Editor(store)(JOB,[],usage,.2)
         self.assertEqual(result.next_stage,'review')
-        self.assertEqual(usage.tracker['repair_protocol_errors'],3)
+        self.assertEqual(usage.tracker['repair_protocol_errors'],6)
 
     async def test_unchanged_year_and_its_claim_are_removed_together(self):
         async def model(**kwargs):
@@ -371,6 +459,8 @@ class EditorTests(EditorCase):
         store.job_sources.return_value = {page['id']:page}
         async def resume(**kwargs):
             self.assertIn('saved_draft',kwargs['prompt'])
+            self.assertIn('"missing_evidence_fields": ["body"]', kwargs['prompt'])
+            self.assertIn('"error_kind": "missing_evidence"', kwargs['prompt'])
             await kwargs['handler']({'repairs':[{'op':'set','path':'/claims','value':candidate()['claims']}]})
         with patch('commulingo_pipeline.service.call',return_value=CURRENT), patch('commulingo_pipeline.stages.model_call',side_effect=resume):
             result = await Editor(store)(JOB,[{'stage':'editor_checkpoint','value':checkpoint}],Usage(),.2)

@@ -145,7 +145,7 @@ def _clusters(spans, limit):
     return groups
 
 
-def resolve_passages(claims, passages, sources):
+def resolve_passages(claims, passages, sources, *, draft_paths=False):
     """Replace each claim's passage labels with source snapshots and character ranges.
 
     One resolved claim per range ``passages.resolve`` returns; invalid labels
@@ -169,6 +169,8 @@ def resolve_passages(claims, passages, sources):
         for source_id, start, end in ranges:
             value = {k: v for k, v in claim.items() if k != 'passages'}
             value.update(source_id=source_id, start=start, end=end)
+            if draft_paths:
+                value['draft_path'] = f'/claims/{index - 1}'
             resolved.append(value)
     return resolved
 

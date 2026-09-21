@@ -1,13 +1,33 @@
 import unittest
 from unittest.mock import patch
 
-from commulingo_pipeline.draft_repair import DraftRepair
+from commulingo_pipeline.draft_repair import DraftRepair, RepairProtocolError
 from scripts.commulingo_write_session import draft_id
 from tool_gateway.dispatcher import execute_tool
 from tool_gateway.security import caller_scope, new_run_context
 
 
 class DraftRepairTests(unittest.IsolatedAsyncioTestCase):
+    def test_empty_calls_preserve_rejected_draft_for_repair(self):
+        original = self.session()
+        session = DraftRepair({'name':original.name,'input_schema':original.canonical}, capture_invalid=True)
+        session.separate_tools = True
+        with self.assertRaises(RepairProtocolError):
+            session.prepare({})
+        self.assertIsNone(session.draft)
+        bad = {'fields':{'bio':{'en':'Long prose that exceeds the original limit'}}}
+        with self.assertRaises(ValueError):
+            session.prepare(bad)
+        saved_id = draft_id(session.draft)
+        for empty in ({}, {'draft_id':saved_id}):
+            with self.assertRaisesRegex(RepairProtocolError, 'commulingo_pipeline_repair'):
+                session.prepare(empty)
+            self.assertEqual(session.draft['args'], bad)
+            self.assertEqual(draft_id(session.draft), saved_id)
+        self.assertEqual(session.prepare({'repairs':[
+            {'op':'set','path':'/fields/bio/en','value':'Short'}]}),
+            {'fields':{'bio':{'en':'Short'}}})
+
     async def test_editor_dispatch_retains_bad_shape_and_enum_then_repairs_without_resend(self):
         original = self.session()
         session = DraftRepair({'name':original.name,'input_schema':original.canonical}, capture_invalid=True)

@@ -73,6 +73,24 @@ class CitationGateTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('claim 1', message)
         self.assertEqual(usage.tracker['citation_rejections'], 1)
 
+    async def test_expanded_citations_report_original_draft_repair_path(self):
+        from commulingo_pipeline.evidence import Passages, resolve_passages
+        first = snapshot('https://example.org/first', 'Born in 1904.')
+        second = snapshot('https://example.org/second', 'Unrelated text.')
+        sources = {s['id']:s for s in (first, second)}
+        passages = Passages()
+        for source in sources.values():
+            passages.show(source['id'], source['body'])
+        claims = resolve_passages([{'field':'body','claim':'Born in 1904.',
+                                    'passages':['P1','P2']}], passages, sources, draft_paths=True)
+        async def decide(feature, state, questions):
+            return decision('unrelated' if state['source_url']==second['url'] else 'supports', .99)
+        with self.assertRaises(ValueError) as caught:
+            await check_claims(claims, sources, decide=batched(decide))
+        self.assertIn('claim 2', str(caught.exception))
+        self.assertIn('[repair /claims/0]', str(caught.exception))
+        self.assertNotIn('/claims/1', str(caught.exception))
+
     async def test_confident_partial_support_passes_and_is_recorded(self):
         async def decide(feature, state, questions):
             self.assertIn('partially_supports', questions['support']['criteria'])

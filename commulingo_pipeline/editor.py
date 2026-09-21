@@ -15,7 +15,7 @@ from .evidence import compile_evidence, resolve_passages, PASSAGE_PATTERN, MAX_P
 from .issues import commission, FACTS
 from .patches import canonical, changes, patch_hash, schema_for
 from .source_session import Sources
-from .editor_context import RepairReads, prose_budgets
+from .editor_context import RepairReads, prose_budgets, work_status
 from .decisions import Decisions
 
 INSTRUCTIONS = '''You are an evidence-based bilingual dictionary editor.
@@ -46,7 +46,12 @@ commulingo_pipeline_repair with only repairs, never repeat status, reason or fie
 Either tool records a validated patch, not publication. Read cached P-label text with
 commulingo_pipeline_cached_passages instead of reconstructing fetch arguments.
 Use only labels listed in source_cache or shown by a tool. If a cached page has no labels,
-open its source_id with that tool first; do not assume P1 exists.
+open its exact source_id with that tool first; do not assume P1 exists. Call the cache tool
+with {} to list current available pages when IDs are missing; never invent an ID.
+work_status describes the current saved draft, research access and next action. Follow it
+after a rejection. Saved claims are retained, not necessarily validated or approved.
+surrounding_context is existing read-only background to avoid contradictions and duplication;
+it does not expand the commissioned issues. Fetch additional context only when relevant.
 '''
 
 
@@ -103,6 +108,7 @@ class Editor:
         field_schema['properties']['notes'] = {'type':'string','maxLength':4000,
             'description':'Private working notes; moved out of published fields.'}
         reads = RepairReads(session,repair_only=checkpoint.get('repair_only',False))
+        reads.missing_fields = list(checkpoint.get('missing_fields', []))
         tool = result_tool({'type':'object','additionalProperties':False,
             'properties': {
                 'status':{'type':'string','enum':['ready','complete','not_applicable','sources_unavailable']},
@@ -140,18 +146,28 @@ class Editor:
                             value[lang] = ' '.join(value[lang])
         failures = dict(checkpoint.get('failures') or {})
         box = {}
+        error_kind = checkpoint.get('error_kind', '')
+        last_error = checkpoint.get('error', '')
+        def status():
+            return work_status(issues, repair.draft, reads, error=last_error, error_kind=error_kind)
+        reads.status = status
 
-        async def save_checkpoint(error=''):
+        async def save_checkpoint(error=None):
             if repair.draft or session.passages.shown:
                 await asyncio.to_thread(self.store.save_editor_checkpoint, job, {
                     'baseline':baseline, 'draft':repair.draft, 'passages':session.passages.shown,
-                    'source_requests':session.requests, 'failures':failures, 'error':error,
+                    'source_requests':session.requests, 'failures':failures,
+                    'error':last_error if error is None else error,
+                    'error_kind':error_kind,
                     'repair_only':reads.repair_only,'missing_fields':reads.missing_fields,
                     'classification_cache':decisions.cache})
 
         async def finish(value):
+            nonlocal error_kind, last_error
+            error_kind = 'schema'
             try:
                 value = repair.prepare(value)
+                error_kind = 'validation'
                 await save_checkpoint()
                 if is_probe(value['reason']) or any(is_probe(c['claim']) for c in value.get('claims',[])):
                     raise ValueError('reason is a probe or progress note; submit a substantive editorial decision')
@@ -182,8 +198,10 @@ class Editor:
                 if problem:
                     problems.append(problem)
                 try:
-                    claims = resolve_passages(value.get('claims') or [], session.passages, session.sources)
+                    claims = resolve_passages(value.get('claims') or [], session.passages, session.sources,
+                                              draft_paths=True)
                 except ValueError as exc:
+                    error_kind = 'passages'
                     problems.append(str(exc))
                     claims = []
                 # Validate every passage before dropping claims for unchanged
@@ -196,6 +214,8 @@ class Editor:
                 factual = {'body'} if section else FACTS[job['kind']]
                 missing = (set(fields) & factual) - {c['field'] for c in claims}
                 if missing:
+                    if error_kind != 'passages':
+                        error_kind = 'missing_evidence'
                     problems.append('evidence required for ' + ', '.join(sorted(missing)) + '; repair those claims in this session')
                 reads.missing_fields = sorted(missing)
                 reads.repair_only = not missing and bool(claims)
@@ -210,6 +230,7 @@ class Editor:
                         decide=decisions.decide,cache=decisions.citations))
                 except ValueError:
                     reads.repair_only = False
+                    error_kind = 'citation'
                     raise
                 evidence = compile_evidence(claims, session.sources, set(fields))
                 if not evidence:
@@ -251,6 +272,7 @@ class Editor:
                 box.update(editor_version=2, draft=candidate, research=research)
                 return 'OK: validated patch recorded for independent review'
             except ValueError as exc:
+                last_error = str(exc)
                 usage.tracker['preflight_failures'] = usage.tracker.get('preflight_failures',0)+1
                 if 'revision_conflict' in str(exc):
                     box.update(rebase=True, error=str(exc))
@@ -258,14 +280,14 @@ class Editor:
                 if isinstance(exc, RepairProtocolError):
                     usage.tracker['repair_protocol_errors'] = usage.tracker.get('repair_protocol_errors',0)+1
                     await save_checkpoint(str(exc))
-                    raise
+                    raise RepairProtocolError(reads.with_status(str(exc))) from exc
                 fingerprint = hashlib.sha256(canonical({'draft':repair.draft,'error':str(exc)}).encode()).hexdigest()
                 failures[fingerprint] = failures.get(fingerprint,0)+1
                 await save_checkpoint(str(exc))
                 if failures[fingerprint]>=2:
                     box.update(hold_reason='same rejected patch and error repeated without progress', error=str(exc))
                     return 'Held: identical failed patch repeated; retained for diagnosis.'
-                raise ValueError(repair.feedback(str(exc))) from exc
+                raise ValueError(reads.with_status(repair.feedback(str(exc)))) from exc
 
         from scripts.commulingo_write_session import repair_schema
         repair_tool = {'name':'commulingo_pipeline_repair',
@@ -287,6 +309,11 @@ class Editor:
             k:v for k,v in field_schema['properties'].items() if k in needed}
         focused_current = {k:v for k,v in (current or {}).items()
                            if k in needed | {'id','revision','name','term','evidence','notes','sections'}}
+        background_fields = ({'definition','original','aliases','period','startYear','endYear'}
+                             if job['kind']=='term' else
+                             {'givenName','familyName','cyrillic','years','epithet','bio','role'})
+        surrounding_context = {k:v for k,v in (current or {}).items()
+                               if k in background_fields and k not in focused_current}
         context_fields = set(field_schema['properties']) | {'sections','notes'}
         async def read_context(fields):
             unknown = set(fields)-context_fields
@@ -297,7 +324,8 @@ class Editor:
         context_tool = {'name':'commulingo_pipeline_context',
             'description':'Read current values and exact schema for additional fields only when needed for the commissioned correction.',
             'input_schema':{'type':'object','additionalProperties':False,
-                'properties':{'fields':{'type':'array','minItems':1,'maxItems':10,
+                'properties':{'fields':{'type':'array','minItems':1,'maxItems':len(context_fields),
+                    'uniqueItems':True,
                     'items':{'type':'string','enum':sorted(context_fields)}}},'required':['fields']}}
         prompt = ('Read the original sources and prepare the minimal patch in this same session. '
                   'The saved draft is editable with JSON-pointer repairs. Return the final result tool early enough to repair it.\n'
@@ -309,6 +337,7 @@ class Editor:
                   'If new factual research is essential, request it through commulingo_pipeline_research with fields and reason.\n'
                   + stage_evidence({'job':{k:job[k] for k in ('id','kind','action','target')},
                       'current':focused_current,'issues':issues,
+                      'surrounding_context':surrounding_context,'work_status':status(),
                       'draft_contract':focused_contract,
                       'prose_budgets':prose_budgets(focused_contract['properties']['fields']),
                       'original_proposal':(job.get('payload') or {}).get('original_proposal'),
@@ -320,7 +349,7 @@ class Editor:
         await model_call(spec=spec,prompt=prompt,tool=repair.tool,handler=finish,reads=READS,
             usage=usage,budget=budget,read_wrap=reads.wrap,max_rounds=12,
             local_tools=[(repair_tool,edit,True),session.cached_tool(on_read=save_checkpoint),(context_tool,read_context,False),
-                         reads.tool(field_schema['properties'],usage)],
+                         reads.tool(field_schema['properties'],usage,on_reopen=save_checkpoint)],
             scope_id=f'commulingo_pipeline:{job["id"]}:editor',job=job)
         if box.get('rebase'):
             return Result(box,'research')

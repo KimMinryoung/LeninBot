@@ -273,7 +273,8 @@ async def check_claims(claims, sources, *, usage=None, decide=None, cache=None):
     return await _judge(FEATURE, QUESTIONS, claims, key=claim_key, skip=skip,
                         state=lambda claim: claim_state(claim, sources.get(claim.get('source_id')) or {}),
                         usage=usage, decide=decide, cache=cache,
-                        describe=lambda i, c: f'claim {i + 1} ({c.get("field")}, {str(c.get("claim"))[:120]!r})')
+                        describe=lambda i, c: (f'claim {i + 1} ({c.get("field")}, {str(c.get("claim"))[:120]!r})'
+                                              + (f' [repair {c["draft_path"]}]' if c.get('draft_path') else '')))
 
 
 def review_gate(usage=None, cache=None):
