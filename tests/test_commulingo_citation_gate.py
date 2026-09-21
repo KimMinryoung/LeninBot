@@ -183,6 +183,34 @@ class CitationGateTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls, ['Born 1904', 'Executed in 1938', 'Chaired the Council'])
         self.assertEqual([c['support'] for c in checks], ['supports', 'supports'])
 
+    async def test_cache_tracks_actual_source_text_and_model(self):
+        calls = []
+        async def decide(feature, state, questions):
+            calls.append(state['excerpt'])
+            return decision('supports', 0.95)
+        cache, usage = {}, Usage()
+        claim = self.claims[:1]
+        for _ in range(2):
+            await check_claims(claim, self.sources, decide=batched(decide), cache=cache, usage=usage)
+        changed = {self.source['id']: {**self.source, 'body': 'Different fetched content.'}}
+        await check_claims(claim, changed, decide=batched(decide), cache=cache, usage=usage)
+        citation_gate.settings.return_value = {**SETTINGS, 'model': ('typesafe', 'new-snapshot')}
+        await check_claims(claim, changed, decide=batched(decide), cache=cache, usage=usage)
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(usage.tracker['citation_requests'], 3)
+        self.assertEqual(usage.tracker['citation_cache_hits'], 1)
+        self.assertEqual(usage.tracker['citation_unique_items'], 3)
+
+    async def test_changed_threshold_does_not_reuse_stale_rejection(self):
+        cache = {}
+        async def decide(feature, state, questions):
+            return decision('unrelated', 0.9)
+        with self.assertRaises(ValueError):
+            await check_claims(self.claims[:1], self.sources, decide=batched(decide), cache=cache)
+        citation_gate.settings.return_value = {**SETTINGS, 'thresholds': {'reject': .95, 'boilerplate': .9}}
+        checks = await check_claims(self.claims[:1], self.sources, decide=batched(decide), cache=cache)
+        self.assertNotIn('reject', checks[0])
+
     async def test_review_checks_use_finding_and_quote_and_record_under_review_prefix(self):
         from commulingo_pipeline.citation_gate import check_review_checks
         checks = [{'citation': 'c', 'source': 'https://example.org/a', 'quote': 'Kosygin was born in 1904.',

@@ -26,6 +26,7 @@ it enforces from the start.
 dev_docs/jev_system_one_adoption.md §4.5 and §4.8 have the measured baselines.
 """
 import asyncio
+import hashlib
 import json
 import logging
 
@@ -98,7 +99,7 @@ def settings(feature=FEATURE):
     extra = profile.extra or {}
     thresholds = {**DEFAULT_THRESHOLDS, **(extra.get('thresholds') or {})}
     return {'enabled': bool(extra.get('enabled', True)), 'enforce': bool(extra.get('enforce', True)),
-            'thresholds': thresholds}
+            'thresholds': thresholds, 'model': (profile.provider, profile.model)}
 
 
 def claim_state(claim, source):
@@ -208,24 +209,34 @@ async def _judge(feature, questions, items, *, key, state, skip, describe, usage
         decide = registry_decide
     cache = cache if cache is not None else {}
     gate = asyncio.Semaphore(CONCURRENCY)
+    # Source ids/offsets alone do not identify the evaluated text after a
+    # refetch. Include the actual bounded state and policy in the cache key.
+    states = [state(item) if not skip(item) else None for item in items]
+    keys = [hashlib.sha256(json.dumps(
+        [feature, conf.get('model'), questions, conf['thresholds'], key(item), st],
+        ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+        for item, st in zip(items, states)]
+    cache_hits = sum(k in cache for k in keys)
+    requests = 0
 
     # One paid judgement per distinct item: duplicates within the batch share
     # the first item's slot, and anything already judged comes from the cache.
     results, pending = {}, {}
-    for item in items:
-        k = key(item)
+    for k, item, st in zip(keys, items, states):
         if k in cache or k in results or k in pending:
             continue
         reason = skip(item)
         if reason:
             results[k] = {'support': None, 'error': reason}
         else:
-            pending[k] = item
+            pending[k] = (item, st)
 
     async def run(batch):
+        nonlocal requests
         ids = {f'c{i + 1}': entry for i, entry in enumerate(batch)}
         request_state, request_questions = fan_out({cid: st for cid, (_, _, st) in ids.items()}, questions)
         async with gate:
+            requests += 1
             decision = await decide(feature, request_state, request_questions)
         if decision is None:
             results.update({k: {'support': None, 'error': 'decision unavailable'} for k, _, _ in batch})
@@ -233,13 +244,18 @@ async def _judge(feature, questions, items, *, key, state, skip, describe, usage
         for cid, (k, item, _) in ids.items():
             results[k] = verdict(decision.item(cid, questions), conf['thresholds'], item.get('stance') or 'supports')
 
-    await asyncio.gather(*(run(batch) for batch in _batches(list(pending.items()), state)))
+    prepared = _batches(list(pending.items()), lambda entry: entry[1])
+    await asyncio.gather(*(run([(k, entry[0], st) for k, entry, st in batch]) for batch in prepared))
     for k, result in results.items():
         if result.get('support') is not None:
             cache[k] = result
-    checks = [cache.get(key(item)) or results[key(item)] for item in items]
+    checks = [cache.get(k) or results[k] for k in keys]
     if usage is not None:
         tracker = usage.tracker
+        for metric, count in {'citation_requests': requests, 'citation_cache_hits': cache_hits,
+                              'citation_unique_items': len(pending)}.items():
+            name = f'{tracker_prefix}{metric}'
+            tracker[name] = tracker.get(name, 0) + count
         tracker[f'{tracker_prefix}citation_checks'] = tracker.get(f'{tracker_prefix}citation_checks', 0) + len(checks)
         tracker[f'{tracker_prefix}citation_unavailable'] = (tracker.get(f'{tracker_prefix}citation_unavailable', 0)
                                                             + sum(1 for c in checks if c.get('support') is None))

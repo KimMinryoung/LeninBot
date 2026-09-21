@@ -720,7 +720,9 @@ def fan_out(items: dict, questions: dict, **shared) -> tuple[dict, dict]:
     TypeSafe evaluates a request's questions in parallel, so latency follows
     requests, not questions. Read answers back with ``Decision.item``."""
     state = {**shared, "items": dict(items)}
-    keyed = {f"{item_id}_{key}": {**question, "instructions": f"About `items.{item_id}`: " + question["instructions"]}
+    keyed = {f"{item_id}_{key}": {**question, "instructions": f"About `items.{item_id}`: " + (
+                 question["instructions"] if isinstance(question["instructions"], str)
+                 else json.dumps(question["instructions"], ensure_ascii=False))}
              for item_id in items for key, question in questions.items()}
     return state, keyed
 
@@ -759,6 +761,8 @@ def _stringify_criteria(questions: dict) -> dict:
     out = {}
     for key, q in questions.items():
         q = dict(q)
+        if not isinstance(q['instructions'], str):
+            q['instructions'] = json.dumps(q['instructions'], ensure_ascii=False)
         criteria = q.get("criteria")
         if isinstance(criteria, dict):
             q["criteria"] = {k: v if isinstance(v, str) else json.dumps(v, ensure_ascii=False)

@@ -34,10 +34,11 @@ TypeSafe Jev는 텍스트를 생성하지 않고 typed 판정을 돌려주는 �
   프록시 라우트에 남아 있다. `kind`는 표시용이며 실행은 provider가 결정한다.
 - `decide_detailed(feature, state, questions, label=) → DecisionResult`, `decide_sync(...) → Decision | None`,
   `async decide(...)`. `state`는 문자열 또는 JSON 구조(질문에 필요한 필드만), `questions`는
-  `{key: {"type": "noul"|"choice"|"score", "instructions": str, "criteria": dict|list}}`.
+  `{key: {"type": "noul"|"choice"|"score", "instructions": str|dict|list, "criteria": dict|list}}`.
   choice는 2..255 옵션 dict, score는 2..10 단계 list. 중첩 criteria 값은 OpenRouter가 문자열만 받으므로
-  JSON 문자열로 직렬화해 보낸다.
-- `Decision.noul(key)/choice(key)/score(key)/confidence(key)/probabilities(key)`는 없는 키에 `None`.
+  JSON 문자열로 직렬화해 보낸다. 구조화된 instructions도 같은 방식으로 직렬화하며 `fan_out`에서도 지원한다.
+- `Decision.noul(key)/choice(key)/score(key)/confidence(key)`는 없는 키에 `None`, `probabilities(key)`는 `{}`.
+  confidence는 분포의 집중도에서 계산한 값이며 선택지의 확률이나 실제 정답률과 동일하지 않다.
   응답의 실제 `model`(예: `typesafe/jev-1.13-20260917`)과 `usage`, 지연, 비용을 담는다.
 - 감사: `check_llm_call` → 호출 → `record_llm_call`. OpenRouter가 `usage.cost`를 주면 그 값을, 없으면
   gateway의 `SYSTEM_ONE_PRICING`(입력 $0.042/M, 출력 0)으로 추정. 실패는 status=error 행 하나.

@@ -55,6 +55,11 @@ CommuLingo의 필요한 설명·라벨·원문 발췌 전송과 자동 실행은
 판정 불가 시 독립 검토를 유지하며 분류 장애와 동일하게 취급하지 않는다.
 
 요청은 최대 12항목·state 24k자 단위로 묶고 같은 입력은 캐시한다.
+캐시 키는 실제 발췌·질문·provider/model·임계값·stance를 포함한다. 같은 source ID와 offset이라도
+다시 가져온 본문이 달라지면 재판정하며 모델/임계값 변경 후 이전 거절 결과를 재사용하지 않는다.
+Usage에는 `citation_requests`(배치 요청 수), `citation_cache_hits`(캐시로 처리한 항목 수),
+`citation_unique_items`(이번 호출에서 판정을 요청한 고유 항목 수)를 누적한다.
+검토 게이트의 지표에는 `review_` 접두사가 붙는다. requests는 내부 HTTP 재시도 횟수를 포함하지 않는다.
 판정 수치는 해당 claim에 붙여 근거가 재배치되어도 대응이 어긋나지 않게 한다.
 P 문단 라벨·원문 offset·인용문 포함 여부는 결정적 코드로 검증한다.
 Jev가 라벨이나 인용 위치를 추측하지 않는다. editor는 legacy 검색 shadow triage를 호출하지 않는다.
@@ -87,6 +92,49 @@ Scout의 KG 그룹 분류를 Jev로 대체하는 안은 채택하지 않았으�
 저장 라벨과의 일치는 정확도가 아니다. 분류 기준 변경·자료 누락·기존 오분류를 따로 검토해야 한다.
 외부 원문은 판정 대상 데이터이며 실행 지시나 권한 근거로 취급하지 않는다.
 지속적인 사후 품질 감사 없이 테스트 통과를 역사적 사실의 정확성 보증으로 해석하지 않는다.
+
+## 공식 문서·외부 사례 검토와 반복 평가
+
+2026-09-21 공식 문서와 GitHub 사례를 대조했다. 현재의 고정 선택지 분류, 독립적인 질문의
+일괄 호출, 코드로 판정 결합, 낮은 신뢰도 fallback은 권장 패턴과 부합한다.
+
+- [공식 Confidence](https://docs.typesafe.ai/confidence): confidence는 선택지 분포에서 계산한 통계다.
+  `confidence=.9`를 실제 정답률 90%로 해석하지 않는다. 임계값은 적용 업무의 검증 데이터로 평가한다.
+- [공식 Primitives](https://docs.typesafe.ai/primitives): 질문은 독립적으로 평가된다. 질문 ID는 모델에
+  전달되지 않으므로 대상 항목은 instructions에도 명시해야 한다. 기존 `fan_out`은 이를 수행한다.
+- [공식 Speculative fan-out](https://docs.typesafe.ai/patterns/fan-out): 같은 state에 필요한 질문들을
+  모으면 왕복 지연을 줄일 수 있다. 현재 인용·역할극의 다중 질문 방식에 이미 적용되어 있다.
+- [문서 분류 사례](https://github.com/Charlyhno-eng/jev-document-classification): 입력 크기 제한,
+  짧은 문서 묶음 처리와 비용·실행시간 기록을 참고했다. 현재 인용 배치·캐시를 유지하고 사용량 지표를 보강했다.
+- [jevcal](https://github.com/abhixhek/jevcal), [jev-eval-agent](https://github.com/vinilana/jev-eval-agent),
+  [jev-harness](https://github.com/AntonioCoppe/jev-harness): 임계값별 처리율·정확도, 실제 행동의 오판,
+  저장 응답 재평가를 참고했다. 외부 코드나 의존성을 설치하지 않았다. 해당 프로젝트의 수치를
+  Leninbot의 성능으로 인용하지 않는다.
+
+`scripts/eval_jev_citations.py`는 운영 citation 질문과 `verdict()`를 그대로 사용한다.
+기본 fixture는 지지/모순/무관/부분 지지/반박 stance/접근 차단/러시아어-한국어/부정/원문 속 지시문을
+담은 합성 10건이다. 품질 회귀의 출발점이며 운영 정답률이나 임계값 최적화의 충분한 근거가 아니다.
+
+```bash
+# 실제 외부 호출·과금·감사 기록 발생. 접근 가능한 기존 gateway/credential 환경에서 실행.
+venv/bin/python scripts/eval_jev_citations.py --live > /tmp/jev-citations.json
+# 저장한 응답으로 현재 정책과 임계값별 결과 비교: 외부 호출 없음.
+venv/bin/python scripts/eval_jev_citations.py --replay /tmp/jev-citations.json
+```
+
+출력은 실제 모델, 응답·오류, 알려진 호출 비용, p50/p95 지연, 고신뢰 처리율·분류 정확도,
+오차단·차단 누락, 0.70~0.95의 reject 임계값 비교를 포함한다. unavailable은 별도로 세며
+성공으로 간주하지 않는다. 고신뢰 처리율은 전체 표본 대비 support confidence 문턱을 넘은 비율로,
+독립 검토를 생략해도 된다는 뜻은 아니다. 지연은 성공 요청의 HTTP 지연이고 재시도 대기를 포함하지 않는다.
+저장된 평가 파일은 state를 포함하므로 실제 운영 자료로 확장할 때 접근 범위를 관리한다.
+재평가는 질문·모델을 바꾸지 않고 거절 임계값만 비교한다. 질문 변경은 새로운 호출 결과가 필요하다.
+
+추가 적용 후보인 검색 재정렬과 LLM 모델 티어 선택은 자체 정답 데이터와 기존 경로 대비 평가가
+마련된 뒤 검토한다. 기존 30건 라우팅 표본만으로 다른 도메인의 임계값을 정하거나 자동 대체하지 않는다.
+
+2026-09-21 합성 예제 3건의 실제 연결 스모크는 모두 성공했다(`jev-1.13.0`, 요청별
+338/346/745ms, 입력 합계 1,291토큰, 총 추정 $0.000054222). 이는 연결·형식 확인이며
+평가 fixture 10건의 실측이나 운영 정확도·절감률 검증은 아니다.
 
 검증은 `tests/test_commulingo_classify.py`, `test_commulingo_editor_decisions.py`,
 `test_commulingo_citation_gate.py`, `test_commulingo_classification_audit.py`,

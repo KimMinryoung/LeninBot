@@ -114,6 +114,18 @@ class DecideTests(unittest.TestCase):
         self.assertEqual(result.error_kind, "configuration")
         post.assert_not_called()
 
+    def test_structured_instructions_work_on_wire_and_in_fan_out(self):
+        question = {'type': 'noul', 'instructions': {'question': 'Is this urgent?', 'hint': ['deadline']}}
+        with mock.patch('httpx.post', return_value=_Resp(200, PAYLOAD)) as post:
+            cr.decide_detailed('t', 's', {'urgent': question}, profile=_profile())
+        import json
+        self.assertEqual(json.loads(post.call_args.kwargs['json']['questions']['urgent']['instructions']),
+                         question['instructions'])
+        _, questions = cr.fan_out({'c1': 's'}, {'urgent': question})
+        self.assertIn('About `items.c1`:', questions['c1_urgent']['instructions'])
+        self.assertIn('deadline', questions['c1_urgent']['instructions'])
+        self.assertIsInstance(question['instructions'], dict)
+
     def test_retryable_failure_is_retried_once_then_succeeds(self):
         responses = [_Resp(429, text="slow down", headers={"retry-after": "1"}), _Resp(200, PAYLOAD)]
         with mock.patch("httpx.post", side_effect=responses) as post, \
