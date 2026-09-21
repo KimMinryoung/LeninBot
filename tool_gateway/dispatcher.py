@@ -70,6 +70,20 @@ def _idempotency_key(name: str, args: dict) -> str:
     return f"{name}:{payload}"
 
 
+def _roleplay_snapshot_call(name: str, args: dict) -> bool:
+    """Reads must stay fresh; discarded SQLite drafts must never acquire durable receipts.
+
+    The final roleplay transaction owns replay protection via automatic_turns.
+    This exception is limited to tools whose writes all use MEMORY_OVERRIDE.
+    """
+    if name not in {'roleplay_state', 'roleplay_person', 'roleplay_memory'}:
+        return False
+    if args.get('action') in {'read', 'history', 'list', 'search'}:
+        return True
+    from runtime_tools.roleplay_memory import MEMORY_OVERRIDE
+    return MEMORY_OVERRIDE.get() is not None
+
+
 def _compact_text(text: str, limit: int) -> str:
     """Collapse long tool/schema descriptions while preserving their meaning."""
     text = " ".join(str(text or "").split())
@@ -350,7 +364,7 @@ async def execute_tool(
             logger.warning("gateway validation audit failed for %s: %s", name, audit_exc)
         return msg, True
 
-    side_effect = is_side_effect_tool(name, gw_decision.risk_class)
+    side_effect = is_side_effect_tool(name, gw_decision.risk_class) and not _roleplay_snapshot_call(name, args)
     cache_key = _idempotency_key(name, args) if side_effect else None
     if cache_key is not None and idempotency_cache is not None:
         cached = idempotency_cache.get(cache_key)

@@ -109,7 +109,7 @@ FEEDBACK_PREFERENCE = "feedback_line"
 # Buttons are off by default: an unsure Jev label takes its most probable value and the
 # settlement line says so. /ask 켜기 brings the buttons back for a player who wants them.
 ASK_PREFERENCE = "ask_player"
-AUTO_SETTLE_ROUNDS = 4
+AUTO_SETTLE_ROUNDS = 32  # event/intensity/activity plus bounded record decisions
 
 
 def _asks_player(user_id: int) -> bool:
@@ -436,7 +436,12 @@ async def cmd_status(message: Message) -> None:
     state["relative_day"] = clock["relative_day"]
     state["time_certainty"] = {"explicit": "명시된 범위", "estimated": "추정 포함", "unknown": "미상"}[clock["certainty"]]
     interpretation = clock["last_interpretation"]
-    state["time_evidence"] = f"{interpretation['source_quote']} → {interpretation['interpretation']}" if interpretation else "아직 없음"
+    # Repairs and legacy records may have an explanation without a direct quote.
+    # Missing audit metadata must never prevent the status command from replying.
+    state["time_evidence"] = " → ".join(str(value) for value in (
+        interpretation.get("source_quote"), interpretation.get("interpretation")
+    ) if value) if isinstance(interpretation, dict) else ""
+    state["time_evidence"] = state["time_evidence"] or "아직 없음"
     gaps = clock.get('uncalculated_minutes', 0)
     state["time_gaps"] = (f"{clock['unquantified_gaps']}개 구간의 활동 미상 (시간 추정 {gaps}분, 상태 미반영)" if gaps else f"{clock['unquantified_gaps']}개 구간의 경과 분량 미상 (상태 미반영)") if not clock["elapsed_complete"] else "없음"
     metrics = {"hunger": "허기", "fatigue": "피로", "pain": "통증", "tension": "긴장"}

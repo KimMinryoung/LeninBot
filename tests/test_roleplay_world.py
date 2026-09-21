@@ -155,7 +155,8 @@ class RoutineTests(unittest.TestCase):
         state['participants'] = []
         auth = {'user_text': '12시간 쉬어', 'labels': {'mode': 'scene', 'transition': 'current', 'span': 'brief', 'time_scope': 'explicit'}}
         verdict = {'status': 'classified', 'labels': {'mode': 'scene', 'event': 'none', 'activity': 'rest', 'location': 'keep'}, 'uncertain': [], 'answers': {}, 'model': 't', 'draft': '초안'}
-        with patch.object(turn, 'review_reply', return_value={'approved': True, 'issues': []}):
+        with patch.object(turn, 'review_reply', return_value={'approved': True, 'issues': []}), \
+             patch.object(jev, 'estimate_duration', return_value={'elapsed_minutes': 600}):
             prepared = turn.prepare('12시간 쉬어', state, [], [], '9', '초안', auth, None, verdict)
         self.assertTrue(prepared['applied']['interrupted'])
         self.assertEqual(prepared['state']['scene_minute'], 600)

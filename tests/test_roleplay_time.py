@@ -25,10 +25,10 @@ class TimeAuthorizationTests(unittest.TestCase):
         self.assertEqual(turn.policy_for_authorization(auth).max_minutes, 205)
         self.assertEqual(turn.expected_stop(auth, before), {'title': '18:00 저녁 배식', 'minutes': 205})
         verdict = {'status': 'classified', 'labels': {'mode': 'scene', 'event': 'none', 'activity': 'rest'}}
-        with patch.object(jev, 'classify', return_value=verdict), patch.object(jev, 'estimate_duration') as estimate, \
+        with patch.object(jev, 'classify', return_value=verdict), patch.object(jev, 'estimate_duration', return_value={'elapsed_minutes': 1}) as estimate, \
              patch.object(turn, 'review_reply', return_value={'approved': True, 'issues': []}):
             prepared = turn.prepare(text, before, [], [], 'evening', '저녁 배식이 왔다.', auth)
-        estimate.assert_not_called()
+        estimate.assert_called_once()
         self.assertEqual(prepared['applied']['minutes'], 205)
         self.assertEqual(prepared['state']['clock']['time'], '18:00')
 
@@ -61,10 +61,10 @@ class TimeAuthorizationTests(unittest.TestCase):
             self.assertEqual(applied['minutes'], 20)
             self.assertEqual(state['scene_minute'], 20)
         with patch.object(jev, 'classify', return_value={'status': 'classified', **deepcopy(verdict)}), \
-             patch.object(jev, 'estimate_duration') as estimate, \
+             patch.object(jev, 'estimate_duration', return_value={'elapsed_minutes': 1}) as estimate, \
              patch.object(turn, 'review_reply', return_value={'approved': True, 'issues': []}):
             prepared = turn.prepare(text, initial(), [], [], 'scope', '20분 쉬었다', auth)
-        estimate.assert_not_called()
+        estimate.assert_called_once()
         self.assertEqual(prepared['applied']['minutes'], 20)
 
     def test_draft_jev_does_not_reclassify_llm_time(self):

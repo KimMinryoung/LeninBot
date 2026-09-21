@@ -142,3 +142,10 @@ it while retaining failure semantics. The dispatcher forwards metadata to audit 
 returning ordinary text to provider loops. KG metadata contains only route, counts,
 empty-result and fallback flags; it does not include result bodies. The KG search schema
 accepts a nonblank `query` or `entity` (either is sufficient).
+
+## Roleplay snapshot exception
+
+`roleplay_state`, `roleplay_person`, `roleplay_memory` read/history/list/search actions bypass result deduplication so reads remain fresh.
+When their `MEMORY_OVERRIDE` is active, their disposable SQLite writes also bypass loop/durable receipts; a discarded draft must not suppress
+the next draft's writes. Argument validation, authorization and audit still run. Final publication is protected by roleplay's SQLite revision
+check and `automatic_turns`, while writes outside a draft retain ordinary gateway idempotency.

@@ -244,7 +244,7 @@ class AutomaticTransactionTests(unittest.TestCase):
 
     def test_focused_jev_retry_preserves_confident_event(self):
         def answer(label, confidence): return {'choice': label, 'confidence': confidence}
-        first = Decision(answers={'mode':answer('scene',.99), 'event_pressure':answer('public_submission',.9), 'intensity':answer('moderate',.5),
+        first = Decision(answers={'mode':answer('scene',.99), 'event_pressure':answer('public_submission',.9), 'intensity':answer('moderate',.49),
                                  **{k:answer('none',.9) for k in jev.FAMILY_KEYS if k != 'event_pressure'}}, model='jev', cost_usd=.001)
         second = Decision(answers={'intensity':answer('moderate',.9)}, model='jev', cost_usd=.002)
         with patch.object(jev, 'decide_detailed', side_effect=[DecisionResult(decision=first),DecisionResult(decision=Decision(answers={}, model="jev")),DecisionResult(decision=second)]) as decide:
@@ -270,8 +270,8 @@ class DurationTests(unittest.TestCase):
     def test_duration_only_valid_integer_within_single_event_cap(self):
         for value, expected in ((-1, 10), (11, 10)):
             with patch.object(jev, 'generate_detailed', return_value=GenerationResult(text=json.dumps({'elapsed_minutes':value,'reason':'arrival'}))):
-                capped = jev.estimate_duration('감방으로 보내',initial(),verdict())
-                self.assertEqual((capped['elapsed_minutes'], capped['capped']), (expected, True))
+                with self.assertRaisesRegex(ValueError, '허가된 사건·시간'):
+                    jev.estimate_duration('감방으로 보내',initial(),verdict())
         for value in (True, 1.5, '3', None):
             with patch.object(jev, 'generate_detailed', return_value=GenerationResult(text=json.dumps({'elapsed_minutes':value,'reason':'arrival'}))):
                 with self.assertRaises(ValueError): jev.estimate_duration('감방으로 보내',initial(),verdict())

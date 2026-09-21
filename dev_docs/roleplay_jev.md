@@ -17,19 +17,31 @@ Telegram의 새 처리 절차는 사용자 허용 범위를 확인하고 초안�
 분류는 `roleplay_scene_adjudication` 등록을 사용하며 세 호출로 나뉜다(`question_group`): `roleplay-scene`(mode/elapsed/plan_action/
 사건 축 5개/sexual_act/intensity/활동/수면/위협/접촉/고립/장소/새 부상), `roleplay-people`(인물별 출입), `roleplay-records`(부상·예정 사건·
 holdout·bargain). people/records 호출이 실패하면 그 키만 미확정으로 남고 장면 판정은 진행된다. 수락 기준은 핵심 라벨(mode/사건 축/elapsed/
-intensity/sexual_act/plan_action) 0.65, 보조 라벨 0.5다(`CORE_LABELS`, thresholds.accept/secondary). 핵심 라벨이 재판정 뒤에도 불확실하면
+intensity/sexual_act/plan_action) 0.5, 보조 라벨 0.5다(`CORE_LABELS`, thresholds.accept/secondary). 핵심 라벨이 재판정 뒤에도 불확실하면
 `PendingChoice`가 나고 봇이 자동 처리하거나 버튼으로 묻는다([roleplay_postdraft.md](roleplay_postdraft.md)). mode/사건/강도가 확정된 즉시 사건은
 elapsed만 불확실할 때 해당 효과를 적용하고 시간과 장면 조건은 보류한다(applied.deferred_components). 그 외 불확실한 보조 선택지는 기존 값을
 유지한다. 분류 장애를 생성 모델로 대체하지 않는다. 이동+회복 상담은 이동 한 사건만 처리한다.
+
+0.5는 API의 `confidence` 기준이며 최상위 선택지의 확률이나 정답률 50%를 뜻하지 않는다.
+정정 가능한 게임 판정에서 불필요한 재판정을 줄이기 위한 운영값이다. 설정 누락 시 코드 기본값도 0.5이며,
+그 미만의 재판정·자동 선택 표시와 시간·저장 검증은 유지한다. 실제 정확도는 별도 정답 표본으로 평가해야 한다.
+해석 근거: [TypeSafe confidence 문서](https://docs.typesafe.ai/confidence).
 
 Telegram은 scene 모드에만 이 사건 분류를 호출한다. discussion/correction/reset/plan은 초안 전 LLM의 판정을
 코드가 검증·적용하며 사건 분류·소요 추정·서술 검토를 생략한다. 세 경로의 계약은
 [입력 모드별 처리](roleplay_postdraft.md#입력-모드별-세-처리-경로)를 따른다.
 
-시간 LLM에는 원문·실제 초안·기존 장소/장면·Jev 라벨을 전달한다. 출력은 정수 elapsed_minutes와 reason만
-허용한다. 기본 한도는 0~10분(허용된 긴 세션·개방형 휴식은 최대 180분)이며 한도를 넘는 추정(-1 포함)은 한도로 절단해 진행한다.
-잘못된 JSON·잘린 출력·오류는 초안 실패다. 명시적인 ‘한 시간 쉬어’는 이 호출 없이 60분이다.
-허가 LLM이 상담/계획으로 판정하면 실제 경과를 적용하지 않는다. 시간 판정 LLM은 사건과 수치 계수를 선택하지 못한다.
+시간 검사는 모든 scene 초안에서 호출한다. 원문·초안·저장 시계·허가·일과·예정 중단점을 전달하고
+elapsed_minutes/reason/within_scope/timeline_anchor를 받는다. 명시 기간은 여전히 허가된 분으로 정산하며
+시간 검사는 초안이 그 범위를 넘었는지만 확인한다. 비명시 기간은 검증된 추정값을 사용한다.
+초안의 마지막 명시 시각은 날짜·시각·원문 인용으로 추출하고, Python이 저장 시계와의 차이를 계산한다.
+인용이 초안에 없거나 과거 시각·허용 상한·예정 중단점을 넘으면 저장하지 않는다. -1이나 상한 초과도
+절단하지 않고 초안을 다시 쓴다. 명시 시각의 추출과 행위 범위의 의미 판정은 여전히 모델에 의존한다.
+
+규칙 버전 11부터 holdout/bargain/story 미확정은 별도 roleplay-record-review로 한 번 재판정한다.
+그래도 미확정이면 항목별 PendingChoice를 발생시켜 기본 자동 처리 또는 /ask 선택으로 정산한다.
+최신 확률순 후보를 쓰며 확률 부재·동률이면 keep을 우선하고, 자동 선택은 확정 한 줄에 표시한다.
+이전처럼 미확정을 조용히 keep으로 버리지 않는다. 재판정 비용·지연·답변은 calls/answers에 포함한다.
 
 사건은 다섯 독립 축으로 판정한다(`EVENT_FAMILIES`). 물질적 축 harm(부상·구타·성적 가해)/care(처치)/intake(식사·간식·물)와
 영향 축 pressure(심문·자백·연루·협박·공개 굴욕·헛수고·실패·파기)/relief(배려·인정·선택권·성취·경계 존중·지지)는 서로 독립이며, 한 축 안에서는

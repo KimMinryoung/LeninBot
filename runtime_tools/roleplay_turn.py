@@ -216,6 +216,11 @@ def prepare(user_text, before, people, history, scope_id, draft, authorization, 
         if mode == 'scene':
             if policy.explicit_passage and authorization['labels']['transition']=='current':
                 verdict['labels']['elapsed']='explicit'
+                verdict['duration_limit'] = policy.max_minutes
+                verdict['expected_stop'] = expected_stop(authorization, state)
+                if not verdict.get('duration_estimate'):
+                    # Validate the draft; the authorized duration still owns arithmetic.
+                    verdict['duration_estimate'] = jev.estimate_duration(user_text, state, verdict)
             else:
                 # The duration generator, not ambiguous temporal word classification,
                 # decides how much time the authorized draft actually uses.
@@ -360,7 +365,14 @@ def feedback_line(outcome, state=None):
     if applied.get('auto_settled'):
         korean = {'mode': '모드', 'event': '사건', 'intensity': '강도', 'activity': '활동', 'within_scope': '범위'}
         values = {**names, 'scene': '장면 실행', 'discussion': '질문·상담', 'plan': '예정 등록', 'mild': '스침', 'moderate': '보통', 'severe': '극심',
-                  'light': '가벼운 움직임', 'rest': '휴식', 'yes': '안'}
+                  'light': '가벼운 움직임', 'rest': '휴식', 'yes': '안', 'lost': '넘김', 'keep': '유지',
+                  'paid': '값 치름', 'kept': '이행', 'broken': '파기', 'complete': '완료', 'cancel': '취소'}
+        for i, item in enumerate((state or {}).get('holdouts', [])):
+            korean[f'holdout_{i}'] = item['title']
+        for i, item in enumerate((state or {}).get('bargains', [])):
+            korean[f'bargain_{i}'] = item['request']
+        for i, item in enumerate((state or {}).get('story_events', [])):
+            korean[f'story_{i}'] = item['title']
         parts.append('애매해서 자동 처리: ' + ', '.join(f"{korean.get(k, k)}={values.get(v, v)}" for k, v in applied['auto_settled'].items()))
     return '⚙ ' + ' · '.join(parts)
 
