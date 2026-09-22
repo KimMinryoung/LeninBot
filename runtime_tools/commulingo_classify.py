@@ -533,13 +533,13 @@ ROLE_KEYS = {"soviet": "role_soviet", "china": "role_china", "other": "role_non_
 
 
 def classify_person_card(fields: dict, *, catalogs=None, claims: dict | None = None, decide=None, codes=True, legacy=False) -> dict | None:
-    """One request for a person's card: {"codes": classify_person_codes shape,
-    "person": classify_person shape or None}, or None when the model is unavailable.
+    """Classify a card, returning codes and a person assignment, or None.
 
-    Two requests (codes, then group/role once the citizenship was known) sent
-    the same ~8k-token card twice and doubled the latency.
+    Legacy cards use one request. Sourced activities select the function,
+    then its affiliation, then supporting evidence in dependent requests.
+    Each stage sees the preceding choice; Jev question heads are independent.
     """
-    from llm.call_registry import decide_detailed
+    from llm.call_registry import decide_detailed, Decision
     from runtime_tools.commulingo_people import _NATIONAL_ORIGIN_CODES, _NATIONALITY_CODES
 
     enabled, accept = _profile(FEATURE)
@@ -558,8 +558,12 @@ def classify_person_card(fields: dict, *, catalogs=None, claims: dict | None = N
     activity_catalog = load_catalog() if basis else None
     if basis:
         questions = {k: v for k, v in questions.items() if not k.startswith('role')}
-        questions.update(activity_questions(activity_catalog, basis))
-    result = (decide or decide_detailed)(FEATURE, person_card_state(fields, claims), questions,
+        activity_q = activity_questions(activity_catalog, basis)
+        questions['activity_function'] = activity_q['activity_function']
+    state = person_card_state(fields, claims)
+    if basis:
+        state['cited_activity_evidence'] = basis
+    result = (decide or decide_detailed)(FEATURE, state, questions,
                                          label="person-card" if codes else "person-classification")
     decision = result.decision
     if decision is None:
@@ -567,6 +571,31 @@ def classify_person_card(fields: dict, *, catalogs=None, claims: dict | None = N
         return None
     verdicts = _codes_from(decision, questions, fields, accept) if codes else {}
     if basis:
+        # Jev questions run independently. Later choices must see the actual
+        # earlier answer, never instructions referring to another parallel question.
+        function = decision.choice('activity_function')
+        if function not in {f['id'] for f in activity_catalog['functions']}:
+            return None
+        state['selected_activity_function'] = function
+        affiliation_q = dict(activity_q['activity_affiliation'])
+        affiliation_q['instructions'] += ' The function is fixed by selected_activity_function in the state.'
+        affiliation_result = (decide or decide_detailed)(FEATURE, state,
+            {'activity_affiliation': affiliation_q}, label='person-activity-affiliation')
+        if affiliation_result.decision is None:
+            return None
+        affiliation = affiliation_result.decision.choice('activity_affiliation')
+        if affiliation not in {a['id'] for a in activity_catalog['affiliations']} | {'unresolved', 'independent'}:
+            return None
+        state['selected_activity_affiliation'] = affiliation
+        basis_q = dict(activity_q['activity_basis'])
+        basis_q['instructions'] += ' Verify the exact selected_activity_function and selected_activity_affiliation in the state.'
+        basis_result = (decide or decide_detailed)(FEATURE, state,
+            {'activity_basis': basis_q}, label='person-activity-basis')
+        if basis_result.decision is None:
+            return None
+        decision = Decision(answers={**decision.answers,
+            'activity_affiliation': affiliation_result.decision.answers['activity_affiliation'],
+            'activity_basis': basis_result.decision.answers['activity_basis']}, model=decision.model)
         person = activity_person_from(decision, activity_catalog, basis, {g['id'] for g in groups}, accept)
         return {"codes": verdicts, "person": person}
     if "role" in questions:

@@ -491,5 +491,17 @@
       "type": "disabled"
     },
     "note": "시간 허가·장면 범위·선택된 명시 기간은 초안 전 LLM 한 번으로 판정. 과거/부정/계획 기간을 합산하지 않는다. 초안 후 실제 소요 추정은 별도 호출."
+  },
+  "commulingo_activity_migration_review": {
+    "provider": "deepseek",
+    "model": "deepseek-flash",
+    "temperature": 0.1,
+    "max_tokens": 2500,
+    "timeout": 120,
+    "json_mode": true,
+    "thinking": {
+      "type": "disabled"
+    },
+    "note": "2026-09-22 운영자가 요청한 혼합 역할 897명 이관의 공개 원문 근거 검토. 도구 없는 단발 JSON 검토이며 인물 DB 쓰기 없음. 원문 위치와 정체성·기능·실제 소속을 검토하고 결과는 별도 Jev 근거 검사 및 공통 Admin 이관 전에 검수한다."
   }
 }
