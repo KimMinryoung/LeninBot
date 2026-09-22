@@ -44,6 +44,13 @@ DB의 research/draft 단계명은 호환용이며 둘 다 Editor를 실행한다
 분류 코드를 제거한다. 기존 인물 분류는 보존하고 신규·누락 분류와 변경된 라벨의 코드를 채운다.
 분류 장애 때는 초안을 저장해 재시도하며 LLM 분류로 대체하지 않는다.
 
+출처가 있는 인물 활동은 기능 → 해당 기능의 소속 → 선택된 기능·소속을 지지하는 근거 순서로
+Jev에 질의한다. 질문별 판정은 독립적이므로 후속 질의 state에 앞선 선택을 명시한다.
+발췌 원문도 state에 포함하며, 허용 목록 밖 응답이나 근거 없는 선택은 보류한다.
+국적·거주·학술 연구 대상을 국가기관 복무로 추정하지 않는다.
+2026-09-22 혼합 분류 897명 이관의 출처·검토 방식·운영 반영 기록은 프런트엔드
+`dev_docs/commulingo-role-model-plan.md`와 `scripts/content/person-activities-mixed-reviewed-20260922.json`에 있다.
+
 ### 원문 캐시와 문단 라벨
 
 `source_session.py`는 기존 PostgreSQL 원문 캐시와 job_sources를 재사용한다.
