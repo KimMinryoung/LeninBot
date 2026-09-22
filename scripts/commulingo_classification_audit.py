@@ -12,7 +12,9 @@ The criteria carry the editorial rules the operator confirmed on 2026-09-19
 (dev_docs/jev_system_one_adoption.md 4.11.1): republic first secretaries are
 the nationalities-federal line, regional secretaries the Secretariat line,
 ideology-propaganda is for pro-Soviet ideologues only, non-Soviet people never
-sit in a Soviet era group, "scholar" means historians of this history. Pairs
+sit in a Soviet era group, "scholar" means historians of this history; since
+2026-09-21 Chinese citizens take a china-* group and the Chinese party-state
+categories (CATEGORY_RULES), which no one else is offered. Pairs
 the operator accepted as boundary judgements are left out of the report
 (ACCEPTED_PAIRS).
 
@@ -35,7 +37,7 @@ from datetime import date
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 FEATURE = "commulingo_classification_audit"
-from runtime_tools.commulingo_classify import build_questions, offices_allowed  # noqa: E402  shared editorial rules
+from runtime_tools.commulingo_classify import build_questions, offices_allowed, role_scope  # noqa: E402  shared editorial rules
 
 # stored→judged pairs the operator has accepted as boundary judgements; a
 # disagreement on these lines is not reported (2026-09-19 decisions).
@@ -67,8 +69,9 @@ def state_of(p: dict) -> dict:
 
 def judge(p: dict, catalogs: tuple, decide) -> dict:
     groups, offices, categories = catalogs
-    soviet = offices_allowed(p["citizenship_code"])
-    result = decide(FEATURE, state_of(p), build_questions(groups, offices, categories, soviet), label="classification-audit")
+    scope = role_scope(p["citizenship_code"])
+    result = decide(FEATURE, state_of(p), build_questions(groups, offices, categories, scope == "soviet", scope=scope),
+                    label="classification-audit")
     row = {"id": p["id"], "name": p["name_ko"], "years": p["years_label"],
            "stored": {"group": p["group_id"], "role": p["office_id"] or p["category_id"]}}
     if result.decision is None:

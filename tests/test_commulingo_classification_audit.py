@@ -9,7 +9,8 @@ GROUPS = [{'id': 'thaw', 'title_en': 'Thaw', 'range_label': '1953–1985', 'blur
 OFFICES = [{'id': 'nationalities-federal', 'title_en': 'Nationalities', 'range_label': '1917–1991'},
            {'id': 'party-leadership', 'title_en': 'Party leadership', 'range_label': '1922–1991'}]
 CATS = [{'id': 'socialist-bloc-leader', 'label_en': 'Bloc leader', 'label_ko': '사회주의권 지도자'},
-        {'id': 'scholar', 'label_en': 'Scholar', 'label_ko': '연구자'}]
+        {'id': 'scholar', 'label_en': 'Scholar', 'label_ko': '연구자'},
+        {'id': 'ccp-security', 'label_en': 'CCP security', 'label_ko': '중공 보안·정보'}]
 
 
 def decision(group, role, conf=0.95):
@@ -39,6 +40,35 @@ class AuditTests(unittest.TestCase):
         successor = {**person, 'citizenship_code': 'azerbaijan'}
         audit.judge(successor, (GROUPS, OFFICES, CATS), decide)
         self.assertIn('nationalities-federal', seen[1][1])
+
+    def test_chinese_citizens_get_the_party_state_categories_and_nobody_else_does(self):
+        from scripts import commulingo_classification_audit as audit
+        from runtime_tools.commulingo_classify import role_scope
+        self.assertEqual(role_scope('china'), 'china')
+        self.assertEqual(role_scope('soviet'), 'soviet')
+        self.assertEqual(role_scope('poland'), 'other')
+        china = audit.build_questions(GROUPS, OFFICES, CATS, soviet=False, scope='china')
+        self.assertEqual(set(china['role']['criteria']), {'ccp-security', 'scholar'})
+        self.assertIn('Kang Sheng', china['role']['criteria']['ccp-security'])
+        self.assertNotIn('nationalities-federal', china['role']['criteria'])
+        self.assertNotIn('ccp-security', audit.build_questions(GROUPS, OFFICES, CATS, soviet=True)['role']['criteria'])
+        self.assertNotIn('ccp-security', audit.build_questions(GROUPS, OFFICES, CATS, soviet=False)['role']['criteria'])
+        seen = []
+        def decide(feature, state, questions, label=None):
+            seen.append(set(questions['role']['criteria']))
+            return decision('international-revolutionary', 'ccp-security')
+        person = {'id': 'k', 'name_ko': '캉성', 'years_label': '1898–1975', 'epithet_ko': '', 'bio_ko': 'b', 'bio_en': 'b',
+                  'group_id': 'thaw', 'citizenship_code': 'china', 'category_id': None, 'office_id': None, 'career': None}
+        audit.judge(person, (GROUPS, OFFICES, CATS), decide)
+        self.assertEqual(seen[0], {'ccp-security', 'scholar'})
+
+    def test_undecided_citizenship_asks_the_role_three_ways(self):
+        from runtime_tools.commulingo_classify import ROLE_KEYS, person_card_questions
+        q = person_card_questions({'citizenship': {'label': {'en': 'China'}}}, GROUPS, OFFICES, CATS, ['china', 'soviet'], ['china'])
+        self.assertEqual(set(ROLE_KEYS.values()) - set(q), set())
+        self.assertIn('ccp-security', q['role_china']['criteria'])
+        self.assertNotIn('ccp-security', q['role_soviet']['criteria'])
+        self.assertNotIn('ccp-security', q['role_non_soviet']['criteria'])
 
     def test_report_skips_accepted_boundary_pairs(self):
         from scripts import commulingo_classification_audit as audit

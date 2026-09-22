@@ -1,11 +1,13 @@
 """Assign a CommuLingo person's group and role with a System One model.
 
 The person create API used to require the writing model to pick ``groupId``
-(13 groups) and ``role`` (16 Soviet offices or 11 categories) beside the prose.
+and ``role`` (a Soviet office or a role category) beside the prose.
 Those are closed-set editorial judgements: on 2026-09-19 a Jev audit of all
 2,341 stored people found 106 misfiled ones, and the operator decided the
 runner should assign the classification after the draft instead of the
-writer choosing it. ``classify_person`` takes the drafted fields (name,
+writer choosing it. Since 2026-09-21 the dictionary has a China shelf (four
+china-* groups) and function categories for the Chinese party-state, offered
+to Chinese citizens the way the offices are offered to Soviet ones. ``classify_person`` takes the drafted fields (name,
 years, citizenship, epithet, career, bio) and returns the group and role
 with confidences; the pipeline draft stage and the person create tool fill
 them in when the writer left them out. Offices are only offered for Soviet
@@ -28,6 +30,15 @@ SOVIET_CITIZENSHIP = frozenset({"soviet", "russia"})
 SOVIET_SUCCESSORS = frozenset({"armenia", "azerbaijan", "belarus", "estonia", "georgia", "kazakhstan", "kyrgyzstan",
                                "latvia", "lithuania", "moldova", "tajikistan", "turkmenistan", "ukraine", "uzbekistan"})
 DEFAULT_ACCEPT = 0.7
+# The Chinese party-state has its own function categories (frontend migration
+# 183): they are offered only to Chinese citizens, the way the offices are
+# offered only to Soviet ones, and the camp categories that describe the
+# world beyond both states are withheld from Chinese citizens.
+CHINA_CITIZENSHIP = frozenset({"china"})
+CHINA_CATEGORIES = frozenset({"ccp-leadership", "prc-government", "ccp-security", "ccp-ideology-propaganda",
+                              "prc-economy-planning", "prc-foreign-affairs", "qing-kuomintang-warlords"})
+CAMP_CATEGORIES = frozenset({"socialist-bloc-leader", "socialist-bloc-reform-leader", "foreign-statesman",
+                             "counterrevolution", "imperial-white", "left-opposition"})
 
 GROUP_RULES = {
     "old-regime": "Inside the Russian Empire before October 1917: tsarist officials and generals, White commanders of the "
@@ -85,6 +96,45 @@ OFFICE_RULES = {
     "head-of-government": "Chairmen of Sovnarkom / Council of Ministers and their deputies; an ambiguous line — prefer the "
                           "person's defining office when they also held one.",
     "comintern": "Comintern functionaries of any nationality (Dimitrov, Kolarov, Manuilsky).",
+}
+
+
+CATEGORY_RULES = {
+    "ccp-leadership": "Chinese Communist Party leadership: chairmen and general secretaries, Politburo and Secretariat "
+                      "members, the founders and the successive party heads (Chen Duxiu, Qu Qiubai, Wang Ming, Mao, Liu "
+                      "Shaoqi, Deng, Hu Yaobang, Zhao Ziyang, Jiang Zemin) — the function they are known for is running "
+                      "the party.",
+    "prc-government": "State Council and state organs of the People's Republic: premiers and vice-premiers, state "
+                      "chairmen and vice-chairmen, NPC chairmen, ministers known for their government office (Zhou Enlai, "
+                      "Li Peng, Wan Li, Soong Ching-ling).",
+    "ccp-security": "Party and state security, intelligence and the guard: Social Affairs Department, Ministry of Public "
+                    "Security, Central Guard Bureau (Kang Sheng, Luo Ruiqing, Wang Dongxing).",
+    "ccp-ideology-propaganda": "Ideology, propaganda, the party press and the arts as instruments of the line (Chen Boda, "
+                               "Yao Wenyuan, Deng Tuo, Jiang Qing, Zhang Chunqiao). Never a dissident.",
+    "prc-economy-planning": "Planning, finance and economic management of the People's Republic (Chen Yun, Li Xiannian, "
+                            "Bo Yibo, Gao Gang).",
+    "prc-foreign-affairs": "Foreign ministers and diplomats of the People's Republic (Chen Yi).",
+    "qing-kuomintang-warlords": "The side the Communists fought inside China: late-Qing officials and emperors, warlords, "
+                                "Kuomintang politicians, diplomats and generals (Yuan Shikai, Puyi, Zhang Zuolin, Chiang "
+                                "Kai-shek, Wang Jingwei, T. V. Soong). Not Sun Yat-sen, who stays a revolutionary.",
+    "military-commander": "Commanders and marshals of an army outside the Soviet one: PLA marshals and generals, Giap, "
+                          "partisan generals. Soviet commanders use the defence OFFICE instead.",
+    "dissident": "People known for opposing the party-state from outside it after it took power: Democracy Wall and "
+                 "1989 figures (Wei Jingsheng, Fang Lizhi). Not a purged official.",
+    "non-soviet-revolutionary": "Revolutionaries and socialists outside the Soviet and Chinese state apparatus, and the "
+                                "Chinese revolutionaries without a party-state function (Sun Yat-sen), "
+                                "Comintern advisers abroad (Borodin, Otto Braun).",
+    "socialist-bloc-leader": "Leaders and officials of socialist states other than the USSR and China (Poland, Hungary, "
+                             "East Germany, Cuba, Vietnam, Korea...).",
+    "socialist-bloc-reform-leader": "Reformers inside those socialist states (Nagy, Dubček, Kádár's reformers).",
+    "foreign-statesman": "Non-communist politicians, diplomats and generals of other states who dealt with the USSR.",
+    "counterrevolution": "Rulers and soldiers outside the USSR and China who fought a revolution at home by force "
+                         "(Franco, Mannerheim).",
+    "imperial-white": "The Russian imperial establishment and the White movement.",
+    "left-opposition": "The Left Opposition inside the Bolshevik party.",
+    "theorist": "The movement's own theorists and intellectuals (Gramsci, Hu Shih as a public thinker).",
+    "writer-artist": "Writers, artists and cultural figures known for their work, not for running culture.",
+    "scholar": "Historians and social scientists who study this history (Schram, MacFarquhar, Yang Jisheng, Gao Hua).",
 }
 
 
@@ -324,11 +374,46 @@ def offices_allowed(citizenship_code: str | None) -> bool:
     return (citizenship_code or "") in SOVIET_CITIZENSHIP | SOVIET_SUCCESSORS
 
 
-def build_questions(groups: list[dict], offices: list[dict], categories: list[dict], soviet: bool) -> dict:
+def role_scope(citizenship_code: str | None) -> str:
+    """Which role catalogue a citizenship opens: 'soviet' (offices + categories),
+    'china' (the Chinese party-state categories) or 'other' (categories only)."""
+    code = citizenship_code or ""
+    if code in SOVIET_CITIZENSHIP | SOVIET_SUCCESSORS:
+        return "soviet"
+    if code in CHINA_CITIZENSHIP:
+        return "china"
+    return "other"
+
+
+def role_categories_for(categories: list[dict], scope: str) -> list[dict]:
+    """The office-less categories a scope may choose from: the Chinese
+    party-state categories only for Chinese citizens, and the camp categories
+    (bloc leader, foreign statesman...) for everyone but them."""
+    if scope == "china":
+        return [c for c in categories if c["id"] not in CAMP_CATEGORIES]
+    return [c for c in categories if c["id"] not in CHINA_CATEGORIES]
+
+
+ROLE_INSTRUCTIONS = {
+    "soviet": "Which single role identifies this person? Choose a catalogued OFFICE only when the career shows they held "
+              "it; otherwise the closest CATEGORY.",
+    "china": "Which single category identifies this Chinese person's function in the party-state (leadership, "
+             "government, security, ideology, economy, diplomacy, the Qing/Kuomintang side), or their craft "
+             "(commander, writer, theorist, scholar, dissident)? A revolutionary without a party-state function is "
+             "non-soviet-revolutionary.",
+    "other": "Which category best identifies this non-Soviet, non-Chinese person's role in this history?",
+}
+
+
+def build_questions(groups: list[dict], offices: list[dict], categories: list[dict], soviet: bool, scope: str | None = None) -> dict:
+    """The group and role questions for one role scope. ``soviet`` is the
+    older boolean form (True → 'soviet', False → 'other'); ``scope`` wins."""
+    scope = scope or ("soviet" if soviet else "other")
     group_criteria = {g["id"]: f"{g['title_en']} ({g.get('range_label') or ''}). {GROUP_RULES.get(g['id'], g.get('blurb_en') or '')}"
                       for g in groups}
-    role_criteria = {c["id"]: f"CATEGORY {c['label_en']} / {c['label_ko']}" for c in categories}
-    if soviet:
+    role_criteria = {c["id"]: f"CATEGORY {c['label_en']} / {c['label_ko']}: {CATEGORY_RULES.get(c['id'], '')}".rstrip(": ")
+                     for c in role_categories_for(categories, scope)}
+    if scope == "soviet":
         role_criteria.update({o["id"]: f"OFFICE {o['title_en']} ({o.get('range_label') or ''}): {OFFICE_RULES.get(o['id'], '')}"
                               for o in offices})
     return {
@@ -336,10 +421,7 @@ def build_questions(groups: list[dict], offices: list[dict], categories: list[di
                   "instructions": "Which dictionary group does this person belong to? Soviet citizens go to the era in which "
                                   "their public role peaked; Chinese citizens go to the china-* group of their era or side; "
                                   "people outside both states go to one of the four non-Soviet groups."},
-        "role": {"type": "choice", "criteria": role_criteria,
-                 "instructions": ("Which single role identifies this person? Choose a catalogued OFFICE only when the career "
-                                  "shows they held it; otherwise the closest CATEGORY." if soviet else
-                                  "Which category best identifies this non-Soviet person's role in this history?")},
+        "role": {"type": "choice", "criteria": role_criteria, "instructions": ROLE_INSTRUCTIONS[scope]},
     }
 
 
@@ -433,16 +515,21 @@ def person_card_questions(fields: dict, groups, offices, categories, citizenship
     """The card's questions: missing codes, group, and role. The role's options
     depend on the citizenship (offices are Soviet institutions): when the card
     already carries the code, one role question fits it; when this request
-    decides the citizenship, the role is asked both ways and code picks one."""
+    decides the citizenship, the role is asked for each scope and the decided code picks one."""
     questions = person_code_questions(fields, citizenship_codes, origin_codes) if codes else {}
     questions["group"] = build_questions(groups, offices, categories, soviet=True)["group"]
     if "citizenship" in questions:
-        questions["role_soviet"] = build_questions(groups, offices, categories, soviet=True)["role"]
-        questions["role_non_soviet"] = build_questions(groups, offices, categories, soviet=False)["role"]
+        for scope in ("soviet", "china", "other"):
+            questions[ROLE_KEYS[scope]] = build_questions(groups, offices, categories, soviet=False, scope=scope)["role"]
     else:
-        soviet = offices_allowed((fields.get("citizenship") or {}).get("code"))
-        questions["role"] = build_questions(groups, offices, categories, soviet=soviet)["role"]
+        scope = role_scope((fields.get("citizenship") or {}).get("code"))
+        questions["role"] = build_questions(groups, offices, categories, soviet=False, scope=scope)["role"]
     return questions
+
+
+# One role question per scope when the citizenship is decided in the same
+# request; the decided code then picks which answer counts.
+ROLE_KEYS = {"soviet": "role_soviet", "china": "role_china", "other": "role_non_soviet"}
 
 
 def classify_person_card(fields: dict, *, catalogs=None, claims: dict | None = None, decide=None, codes=True) -> dict | None:
@@ -474,7 +561,7 @@ def classify_person_card(fields: dict, *, catalogs=None, claims: dict | None = N
         role_key = "role"
     else:
         citizenship = (verdicts.get("citizenship") or {}).get("code")
-        role_key = "role_soviet" if offices_allowed(citizenship) else "role_non_soviet"
+        role_key = ROLE_KEYS[role_scope(citizenship)]
     return {"codes": verdicts, "person": _person_from(decision, role_key, groups, offices, categories, accept)}
 
 

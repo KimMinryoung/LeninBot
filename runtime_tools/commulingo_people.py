@@ -612,12 +612,12 @@ def _list_groups() -> list[dict]:
     # Roosevelt, Marshall, Paasikivi, and a Finnish foreign minister — when the
     # blurb says the group is for those who took up arms against a revolution.
     return db_query(
-        """SELECT g.id, g.range_label, g.title_ko, g.title_en,
+        """SELECT g.id, g.shelf, g.range_label, g.title_ko, g.title_en,
                   g.blurb_ko, g.blurb_en,
                   COUNT(p.id) AS people_count
            FROM commulingo_people_groups g
            LEFT JOIN commulingo_people p ON p.group_id = g.id
-           GROUP BY g.id, g.sort_order, g.range_label, g.title_ko, g.title_en,
+           GROUP BY g.id, g.shelf, g.sort_order, g.range_label, g.title_ko, g.title_en,
                     g.blurb_ko, g.blurb_en
            ORDER BY g.sort_order, g.id"""
     )
@@ -1072,19 +1072,20 @@ COMMULINGO_PEOPLE_TOOL = {
     "name": "commulingo_people",
     "description": (
         "Read the CommuLingo people dictionary (cyber-lenin.com/commulingo/people): "
-        "Soviet-history figures with bios, career timelines, and institution "
-        "(office) leadership timelines, all bilingual ko/en. Actions: "
+        "figures of Soviet history and of the Chinese revolution and People's "
+        "Republic, with bios, career timelines, and Soviet institution (office) "
+        "leadership timelines, all bilingual ko/en. Actions: "
         "`search` (q matched across people, glossary terms, historical events, "
         "and offices at once — a single match returns its full record inline; "
         "use this when the category is uncertain), "
-        "`list_groups` (era groups + people counts), "
+        "`list_groups` (era groups on the Soviet, China and world shelves + people counts), "
         "`search_people` (q matches id/name/cyrillic; optional group_id), "
         "`get_person` (full record — returned in the canonical person-field shape "
         "accepted by the narrow person writers; "
         "office_rows, sections and role.resolvedIcon are read-only info), "
         "`list_offices` (institution timelines + row counts), "
         "`get_office` (one institution's full leadership timeline), "
-        "`list_categories` (office-less role categories for role {category}), "
+        "`list_categories` (office-less role categories for role {category}: general role categories and Chinese party-state functions; Soviet leadership timelines use offices), "
         "`get_sections` (a person's full detail-page sections, returned in the "
         "exact person_section patch shape — edit and send back), "
         "`list_events` (historical event ids, titles, and linked-person counts), "

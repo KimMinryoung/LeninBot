@@ -176,7 +176,7 @@ class ClassifyCardTests(unittest.TestCase):
         out = cc.classify_person_card(card, catalogs=CATALOGS, claims={'fate': [{'claim': 'died at home', 'excerpt': 'умер'}]}, decide=decide)
         self.assertEqual(seen['feature'], cc.FEATURE)
         self.assertEqual(seen['label'], 'person-card')
-        self.assertEqual(set(seen['questions']), {'citizenship', 'fate', 'group', 'role_soviet', 'role_non_soviet'})
+        self.assertEqual(set(seen['questions']), {'citizenship', 'fate', 'group', 'role_soviet', 'role_china', 'role_non_soviet'})
         self.assertIn('nationalities-federal', seen['questions']['role_soviet']['criteria'])
         self.assertNotIn('nationalities-federal', seen['questions']['role_non_soviet']['criteria'])
         self.assertEqual(seen['state']['fate_claims'][0]['excerpt'], 'умер')
@@ -197,6 +197,26 @@ class ClassifyCardTests(unittest.TestCase):
         self.assertEqual(out['person']['confidence']['role'], 0.85)
         self.assertIsNone(cc.classify_person_card(card, catalogs=CATALOGS,
                                                   decide=lambda *a, **k: DecisionResult(error_kind='server', error='503')))
+
+
+class ChinaCardTests(unittest.TestCase):
+    def test_chinese_role_is_consumed_for_known_and_inferred_citizenship(self):
+        groups = GROUPS + [{'id': 'china-mao-era', 'title_en': 'Mao era', 'range_label': '1949–1976'}]
+        categories = CATS + [{'id': 'ccp-security', 'label_en': 'CCP security', 'label_ko': '중공 보안·정보'}]
+        for citizenship in ({'code': 'china'}, {'label': {'en': 'China'}}):
+            with self.subTest(citizenship=citizenship), patch('llm.call_registry.resolve', return_value=PROFILE):
+                def decide(feature, state, questions, label=None):
+                    key = 'role' if 'role' in questions else 'role_china'
+                    self.assertEqual(set(questions[key]['criteria']), {'ccp-security', 'scholar'})
+                    return codes_result(citizenship=('china', 0.99), group=('china-mao-era', 0.96),
+                                        **{key: ('ccp-security', 0.94),
+                                           'role_soviet': ('nationalities-federal', 0.99),
+                                           'role_non_soviet': ('socialist-bloc-leader', 0.99)})
+                out = cc.classify_person_card({**FIELDS, 'citizenship': citizenship},
+                                               catalogs=(groups, OFFICES, categories), decide=decide)
+                self.assertEqual(out['person']['groupId'], 'china-mao-era')
+                self.assertEqual(out['person']['role'], {'category': 'ccp-security'})
+                self.assertEqual(out['person']['confidence']['role'], 0.94)
 
 
 class ClassifyCodesTests(unittest.TestCase):

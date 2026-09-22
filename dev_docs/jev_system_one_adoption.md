@@ -43,6 +43,8 @@ CommuLingo의 필요한 설명·라벨·원문 발췌 전송과 자동 실행은
 판정 장애와 낮은 신뢰도는 다르다. editor는 장애로 초안을 버리거나 작성 LLM에 분류를 떠넘기지 않는다.
 직접 등록 도구도 공통 분류 함수를 사용하지만 editor의 체크포인트 복구는 editor 전용이다.
 
+역할 선택지는 시민권에 따라 다르다(`role_scope`): 소련·계승국 시민은 소련 기관(office)과 범주, 중국 시민은 중공 당·국가 기능 범주(`CHINA_CATEGORIES`, 2026-09-21)와 직능 범주, 나머지는 중국 전용 범주를 제외한 진영·직능 범주를 받는다. 시민권을 같은 요청에서 판정할 때는 세 가지 역할 질문(`role_soviet`/`role_china`/`role_non_soviet`)을 함께 묻고 판정된 코드로 하나를 고른다. 범주별 기준은 `CATEGORY_RULES`에 있다. 작업 API의 `list_groups`는 `shelf`(soviet/china/world)를 포함하고, `list_categories`는 DB의 최신 역할 범주를 조회한다.
+
 `scripts/commulingo_classification_audit.py`는 저장값과 고신뢰 판정이 다른 인물을 보고한다.
 감사 자체는 쓰지 않는다. 정정은 근거를 갖춘 공통 편집 서비스의 제출·승인을 거친다.
 

@@ -124,8 +124,8 @@ def load_config(path: Path = CONFIG_PATH) -> dict:
     cfg["enrich_batch_time_budget_sec"] = max(0, int(cfg["enrich_batch_time_budget_sec"]))
     cfg["stale_priority_every"] = max(0, int(cfg["stale_priority_every"]))
     cfg["stale_priority_days"] = max(1, int(cfg["stale_priority_days"]))
-    if cfg["new_person_focus"] not in {"all", "soviet_institutions", "old_regime"}:
-        raise ValueError("new_person_focus must be all, soviet_institutions, or old_regime")
+    if cfg["new_person_focus"] not in {"all", "soviet_institutions", "old_regime", "china"}:
+        raise ValueError("new_person_focus must be all, soviet_institutions, old_regime, or china")
     if not isinstance(cfg["roster_groups"], list):
         raise ValueError("roster_groups must be a list of group ids")
     cfg["roster_groups"] = [str(g) for g in cfg["roster_groups"]]
@@ -707,6 +707,9 @@ ROSTER_GROUPS_BY_FOCUS = {
     # the revolution generation or as a non-Soviet revolutionary, so the roster
     # keeps those groups to prove absence.
     "old_regime": ("old-regime", "bolshevik", "international-revolutionary"),
+    # The China shelf (frontend migration 182); foreign advisers to the
+    # Chinese revolution are filed as international revolutionaries.
+    "china": ("china-old-regime", "china-revolution", "china-mao-era", "china-reform", "international-revolutionary"),
 }
 
 
@@ -895,6 +898,19 @@ CURRENT SELECTION FOCUS:
   they are out of scope for now.
 - State in the coverage reason why the person matters to pre-October revolutionary or
   imperial history.
+"""
+    elif new_person_focus == "china":
+        focus_instruction = """
+CURRENT SELECTION FOCUS:
+- Select only a person of the Chinese revolution or the People's Republic, one whose card
+  belongs on the China shelf: the late-Qing and Kuomintang side (china-old-regime), the
+  revolutionary generation to 1949 (china-revolution), the Mao era (china-mao-era) or the
+  reform era (china-reform). Foreign advisers to the Chinese revolution are filed as
+  international revolutionaries.
+- Prefer a documented party-state function — party leadership, government, security,
+  ideology and propaganda, economy and planning, diplomacy, the PLA command — or a
+  writer, theorist or dissident whose absence leaves a Chinese event's people list thin.
+- State in the coverage reason which Chinese event or era the person is needed for.
 """
     return """MODE: NEW PERSON DISCOVERY ONLY
 
