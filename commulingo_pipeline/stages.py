@@ -273,7 +273,8 @@ async def model_call(*, spec, prompt, tool, handler, reads, usage, budget, read_
                 max_rounds=min(policy.max_rounds,max_rounds),max_tokens=policy.max_output_tokens,
                 max_input_tokens=policy.max_input_tokens,budget_usd=budget,budget_tracker=usage.tracker,
                 agent_name=spec.name,finalization_tools=terminal_names,terminal_tools=terminal_names,
-                terminal_required=True,**binding.reasoning)
+                terminal_required=True,continue_on_length=policy.max_output_continuations > 0,
+                max_length_continuations=policy.max_output_continuations,**binding.reasoning)
     jev_before = usage.tracker.get('jev_cost_usd',0)
     observed_before = usage.tracker.get('observed_llm_cost_usd',0)
     cost_before = usage.tracker.get('total_cost',0)

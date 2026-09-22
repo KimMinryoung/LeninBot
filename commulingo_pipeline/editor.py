@@ -330,6 +330,10 @@ class Editor:
         initial_status.pop('scope')
         prompt = ('Complete the commissioned edit using the task data below. '
                   'Use commulingo_pipeline_context for additional current values. Editable changes are defined by the tools.\n'
+                  + ('For a person section, write one distinct documented phase or theme that the current sections do not cover. '
+                     'Give it a specific heading and a substantive bilingual body. If the available sources do not support '
+                     'a useful section, submit a reasoned no-edit decision; length and section count are not targets.\n'
+                     if section else '')
                   + stage_evidence({'job':{k:job[k] for k in ('id','kind','action','target')},
                       'current':focused_current,'issues':issues,
                       'surrounding_context':surrounding_context,'work_status':initial_status,

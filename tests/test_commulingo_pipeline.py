@@ -137,6 +137,34 @@ class PlannerSelectionTests(unittest.TestCase):
         self.assertIn("lower(ev.title_ko)=lower(g.label_ko)", gap_sql)
         self.assertEqual(gap_params[0], ['battle-of-lake-khasan'])
 
+    def test_editor_commissions_first_section_without_section_quota(self):
+        from commulingo_pipeline.planner import Planner
+        cur = Mock()
+        cur.fetchall.side_effect = [[], [], []]
+        store = Mock()
+        @contextmanager
+        def transaction():
+            yield cur
+        store.transaction = transaction
+        with patch('commulingo_pipeline.planner.report_mentions_by_term', return_value={}):
+            Planner(store, overlap_allow=[], exclude=[], concrete=True).candidates(5)
+        sql = cur.execute.call_args_list[0].args[0]
+        self.assertIn("('sections',50,NOT EXISTS (SELECT 1 FROM commulingo_person_sections", sql)
+        self.assertIn("topic.name='sections' OR NOT", sql)
+        self.assertNotIn("('sections',50,false)", sql)
+
+    def test_first_section_is_not_cancelled_by_card_edit_grace(self):
+        cur = Mock()
+        cur.rowcount = 0
+        store = Mock()
+        @contextmanager
+        def transaction():
+            yield cur
+        store.transaction = transaction
+        self.assertEqual(Store.retire_people_in_grace(store), 0)
+        self.assertIn("COALESCE(j.payload->'topics','[]'::jsonb) <> '[\"sections\"]'::jsonb",
+                      cur.execute.call_args.args[0])
+
     def test_term_candidates_are_ordered_by_body_and_report_mentions(self):
         from commulingo_pipeline.planner import Planner
         cur = Mock()
@@ -361,6 +389,8 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
             return 'OK: saved artifact'
         async def chat(*args,**kwargs):
             self.assertEqual([t['name'] for t in kwargs['tools']],['commulingo_pipeline_result'])
+            self.assertTrue(kwargs['continue_on_length'])
+            self.assertEqual(kwargs['max_length_continuations'], 2)
             with patch('tool_gateway.security.audit'):
                 _, failed = await execute_tool(tool['name'],{'reason':2},kwargs['tool_handlers'],tool_schema=tool['input_schema'])
                 self.assertTrue(failed)

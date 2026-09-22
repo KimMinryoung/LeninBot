@@ -215,6 +215,8 @@ async def run_tool_loop(
     budget_warning_sent = False
     terminal_reminded = False
     length_continuations = 0
+    length_exhausted = False
+    terminal_missing = False
     round_num = 0
     response = None
 
@@ -305,6 +307,15 @@ async def run_tool_loop(
                             continue
                 if turn.truncated_by_length:
                     await adapter.on_truncated_final()
+                    if terminal_required and terminal_tools:
+                        # A scheduled stage records work only through its terminal
+                        # tool. Keep this conversation and give the restricted
+                        # finalization call one chance after length recovery runs out.
+                        partial_text = "\n".join(t for t in turn.text_parts if t).strip()
+                        if partial_text:
+                            adapter.append_assistant_text(working_msgs, partial_text)
+                        length_exhausted = True
+                        break
                 if (terminal_required and terminal_tools and not terminal_reminded
                         and not turn.truncated_by_length and round_num < total_round_limit):
                     # The stage result only exists once the terminal tool
@@ -319,6 +330,12 @@ async def run_tool_loop(
                         round_num, ", ".join(terminal_tools),
                     )
                     continue
+                if terminal_required and terminal_tools:
+                    text = "\n".join(t for t in turn.text_parts if t).strip()
+                    if text:
+                        adapter.append_assistant_text(working_msgs, text)
+                    terminal_missing = True
+                    break
                 return _tracked(
                     accumulated_text_parts + turn.text_parts,
                     finish_reason=turn.finish_reason,
@@ -415,7 +432,8 @@ async def run_tool_loop(
         # Limit reached (rounds or budget) — force final response
         # ══════════════════════════════════════════════════════════════
         budget_exhausted = state.total_cost >= budget_usd
-        was_still_working = adapter.was_still_working(response) if response else False
+        was_still_working = (length_exhausted or terminal_missing or
+                             (adapter.was_still_working(response) if response else False))
         log_detail = "\n".join(tool_call_log) if tool_call_log else ""
         logger.warning(
             "Limit reached (rounds=%d/%d, normal_rounds=%d, budget=$%.4f/$%.2f, "
@@ -423,7 +441,9 @@ async def run_tool_loop(
             round_num, total_round_limit, max_rounds, state.total_cost, budget_usd,
             was_still_working, log_detail,
         )
-        limit_reason = "예산 소진" if budget_exhausted else "도구 호출 한도 도달"
+        limit_reason = ("예산 소진" if budget_exhausted else
+                        "응답 길이 한도 도달" if length_exhausted else
+                        "최종 도구 미호출" if terminal_missing else "도구 호출 한도 도달")
 
         # Finalization tool whitelist (subset of the agent's allowed tools):
         # if provided, only these remain available on the forced-final call so

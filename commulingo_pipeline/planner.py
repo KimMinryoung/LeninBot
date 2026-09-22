@@ -20,9 +20,12 @@ class Planner:
         self.exclude = list(exclude)
 
     def candidates(self, limit=40):
-        section_needed = ('false' if self.concrete else
+        section_needed = ('NOT EXISTS (SELECT 1 FROM commulingo_person_sections s WHERE s.person_id=p.id)'
+            if self.concrete else
             '(SELECT count(*) FROM commulingo_person_sections s WHERE s.person_id=p.id) < '
             + SECTION_CAP_SQL.format(events=PERSON_EVENTS_SQL.format(person='p.id')))
+        person_grace = ("(topic.name='sections' OR NOT " + PERSON_IN_GRACE_SQL.format(person='p.id') + ')'
+                        if self.concrete else 'NOT ' + PERSON_IN_GRACE_SQL.format(person='p.id'))
         with self.store.transaction() as cur:
             # Only empty values are commissioned. Prose that predates the
             # evidence regime is not re-researched to backfill sources: that
@@ -54,7 +57,7 @@ class Planner:
                     WHERE e.person_id=p.id AND e.topic=topic.name AND e.status!='open' AND e.review_after>now())
                 AND NOT EXISTS (SELECT 1 FROM commulingo_agent_suggestions s
                     WHERE s.target_id=p.id AND s.target_type IN ('person','person_section') AND s.status='pending')
-                AND NOT ''' + PERSON_IN_GRACE_SQL.format(person='p.id') + '''
+                AND ''' + person_grace + '''
                 UNION ALL
                 SELECT 'term','update',t.id,topic.name,topic.priority,
                     'Commissioned glossary explanation: ' || topic.name,t.updated_at::text,

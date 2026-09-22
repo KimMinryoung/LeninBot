@@ -6,7 +6,8 @@ REASON = 'automatic commission has no remaining missing fields'
 TABLES = ('commulingo_pipeline_jobs', 'commulingo_pipeline_artifacts',
           'commulingo_pipeline_attempts', 'commulingo_pipeline_budget',
           'commulingo_pipeline_job_sources', 'commulingo_people', 'commulingo_terms',
-          'commulingo_person_roles', 'commulingo_person_career_entries')
+          'commulingo_person_roles', 'commulingo_person_career_entries',
+          'commulingo_person_sections')
 
 
 def has_work(job, current):
@@ -33,7 +34,8 @@ def retire(store, *, apply=False, limit=200):
                 'citizenship',jsonb_build_object('label',jsonb_build_object('ko',p.citizenship_label_ko,'en',p.citizenship_label_en)),
                 'nationalOrigin',jsonb_build_object('label',jsonb_build_object('ko',p.origin_label_ko,'en',p.origin_label_en)),
                 'role',EXISTS(SELECT 1 FROM commulingo_person_roles r WHERE r.person_id=p.id),
-                'career',EXISTS(SELECT 1 FROM commulingo_person_career_entries c WHERE c.person_id=p.id))
+                'career',EXISTS(SELECT 1 FROM commulingo_person_career_entries c WHERE c.person_id=p.id),
+                'sections',EXISTS(SELECT 1 FROM commulingo_person_sections s WHERE s.person_id=p.id))
             ELSE jsonb_build_object('definition',jsonb_build_object('ko',t.definition_ko,'en',t.definition_en),
                 'body',jsonb_build_object('ko',t.body_ko,'en',t.body_en)) END AS current
             FROM commulingo_pipeline_jobs j

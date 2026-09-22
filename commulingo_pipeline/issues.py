@@ -16,6 +16,12 @@ def commission(job, current):
     current = current or {}
     issues = []
     for topic in work_topics(job):
+        if job['kind']=='person' and topic=='sections':
+            if not current.get('sections'):
+                issues.append({'id':'missing:sections', 'field':'body', 'topic':topic,
+                    'problem':'No detail section exists for this person.',
+                    'done_when':'Add one distinct, well-documented bilingual detail section with body evidence, or explain why this life does not warrant one.'})
+            continue
         fields = (PERSON if job['kind']=='person' else TERM).get(topic, ())
         for field in fields:
             value = current.get(field)

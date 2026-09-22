@@ -138,9 +138,11 @@ class SourceAndIssueTests(EditorCase):
         self.assertEqual(commission(JOB,full), [])
         self.assertEqual(commission({**JOB,'topic':'examples'},full), [])
         person = {**JOB,'kind':'person','topic':'sections','reason':'Commissioned missing information or evidence: sections'}
-        self.assertEqual(commission(person,{'sections':[]}), [])
+        self.assertEqual([(i['id'],i['field']) for i in commission(person,{'sections':[]})],
+                         [('missing:sections','body')])
+        self.assertEqual(commission(person,{'sections':[{'slug':'existing-theme'}]}), [])
         explicit = {**person,'reason':'Add the documented 1930 trial section.'}
-        self.assertEqual(commission(explicit,{})[0]['id'],'requested')
+        self.assertEqual({i['id'] for i in commission(explicit,{})}, {'missing:sections','requested'})
         # Missing provenance on existing prose is not a commission (2026-09-20).
         self.assertEqual(commission(JOB,{**full,'evidence':[]}), [])
         complete_person = {'years':'1900–1980','epithet':{'ko':'역사가','en':'Historian'},

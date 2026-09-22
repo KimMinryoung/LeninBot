@@ -17,7 +17,8 @@ class CleanupTests(TestCase):
         self.assertFalse(has_work(JOB, FULL))
         self.assertTrue(has_work(JOB, {**FULL, 'body': {'ko': '본문', 'en': ''}}))
         person = {**JOB, 'kind': 'person', 'payload': {'topics': ['bio','sections']}}
-        self.assertFalse(has_work(person, {'bio': FULL['body']}))
+        self.assertTrue(has_work(person, {'bio': FULL['body'], 'sections':False}))
+        self.assertFalse(has_work(person, {'bio': FULL['body'], 'sections':True}))
         self.assertTrue(automatic(JOB))
         for key, value in [('gap_ids',[2]), ('gap_id',2), ('review_feedback',{'decision':'revise'}),
                            ('original_proposal',{'id':3})]:
@@ -45,6 +46,7 @@ class CleanupTests(TestCase):
         self.assertEqual(preview['retired'], 0)
         self.assertEqual(cur.execute.call_count, 1)
         self.assertTrue(cur.execute.call_args.args[0].startswith('SELECT'))
+        self.assertIn("'sections',EXISTS(SELECT 1 FROM commulingo_person_sections", cur.execute.call_args.args[0])
         cur.reset_mock()
         result = retire(store, apply=True)
         self.assertEqual(result['retired'], 1)

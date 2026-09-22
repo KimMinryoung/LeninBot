@@ -102,6 +102,7 @@ class Store:
                 last_error='re-enrichment grace after an applied edit'
                 WHERE j.kind='person' AND j.action='update' AND j.topic='enrichment'
                   AND j.status='ready' AND j.stage='research' AND j.priority>=20
+                  AND COALESCE(j.payload->'topics','[]'::jsonb) <> '["sections"]'::jsonb
                   AND NOT EXISTS (SELECT 1 FROM commulingo_pipeline_artifacts a WHERE a.job_id=j.id)
                   AND """ + PERSON_IN_GRACE_SQL.format(person='j.target'), GRACE_PARAMS)
             return cur.rowcount

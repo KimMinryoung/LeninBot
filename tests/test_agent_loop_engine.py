@@ -270,19 +270,24 @@ class TestClaudeFinalizationTools(unittest.TestCase):
         self.assertIn("판단: 승인해도 된다", str(msgs[-2]["content"]))
         self.assertIn("save_diary 호출로만 기록된다", str(msgs[-1]))
 
-    def test_terminal_required_accepts_second_text_answer(self):
+    def test_terminal_required_finalizes_after_second_text_answer(self):
         client = FakeAnthropicClient([
             _response([_text_block("첫 답")]),
             _response([_text_block("둘째 답")]),
+            _response([_tool_use_block("t1", "save_diary")], stop_reason="tool_use"),
         ])
-        result = asyncio.run(claude_loop.chat_with_tools(
-            [{"role": "user", "content": "q"}],
-            client=client, model="claude-sonnet-5",
-            tools=TOOLS, tool_handlers=HANDLERS, system_prompt="s",
-            budget_usd=5.0, terminal_tools=["save_diary"], terminal_required=True,
-        ))
-        self.assertEqual(len(client.calls), 2)
-        self.assertIn("둘째 답", result)
+        with patch.object(claude_loop, "execute_tools_batch",
+                          _fake_batch_factory({"save_diary": ("recorded", False)})):
+            result = asyncio.run(claude_loop.chat_with_tools(
+                [{"role": "user", "content": "q"}],
+                client=client, model="claude-sonnet-5",
+                tools=TOOLS, tool_handlers=HANDLERS, system_prompt="s",
+                budget_usd=5.0, terminal_tools=["save_diary"],
+                finalization_tools=["save_diary"], terminal_required=True,
+            ))
+        self.assertEqual(len(client.calls), 3)
+        self.assertTrue(result.endswith("recorded"))
+        self.assertIn("둘째 답", str(client.calls[-1]["messages"]))
 
     def test_text_answer_without_terminal_required_is_final(self):
         client = FakeAnthropicClient([_response([_text_block("완료")])])
@@ -342,6 +347,25 @@ class TestClaudeFinalizationTools(unittest.TestCase):
 
 
 class TestClaudeLengthContinuation(unittest.TestCase):
+    def test_terminal_required_finalizes_after_length_continuations(self):
+        client = FakeAnthropicClient([
+            _response([_text_block(f"부분 판단 {i}")], stop_reason="max_tokens")
+            for i in range(3)
+        ] + [_response([_tool_use_block("saved", "save_diary")], stop_reason="tool_use")])
+        with patch.object(claude_loop, "execute_tools_batch",
+                          _fake_batch_factory({"save_diary": ("recorded", False)})):
+            result = asyncio.run(claude_loop.chat_with_tools(
+                [{"role": "user", "content": "기록하라"}], client=client,
+                model="deepseek-flash", tools=TOOLS, tool_handlers=HANDLERS,
+                system_prompt="s", budget_usd=5.0, max_rounds=1,
+                continue_on_length=True, max_length_continuations=2,
+                terminal_tools=["save_diary"], finalization_tools=["save_diary"],
+                terminal_required=True))
+        self.assertTrue(result.endswith("recorded"))
+        self.assertEqual(len(client.calls), 4)
+        self.assertIn("부분 판단 2", str(client.calls[-1]["messages"]))
+        self.assertIn("응답 길이 한도 도달", str(client.calls[-1]["messages"]))
+
     def test_partial_text_stitched_across_continuation(self):
         client = FakeAnthropicClient([
             _response([_text_block("첫 부분이 여기서 끊겼다")], stop_reason="max_tokens"),
