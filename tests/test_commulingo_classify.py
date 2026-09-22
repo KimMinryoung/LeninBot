@@ -49,7 +49,7 @@ class ClassifyTests(unittest.TestCase):
         def decide(feature, state, questions, label=None):
             seen.update(feature=feature, roles=set(questions['role']['criteria']))
             return result('international-revolutionary', 'socialist-bloc-leader')
-        out = cc.classify_person(FIELDS, catalogs=CATALOGS, decide=decide)
+        out = cc.classify_person(FIELDS, legacy=True, catalogs=CATALOGS, decide=decide)
         self.assertEqual(seen['feature'], cc.FEATURE)
         self.assertEqual(seen['roles'], {'socialist-bloc-leader', 'scholar'})
         self.assertEqual(out['groupId'], 'international-revolutionary')
@@ -65,11 +65,11 @@ class ClassifyTests(unittest.TestCase):
             return result('international-revolutionary', 'socialist-bloc-leader')
         claims = {'career': [{'claim': 'First Secretary 1956–1988', 'excerpt': 'x' * 2000}],
                   'bio': [{'claim': 'b', 'excerpt': 'short'}], 'citizenship': [{'claim': 'c', 'excerpt': 'ignored here'}]}
-        cc.classify_person(FIELDS, catalogs=CATALOGS, claims=claims, decide=decide)
+        cc.classify_person(FIELDS, legacy=True, catalogs=CATALOGS, claims=claims, decide=decide)
         ex = seen['state']['research_excerpts']
         self.assertEqual([e['field'] for e in ex], ['bio', 'career'])
         self.assertEqual(len(ex[1]['excerpt']), cc.EVIDENCE_CHARS)
-        cc.classify_person(FIELDS, catalogs=CATALOGS, decide=decide)
+        cc.classify_person(FIELDS, legacy=True, catalogs=CATALOGS, decide=decide)
         self.assertNotIn('research_excerpts', seen['state'])
 
     def test_soviet_and_successor_citizens_may_receive_an_office(self):
@@ -78,17 +78,17 @@ class ClassifyTests(unittest.TestCase):
             self.assertIn('Union-republic first secretaries', questions['role']['criteria']['nationalities-federal'])
             return result('thaw', 'nationalities-federal', rconf=0.6)
         for code in ('soviet', 'azerbaijan'):
-            out = cc.classify_person({**FIELDS, 'citizenship': {'code': code}}, catalogs=CATALOGS, decide=decide)
+            out = cc.classify_person({**FIELDS, 'citizenship': {'code': code}}, legacy=True, catalogs=CATALOGS, decide=decide)
             self.assertEqual(out['role'], {'officeId': 'nationalities-federal'})
             self.assertTrue(out['low_confidence'])
 
     def test_unavailable_or_unknown_choice_returns_none_and_keeps_writer_values(self):
         def down(feature, state, questions, label=None):
             return DecisionResult(error_kind='transport', error='down')
-        self.assertIsNone(cc.classify_person(FIELDS, catalogs=CATALOGS, decide=down))
+        self.assertIsNone(cc.classify_person(FIELDS, legacy=True, catalogs=CATALOGS, decide=down))
         def odd(feature, state, questions, label=None):
             return result('no-such-group', 'scholar')
-        self.assertIsNone(cc.classify_person(FIELDS, catalogs=CATALOGS, decide=odd))
+        self.assertIsNone(cc.classify_person(FIELDS, legacy=True, catalogs=CATALOGS, decide=odd))
         writer = {**FIELDS, 'groupId': 'thaw', 'role': {'category': 'scholar'}}
         self.assertEqual(cc.fill_classification(writer, None), writer)
 
@@ -96,7 +96,7 @@ class ClassifyTests(unittest.TestCase):
         with patch('llm.call_registry.resolve', return_value=CallSiteProfile(
                 feature=cc.FEATURE, provider='openrouter', model='m', extra={'enabled': False})):
             def boom(*a, **k): raise AssertionError('must not be called')
-            self.assertIsNone(cc.classify_person(FIELDS, catalogs=CATALOGS, decide=boom))
+            self.assertIsNone(cc.classify_person(FIELDS, legacy=True, catalogs=CATALOGS, decide=boom))
 
 
 if __name__ == '__main__':
@@ -173,7 +173,7 @@ class ClassifyCardTests(unittest.TestCase):
                        'role_soviet': ('nationalities-federal', 0.9), 'role_non_soviet': ('socialist-bloc-leader', 0.8)}
             return DecisionResult(decision=Decision(answers={k: {'choice': c, 'confidence': p, 'probabilities': {c: p}}
                                                              for k, (c, p) in answers.items()}, model='typesafe/jev-test'))
-        out = cc.classify_person_card(card, catalogs=CATALOGS, claims={'fate': [{'claim': 'died at home', 'excerpt': 'умер'}]}, decide=decide)
+        out = cc.classify_person_card(card, legacy=True, catalogs=CATALOGS, claims={'fate': [{'claim': 'died at home', 'excerpt': 'умер'}]}, decide=decide)
         self.assertEqual(seen['feature'], cc.FEATURE)
         self.assertEqual(seen['label'], 'person-card')
         self.assertEqual(set(seen['questions']), {'citizenship', 'fate', 'group', 'role_soviet', 'role_china', 'role_non_soviet'})
@@ -192,10 +192,10 @@ class ClassifyCardTests(unittest.TestCase):
                        'role_soviet': ('nationalities-federal', 0.9), 'role_non_soviet': ('socialist-bloc-leader', 0.85)}
             return DecisionResult(decision=Decision(answers={k: {'choice': c, 'confidence': p, 'probabilities': {c: p}}
                                                              for k, (c, p) in answers.items()}, model='m'))
-        out = cc.classify_person_card(card, catalogs=CATALOGS, decide=foreign)
+        out = cc.classify_person_card(card, legacy=True, catalogs=CATALOGS, decide=foreign)
         self.assertEqual(out['person']['role'], {'category': 'socialist-bloc-leader'})
         self.assertEqual(out['person']['confidence']['role'], 0.85)
-        self.assertIsNone(cc.classify_person_card(card, catalogs=CATALOGS,
+        self.assertIsNone(cc.classify_person_card(card, legacy=True, catalogs=CATALOGS,
                                                   decide=lambda *a, **k: DecisionResult(error_kind='server', error='503')))
 
 
@@ -212,7 +212,7 @@ class ChinaCardTests(unittest.TestCase):
                                         **{key: ('ccp-security', 0.94),
                                            'role_soviet': ('nationalities-federal', 0.99),
                                            'role_non_soviet': ('socialist-bloc-leader', 0.99)})
-                out = cc.classify_person_card({**FIELDS, 'citizenship': citizenship},
+                out = cc.classify_person_card({**FIELDS, 'citizenship': citizenship}, legacy=True,
                                                catalogs=(groups, OFFICES, categories), decide=decide)
                 self.assertEqual(out['person']['groupId'], 'china-mao-era')
                 self.assertEqual(out['person']['role'], {'category': 'ccp-security'})

@@ -48,7 +48,7 @@ def schema_for(job, current, catalogs=None):
     # The author chooses from real closed sets; no hidden classifier rewrites a
     # reviewed fact or prevents a format repair when a second provider is down.
     if job['kind']=='person':
-        for field in ('citizenship','nationalOrigin','fate','groupId','role'):
+        for field in ('citizenship','nationalOrigin','fate','groupId','role','activities'):
             schema['properties'][field] = deepcopy(canonical_fields[field])
         groups, offices, roles = catalogs or ([], [], [])
         if not groups or not roles:

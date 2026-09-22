@@ -67,7 +67,7 @@ GROUP_RULES = {
                                    "side: communists, socialists, leaders and officials of socialist states (Poland, Hungary, "
                                    "Czechoslovakia, East Germany, Cuba, Vietnam...), their reformers and dissidents, and "
                                    "foreign advisers to the Chinese revolution (Borodin, Otto Braun). A non-Soviet citizen "
-                                   "never belongs to a Soviet era group; a Chinese citizen belongs to a china-* group.",
+                                   "never belongs to a Soviet era group; Chinese historical actors belong to a china-* group; historians studying history belong to scholar regardless of citizenship.",
     "foreign-statesmen": "Non-communist politicians, diplomats and generals of other states who negotiated with or confronted "
                          "the USSR: presidents, prime ministers, foreign ministers, ambassadors, monarchs.",
     "international-counterrevolutionary": "Rulers, soldiers and movements outside the USSR that fought revolution and the "
@@ -420,7 +420,7 @@ def build_questions(groups: list[dict], offices: list[dict], categories: list[di
         "group": {"type": "choice", "criteria": group_criteria,
                   "instructions": "Which dictionary group does this person belong to? Soviet citizens go to the era in which "
                                   "their public role peaked; Chinese citizens go to the china-* group of their era or side; "
-                                  "people outside both states go to one of the four non-Soviet groups."},
+                                  "people outside both states go to a world group. Historians researching this history use scholar regardless of nationality; actors or targets in historical events can retain the era of their activity."},
         "role": {"type": "choice", "criteria": role_criteria, "instructions": ROLE_INSTRUCTIONS[scope]},
     }
 
@@ -485,7 +485,7 @@ def _person_from(decision, role_key, groups, offices, categories, accept) -> dic
             "confidence": conf, "low_confidence": min(conf.values()) < accept, "model": decision.model}
 
 
-def classify_person(fields: dict, *, catalogs=None, claims: dict | None = None, decide=None) -> dict | None:
+def classify_person(fields: dict, *, catalogs=None, claims: dict | None = None, decide=None, legacy=False) -> dict | None:
     """Group and role for a drafted person whose codes are settled, or None when
     the model is unavailable: the card request without its code questions.
 
@@ -495,7 +495,7 @@ def classify_person(fields: dict, *, catalogs=None, claims: dict | None = None, 
     reviewer confirm the classification rather than drop it: the best choice
     still beats the writer guessing.
     """
-    card = classify_person_card(fields, catalogs=catalogs, claims=claims, decide=decide, codes=False)
+    card = classify_person_card(fields, catalogs=catalogs, claims=claims, decide=decide, codes=False, legacy=legacy)
     return card["person"] if card else None
 
 
@@ -532,7 +532,7 @@ def person_card_questions(fields: dict, groups, offices, categories, citizenship
 ROLE_KEYS = {"soviet": "role_soviet", "china": "role_china", "other": "role_non_soviet"}
 
 
-def classify_person_card(fields: dict, *, catalogs=None, claims: dict | None = None, decide=None, codes=True) -> dict | None:
+def classify_person_card(fields: dict, *, catalogs=None, claims: dict | None = None, decide=None, codes=True, legacy=False) -> dict | None:
     """One request for a person's card: {"codes": classify_person_codes shape,
     "person": classify_person shape or None}, or None when the model is unavailable.
 
@@ -550,6 +550,15 @@ def classify_person_card(fields: dict, *, catalogs=None, claims: dict | None = N
         return None
     questions = person_card_questions(fields, groups, offices, categories, sorted(_NATIONALITY_CODES),
                                       sorted(_NATIONAL_ORIGIN_CODES), codes=codes)
+    from runtime_tools.commulingo_activities import activity_evidence, activity_questions, activity_person_from, load_catalog
+    basis = activity_evidence(fields, claims)
+    if not basis and not legacy:
+        logger.warning("activity classification requires cited career/bio evidence excerpts; no legacy fallback")
+        return None
+    activity_catalog = load_catalog() if basis else None
+    if basis:
+        questions = {k: v for k, v in questions.items() if not k.startswith('role')}
+        questions.update(activity_questions(activity_catalog, basis))
     result = (decide or decide_detailed)(FEATURE, person_card_state(fields, claims), questions,
                                          label="person-card" if codes else "person-classification")
     decision = result.decision
@@ -557,6 +566,9 @@ def classify_person_card(fields: dict, *, catalogs=None, claims: dict | None = N
         logger.warning("person card classification unavailable: %s", result.error)
         return None
     verdicts = _codes_from(decision, questions, fields, accept) if codes else {}
+    if basis:
+        person = activity_person_from(decision, activity_catalog, basis, {g['id'] for g in groups}, accept)
+        return {"codes": verdicts, "person": person}
     if "role" in questions:
         role_key = "role"
     else:
@@ -576,4 +588,6 @@ def fill_classification(fields: dict, classification: dict | None) -> dict:
     out.pop("group", None)
     out["groupId"] = classification["groupId"]
     out["role"] = dict(classification["role"])
+    if classification.get("activities"):
+        out["activities"] = classification["activities"]
     return out

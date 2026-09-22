@@ -26,7 +26,7 @@ class Decisions:
 
     def author_schema(self, schema):
         out = deepcopy(schema)
-        assigned = {'group','groupId','role'} if self.job['kind']=='person' else {'category'}
+        assigned = {'group','groupId','role','activities'} if self.job['kind']=='person' else {'category'}
         for field in assigned:
             out['properties'].pop(field,None)
         out['required'] = [f for f in out.get('required',[]) if f not in assigned]
@@ -38,7 +38,7 @@ class Decisions:
         return out
 
     def strip_assigned(self, fields):
-        for key in ('group','groupId','role') if self.job['kind']=='person' else ('category',):
+        for key in ('group','groupId','role','activities') if self.job['kind']=='person' else ('category',):
             fields.pop(key,None)
         for field,key in (('citizenship','code'),('nationalOrigin','code'),('fate','kind')):
             if isinstance(fields.get(field),dict):
@@ -50,17 +50,19 @@ class Decisions:
         for claim in claims:
             page = sources[claim['source_id']]['body']
             excerpts.setdefault(claim['field'],[]).append({'claim':claim['claim'],
-                'excerpt':page[claim['start']:claim['end']][:1500]})
+                'excerpt':page[claim['start']:claim['end']][:1500],
+                'source':sources[claim['source_id']].get('url',''), 'locator':f"characters {claim['start']}–{claim['end']}"})
         merged = {**self.current, **fields}
         kind = self.job['kind']
         person = kind=='person' and (self.job['action']=='create' or
-            not self.current.get('groupId') or not self.current.get('role'))
+            not self.current.get('groupId') or not self.current.get('role') or (not self.current.get('activities') and any(excerpts.get(k) for k in ('career','bio','moment'))))
         codes = kind=='person' and any(k in fields for k in ('citizenship','nationalOrigin','fate'))
         term = kind=='term' and self.job['action']=='create'
         if not (person or codes or term):
             return fields, {}
         state = c.term_state(merged) if term else c.person_card_state(merged,excerpts)
-        key = canonical({'state':state,'person':person,'codes':codes,'term':term})
+        from runtime_tools.commulingo_activities import load_catalog
+        key = canonical({'state':state,'person':person,'codes':codes,'term':term,'activity_catalog':load_catalog() if person else None})
         verdict = self.cache.get(key)
         if verdict is None:
             if term:
@@ -82,7 +84,7 @@ class Decisions:
                 raise RuntimeError('Jev returned incomplete codes; saved draft retained for retry')
             if person:
                 classified = c.fill_classification(out,verdict['person'])
-                for key in ('groupId','role'):
-                    if self.job['action']=='create' or not self.current.get(key):
+                for key in ('groupId','role','activities'):
+                    if key in classified and (self.job['action']=='create' or not self.current.get(key)):
                         out[key] = classified[key]
         return out, verdict

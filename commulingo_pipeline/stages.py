@@ -745,10 +745,10 @@ class Draft:
             for c in claims:
                 if c.get('source_id') in sources:
                     body = sources[c['source_id']].get('body') or ''
-                    excerpts.setdefault(c['field'],[]).append({'claim':c.get('claim'),'excerpt':body[c.get('start',0):c.get('end',0)][:1500]})
+                    excerpts.setdefault(c['field'],[]).append({'claim':c.get('claim'),'excerpt':body[c.get('start',0):c.get('end',0)][:1500], 'source':sources[c['source_id']].get('url',''), 'locator':f"characters {c.get('start',0)}:{c.get('end',0)}"})
         class_memo = {}
         CLASSIFIED_KEYS = ('name','givenName','familyName','years','epithet','career','bio','moment','citizenship','nationalOrigin',
-                           'origin','fate','term','definition','period','body','aliases','parentId')
+                           'origin','fate','term','definition','period','body','aliases','parentId','evidence')
 
         async def assign_classification(fields):
             """Runner-assigned closed-set fields (commulingo_classify); memoised on

@@ -86,7 +86,7 @@ _PERSON_PATCH_KEYS = frozenset({
     "id", "group", "groupId", "sortOrder", "cyrillic", "years",
     "name", "givenName", "familyName",
     "epithet", "bio", "moment", "fate", "patronymic", "cyrillicPatronymic",
-    "aliases", "scenes", "career", "role", "citizenship", "origin", "nationalOrigin",
+    "aliases", "scenes", "career", "role", "activities", "citizenship", "origin", "nationalOrigin",
     "expectedRevision", "evidence", "reviewFlags", "aliasEdits", "careerEdits", "sceneEdits",
     "office_rows", "sections",  # read-only echoes from get_person; tolerated and ignored
 })
@@ -683,6 +683,9 @@ def _person_snapshot(cur, person_id: str) -> dict | None:
             "label": {"ko": row["origin_label_ko"], "en": row["origin_label_en"]},
         },
     }
+    cur.execute("SELECT COALESCE(to_jsonb(p)->'activities', '[]'::jsonb) AS activities FROM commulingo_people p WHERE id=%s", (person_id,))
+    activity_row = cur.fetchone()
+    person["activities"] = activity_row.get("activities", []) if activity_row else []
     person["nationalOrigin"] = person["origin"]
     cur.execute(
         """SELECT patronymic_ko, patronymic_en, cyrillic_patronymic
@@ -1078,6 +1081,7 @@ COMMULINGO_PEOPLE_TOOL = {
         "`search` (q matched across people, glossary terms, historical events, "
         "and offices at once — a single match returns its full record inline; "
         "use this when the category is uncertain), "
+        "`list_activity_catalog` (shared functions and activity affiliations; activities bind function + organization + period + evidence, separate from citizenship), "
         "`list_groups` (era groups on the Soviet, China and world shelves + people counts), "
         "`search_people` (q matches id/name/cyrillic; optional group_id), "
         "`get_person` (full record — returned in the canonical person-field shape "
@@ -1104,7 +1108,7 @@ COMMULINGO_PEOPLE_TOOL = {
             "action": {
                 "type": "string",
                 "enum": [
-                    "search", "list_groups", "search_people", "get_person",
+                    "list_activity_catalog", "search", "list_groups", "search_people", "get_person",
                     "list_offices", "get_office", "list_categories",
                     "get_sections", "list_events", "get_event",
                     "list_terms", "get_term", "list_suggestions",
@@ -1162,6 +1166,9 @@ async def _exec_commulingo_people(
             if not (q or "").strip():
                 return "Error: q is required for search."
             result = await asyncio.to_thread(_search_all, q.strip(), limit)
+        elif action == "list_activity_catalog":
+            from runtime_tools.commulingo_activities import load_catalog
+            result = load_catalog()
         elif action == "list_groups":
             result = await asyncio.to_thread(_list_groups)
         elif action == "search_people":
@@ -2017,7 +2024,7 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
                 return "Error: at least one bilingual career entry is required for person create."
             role = patch.get("role")
             if not isinstance(role, dict) or not (
-                role.get("officeId") or role.get("category") or role.get("categoryId")
+                role.get("officeId") or role.get("category") or role.get("categoryId") or role.get("icon")
             ):
                 return (
                     "Error: a primary role with officeId, category, or categoryId "
@@ -2046,7 +2053,7 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
             category = role.get("category") or role.get("categoryId") or ""
             if office_id and category:
                 return "Error: role takes exactly one of officeId or category, not both."
-            if not office_id and not category:
+            if not office_id and not category and not (patch.get("activities") and role.get("icon")):
                 return (
                     "Error: role needs officeId or category (icon/label render from "
                     "them — see commulingo_people action='list_categories' / 'list_offices')."
@@ -2909,7 +2916,7 @@ def _run_edit(target_type: str, action: str, target_id: str, patch: dict,
         from runtime_tools.commulingo_classify import classify_term, fill_term_category
         classification = classify_term(patch)
         if classification is None:
-            return "Error: the classification service is unavailable right now; retry this create later."
+            return "Error: activity classification needs cited bio/career evidence with source, locator, claim and excerpt; if already provided, retry the saved draft after the classifier recovers."
         patch = fill_term_category(patch, classification)
     if target_type=='term':
         from commulingo_pipeline.config import load
@@ -2938,6 +2945,7 @@ def _run_edit(target_type: str, action: str, target_id: str, patch: dict,
         if isinstance(fields.get("role"), dict) and "categoryId" in fields["role"]:
             fields["role"] = {**fields["role"], "category": fields["role"]["categoryId"]}
             fields["role"].pop("categoryId")
+        activity_review_required = False
         if target_type == "person":
             from runtime_tools.commulingo_classify import (classify_person, classify_person_card, classify_person_codes,
                                                           fill_classification, fill_person_codes, missing_person_codes)
@@ -2955,9 +2963,10 @@ def _run_edit(target_type: str, action: str, target_id: str, patch: dict,
                     return "Error: the classification service is unavailable right now; retry this write later."
             if needs_group:
                 if classification is None:
-                    return "Error: the classification service is unavailable right now; retry this create later."
+                    return "Error: activity classification needs cited bio/career evidence with source, locator, claim and excerpt; if already provided, retry the saved draft after the classifier recovers."
                 fields = fill_classification(fields, classification)
                 if classification["low_confidence"]:
+                    activity_review_required = bool(classification.get("activities"))
                     logger.info("person %s classified with low confidence: %s", target_id, classification["confidence"])
         evidence_errors = _person_evidence_errors(fields, sources)
         if evidence_errors:
@@ -2966,7 +2975,7 @@ def _run_edit(target_type: str, action: str, target_id: str, patch: dict,
             result = call_person_service({"command": "submit", "target": target_type,
                 "action": action, "id": target_id, "fields": fields, "sources": sources,
                 "confidence": confidence, "changedBy": _SUGGESTED_BY,
-                "directApply": direct_apply_enabled()})
+                "directApply": direct_apply_enabled() and not activity_review_required})
         except ValueError as exc:
             return f"Error: {exc}"
         return (f"OK — {result['status']}: {action} {target_type} '{target_id}'. "
@@ -3398,6 +3407,7 @@ _COMMULINGO_FIELD_SCHEMA = {
         # was 41 rejected person_create calls, and min/maxProperties stops those
         # before the call is spent. null (to clear the role) still validates
         # because the property constraints only apply to the object form.
+        "activities": json.loads(Path(os.environ.get("COMMULINGO_ACTIVITY_SCHEMA", "/home/grass/frontend/data/commulingo/activity-schema.json")).read_text()),
         "role": {
             "type": ["object", "null"], "additionalProperties": False,
             "minProperties": 1, "maxProperties": 1,
@@ -3407,7 +3417,7 @@ _COMMULINGO_FIELD_SCHEMA = {
                 "commulingo_people(action='list_categories'), office ids from "
                 "action='list_offices'. null clears the role."
             ),
-            "properties": {"officeId": {"type": "string"}, "category": {"type": "string"}, "categoryId": {"type": "string"}},
+            "properties": {"officeId": {"type": "string"}, "category": {"type": "string"}, "categoryId": {"type": "string"}, "icon": {"type": "string"}},
         },
         "fate": {
             "type": "object", "additionalProperties": False,
@@ -3777,7 +3787,7 @@ def _narrow_fields_schema(keys: tuple[str, ...], *, required: tuple[str, ...] = 
 _PERSON_NARROW_KEYS = (
     "groupId", "sortOrder", "cyrillic", "cyrillicPatronymic", "years",
     "givenName", "familyName", "epithet", "bio", "moment", "patronymic",
-    "citizenship", "nationalOrigin", "aliases", "career", "role", "fate", "scenes",
+    "citizenship", "nationalOrigin", "aliases", "career", "role", "activities", "fate", "scenes",
     "expectedRevision", "evidence", "reviewFlags", "aliasEdits", "careerEdits", "sceneEdits",
 )
 _TERM_NARROW_KEYS = (
@@ -3836,7 +3846,7 @@ def _person_write_tool(name: str, action: str) -> dict:
     # groupId and role are assigned by the runner (commulingo_classify): the
     # model never classifies, so a create does not even carry the fields.
     if action == "create":
-        field_keys = tuple(key for key in field_keys if key not in {"group", "groupId", "role"})
+        field_keys = tuple(key for key in field_keys if key not in {"group", "groupId", "role", "activities"})
     required_fields = (
         "epithet", "bio", "career", "citizenship", "nationalOrigin", "evidence",
     ) if action == "create" else ("expectedRevision", "evidence")
