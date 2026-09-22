@@ -623,7 +623,32 @@ def _list_groups() -> list[dict]:
     )
 
 
-def _search_people(q: str, group_id: str, limit: int) -> list[dict]:
+def _search_people(q: str, group_id: str, limit: int, function_id: str = "", affiliation_id: str = "") -> list[dict]:
+    if function_id or affiliation_id:
+        from runtime_tools.commulingo_activities import activity_search_params
+        params = activity_search_params(function_id, affiliation_id)
+        params.update(q=q, g=group_id, limit=limit)
+        return db_query(
+            """SELECT p.id, p.group_id, p.name_ko, p.name_en, p.cyrillic,
+                      p.years_label, p.epithet_ko, p.fate_kind
+               FROM commulingo_people p
+               LEFT JOIN commulingo_person_roles r ON r.person_id = p.id
+               WHERE (%(q)s = '' OR p.id ILIKE '%%' || %(q)s || '%%'
+                      OR p.name_ko ILIKE '%%' || %(q)s || '%%'
+                      OR p.name_en ILIKE '%%' || %(q)s || '%%'
+                      OR p.cyrillic ILIKE '%%' || %(q)s || '%%')
+                 AND (%(g)s = '' OR p.group_id = %(g)s)
+                 AND EXISTS (
+                   SELECT 1 FROM jsonb_array_elements(
+                     CASE WHEN jsonb_array_length(p.activities) > 0 THEN p.activities
+                     WHEN %(legacy)s::jsonb ? COALESCE(r.office_id, r.category_id)
+                     THEN jsonb_build_array(jsonb_build_object(
+                       'functionId', %(legacy)s::jsonb -> COALESCE(r.office_id, r.category_id) -> 0,
+                       'affiliationId', %(legacy)s::jsonb -> COALESCE(r.office_id, r.category_id) -> 1))
+                     ELSE '[]'::jsonb END
+                   ) a WHERE (%(function)s = '' OR a->>'functionId' = %(function)s)
+                     AND (%(affiliation)s = '' OR a->>'affiliationId' = ANY(%(descendants)s::text[]))
+                 ) ORDER BY p.sort_order, p.id LIMIT %(limit)s""", params)
     return db_query(
         """SELECT id, group_id, name_ko, name_en, cyrillic, years_label,
                   epithet_ko, fate_kind
@@ -1083,7 +1108,7 @@ COMMULINGO_PEOPLE_TOOL = {
         "use this when the category is uncertain), "
         "`list_activity_catalog` (shared functions and activity affiliations; activities bind function + organization + period + evidence, separate from citizenship), "
         "`list_groups` (era groups on the Soviet, China and world shelves + people counts), "
-        "`search_people` (q matches id/name/cyrillic; optional group_id), "
+        "`search_people` (q matches id/name/cyrillic; optional group_id/function_id/affiliation_id; function and affiliation must match the same activity), "
         "`get_person` (full record — returned in the canonical person-field shape "
         "accepted by the narrow person writers; "
         "office_rows, sections and role.resolvedIcon are read-only info), "
@@ -1128,6 +1153,8 @@ COMMULINGO_PEOPLE_TOOL = {
                 "type": "string",
                 "description": "search_people: restrict to one group id.",
             },
+            "function_id": {"type": "string", "description": "search_people: activity function id from list_activity_catalog."},
+            "affiliation_id": {"type": "string", "description": "search_people: actual service affiliation, including descendants; matched within the same activity as function_id."},
             "person_id": {"type": "string", "description": "get_person/get_sections: person id."},
             "office_id": {"type": "string", "description": "get_office: office id."},
             "event_id": {"type": "string", "description": "get_event: historical event id."},
@@ -1156,6 +1183,8 @@ async def _exec_commulingo_people(
     term_id: str = "",
     status: str = "",
     limit: int = 30,
+    function_id: str = "",
+    affiliation_id: str = "",
 ) -> str:
     try:
         limit = max(1, min(int(limit), 100))
@@ -1172,7 +1201,10 @@ async def _exec_commulingo_people(
         elif action == "list_groups":
             result = await asyncio.to_thread(_list_groups)
         elif action == "search_people":
-            result = await asyncio.to_thread(_search_people, (q or "").strip(), (group_id or "").strip(), limit)
+            search_args = [(q or "").strip(), (group_id or "").strip(), limit]
+            if function_id or affiliation_id:
+                search_args.extend([(function_id or "").strip(), (affiliation_id or "").strip()])
+            result = await asyncio.to_thread(_search_people, *search_args)
         elif action == "get_person":
             if not person_id:
                 return "Error: person_id is required for get_person."

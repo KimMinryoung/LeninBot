@@ -42,3 +42,13 @@ class ActivitiesTests(unittest.TestCase):
         self.assertEqual(filled['activities'][0]['affiliationId'],'china-ccp')
         self.assertEqual(filled['activities'][0]['evidence'][0]['source'],EVIDENCE[0]['source'])
         self.assertIsNone(filled['activities'][0]['startYear'])
+
+    def test_search_filters_expand_children_and_reject_unknown_ids(self):
+        from runtime_tools.commulingo_activities import activity_search_params
+        params = activity_search_params('military', 'china-ccp')
+        self.assertIn('china-ccp', params['descendants'])
+        self.assertIn('china-pla', params['descendants'])
+        self.assertNotIn('china-kmt', params['descendants'])
+        for function, affiliation in [('unknown', ''), ('', 'unknown')]:
+            with self.assertRaises(ValueError):
+                activity_search_params(function, affiliation)

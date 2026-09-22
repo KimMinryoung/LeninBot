@@ -69,3 +69,24 @@ def activity_person_from(decision, catalog, evidence, group_ids, accept=0.7):
                 'startYear':None,'endYear':None,'evidence':[e]}
     return {'groupId':group,'role':{'icon':functions[function]['icon']},'activities':[activity],
             'confidence':confidence,'low_confidence':min(confidence.values())<accept,'model':decision.model}
+
+
+def activity_search_params(function_id, affiliation_id, catalog=None):
+    """Validate filters and expand descendants using the same public catalogue."""
+    catalog = catalog or load_catalog()
+    affiliations = {a['id']: a for a in catalog['affiliations']}
+    if function_id and function_id not in {f['id'] for f in catalog['functions']}:
+        raise ValueError('unknown function_id; use list_activity_catalog')
+    if affiliation_id and affiliation_id not in affiliations:
+        raise ValueError('unknown affiliation_id; use list_activity_catalog')
+    descendants = []
+    for candidate in affiliations:
+        current, seen = candidate, set()
+        while current and current not in seen:
+            if current == affiliation_id:
+                descendants.append(candidate)
+                break
+            seen.add(current)
+            current = affiliations.get(current, {}).get('parentId')
+    return {'function': function_id, 'affiliation': affiliation_id,
+            'descendants': descendants, 'legacy': json.dumps(catalog['legacy'])}
