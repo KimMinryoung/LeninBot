@@ -15,6 +15,10 @@ LeninBot은 provider와 모델 티어를 런타임 설정으로 해석한다. Te
 
 `bot_config.py` defaults are authoritative when `config.json` is missing a key.
 
+OpenAI 호환 tool 변환은 모든 중첩 객체의 필수 필드·닫힌 속성을 확인한 뒤 strict를 켠다.
+`uniqueItems`를 포함한 schema는 provider의 strict 제한 때문에 non-strict로 전달한다.
+원래 schema와 로컬 중복 검증은 유지한다.
+
 ## Provider Paths
 
 ```

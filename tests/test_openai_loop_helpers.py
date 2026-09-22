@@ -70,6 +70,18 @@ class TestSchemaConversion(unittest.TestCase):
         }
         self.assertTrue(_is_strict_safe_schema(params))
 
+    def test_unique_items_uses_non_strict_without_losing_local_validation(self):
+        params = {
+            "type": "object", "additionalProperties": False,
+            "properties": {"fields": {"type": "array", "uniqueItems": True,
+                                       "items": {"type": "string"}}},
+            "required": ["fields"],
+        }
+        self.assertFalse(_is_strict_safe_schema(params))
+        converted = _convert_tool_anthropic_to_openai({"name":"context", "input_schema":params})
+        self.assertNotIn("strict", converted["function"])
+        self.assertTrue(converted["function"]["parameters"]["properties"]["fields"]["uniqueItems"])
+
     def test_missing_required_not_strict(self):
         params = {"type": "object", "properties": {"a": {}, "b": {}}, "required": ["a"]}
         self.assertFalse(_is_strict_safe_schema(params))

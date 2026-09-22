@@ -28,6 +28,28 @@ def candidate():
             'issue_results':[{'id':'missing:body','status':'resolved','reason':'Supplied both languages with original evidence.'}]}
 
 
+
+def submission(value):
+    """Express existing canonical test fixtures through the public author API."""
+    result = {'changes': {field: {'value': content, 'evidence': [
+                    {key: val for key, val in claim.items() if key != 'field'}
+                    for claim in value.get('claims', []) if claim['field'] == field]}
+                for field, content in value.get('fields', {}).items() if field != 'notes'},
+              'reason': value['reason']}
+    if 'issue_results' in value:
+        result['issues'] = {item['id']: {'status': item['status'], 'reason': item['reason']}
+                            for item in value['issue_results']}
+    if 'notes' in value or 'notes' in value.get('fields', {}):
+        result['notes'] = value.get('notes', value.get('fields', {}).get('notes'))
+    return result
+
+
+async def repair_call(kwargs, value):
+    edit = next(handler for tool, handler, _ in kwargs['local_tools']
+                if tool['name'] == 'commulingo_pipeline_repair')
+    return await edit(changes=submission(value)['changes'])
+
+
 def store_mock():
     store = Mock()
     store.job_sources.return_value = {}
@@ -45,13 +67,16 @@ class SourceAndIssueTests(EditorCase):
         async def save():
             checkpoint['passages'] = deepcopy(session.passages.shown)
         tool, read, _ = session.cached_tool(on_read=save)
-        from jsonschema import validate, ValidationError
+        from jsonschema import validate
         validate({'source_id':page['id']}, tool['input_schema'])
         validate({'passages':['P1']}, tool['input_schema'])
         validate({}, tool['input_schema'])
-        for args in ({'source_id':page['id'],'passages':['P1']},):
-            with self.assertRaises(ValidationError):
-                validate(args, tool['input_schema'])
+        validate({'passages':[]}, tool['input_schema'])
+        self.assertFalse(set(tool['input_schema']) & {'not','oneOf','anyOf','allOf','enum','const'})
+        with self.assertRaisesRegex(ValueError, 'exactly one'):
+            await read(source_id=page['id'], passages=['P1'])
+        with self.assertRaisesRegex(ValueError, 'exactly one'):
+            await read(source_id=page['id'], passages=[])
         with self.assertRaisesRegex(ValueError, 'source_id.*Never guess P1'):
             await read(passages=['P1'])
         fetched_at, expires_at = page['fetched_at'], page['expires_at']
@@ -72,6 +97,7 @@ class SourceAndIssueTests(EditorCase):
         session = Sources(store_mock(), JOB, Usage(), {expired['id']:expired})
         _, read, _ = session.cached_tool()
         self.assertEqual(json.loads(await read())['available_pages'], [])
+        self.assertEqual(await read(passages=[]), await read())
         shown = session.display(page)
         self.assertIn(page['id'], shown)
         before = deepcopy(session.passages.shown)
@@ -161,6 +187,29 @@ class SourceAndIssueTests(EditorCase):
 
 
 class EditorTests(EditorCase):
+    async def test_no_edit_retains_rejected_draft_without_removing_content(self):
+        store = store_mock()
+        async def model(**kwargs):
+            value = candidate()
+            value['claims'] = []
+            with self.assertRaisesRegex(ValueError, 'evidence required'):
+                await kwargs['handler'](submission(value))
+            saved = deepcopy(store.save_editor_checkpoint.call_args.args[1]['draft'])
+            tool, no_edit, _ = next(t for t in kwargs['local_tools']
+                                    if t[0]['name'] == 'commulingo_pipeline_no_edit')
+            response = await no_edit(status='sources_unavailable',
+                reason='No available original establishes the commissioned facts.',
+                issues={'missing:body': {'status':'deferred', 'reason':'No reliable original could be retrieved.'}})
+            self.assertIn('no-edit judgment recorded', response)
+            self.assertEqual(store.save_editor_checkpoint.call_args.args[1]['draft'], saved)
+        with patch('commulingo_pipeline.service.call', return_value=CURRENT) as rpc, \
+             patch('commulingo_pipeline.stages.model_call', side_effect=model):
+            result = await Editor(store)(JOB, [], Usage(), .2)
+        self.assertEqual(result.next_stage, 'judge')
+        self.assertNotIn('draft', result.value)
+        self.assertEqual(latest([{'stage':'research', 'value':result.value}], 'research')['status'], 'sources_unavailable')
+        self.assertEqual([call.args[0]['command'] for call in rpc.call_args_list], ['read'])
+
     async def test_format_state_survives_restart_and_research_reopen_is_saved(self):
         store = store_mock()
         async def first(**kwargs):
@@ -170,7 +219,7 @@ class EditorTests(EditorCase):
             value = candidate()
             value['fields']['body']['en'] = 'A clause — another clause.'
             with self.assertRaises(ValueError) as failure:
-                await kwargs['handler'](value)
+                await kwargs['handler'](submission(value))
             state = json.loads(str(failure.exception).splitlines()[-1])['work_status']
             self.assertEqual(state['mode'], 'format_repair')
             self.assertTrue(state['draft_saved'])
@@ -202,8 +251,7 @@ class EditorTests(EditorCase):
             response = await reopen(fields=['body'], reason='Check a conflicting historical fact.')
             self.assertIn('"mode": "research_allowed"', response)
             self.assertFalse(store.save_editor_checkpoint.call_args.args[1]['repair_only'])
-            await kwargs['handler']({'repairs':[{'op':'set','path':'/fields/body/en',
-                                               'value':candidate()['fields']['body']['en']}]})
+            await repair_call(kwargs, candidate())
         with patch('commulingo_pipeline.service.call', return_value=CURRENT), \
              patch('commulingo_pipeline.stages.model_call', side_effect=resume):
             result = await Editor(store)(JOB, [{'stage':'editor_checkpoint','value':checkpoint}], Usage(), .2)
@@ -220,7 +268,7 @@ class EditorTests(EditorCase):
             saved = store.save_editor_checkpoint.call_args.args[1]
             self.assertIsNone(saved['draft'])
             self.assertIn('P1', saved['passages'])
-            await kwargs['handler'](candidate())
+            await kwargs['handler'](submission(candidate()))
         with patch('commulingo_pipeline.service.call', return_value=CURRENT), \
              patch('commulingo_pipeline.stages.model_call', side_effect=model):
             result = await Editor(store)(JOB, [], Usage(), .2)
@@ -235,7 +283,7 @@ class EditorTests(EditorCase):
             value = candidate()
             value['claims'][0]['claim'] = 'An unrelated invented claim.'
             with self.assertRaisesRegex(ValueError, 'citation check failed') as failure:
-                await kwargs['handler'](value)
+                await kwargs['handler'](submission(value))
             state = json.loads(str(failure.exception).splitlines()[-1])['work_status']
             self.assertEqual(state['error_kind'], 'citation')
             self.assertEqual(state['mode'], 'research_allowed')
@@ -244,8 +292,7 @@ class EditorTests(EditorCase):
             self.assertEqual(state['saved_claim_count'], 1)
             self.assertEqual(store.save_editor_checkpoint.call_args.args[1]['draft']['args']['fields'], value['fields'])
             self.jev.side_effect = citation_result
-            await kwargs['handler']({'repairs': [{'op': 'set', 'path': '/claims/0/claim',
-                                                  'value': candidate()['claims'][0]['claim']}]})
+            await repair_call(kwargs, candidate())
         with patch('commulingo_pipeline.service.call', return_value=CURRENT) as rpc, \
              patch('commulingo_pipeline.stages.model_call', side_effect=model):
             result = await Editor(store)(JOB, [], usage, .2)
@@ -261,7 +308,7 @@ class EditorTests(EditorCase):
         async def model(**kwargs):
             await kwargs['read_wrap']('fetch_url', AsyncMock(
                 return_value=f'<external source="web">\n{BODY}\n</external>'))(url=URL)
-            await kwargs['handler']({
+            await kwargs['handler'](submission({
                 'status': 'ready', 'reason': 'The source supports the new term definition.',
                 'fields': {'term': {'ko': '검증 용어', 'en': 'Fixture term'},
                            'definition': {'ko': '검증한 개념이다.', 'en': 'A documented concept.'},
@@ -270,7 +317,7 @@ class EditorTests(EditorCase):
                 'claims': [{'field': field, 'claim': 'This field is documented.', 'passages': ['P1']}
                            for field in ('definition', 'period')],
                 'issue_results': [{'id': 'register', 'status': 'resolved', 'reason': 'Supported bilingual entry.'}],
-            })
+            }))
         with patch('commulingo_pipeline.service.call', return_value=None) as rpc, \
              patch('runtime_tools.commulingo_classify.classify_term', return_value=None), \
              patch('commulingo_pipeline.stages.model_call', side_effect=model):
@@ -298,10 +345,16 @@ class EditorTests(EditorCase):
             self.assertGreater(len(fields), 10)
             validate({'fields':fields}, context_tool['input_schema'])
             self.assertIn('Earlier author unresolved question', await read_context(fields))
-            self.assertIn('Do not use an em dash',kwargs['spec'].render_prompt(provider='deepseek'))
+            policy = kwargs['spec'].render_prompt(provider='deepseek')
+            self.assertIn('Do not use an em dash', policy)
+            self.assertNotIn('Finish this stage with commulingo_pipeline_result', policy)
+            self.assertNotIn('Discovery proposes', policy)
+            self.assertEqual(kwargs['prompt'].count('"missing_evidence_fields":'), 1)
+            self.assertEqual(kwargs['prompt'].count('"last_error":'), 1)
+            self.assertNotIn('"scope":', kwargs['prompt'])
             await kwargs['read_wrap']('fetch_url',AsyncMock(return_value=f'<external source="web">\n{BODY}\n</external>'))(url=URL)
             value = candidate(); value['fields']['notes']='Private deferred detail'
-            await kwargs['handler'](value)
+            await kwargs['handler'](submission(value))
         with patch('commulingo_pipeline.service.call',return_value=current), patch('commulingo_pipeline.stages.model_call',side_effect=model):
             result = await Editor(store_mock())(job,[],Usage(),.2)
         self.assertNotIn('notes',result.value['draft']['fields'])
@@ -329,9 +382,9 @@ class EditorTests(EditorCase):
                 Decisions(job,None,catalogs,Usage()).strip_assigned(fields)
                 async def model(**kwargs):
                     await kwargs['read_wrap']('fetch_url',AsyncMock(return_value=f'<external source="web">\n{BODY}\n</external>'))(url=URL)
-                    await kwargs['handler']({'status':'ready','reason':'The original archive supports this new entry.',
+                    await kwargs['handler'](submission({'status':'ready','reason':'The original archive supports this new entry.',
                         'fields':fields,'claims':[{'field':f,'claim':'The source documents this field.','passages':['P1']} for f in facts],
-                        'issue_results':[{'id':'register','status':'resolved','reason':'Registered a supported bilingual entry.'}]})
+                        'issue_results':[{'id':'register','status':'resolved','reason':'Registered a supported bilingual entry.'}]}))
                 with patch('commulingo_pipeline.service.call',return_value=None), \
                      patch('runtime_tools.commulingo_classify.load_catalogs',return_value=catalogs), \
                      patch('runtime_tools.commulingo_classify.classify_person_card',return_value={'codes':{'citizenship':{'code':'france'},'nationalOrigin':{'code':'france'}},'person':{'groupId':'fixture-group','role':{'category':'fixture-role'}}}) as classifier, \
@@ -349,8 +402,8 @@ class EditorTests(EditorCase):
             await kwargs['read_wrap']('fetch_url',fetch)(url=URL)
             value = candidate(); value['claims'] = []
             with self.assertRaisesRegex(ValueError, 'evidence required for body'):
-                await kwargs['handler'](value)
-            await kwargs['handler']({'repairs':[{'op':'set','path':'/claims','value':candidate()['claims']}]})
+                await kwargs['handler'](submission(value))
+            await repair_call(kwargs, candidate())
         with patch('commulingo_pipeline.service.call',return_value=CURRENT) as rpc, \
              patch('commulingo_pipeline.stages.model_call',side_effect=model) as model_call:
             result = await Editor(store)(JOB,[],usage,.2)
@@ -380,19 +433,19 @@ class EditorTests(EditorCase):
                     raise ToolRejection(str(exc)) from exc
             ctx = new_run_context(interface='autonomous',agent_name='commulingo_curator',is_owner=True,
                 scope_type='maintenance_job',scope_id='commulingo_pipeline:editor-dispatch-test')
-            value = candidate(); value['fields']['sections'] = [{'invalid':'unsupported'}]
+            value = candidate(); value['fields']['body']['en'] = 'A clause — another clause.'
             with caller_scope(ctx), patch('tool_gateway.security.audit'):
-                response, failed = await execute_tool(kwargs['tool']['name'],value,
+                response, failed = await execute_tool(kwargs['tool']['name'],submission(value),
                     {kwargs['tool']['name']:terminal},tool_schema=kwargs['tool'])
                 self.assertTrue(failed)
                 self.assertIn('commulingo_pipeline_repair',response)
                 saved = store.save_editor_checkpoint.call_args.args[1]
                 self.assertEqual(saved['draft']['args']['claims'],candidate()['claims'])
-                self.assertIn('sections',saved['draft']['args']['fields'])
+                self.assertEqual(saved['draft']['args']['fields']['body']['en'], 'A clause — another clause.')
                 edit_tool = kwargs['local_tools'][0][0]
                 response, failed = await execute_tool(edit_tool['name'],
-                    {'repairs':[{'op':'remove','path':'/fields/sections'}]},
-                    {edit_tool['name']:terminal},tool_schema=edit_tool)
+                    {'changes':submission(candidate())['changes']},
+                    {edit_tool['name']:kwargs['local_tools'][0][1]},tool_schema=edit_tool)
                 self.assertFalse(failed,response)
         with patch('commulingo_pipeline.service.call',return_value=CURRENT), patch('commulingo_pipeline.stages.model_call',side_effect=model):
             result = await Editor(store)(JOB,[],Usage(),.2)
@@ -402,9 +455,11 @@ class EditorTests(EditorCase):
         async def model(**kwargs):
             value = candidate(); del value['issue_results']; del value['claims']
             with self.assertRaises(ValueError) as failure:
-                await kwargs['handler'](value)
-            self.assertIn('issue_results',str(failure.exception))
-            self.assertIn('evidence required for body',str(failure.exception))
+                await kwargs['handler'](submission(value))
+            self.assertIn('issues',str(failure.exception))
+            value['issue_results'] = candidate()['issue_results']
+            with self.assertRaisesRegex(ValueError, 'evidence required for body'):
+                await kwargs['handler'](submission(value))
             raise RuntimeError('end test after feedback')
         with patch('commulingo_pipeline.service.call',return_value=CURRENT), patch('commulingo_pipeline.stages.model_call',side_effect=model):
             with self.assertRaisesRegex(RuntimeError,'end test'):
@@ -416,15 +471,15 @@ class EditorTests(EditorCase):
             await kwargs['read_wrap']('fetch_url',AsyncMock(return_value=f'<external source="web">\n{BODY}\n</external>'))(url=URL)
             value = candidate(); value['claims'] = []
             with self.assertRaises(ValueError):
-                await kwargs['handler'](value)
+                await kwargs['handler'](submission(value))
             edit = kwargs['local_tools'][0][1]
             for _ in range(3):
                 with self.assertRaises(ValueError):
-                    await edit(repairs=[{'op':'set','path':'/claims','value':candidate()['claims']}],reason='unexpected')
+                    await edit(changes=submission(candidate())['changes'], unexpected=True)
                 with self.assertRaises(ValueError):
                     await kwargs['handler']({})
                 self.assertEqual(store.save_editor_checkpoint.call_args.args[1]['draft']['args'], value)
-            await edit(repairs=[{'op':'set','path':'/claims','value':candidate()['claims']}])
+            await repair_call(kwargs, candidate())
         usage = Usage()
         with patch('commulingo_pipeline.service.call',return_value=CURRENT), patch('commulingo_pipeline.stages.model_call',side_effect=model):
             result = await Editor(store)(JOB,[],usage,.2)
@@ -436,9 +491,10 @@ class EditorTests(EditorCase):
             await kwargs['read_wrap']('fetch_url',AsyncMock(return_value=f'<external source="web">\n{BODY}\n</external>'))(url=URL)
             value = candidate(); value['fields']['startYear'] = 1923
             value['claims'].append({'field':'startYear','claim':'The year is 1923.','passages':['P1']})
-            await kwargs['handler'](value)
+            value['issue_results'].append({'id':'requested', 'status':'resolved', 'reason':'Checked the historical context and dates.'})
+            await kwargs['handler'](submission(value))
         with patch('commulingo_pipeline.service.call',return_value={**CURRENT,'startYear':1923}), patch('commulingo_pipeline.stages.model_call',side_effect=model):
-            result = await Editor(store_mock())(JOB,[],Usage(),.2)
+            result = await Editor(store_mock())({**JOB, 'reason':'Verify historical context and dates'},[],Usage(),.2)
         self.assertEqual(result.next_stage,'review')
         self.assertNotIn('startYear',result.value['draft']['fields'])
         self.assertEqual([c['field'] for c in result.value['research']['claims']],['body'])
@@ -449,7 +505,7 @@ class EditorTests(EditorCase):
             await kwargs['read_wrap']('fetch_url',AsyncMock(return_value=f'<external source="web">\n{BODY}\n</external>'))(url=URL)
             value = candidate(); value['claims']=[]
             with self.assertRaises(ValueError):
-                await kwargs['handler'](value)
+                await kwargs['handler'](submission(value))
             raise RuntimeError('simulated provider disconnect')
         with patch('commulingo_pipeline.service.call',return_value=CURRENT), patch('commulingo_pipeline.stages.model_call',side_effect=first):
             with self.assertRaisesRegex(RuntimeError,'disconnect'):
@@ -461,7 +517,7 @@ class EditorTests(EditorCase):
             self.assertIn('saved_draft',kwargs['prompt'])
             self.assertIn('"missing_evidence_fields": ["body"]', kwargs['prompt'])
             self.assertIn('"error_kind": "missing_evidence"', kwargs['prompt'])
-            await kwargs['handler']({'repairs':[{'op':'set','path':'/claims','value':candidate()['claims']}]})
+            await repair_call(kwargs, candidate())
         with patch('commulingo_pipeline.service.call',return_value=CURRENT), patch('commulingo_pipeline.stages.model_call',side_effect=resume):
             result = await Editor(store)(JOB,[{'stage':'editor_checkpoint','value':checkpoint}],Usage(),.2)
         self.assertEqual(result.next_stage,'review')
@@ -471,8 +527,8 @@ class EditorTests(EditorCase):
         store = store_mock()
         async def model(**kwargs):
             value = candidate(); value['claims']=[]
-            with self.assertRaises(ValueError): await kwargs['handler'](value)
-            await kwargs['handler'](value)
+            with self.assertRaises(ValueError): await kwargs['handler'](submission(value))
+            await kwargs['handler'](submission(value))
         with patch('commulingo_pipeline.service.call',return_value=CURRENT), patch('commulingo_pipeline.stages.model_call',side_effect=model):
             result = await Editor(store)(JOB,[],Usage(),.2)
         self.assertEqual(result.status,'escalated')

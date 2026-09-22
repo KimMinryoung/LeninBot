@@ -11,15 +11,16 @@ def work_status(issues, draft, reads, *, error='', error_kind=''):
     if error_kind == 'citation':
         action = ('Read the cited passages for the rejected claims with commulingo_pipeline_cached_passages. '
                   'Correct the claim to match the original, or research only its missing/conflicting fact. '
-                  'Then repair the affected /claims/N and any dependent field text.')
+                  'Resubmit each affected change with its value and corrected evidence.')
         next_tool = 'commulingo_pipeline_cached_passages'
     elif error_kind == 'passages' or reads.missing_fields:
-        action = ('Inspect current cached pages and labels; repair invalid references or add support for missing fields. '
+        action = ('Inspect current cached pages and labels; resubmit affected changes with corrected evidence. '
                   'Fetch an original only if cached text is insufficient. Preserve other draft content.')
         next_tool = 'commulingo_pipeline_cached_passages'
     elif draft:
-        action = ('Repair the saved draft at the reported JSON pointers using only repairs. '
-                  'Do not resend unchanged fields or claims. If a fact needs investigation, follow research_access.')
+        action = ('Resubmit each affected change with its complete value and evidence; omitted changes remain saved. '
+                  'Repair prose/schema errors from saved text without new research. '
+                  'If a fact needs investigation, follow research_access.')
         next_tool = 'commulingo_pipeline_repair'
     else:
         action = ('Read the target context and available originals for the commissioned issues. '
@@ -40,6 +41,7 @@ def work_status(issues, draft, reads, *, error='', error_kind=''):
         'missing_evidence_fields': list(reads.missing_fields),
         'error_kind': error_kind or None, 'last_error': error or None,
         'next_tool': next_tool, 'next_action': action,
+        'no_edit_tool': 'commulingo_pipeline_no_edit',
         'submission_tool': 'commulingo_pipeline_repair' if draft else 'commulingo_pipeline_result',
     }
 

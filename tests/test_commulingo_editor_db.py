@@ -90,10 +90,11 @@ class EditorDatabaseTests(unittest.IsolatedAsyncioTestCase):
             usage.tracker['total_cost']=.01
             await kwargs['read_wrap']('fetch_url',AsyncMock(return_value=f'<external source="web">\n{text}\n</external>'))(url=source)
             if kwargs['tool']['name']=='commulingo_pipeline_result':
-                await kwargs['handler']({'status':'ready','reason':'The archive supports the missing historical context.',
+                from test_commulingo_editor import submission
+                await kwargs['handler'](submission({'status':'ready','reason':'The archive supports the missing historical context.',
                     'fields':{'body':{'ko':'원문으로 확인한 역사적 맥락이다.','en':'Historical context verified against the archive.'}},
                     'claims':[{'field':'body','claim':'The historical context is documented.','passages':['P1']}],
-                    'issue_results':[{'id':'missing:body','status':'resolved','reason':'Added both languages with original evidence.'}]})
+                    'issue_results':[{'id':'missing:body','status':'resolved','reason':'Added both languages with original evidence.'}]}))
             else:
                 await kwargs['handler']({'decision':'approve','reason':'Independent original text supports the changed historical explanation.',
                     'resolved_risks':[], 'checks':[{'citation_id':'S1','passages':['P1'],'finding':'The original confirms the explanation.'}],

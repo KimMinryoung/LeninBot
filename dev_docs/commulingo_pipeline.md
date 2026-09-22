@@ -61,24 +61,56 @@ Jev에 질의한다. 질문별 판정은 독립적이므로 후속 질의 state�
 캐시 재사용은 최초 조회 시각과 만료를 보존한다. 체크포인트에서 만료된 자료를 제외해도
 그 라벨을 새 자료에 재배정하지 않는다. 독립 검토자는 작성기의 원문 캐시 대신 직접 자료를 가져온다.
 
-### 부분 수정과 체크포인트
+### 필드 단위 작성 API와 체크포인트
+
+`author_draft.py`는 AI용 입력을 기존 저장·검토용 `fields/claims/issue_results`로 변환한다.
+등록과 편집은 같은 `changes.<field> = {value, evidence}` 형식이며 등록의 필수 필드는
+기존 canonical schema가 결정한다. 각 evidence는 `claim`·`passages`와 선택적 `stance`를 받는다.
+분류 코드·revision·출처 위치·승인 해시는 작성자가 제공하지 않는다.
 
 | 세션 내부 도구 | 역할 |
 |---|---|
-| `commulingo_pipeline_result` | 전체 수정안 제출 |
-| `commulingo_pipeline_repair` | JSON pointer의 set/remove로 부분 수정, 배열은 `/-`나 다음 인덱스 set으로 추가; 검증 성공 시 종료 |
-| `commulingo_pipeline_cached_passages` | 기존 P 라벨의 유효한 원문을 네트워크 없이 조회 |
-| `commulingo_pipeline_context` | 추가 필드 schema·현재 값 조회 |
+| `commulingo_pipeline_result` | `changes`, `issues`, `reason`, 선택적 `notes`로 전체 초안 제출 |
+| `commulingo_pipeline_repair` | 같은 형식으로 변경한 필드만 다시 제출; 해당 필드의 값과 근거를 함께 교체 |
+| `commulingo_pipeline_no_edit` | `status`, `reason`, 모든 과제의 `issues`로 무편집 판단 제출; 기존 초안은 이력에 보존 |
+| `commulingo_pipeline_cached_passages` | 캐시 목록 및 원문을 네트워크 없이 조회 |
+| `commulingo_pipeline_context` | 추가 현재 값과 이번 작업에서 편집 가능한 필드의 schema 조회 |
 | `commulingo_pipeline_research` | 필드와 이유를 명시해 사실 조사 재개 |
 
-도구는 세션에만 주입하며 소유자·commulingo_curator 호출자 권한을 검사한다.
-초안 접수는 잘못된 중첩 데이터도 먼저 보존하고 실제 schema로 검증한다.
-오류는 해당 JSON pointer와 규칙을 반환하므로 정상 필드와 근거를 유지한 채 고칠 수 있다.
-수정 요청 자체의 형식 오류는 내용 무진전 횟수에 넣지 않는다.
-빈 인자(또는 초안 ID만 있는 전체 제출)는 호출 형식 오류로 처리하며 저장된 초안을
-덮어쓰지 않는다. 기존 필드·근거를 보존한 상태에서 부분 수정을 계속할 수 있다.
-Editor의 인용 오류에는 원래 초안의 `/claims/N` 수정 경로를 표시한다. 하나의 주장이
-여러 원문 범위로 펼쳐져도 검증 순번을 초안 배열의 인덱스로 오인하지 않도록 한다.
+예를 들어 `missing:body` 과제를 처리하는 최초 제출은 다음 형태다. P 라벨은 실제 조회한
+원문에 있어야 한다. 동일한 `changes.body` 객체를 repair에 보내면 body만 고친다.
+
+```json
+{
+  "changes": {
+    "body": {
+      "value": {"ko": "원문으로 확인한 설명이다.", "en": "An explanation supported by the original."},
+      "evidence": [{"claim": "The original documents this explanation.", "passages": ["P1"]}]
+    }
+  },
+  "issues": {
+    "missing:body": {"status": "resolved", "reason": "Added both languages with original evidence."}
+  },
+  "reason": "The original supports the commissioned explanation."
+}
+```
+
+`issues`는 과제 ID를 키로 하는 객체다. 최초 제출과 무편집 판단은 모든 과제에
+resolved/deferred와 사유를 요구하며, 필드를 채웠다는 이유만으로 해결을 추정하지 않는다.
+repair의 `issues`는 명시한 과제 판단만 교체한다. `notes`와 `reason`도 생략하면 보존한다.
+repair의 `remove_fields`는 해당 필드와 근거를 초안에서 철회하며 저장된 공개 데이터를
+삭제하지 않는다. 동일 호출에서 같은 필드를 교체하고 철회할 수 없다.
+배열은 해당 목록 전체를 교체한다. 새 작업에는 aliasEdits/careerEdits/sceneEdits와
+전체 목록 교체 방식을 동시에 노출하지 않으며, 구 체크포인트의 수정 필드는 복구를 위해 유지한다.
+
+도구 schema 자체에 이번 과제·등록 필수·저장된 초안·이전 수정안에 필요한 필드 타입을 넣는다.
+별도 `draft_contract`를 문맥에 중복 제공하지 않는다. 추가 값 조회는 편집 범위를 확장하지 않는다.
+형식 오류는 접수 전에 거절하고 기존 초안을 보존한다. 길이 초과 텍스트는 접수하여 저장한 뒤
+canonical 제한으로 거절하므로 해당 필드만 다시 제출할 수 있다. JSON Pointer 수정은 노출하지 않는다.
+진단 경로는 `changes.<field>.value` 또는 `/changes/<field>/evidence/<index>`로 변환한다.
+한 주장이 여러 원문 범위로 펼쳐져도 원래 필드 내 근거 인덱스를 가리킨다.
+빈 호출과 잘못된 수정 형식은 내용 무진전 횟수에 넣지 않는다.
+모든 도구는 세션에만 주입하며 소유자·commulingo_curator 호출자 권한을 검사한다.
 
 최초 문맥은 과제에 필요한 필드로 좁히되 저자 notes·인물 sections·original_proposal은 포함한다.
 `surrounding_context`에는 용어의 기존 정의·원어·별칭·시기, 인물의 이름·생몰년·소개·역할 중
@@ -91,13 +123,23 @@ Editor의 인용 오류에는 원래 초안의 `/claims/N` 수정 경로를 표�
 당장 실행할 `next_tool`과 구분한다. 조사 제한 상태에서는 먼저 research 도구로 조사를 재개해야 한다.
 오류 종류·부족한 근거·조사 상태를 체크포인트에서 복원하며, 캐시 열람은 이전 오류를 지우지 않는다.
 명시적인 조사 재개도 체크포인트에 저장한다.
+Editor 입력은 세 층으로 나눈다. 시스템 문맥은 공통 편집·문체 원칙과 입력 항목의 역할을
+설명하고, 작업 데이터는 `issues`·관련 현재 값·원문 캐시·필드별 저장 초안을 제공한다.
+`work_status`는 현재 조사 허용 상태와 다음 행동의 단일 진입점이다. 초기 입력에서 과제 범위,
+오류와 부족한 근거를 중복 전달하지 않으며 도구 응답은 독립적으로 읽을 수 있게 범위를 포함한다.
+전체 제출·부분 수정의 호출 방법은 해당 도구 설명이 맡고, `work_status`는 다음 수정 행동과
+별도 무편집 종료 도구를 안내한다. legacy 단계의 discovery·전체 결과 종료 지시는
+Editor 시스템 문맥에 넣지 않는다. curator 기본 프롬프트 역시 누적하지 않고 교체한다.
+저장 schema, 근거 검증, 독립 검토와 승인 조건은 프롬프트 축약과 별개로 코드에서 유지한다.
 공통 WRITING_RULES를 적용하고 문장 분량은 상한의 80%를 여유 목표로 제시한다.
-fields.notes는 공개 필드에서 제거해 비공개 notes와 중복 없이 합친다.
+새 API의 notes는 최상위 비공개 항목이다. 구 체크포인트의 fields.notes는 복구 시 최상위로 옮겨 중복 없이 합친다.
 형식 수정 중에는 기존 근거를 사용하고 사전 항목 조회를 제한한다. 누락 근거나 사실 충돌은
 해당 필드의 조사를 재개할 수 있다. 소개문·정의는 실제 저장 형식인 문자열로 제출한다.
 
 `editor_checkpoint`는 초안·P 라벨·조회 인자·오류·분류 캐시와 수정 상태를 저장한다.
-같은 baseline이면 재시작 후 복구하며 체크포인트 쓰기도 lease로 보호한다.
+내부 artifact 버전과 fields/claims 형식은 유지한다. 같은 baseline이면 구 체크포인트도
+필드별 작성 형식으로 보여 주고 정상 수정 경로로 복구한다. 구 초안의 컨테이너 자체가 잘못된
+경우 원본을 보존해 보여 주고 전체 재제출 또는 무편집 종료를 안내한다. 체크포인트 쓰기도 lease로 보호한다.
 같은 수정안과 오류의 반복은 내부 보류한다. revision 충돌은 최신 상태의 조사로 돌려보낸다.
 
 ## 독립 검토와 공개 반영
@@ -186,6 +228,8 @@ Jev 응답·모델·저장소·검색은 모의 구현하며 HTTP·DB·외부 �
 `asyncio.to_thread`도 executor 종료 wakeup을 받지 못하는 현상과 editor 실패를 구분하기 위한 것이다.
 실제 thread 실행은 `--real-threads`로 별도 확인하며, 운영 실행 코드는 바꾸지 않는다.
 
+`tests/test_commulingo_author_draft.py`는 타입·필드/근거 원자 교체·초안 철회·과제 판단·구 초안 복구와
+작성→독립 검토→승인 해시 공개 경로를 모의 경계에서 검사한다.
 `tests/test_commulingo_editor.py`, `test_commulingo_editor_decisions.py`, `test_commulingo_draft_repair.py`는
 수정·복구·분류 경계를 검사한다. `test_commulingo_pipeline.py`와 `test_commulingo_pipeline_efficiency.py`는
 대기열 및 비용 집계를 검사한다. `test_commulingo_editor_db.py`는
@@ -210,8 +254,9 @@ Editor `tick`은 실행 전에 미착수 자동 보강을 최대 200건 재평�
 적용은 관련 queue·원장·대상 테이블의 짧은 NOWAIT 잠금 아래 DB 조회만 수행한다.
 동시 쓰기가 있으면 해당 tick의 정리를 건너뛰고 정상 작업을 계속한다.
 
-캐시 조회 도구는 빈 인자 `{}`로 현재 사용 가능한 페이지·ID·라벨을 나열하며,
+캐시 조회 도구는 빈 인자 `{}` 또는 `passages: []`로 현재 사용 가능한 페이지·ID·라벨을 나열하며,
 본문 조회에는 기존 `passages` 또는 `source_id` 중 하나를 받는다.
+provider 호환을 위해 도구 schema 루트에는 `not`을 넣지 않으며, 두 선택자의 동시 전달은 handler가 거절한다.
 라벨 없는 저장 페이지는 `source_cache.available_pages`의 `source_id`로 열어 라벨을 얻는다.
 목록에서는 만료·빈 본문·크기 초과 페이지를 제외하고, 잘못된 ID 오류에는 현재 목록을 반환한다.
 원문 조회 응답에도 정확한 source ID를 표시한다. ID와 라벨은 추측하거나 자동 대체하지 않는다.

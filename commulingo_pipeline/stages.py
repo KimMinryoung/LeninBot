@@ -257,7 +257,7 @@ async def model_call(*, spec, prompt, tool, handler, reads, usage, budget, read_
         # The loop appends to this list, so every run starts from a fresh copy.
         return attach_context([{'role':'user','content':prompt}], [context_record(
             'pipeline_stage', 'commulingo_pipeline_runtime', {
-                'terminal_tool': tool['name'],
+                'terminal_tools': terminal_names,
                 'stage_result': 'not recorded yet',
                 'publication': 'not implied by stage completion; only submit/review receipts establish application',
                 'evidence': 'source IDs/hash/ranges and baseline revision belong to the supplied artifacts; do not invent or refresh them',

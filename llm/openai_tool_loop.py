@@ -144,6 +144,7 @@ def _is_strict_safe_schema(params: dict) -> bool:
       * ``additionalProperties`` must be ``false``.
       * No property may carry a ``default`` (strict mode drops the default
         silently, which masks bugs).
+      * ``uniqueItems`` is not accepted by the provider in strict mode.
       * ``anyOf`` / ``oneOf`` is partially supported and pragmatically best
         avoided to keep the API happy.
     """
@@ -155,7 +156,7 @@ def _is_strict_safe_schema(params: dict) -> bool:
 def _strict_safe_node(schema) -> bool:
     if not isinstance(schema, dict):
         return True
-    if "default" in schema or "anyOf" in schema or "oneOf" in schema:
+    if any(key in schema for key in ("default", "anyOf", "oneOf", "uniqueItems")):
         return False
     if schema.get("type") == "object" or "properties" in schema:
         if schema.get("additionalProperties") is not False:

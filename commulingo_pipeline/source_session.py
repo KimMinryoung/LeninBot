@@ -48,7 +48,7 @@ class Sources:
 
     def cached_tool(self, on_read=None):
         async def read(passages=None, source_id=None):
-            if passages is None and source_id is None:
+            if (passages is None or passages == []) and source_id is None:
                 return json.dumps(self.context(), default=str, ensure_ascii=False)
             if passages is not None and source_id is not None:
                 raise ValueError('Supply exactly one of passages or source_id from source_cache.available_pages')
@@ -82,12 +82,11 @@ class Sources:
                 output.append(f"[{label}] URL: {source['url']}\n" + source['body'][start:end])
             return '<external source="pipeline-cache">\n'+'\n\n'.join(output)+'\n</external>'
         return ({'name':'commulingo_pipeline_cached_passages',
-            'description':'Read cached originals without network access. Call with {} to list current available_pages. Supply existing passages OR an exact source_id from that list to display a page and obtain its labels. Never guess IDs or labels. Retrieval timestamps are unchanged.',
+            'description':'Read cached originals without network access. Call with {} or passages: [] to list current available_pages. If the list is empty, fetch an original first. Supply existing passages OR an exact source_id from that list to display a page and obtain its labels. Never guess IDs or labels. Retrieval timestamps are unchanged.',
             'input_schema':{'type':'object','additionalProperties':False,
-                'properties':{'passages':{'type':'array','minItems':1,'maxItems':8,
+                'properties':{'passages':{'type':'array','maxItems':8,
                     'items':{'type':'string','pattern':'^P[1-9][0-9]*$'}},
-                    'source_id':{'type':'string','minLength':1}},
-                'not':{'required':['passages','source_id']}}},read,False)
+                    'source_id':{'type':'string','minLength':1}}}},read,False)
 
     def wrap(self, name, call):
         if self.backoff is not None:

@@ -22,9 +22,11 @@ SMOKE = (
     'test_commulingo_editor.SourceAndIssueTests',
     'test_commulingo_editor_decisions',
     'test_commulingo_draft_repair',
+    'test_commulingo_author_draft.AuthorDraftTests',
     'test_commulingo_classify',
 )
 EXTENDED = (
+    'test_commulingo_author_draft.AuthorWorkflowTests',
     'test_commulingo_efficiency_improvements',
     'test_commulingo_cleanup',
     'test_commulingo_editor.EditorTests',
