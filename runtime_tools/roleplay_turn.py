@@ -4,12 +4,17 @@ from copy import deepcopy
 from dataclasses import replace
 from datetime import datetime, timedelta
 import json
+import hashlib
+import logging
+import time
 import math
 import sqlite3
 import tempfile
 from pathlib import Path
 
 from llm.call_registry import decide_detailed, generate_detailed, resolve, resolve_provider_connection
+from runtime_tools.roleplay_decisions import (AdjudicationUnavailable, DraftOutOfScope, StateConflict,
+    pending_important, settle_general, important_candidates, describe_important)
 from runtime_tools import roleplay_memory as memory, roleplay_jev as jev
 from runtime_tools.roleplay_actor import actor_state_view
 from runtime_tools.roleplay_review import REVIEW_RULES, screen_reply, validate_review
@@ -84,6 +89,11 @@ def direction(authorization, state=None):
         location = state.get('location') or '미확인'
         text += (f" 현재 위치는 \"{location}\"이며, 사용자가 이동을 지시하지 않았으면 사건은 그 자리에서 일어난다. 감방으로 돌아가는 길·계단·다른 방을 지어내지 않는다."
                  " 초안은 이 사건 하나와 그 직후의 반응까지다. 한두 문단이면 충분하고, 그 뒤의 식사·수면·다음 방문·다음 날은 쓰지 않는다.")
+        from runtime_tools.roleplay_story import blocking_events
+        ready = blocking_events(state, 0)
+        if ready:
+            text += (' 이미 도래한 예정 사건: ' + ', '.join(event['title'] for event in ready)
+                     + '. 이번 지시가 이 사건을 다루면 실제 수행·완료를 초안에 서술한다. 도래했다는 말만으로 완료 처리하지 않는다.')
     stop = expected_stop(authorization, state) if state is not None else None
     if stop:
         text += f" 이 장면은 {stop['title']}({stop['minutes']}분 뒤)에서 멈춘다. 그 도래 장면까지만 쓰고 그 뒤는 쓰지 않는다."
@@ -143,7 +153,7 @@ def staged_memory(uid):
 
 def check_staged(conn, uid, stage):
     if _records(conn, uid) != stage['baseline']:
-        raise ValueError('초안 작성 중 인물/메모 기록이 바뀜')
+        raise StateConflict('초안 작성 중 인물/메모 기록이 바뀜')
 
 
 def commit_staged(conn, uid, stage):
@@ -153,10 +163,14 @@ def commit_staged(conn, uid, stage):
             conn.executemany(f'INSERT INTO {table} VALUES (?,?,?)',[(str(uid),*row) for row in stage['records'][table]])
 
 
-def prepare(user_text, before, people, history, scope_id, draft, authorization, stage=None, verdict=None, scope_ok=False, final_attempt=False):
+def prepare(user_text, before, people, history, scope_id, draft, authorization, stage=None, verdict=None, scope_ok=False):
     """Gate and classify the draft, then project it. A ``verdict`` from an earlier attempt
     (the player settled a choice Jev left open) skips the scope gate and the classifier;
     ``scope_ok`` means the player confirmed the draft stays within the authorized scene."""
+    cache_key = hashlib.sha256(json.dumps([before, people, user_text, draft,
+        authorization], sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+    if verdict is not None and verdict.get('cache_key') not in (None, cache_key):
+        verdict = None
     mode = authorization['labels']['mode']
     if mode not in {'scene', 'discussion', 'plan', 'correction', 'reset'} or authorization['user_text'] != user_text:
         raise ValueError('현재 입력의 유효한 모드 판정 없음')
@@ -178,11 +192,14 @@ def prepare(user_text, before, people, history, scope_id, draft, authorization, 
         gate = {'labels': {'within_scope': 'yes'}, 'skipped': True, 'player_confirmed': bool(scope_ok)}
         verdict = jev.classify(user_text,before,people,history,draft=draft,authorization=authorization)
         if verdict['status'] != 'classified':
-            raise ValueError('초안 사건 판정 실패')
+            raise AdjudicationUnavailable('초안 사건 판정 실패')
         verdict.update(draft=draft, authorization=authorization, scope_review=gate)
     else:
         verdict = deepcopy(verdict)
+    verdict['cache_key'] = cache_key
     verdict['labels']['mode'] = mode
+    if mode == 'scene' and authorization.get('auto_general'):
+        verdict = settle_general(before, people, verdict)
     if any(e in {'interrogation','coerced_confession','implicating_others'} for e in jev.resolve_events(verdict['labels'])[0]) and 'activity' not in verdict['labels']:
         verdict['labels']['activity'] = 'light'
     policy = policy_for_authorization(authorization)
@@ -228,6 +245,19 @@ def prepare(user_text, before, people, history, scope_id, draft, authorization, 
                 verdict['duration_limit']=180 if authorization['labels']['span']=='session' or authorization['labels'].get('time_scope')=='open_ended' else 10
                 if not verdict.get('duration_estimate'):
                     verdict['duration_estimate']=jev.estimate_duration(user_text,state,verdict)
+        if mode == 'scene':
+            excluded = authorization.get('excluded_outcomes', [])
+            if any(all(item.get(k) == banned.get(k) for k in ('key', 'label', 'target_id'))
+                   and item['label'] != 'keep'
+                   for item in important_candidates(before, people, verdict) for banned in excluded):
+                raise DraftOutOfScope('플레이어가 제외한 중요한 결과가 초안에 다시 나타남')
+            important = pending_important(before, people, verdict)
+            if important:
+                verdict['pending_important'] = important
+                exc = jev.PendingChoice('important', [('confirm', '결과 확정'), ('rewrite', '결과 없이 다시 작성')],
+                                       '중요한 결과 확인: ' + ', '.join(map(describe_important, important)))
+                exc.verdict = verdict
+                raise exc
         try:
             projected, applied = jev.project(state,user_text,people,verdict,scope_id)
         except jev.PendingChoice as exc:
@@ -236,10 +266,12 @@ def prepare(user_text, before, people, history, scope_id, draft, authorization, 
             raise
     if mode == 'scene' and verdict['labels'].get('location') in {None, 'unknown'}:
         projected['location'] = '미확인 — 확정된 장면 서술 참조'
+    if verdict.get('auto_settled'):
+        applied = {**applied, 'auto_settled': verdict['auto_settled']}
     if authorization.get('auto_settled'):
         applied = {**applied, 'auto_settled': {**authorization['auto_settled'], **(applied.get('auto_settled') or {})}}
     if applied.get('interrupted') and not (mode == 'scene' and verdict['labels'].get('elapsed') == 'explicit'):
-        raise ValueError('예정 사건 도래로 초안 끝까지 실행할 수 없음. 도래 장면에서 멈춰야 함')
+        raise DraftOutOfScope('예정 사건 도래로 초안 끝까지 실행할 수 없음. 도래 장면에서 멈춰야 함')
     # An explicit passage was told where it stops (see direction/expected_stop); the settled
     # scene ends there and the rest of the requested time is simply not spent.
     if stage is not None and mode in {'scene','discussion','plan'}:
@@ -269,6 +301,27 @@ def prepare(user_text, before, people, history, scope_id, draft, authorization, 
     verdict['final_review']=review
     return {'before_revision':before['revision'],'state':projected,'applied':applied,
             'verdict':verdict,'reply':draft,'stage':stage}
+
+
+def prepare_result(*args, **kwargs):
+    """Telegram boundary: normal uncertainty is data, execution failures are exceptions."""
+    started = time.monotonic()
+    result = None
+    try:
+        result = {'status': 'prepared', 'prepared': prepare(*args, **kwargs)}
+        return result
+    except jev.PendingChoice as exc:
+        result = {'status': 'pending', 'key': exc.key, 'candidates': exc.candidates,
+                  'reason': str(exc), 'verdict': getattr(exc, 'verdict', None)}
+        return result
+    finally:
+        verdict = ((result or {}).get('prepared') or {}).get('verdict') or (result or {}).get('verdict') or {}
+        cached = kwargs.get('verdict') or (args[8] if len(args) > 8 else None)
+        reused = bool(cached and verdict.get('cache_key') and cached.get('cache_key') == verdict['cache_key'])
+        calls = 0 if reused else len(verdict.get('calls', {})) + bool(verdict.get('event_review')) + bool(verdict.get('duration_estimate'))
+        logging.getLogger(__name__).info('roleplay prepare status=%s adjudication_calls=%s reused=%s elapsed_ms=%s',
+            (result or {}).get('status', 'failed'), calls if verdict else 'unknown', reused,
+            int((time.monotonic() - started) * 1000))
 
 
 def review_reply(draft, before, projected, stage=None, *, applied=None):
@@ -363,9 +416,12 @@ def feedback_line(outcome, state=None):
     if applied.get('review_unavailable'):
         parts.append('보조 서술 검토 미완료')
     if applied.get('auto_settled'):
-        korean = {'mode': '모드', 'event': '사건', 'intensity': '강도', 'activity': '활동', 'within_scope': '범위'}
+        korean = {'mode': '모드', 'event': '사건', 'intensity': '강도', 'activity': '활동', 'within_scope': '범위',
+                  'event_harm': '가해·부상', 'event_pressure': '압박', 'event_relief': '회복',
+                  'event_care': '처치', 'event_intake': '섭취'}
         values = {**names, 'scene': '장면 실행', 'discussion': '질문·상담', 'plan': '예정 등록', 'mild': '스침', 'moderate': '보통', 'severe': '극심',
-                  'light': '가벼운 움직임', 'rest': '휴식', 'yes': '안', 'lost': '넘김', 'keep': '유지',
+                  'light': '가벼운 움직임', 'rest': '휴식', 'restrained': '억제·동결', 'sleep': '수면',
+                  'self_care': '몸 돌보기', 'focused_work': '목적 있는 일', 'strenuous': '격한 움직임', 'yes': '안', 'lost': '넘김', 'keep': '유지',
                   'paid': '값 치름', 'kept': '이행', 'broken': '파기', 'complete': '완료', 'cancel': '취소'}
         for i, item in enumerate((state or {}).get('holdouts', [])):
             korean[f'holdout_{i}'] = item['title']
@@ -373,7 +429,9 @@ def feedback_line(outcome, state=None):
             korean[f'bargain_{i}'] = item['request']
         for i, item in enumerate((state or {}).get('story_events', [])):
             korean[f'story_{i}'] = item['title']
-        parts.append('애매해서 자동 처리: ' + ', '.join(f"{korean.get(k, k)}={values.get(v, v)}" for k, v in applied['auto_settled'].items()))
+        estimates = [f"{korean.get(k, k)}={values.get(v, v)}" for k, v in applied['auto_settled'].items()]
+        parts.append('애매해서 자동 처리: ' + ', '.join(estimates[:3])
+                     + (f' 외 {len(estimates) - 3}건' if len(estimates) > 3 else ''))
     return '⚙ ' + ' · '.join(parts)
 
 

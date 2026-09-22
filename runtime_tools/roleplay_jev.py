@@ -10,6 +10,7 @@ from runtime_tools import roleplay_illness as illness
 import json
 import math
 import time
+from runtime_tools.roleplay_decisions import AdjudicationUnavailable, DraftOutOfScope, important_candidates
 
 from llm.call_registry import decide_detailed, generate_detailed, resolve
 from runtime_tools.roleplay_dynamics import (METRICS, THREAT_TARGETS,
@@ -23,7 +24,7 @@ from runtime_tools.roleplay_pacing import (policy_for, duration_minutes, check_t
                                          check_reset_request)
 
 FEATURE = 'roleplay_scene_adjudication'
-RULES_VERSION = 11
+RULES_VERSION = 12
 LOCATIONS = ('감방', '구금방', '독방', '심문실', '복도', '집', '사무실', '식당', '병실')
 INTENSITY = {'mild': 1, 'moderate': 2, 'severe': 3}
 BRIEF_ACTIVITY_DEFAULT_MINUTES = 10
@@ -383,6 +384,7 @@ def estimate_duration(user_text, state, verdict):
         'clock_before': state.get('clock'), 'authorization': verdict.get('authorization'),
         'story_events': state.get('story_events'), 'routine': state.get('routine'),
         'expected_stop': verdict.get('expected_stop'),
+        'important_candidates': important_candidates(state, [], verdict),
         'maximum_minutes': limit,
     }, ensure_ascii=False), profile=profile, system=(
         'Estimate elapsed minutes for the actual candidate_scene when provided, through its final enacted action. '
@@ -405,50 +407,58 @@ def estimate_duration(user_text, state, verdict):
         'Extract the LATEST explicitly enacted clock time in candidate_scene into timeline_anchor, even if it is the start '
         'of an interrogation or expressed as 밤 9시. Resolve its date using clock_before; quote the exact supporting text. '
         'Exclude future plans and historical references. Use null if there is no explicit enacted clock time. '
-        'The engine computes the clock difference itself. Never omit an explicit time to fit maximum_minutes.'
+        'The engine computes the clock difference itself. Never omit an explicit time to fit maximum_minutes. '
+        'Also return important_evidence: an array of {key, label, target_id, quote} for important_candidates. '
+        'Copy key, label and target_id exactly. quote must be an exact substring of candidate_scene proving '
+        'that this outcome actually occurred now for that specific record. A demand, proposal, hypothetical, '
+        'historical mention or payment without fulfillment is not completion. Omit unsupported candidates. '
+        'Return an empty array when there is no supported important outcome.'
     ))
     if not result.text or result.truncated or result.error_kind:
-        raise ValueError('시간 추정 실패: ' + (result.error_kind or 'invalid_output'))
+        raise AdjudicationUnavailable('시간 추정 실패: ' + (result.error_kind or 'invalid_output'))
     try:
         value = json.loads(result.text)
     except (ValueError, TypeError) as exc:
-        raise ValueError('시간 추정 JSON 오류') from exc
+        raise AdjudicationUnavailable('시간 추정 JSON 오류') from exc
     fields = {'elapsed_minutes', 'reason', 'within_scope', 'timeline_anchor'}
+    if isinstance(value, dict) and 'important_evidence' in value:
+        fields.add('important_evidence')
     if not isinstance(value, dict) or (set(value) != fields and
             (verdict.get('draft') is not None or set(value) != {'elapsed_minutes', 'reason'})):
-        raise ValueError('시간 추정 응답 형식 오류')
+        raise AdjudicationUnavailable('시간 추정 응답 형식 오류')
     if 'within_scope' in value and type(value['within_scope']) is not bool:
-        raise ValueError('초안 범위 판정 형식 오류')
+        raise AdjudicationUnavailable('초안 범위 판정 형식 오류')
     if value.get('within_scope') is False:
-        raise ValueError('초안이 허가된 사건·시간 범위를 넘음: ' + str(value.get('reason', ''))[:250])
+        raise DraftOutOfScope('초안이 허가된 사건·시간 범위를 넘음: ' + str(value.get('reason', ''))[:250])
     minutes = value['elapsed_minutes']
     if not isinstance(value['reason'], str) or not value['reason'].strip():
-        raise ValueError('단일 사건 시간 추정 근거 없음')
+        raise AdjudicationUnavailable('단일 사건 시간 추정 근거 없음')
     if type(minutes) is int and (minutes == -1 or minutes > limit):
-        raise ValueError('초안이 허가된 사건·시간 범위를 넘음: ' + value['reason'][:250])
+        raise DraftOutOfScope('초안이 허가된 사건·시간 범위를 넘음: ' + value['reason'][:250])
     if type(minutes) is not int or not 0 <= minutes <= limit or not isinstance(value['reason'], str) or not value['reason'].strip():
-        raise ValueError('단일 사건 시간 추정이 허용 범위를 벗어남')
+        raise AdjudicationUnavailable('단일 사건 시간 추정이 허용 범위를 벗어남')
     anchor = value.get('timeline_anchor')
     minimum = 0
     if anchor is not None:
         if (not isinstance(anchor, dict) or set(anchor) != {'date', 'time', 'quote'}
                 or any(not isinstance(v, str) or not v for v in anchor.values())
                 or anchor['quote'] not in (verdict.get('draft') or '')):
-            raise ValueError('초안 시각 근거 검증 실패')
+            raise AdjudicationUnavailable('초안 시각 근거 검증 실패')
         clock = state.get('clock') or {}
         try:
             end = datetime.strptime(anchor['date'] + ' ' + anchor['time'], '%Y-%m-%d %H:%M')
             start = datetime.strptime(clock['date'] + ' ' + clock['time'], '%Y-%m-%d %H:%M')
         except (KeyError, TypeError, ValueError) as exc:
-            raise ValueError('초안 시각과 저장 시계 비교 불가') from exc
+            raise AdjudicationUnavailable('초안 시각과 저장 시계 비교 불가') from exc
         minimum = int((end - start).total_seconds() / 60)
         boundary = (verdict.get('expected_stop') or {}).get('minutes', limit)
         if minimum < 0 or minimum > min(limit, boundary):
-            raise ValueError('초안이 허가된 사건·시간 범위를 넘음: 저장 시계와 초안 시각 불일치')
+            raise DraftOutOfScope('초안이 허가된 사건·시간 범위를 넘음: 저장 시계와 초안 시각 불일치')
         minutes = max(minutes, minimum)
     return {'elapsed_minutes': minutes, 'reason': value['reason'][:400],
             'timeline_anchor': anchor, 'clock_minimum_minutes': minimum, 'within_scope': value.get('within_scope'),
-            'model': profile.model, 'latency_ms': result.latency_ms}
+            'model': profile.model, 'latency_ms': result.latency_ms,
+            'important_evidence': value.get('important_evidence') if isinstance(value.get('important_evidence'), list) else []}
 
 
 def _clamp(value):
@@ -542,6 +552,21 @@ def project(before, user_text, people, verdict, scope_id):
         else:
             raise PendingChoice('intensity', candidates, 'Jev의 사건 강도 판정 신뢰도 부족')
     state = deepcopy(before)
+    # Resolve already-arrived clock barriers before advancing this scene. Otherwise
+    # even a draft classified as completing the event stops at minute zero, before
+    # reaching the endpoint record updates below. Narrative cues retain their
+    # endpoint handling (including delayed-reaction effects).
+    resolved_barriers = {
+        scheduled['id'] for i, scheduled in enumerate(before.get('story_events', []))
+        if scheduled['status'] == 'ready' and not scheduled.get('when_alone')
+        and labels.get(f'story_{i}') in {'complete', 'cancel'}
+    }
+    if resolved_barriers:
+        state = apply_story_updates(state, [
+            {'op': labels[f'story_{i}'], 'id': scheduled['id'], 'outcome': user_text[:300]}
+            for i, scheduled in enumerate(before.get('story_events', []))
+            if scheduled['id'] in resolved_barriers
+        ])
     initialized = {}
     for key in METRICS:
         value = labels.get('initial_' + key, 'unknown')
@@ -696,7 +721,7 @@ def project(before, user_text, people, verdict, scope_id):
     updates = []
     for i, scheduled in enumerate(before.get('story_events', [])):
         action = labels.get(f'story_{i}', 'keep')
-        if action != 'keep':
+        if action != 'keep' and scheduled['id'] not in resolved_barriers:
             updates.append({'op': action, 'id': scheduled['id'], 'outcome': user_text[:300]})
     if updates:
         state = apply_story_updates(state, updates)
@@ -834,7 +859,7 @@ def adjudicate_turn(user_id, user_text, history, scope_id, *, prepared=None):
         current = with_defaults({**memory.STATE_DEFAULTS, **(json.loads(row[0]) if row else {})})
         if current['revision'] != before['revision']:
             projected = None
-            outcome = {'status': 'deferred', 'reason': '분류 중 상태가 바뀌어 저장하지 않음', 'rules_version': RULES_VERSION}
+            outcome = {'status': 'deferred', 'reason': '분류 중 상태가 바뀌어 저장하지 않음', 'reason_kind': 'state_conflict', 'rules_version': RULES_VERSION}
         if prepared is not None and prepared.get('stage') is not None and outcome['status'] in {'applied','unchanged'}:
             from runtime_tools.roleplay_turn import check_staged, commit_staged
             check_staged(conn, uid, prepared['stage'])

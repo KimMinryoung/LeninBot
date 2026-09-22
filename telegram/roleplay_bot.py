@@ -18,6 +18,7 @@ import asyncio
 import logging
 import os
 import re
+import time
 from collections import Counter
 from pathlib import Path
 
@@ -32,6 +33,7 @@ from bot_config import _deepseek_anthropic_client, _resolve_deepseek_model
 from llm.claude_loop import chat_with_tools
 from llm.tool_loop_common import EMPTY_RESPONSE_FALLBACK
 from runtime_tools.roleplay_jev import adjudicate_turn, PendingChoice
+from runtime_tools.roleplay_decisions import AdjudicationUnavailable, DraftOutOfScope, StateConflict, describe_important
 from runtime_tools.roleplay_actor import actor_state_view
 from runtime_tools import roleplay_turn
 from runtime_tools.roleplay_time import TimeAuthorizationUnavailable
@@ -106,10 +108,9 @@ RP_TOOLS, RP_HANDLERS = _select_tools()
 # process memory only: after a restart the player simply resends the message.
 PENDING_CHOICES: dict[int, dict] = {}
 FEEDBACK_PREFERENCE = "feedback_line"
-# Buttons are off by default: an unsure Jev label takes its most probable value and the
-# settlement line says so. /ask 켜기 brings the buttons back for a player who wants them.
+# Ordinary estimates default to automatic; consequential uncertainty always asks.
 ASK_PREFERENCE = "ask_player"
-AUTO_SETTLE_ROUNDS = 32  # event/intensity/activity plus bounded record decisions
+TURN_LOCKS: dict[int, asyncio.Lock] = {}
 
 
 def _asks_player(user_id: int) -> bool:
@@ -217,7 +218,14 @@ class OwnerOnlyMiddleware(BaseMiddleware):
     async def __call__(self, handler, event, data):
         user_id = getattr(getattr(event, "from_user", None), "id", None)
         if _is_allowed(user_id):
-            return await handler(event, data)
+            async with TURN_LOCKS.setdefault(user_id, asyncio.Lock()):
+                # A new mutating command invalidates a draft based on the previous state.
+                command = (getattr(event, "text", "") or "").split(maxsplit=1)[0:1]
+                if command and command[0].split("@")[0] in {"/new", "/routine", "/track"}:
+                    pending = PENDING_CHOICES.pop(user_id, None)
+                    if pending:
+                        await asyncio.to_thread(_drop_unsettled, user_id, pending, "새 명령으로 초안 폐기")
+                return await handler(event, data)
         logger.info("blocked unauthorized roleplay message user_id=%s", user_id)
         return None
 
@@ -260,10 +268,10 @@ async def cmd_help(message: Message) -> None:
         "이 봇은 캐릭터와 1:1 역할극을 하는 독립 봇이야 (Cyber-Lenin과 별개).\n"
         "• 그냥 메시지를 보내면 캐릭터가 답해.\n"
         "• /new — 최근 대화 초기화 (메모·상태표 유지)\n"
-        "• /status — 핵심 상태, /status 상세 — 계산 근거·세부 상태. 수정·초기화는 대화로 요청해.\n"
+        "• /status — 상태와 계산 근거. /status 상세도 같은 내용을 표시해. 수정·초기화는 대화로 요청해.\n"
         "• /people — 저장된 인물 목록, /people 이름 — 인물 기록 확인\n"
         "• /feedback 켜기|끄기 — 답변 뒤에 엔진이 확정한 사건·시간을 한 줄로 표시 (기본 켜짐)\n"
-        "• /ask 켜기|끄기 — 판정이 애매할 때 버튼으로 물을지 (기본 꺼짐: 가장 그럴듯한 값으로 자동 처리하고 한 줄에 표시)\n"
+        "• /ask 켜기|끄기 — 기본은 중요한 결과만 확인. 켜면 일반 추정도 버튼으로 확인\n"
         "• /routine — 감옥 일과 보기, /routine 추가 06:00 아침 배식, /routine 삭제 1, /routine 비우기\n"
         "• /track 켜기|끄기 — 실존 연표(4/30 66명 조서 … 1940-02-04 처형)를 예정 사건으로 깔고 일치·이탈을 표시\n"
         "• 판정이 애매하면 버튼으로 사건을 골라 그 초안을 그대로 확정할 수 있어.\n"
@@ -300,10 +308,10 @@ async def cmd_ask(message: Message) -> None:
         await message.answer("판정이 애매하면 버튼으로 물을게.")
     elif arg in {"끄기", "off", "꺼"}:
         await asyncio.to_thread(set_preference, message.from_user.id, ASK_PREFERENCE, "off")
-        await message.answer("버튼 없이 가장 그럴듯한 값으로 자동 처리하고 확정 한 줄에 표시할게.")
+        await message.answer("일반 추정은 자동 처리할게. 자백·지키는 것·거래의 중요한 결과가 애매할 때만 물을게.")
     else:
         current = await asyncio.to_thread(_asks_player, message.from_user.id)
-        await message.answer(f"판정 버튼: {'켜짐' if current else '꺼짐(자동 처리)'}. /ask 켜기 또는 /ask 끄기")
+        await message.answer(f"판정 버튼: {'켜짐' if current else '중요한 결과만 확인'}. /ask 켜기 또는 /ask 끄기")
 
 
 @router.message(Command("routine"))
@@ -541,6 +549,9 @@ async def handle_message(message: Message) -> None:
         for chunk in _split_message(cached_reply):
             await message.answer(chunk)
         return
+    pending = PENDING_CHOICES.pop(user_id, None)
+    if pending:
+        await asyncio.to_thread(_drop_unsettled, user_id, pending, "새 메시지로 초안 폐기")
     history_id = await asyncio.to_thread(save_message, user_id, "user", user_text)
     history = await asyncio.to_thread(load_history, user_id)
     state = None
@@ -593,6 +604,8 @@ async def _draft_and_settle(message: Message, user_id: int, turn: dict, authoriz
     user_text, scope_id, state = turn["user_text"], turn["scope_id"], turn["state"]
     ctx = new_run_context(interface="telegram", agent_name="roleplay", user_id=str(user_id), is_owner=True,
                           session_id=f"telegram-roleplay:{turn['chat_id']}", scope_type="telegram_message", scope_id=scope_id)
+    authorization = {**authorization, "auto_general": not await asyncio.to_thread(_asks_player, user_id),
+                     "excluded_outcomes": turn.get("rewrite_without", [])}
     time_policy = roleplay_turn.policy_for_authorization(authorization)
     history = attach_context(turn["history"], [context_record(
         "runtime_state", "telegram_roleplay_runtime", {
@@ -600,7 +613,8 @@ async def _draft_and_settle(message: Message, user_id: int, turn: dict, authoriz
             "private_notes": turn["notes"],
             # The compact view: replay bookkeeping (event IDs, timestamps) is
             # server state the model never needs and only crowds the prompt.
-            "character_state": actor_state_view(state) if state else None,
+            "character_state": actor_state_view(state, user_text) if state else None,
+            "rewrite_without": [describe_important(item) for item in turn.get("rewrite_without", [])],
             "people": turn["people"],
             "recent_repeated_phrases": repeated_phrases(turn["history"]),
             "persona_time": "fictional; infer from the roleplay, not the server clock",
@@ -619,14 +633,17 @@ async def _draft_and_settle(message: Message, user_id: int, turn: dict, authoriz
     reply = ""
     settled = None
     issues: list[str] = []
+    started = time.monotonic()
+    draft_count = 0
     try:
-        for attempt in range(2):
+        for attempt in range(1 if turn.get("rewrite_without") else 2):
+            draft_count += 1
             with caller_scope(ctx), turn_time_scope(time_policy):
                 with roleplay_turn.staged_memory(user_id) as stage:
                     reply = await chat_with_tools(
                         history, client=_deepseek_anthropic_client, model=ROLEPLAY_MODEL,
                         tools=RP_TOOLS, tool_handlers=RP_HANDLERS,
-                        system_prompt=build_system_prompt() + "\n지금은 비공개 초안을 작성한다. 도구 저장도 검증 전 임시 기록이다. 사용자의 장면 범위를 지키고 계산 결과를 추측하지 않는다.",
+                        system_prompt=build_system_prompt() + "\nrewrite_without에 지정된 결과는 이번 초안에 일어나지 않게 쓴다. 이전 초안의 기록은 폐기되었으므로 필요한 기록을 새로 저장한다.\n지금은 비공개 초안을 작성한다. 도구 저장도 검증 전 임시 기록이다. 사용자의 장면 범위를 지키고 계산 결과를 추측하지 않는다.",
                         max_rounds=ROLEPLAY_MAX_ROUNDS, max_tokens=ROLEPLAY_MAX_TOKENS,
                         continue_on_length=True, max_length_continuations=1,
                         budget_usd=ROLEPLAY_BUDGET_USD, on_progress=progress_cb,
@@ -635,34 +652,24 @@ async def _draft_and_settle(message: Message, user_id: int, turn: dict, authoriz
                 if not reply.strip() or reply.strip() == EMPTY_RESPONSE_FALLBACK:
                     break
                 try:
-                    prepared = await asyncio.to_thread(roleplay_turn.prepare, user_text, state, stage['people'],
-                        history, scope_id, reply, authorization, stage, None, False, attempt == 1)
-                except PendingChoice as exc:
-                    # Jev left one closed choice open. Either ask the director (buttons on)
-                    # or take the most probable value and say so in the settlement line.
-                    if await asyncio.to_thread(_asks_player, user_id):
-                        PENDING_CHOICES[user_id] = {
-                            **turn, "phase": "settle", "people": stage['people'], "history": history,
-                            "draft": reply, "authorization": authorization, "stage": stage,
-                            "verdict": getattr(exc, "verdict", None), "key": exc.key, "candidates": exc.candidates,
-                        }
+                    result = await asyncio.to_thread(roleplay_turn.prepare_result, user_text, state, stage['people'],
+                        history, scope_id, reply, authorization, stage)
+                    if result['status'] == 'pending':
+                        pending = {**turn, 'source_history': turn.get('source_history', turn['history']), 'phase': 'settle', 'people': stage['people'], 'history': history,
+                                   'draft': reply, 'authorization': authorization, 'stage': stage,
+                                   **{k: result[k] for k in ('verdict', 'key', 'candidates', 'reason')}}
+                        if turn.get('rewrite_without') and result['key'] == 'important':
+                            pending['candidates'] = result['candidates'] = [('confirm', '결과 확정')]
+                        PENDING_CHOICES[user_id] = pending
                         await progress_cb.flush()
                         await _show_draft(message, reply)
+                        exc = PendingChoice(result['key'], result['candidates'], result['reason'])
                         await message.answer(_choice_prompt(exc), reply_markup=_choice_keyboard(scope_id, exc))
                         return
-                    try:
-                        prepared = await asyncio.to_thread(_auto_settle, exc, user_text, state, stage['people'], history, scope_id, reply, authorization, stage, attempt == 1)
-                    except ValueError as inner:
-                        logger.warning("roleplay draft rejected after auto settlement: %s", inner)
-                        issues.append(f"초안 {attempt + 1} 거절: {_issue_text(inner)}")
-                        continue
-                except ValueError as exc:
-                    logger.warning("roleplay draft rejected: %s", exc)
+                    prepared = result['prepared']
+                except DraftOutOfScope as exc:
                     issues.append(f"초안 {attempt + 1} 거절: {_issue_text(exc)}")
-                    history = attach_context(history, [context_record('draft_revision','telegram_roleplay_runtime',
-                        {'direction': f'이전 초안은 폐기됐다. 이번 사용자 메시지 "{user_text[:200]}"의 사건 하나만 다루는 새 초안을 작성하라. 이전에 답하지 못한 지시는 실행하지 않는다.',
-                         'scene_direction': roleplay_turn.direction(authorization, state), 'issue': _issue_text(exc)},
-                        scope=f"telegram-roleplay:{turn['chat_id']}",observed_at=datetime.now(timezone.utc),temporal_scope='current turn')])
+                    history = _draft_revision_context(history, user_text, authorization, state, turn['chat_id'], exc)
                     continue
                 settled = await asyncio.to_thread(adjudicate_turn, user_id, user_text, history, scope_id, prepared=prepared)
                 if settled.get('status') in {'applied','unchanged'}:
@@ -672,19 +679,37 @@ async def _draft_and_settle(message: Message, user_id: int, turn: dict, authoriz
                 break
         if not reply.strip() or reply.strip() == EMPTY_RESPONSE_FALLBACK:
             issues.append("연기 모델이 빈 답변을 냈음")
+    except StateConflict:
+        issues.append("장면 기록이 다른 작업에서 바뀌었어. 최신 상태에서 다시 진행해야 해.")
+    except AdjudicationUnavailable as exc:
+        PENDING_CHOICES.pop(user_id, None)
+        issues.append("판정 서비스가 유효한 결과를 반환하지 못함: " + _issue_text(exc))
     except Exception as exc:
+        PENDING_CHOICES.pop(user_id, None)
         logger.exception("roleplay draft/settlement failed")
         issues.append(f"내부 오류: {_issue_text(exc)}")
     finally:
+        logger.info("roleplay turn scope=%s drafts=%s status=%s elapsed_ms=%s", scope_id, draft_count,
+                    "pending" if user_id in PENDING_CHOICES else (settled or {}).get("status", "unsettled"),
+                    int((time.monotonic() - started) * 1000))
         await progress_cb.flush()
     if settled is None or settled.get('status') not in {'applied','unchanged'}:
         await asyncio.to_thread(_drop_unsettled, user_id, turn, "미확정 턴: " + " / ".join(issues)[:150])
         if reply.strip() and reply.strip() != EMPTY_RESPONSE_FALLBACK:
             await _show_draft(message, reply)  # the player at least sees what was written
         await message.answer("장면을 확정하지 못해서 이번 진행은 저장하지 않았어.\n막힌 부분: "
-                             + (" / ".join(issues) if issues else "이유가 기록되지 않음") + "\n어디까지 진행할지 다시 말해줘.")
+                             + (" / ".join(issues) if issues else "이유가 기록되지 않음") + "\n잠시 후 같은 메시지를 다시 보내줘. 확정 전 기록은 저장하지 않았어.")
         return
     await _deliver(message, user_id, reply, settled)
+
+
+def _draft_revision_context(history, user_text, authorization, state, chat_id, exc):
+    from datetime import datetime, timezone
+    from llm.execution_context import attach_context, context_record
+    return attach_context(history, [context_record('draft_revision', 'telegram_roleplay_runtime',
+        {'direction': f'이전 초안은 폐기됐다. 이번 사용자 메시지 "{user_text[:200]}"의 사건 하나만 다루는 새 초안을 작성하라. 이전에 답하지 못한 지시는 실행하지 않는다.',
+         'scene_direction': roleplay_turn.direction(authorization, state), 'issue': _issue_text(exc)},
+        scope=f"telegram-roleplay:{chat_id}", observed_at=datetime.now(timezone.utc), temporal_scope='current turn')])
 
 
 _ISSUE_TEXT = {
@@ -710,27 +735,6 @@ async def _deliver(message: Message, user_id: int, reply: str, settled: dict) ->
         await message.answer(roleplay_turn.feedback_line(settled, state))
 
 
-def _auto_settle(exc: PendingChoice, user_text, state, people, history, scope_id, draft, authorization, stage, final_attempt=False):
-    """Buttons off: fill each open label with Jev's most probable candidate, at most a few rounds."""
-    picks = dict((authorization or {}).get("auto_settled") or {})
-    for _ in range(AUTO_SETTLE_ROUNDS):
-        pick = exc.candidates[0][0] if exc.candidates else None
-        if pick is None:
-            raise ValueError(str(exc))
-        picks[exc.key] = pick
-        verdict = getattr(exc, "verdict", None)
-        if verdict is not None:
-            verdict = {**verdict, "labels": {**verdict["labels"], exc.key: pick}, "player_settled": True}
-        try:
-            prepared = roleplay_turn.prepare(user_text, state, people, history, scope_id, draft, authorization, stage, verdict, exc.key == "within_scope", final_attempt)
-        except PendingChoice as again:
-            exc = again
-            continue
-        prepared["applied"] = {**prepared["applied"], "auto_settled": picks}
-        return prepared
-    raise ValueError("판정 자동 처리 한도 초과: " + str(exc))
-
-
 async def _show_draft(message: Message, draft: str) -> None:
     """The player judges a draft they can read. It is not saved and not yet the reply."""
     chunks = _split_message(draft)
@@ -739,6 +743,9 @@ async def _show_draft(message: Message, draft: str) -> None:
 
 
 def _choice_prompt(exc: PendingChoice) -> str:
+    if exc.key == "important":
+        return str(exc) + ("\n이 결과를 확정할까, 이 결과 없이 초안을 다시 쓸까?"
+                           if any(label == "rewrite" for label, _ in exc.candidates) else "\n이 결과를 확정하거나 초안을 버릴 수 있어.")
     return {
         "mode": "이 메시지가 장면 실행인지, 질문·상담인지 판정하지 못했어. 골라 주면 그대로 진행할게.",
         "within_scope": "쓴 초안이 지시한 장면 범위 안인지 판정하지 못했어. 범위 안이면 이 초안을 그대로 확정할게.",
@@ -780,6 +787,9 @@ async def on_choice(query: CallbackQuery) -> None:
     if key != pending["key"]:
         await query.answer("이미 처리된 선택이야.")
         return
+    if value not in {label for label, _ in pending.get("candidates", [])}:
+        await query.answer("유효하지 않은 선택이야.", show_alert=True)
+        return
     # Claim the pending draft before any slow work: a second tap (or a Telegram retry)
     # must not settle the same draft twice in parallel.
     PENDING_CHOICES.pop(user_id, None)
@@ -795,18 +805,51 @@ async def on_choice(query: CallbackQuery) -> None:
         await asyncio.to_thread(_drop_unsettled, user_id, pending, "플레이어가 범위 밖으로 판정")
         await query.message.edit_text("이 초안은 버렸어. 어디까지 진행할지 다시 말해줘.")
         return
-    verdict = None
-    if pending.get("verdict") is not None:
-        verdict = dict(pending["verdict"])
-        verdict["labels"] = {**verdict["labels"], key: value}
-        verdict["player_settled"] = True  # one question per draft; the rest falls to conservative defaults
+    verdict = pending.get("verdict")
+    if key == 'important' and value == 'rewrite':
+        if pending.get('rewrite_without'):
+            PENDING_CHOICES[user_id] = pending
+            await query.message.edit_text('이미 한 번 다시 썼어. 결과를 확인하거나 초안을 버려줘.',
+                reply_markup=_choice_keyboard(scope_id, PendingChoice('important', [('confirm', '결과 확정')], '')))
+            pending['candidates'] = [('confirm', '결과 확정')]
+            return
+        rewrite = {**pending, 'rewrite_without': verdict.get('pending_important', []),
+                   'history': pending.get('source_history', pending['history']),
+                   'people': await asyncio.to_thread(people_context, user_id, pending['state'].get('participants', []))}
+        await query.message.edit_text('중요한 결과가 일어나지 않은 장면으로 다시 쓸게.')
+        await _draft_and_settle(query.message, user_id, rewrite, pending['authorization'])
+        return
+    if verdict is not None:
+        from copy import deepcopy
+        verdict = deepcopy(verdict)
+        if key == 'important':
+            confirmed = verdict.setdefault('confirmed_important', [])
+            for item in verdict.get('pending_important', []):
+                confirmed.append({k: item[k] for k in ('key', 'label', 'target_id')})
+                verdict['labels'][item['key']] = item['label']
+            # Refresh the composite event; an old primary event must not override the pick.
+            from runtime_tools.roleplay_jev import FAMILY_KEYS, resolve_events
+            if any(k in verdict['labels'] for k in FAMILY_KEYS):
+                verdict['labels'].pop('event', None)
+                events, unresolved = resolve_events(verdict['labels'])
+                if not unresolved:
+                    verdict['labels']['event'] = events[0] if events else 'none'
+        else:
+            verdict['labels'][key] = value
     try:
-        prepared = await asyncio.to_thread(roleplay_turn.prepare, pending["user_text"], pending["state"], pending["people"],
-            pending["history"], scope_id, pending["draft"], pending["authorization"], pending["stage"], verdict, key == "within_scope")
-    except PendingChoice as exc:
-        pending["verdict"], pending["key"], pending["candidates"] = getattr(exc, "verdict", None), exc.key, exc.candidates
-        PENDING_CHOICES[user_id] = pending
-        await query.message.edit_text(f"선택: {chosen}\n" + _choice_prompt(exc), reply_markup=_choice_keyboard(scope_id, exc))
+        result = await asyncio.to_thread(roleplay_turn.prepare_result, pending['user_text'], pending['state'], pending['people'],
+            pending['history'], scope_id, pending['draft'], pending['authorization'], pending['stage'], verdict)
+        if result['status'] == 'pending':
+            pending.update({k: result[k] for k in ('verdict', 'key', 'candidates', 'reason')})
+            PENDING_CHOICES[user_id] = pending
+            exc = PendingChoice(result['key'], result['candidates'], result['reason'])
+            await query.message.edit_text(f"선택: {chosen}\n" + _choice_prompt(exc), reply_markup=_choice_keyboard(scope_id, exc))
+            return
+        prepared = result['prepared']
+        settled = await asyncio.to_thread(adjudicate_turn, user_id, pending['user_text'], pending['history'], scope_id, prepared=prepared)
+    except StateConflict:
+        await asyncio.to_thread(_drop_unsettled, user_id, pending, "초안 기록 충돌")
+        await query.message.edit_text("장면 기록이 바뀌어서 이 초안을 저장하지 않았어. 최신 상태에서 다시 진행해 줘.")
         return
     except ValueError as exc:
         logger.warning("roleplay choice completion rejected: %s", exc)
@@ -818,7 +861,6 @@ async def on_choice(query: CallbackQuery) -> None:
         await asyncio.to_thread(_drop_unsettled, user_id, pending, "선택 후 내부 오류")
         await query.message.edit_text("확정 중 오류가 났어. 메시지를 다시 보내줘.")
         return
-    settled = await asyncio.to_thread(adjudicate_turn, user_id, pending["user_text"], pending["history"], scope_id, prepared=prepared)
     if settled.get("status") not in {"applied", "unchanged"}:
         await asyncio.to_thread(_drop_unsettled, user_id, pending, f"정산 보류: {settled.get('reason')}")
         await query.message.edit_text(f"선택: {chosen}\n장면을 확정하지 못해서 저장하지 않았어.\n막힌 부분: {settled.get('reason')}")
@@ -851,6 +893,7 @@ async def bot_main() -> None:
         BotCommand(command="help", description="사용법"),
         BotCommand(command="status", description="인물 상태표"),
         BotCommand(command="people", description="저장된 인물 기록"),
+        BotCommand(command="ask", description="일반 추정까지 확인할지 설정"),
         BotCommand(command="feedback", description="확정 한 줄 표시 켜기/끄기"),
         BotCommand(command="routine", description="감옥 일과 보기/추가/삭제"),
         BotCommand(command="track", description="실존 연표 궤도 켜기/끄기"),

@@ -34,7 +34,7 @@ class PostDraftTests(unittest.TestCase):
         ctx.__enter__();self.addCleanup(ctx.__exit__,None,None,None)
         self.text='아침에 집중 심문을 진행하고 66명 명단 진술을 재현한다'
         self.auth={'user_text':self.text,'labels':{'mode':'scene','transition':'next_morning','span':'session'}}
-        self.verdict={'status':'classified','labels':{'mode':'scene','event':'implicating_others','intensity':'moderate','activity':'light'},'uncertain':[],'model':'test'}
+        self.verdict={'confirmed_important':[{'key':'event_pressure','label':'implicating_others','target_id':None}], 'status':'classified','labels':{'mode':'scene','event':'implicating_others','intensity':'moderate','activity':'light'},'uncertain':[],'model':'test'}
 
     def prepare(self,stage=None,final=True):
         with patch.object(turn,'decide',return_value={'labels':{'within_scope':'yes'}}), patch.object(turn,'review_reply',return_value={'approved':final,'issues':[] if final else ['contradiction']}), \
@@ -120,6 +120,31 @@ class PostDraftTests(unittest.TestCase):
             self.assertFalse(prepared['applied'].get('interrupted'))
             self.assertEqual(prepared['applied']['minutes'], 5)
         self.assertEqual(memory.load_state('1'),self.before)
+
+    def test_arrived_dinner_commits_and_replays_without_double_settlement(self):
+        self.before['story_events'] = [{'id': 'dinner', 'title': '저녁 배식',
+            'kind': 'routine', 'status': 'ready', 'due_minute': self.before['scene_minute']}]
+        with memory._connection() as conn:
+            conn.execute('UPDATE character_state SET payload=? WHERE user_id=?',
+                         (json.dumps(self.before), '1'))
+        text = '저녁 배식을 진행한다'
+        auth = {'user_text': text, 'labels': {'mode': 'scene', 'transition': 'current',
+                                             'time_scope': 'none', 'span': 'brief'}}
+        v = {'status': 'classified', 'labels': {'mode': 'scene', 'event': 'none',
+             'activity': 'light', 'story_0': 'complete'}, 'uncertain': [], 'model': 'test'}
+        self.assertIn('이미 도래한 예정 사건: 저녁 배식', turn.direction(auth, self.before))
+        with patch.object(jev, 'classify', return_value=v), \
+             patch.object(jev, 'estimate_duration', return_value={'elapsed_minutes': 3}), \
+             patch.object(turn, 'review_reply', return_value={'approved': None, 'issues': []}):
+            prepared = turn.prepare(text, self.before, [], [], 'dinner', '배식을 받았다', auth)
+        self.assertEqual(memory.load_state('1'), self.before)
+        result = jev.adjudicate_turn('1', text, [], 'dinner', prepared=prepared)
+        self.assertEqual(result['status'], 'applied')
+        after = memory.load_state('1')
+        self.assertEqual(after['scene_minute'], self.before['scene_minute'] + 3)
+        self.assertEqual(after['story_events'][0]['status'], 'completed')
+        jev.adjudicate_turn('1', text, [], 'dinner', prepared=prepared)
+        self.assertEqual(memory.load_state('1'), after)
 
     def test_concurrent_notes_conflict_rolls_back_state_and_records(self):
         stage=self.stage();prepared=self.prepare(stage)

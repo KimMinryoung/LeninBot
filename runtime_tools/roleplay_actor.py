@@ -2,7 +2,7 @@
 from runtime_tools.roleplay_dynamics import isolation_stage, holdout_titles, open_bargains, routine_occurrences, RESOLVE_EVENT_KINDS
 
 
-def actor_state_view(state):
+def actor_state_view(state, user_text=""):
     # revision is an opaque write token, not a character metric.
     view = {key: state.get(key) for key in ('revision', 'period', 'location', 'scene', 'body', 'mood',
             'goal', 'avoid', 'next_action', 'unresolved', 'last_event', 'participants')}
@@ -52,6 +52,20 @@ def actor_state_view(state):
                         'cue': '지키는 항목은 아직 넘기지 않은 실제 사실이다. 넘길지는 장면과 압박이 정하며, 넘기면 그 행위를 서술에 분명히 드러낸다. 잃은 항목을 되찾은 것처럼 쓰지 않는다'}
     view['bargains'] = {'열린 거래': [f"{b['request']} ← {b['price']}" + (' (값은 치름, 이행 대기)' if b.get('paid') else ' (값 미지불)') for b in open_bargains(state)],
                         'cue': '인물은 심문관이 원하는 것(이름·서명·진술)을 구체적인 요구(처치·담요·소식·재판 날짜 등)와 바꾸자고 제안할 수 있다. 성립한 거래만 roleplay_state update의 bargain으로 기록한다. 이행 여부는 상대가 정하며 미리 보장하지 않는다'}
+    # Qualitative consequences survive after an open bargain leaves the active list.
+    recent = [b for b in state.get('bargains', []) if b.get('status') in {'kept', 'broken'}][-3:]
+    view['bargains']['최근 결과'] = [
+        f"{b['request']} ← {b['price']}: " + ('이행됨' if b['status'] == 'kept' else '파기됨') for b in recent]
+    context = ' '.join(str(state.get(k) or '') for k in ('scene', 'goal', 'unresolved')) + ' ' + user_text
+    candidates = ([{'kind': '지키는 것', 'text': title} for title in held]
+                  + [{'kind': '거래', 'text': b['request'] + ' ← ' + b['price']} for b in open_bargains(state)]
+                  + [{'kind': '예정', 'text': e['title']} for e in state.get('story_events', [])
+                     if e.get('status') in {'ready', 'pending'}])
+    # A bounded ordering hint, never an authority to enact an event or select a goal.
+    candidates.sort(key=lambda item: -sum(word in context for word in item['text'].split() if len(word) > 1))
+    view['scene_focus'] = {'원하는 것': state.get('goal'), '피하려는 것': state.get('avoid'),
+                           '가능한 시도': state.get('next_action'), '미해결': state.get('unresolved'),
+                           '관련 단서': candidates[:3]}
     upcoming = routine_occurrences(state, 1440)
     if upcoming:
         view['routine_next'] = [f"{item['time']} {item['title']} ({at}분 뒤)" for at, item in upcoming[:3]]

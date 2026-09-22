@@ -447,13 +447,13 @@
     "provider": "deepseek",
     "model": "deepseek-flash",
     "temperature": 0,
-    "max_tokens": 512,
+    "max_tokens": 2048,
     "timeout": 20,
     "json_mode": true,
     "thinking": {
       "type": "disabled"
     },
-    "note": "초안의 실제 단일 사건 소요 분만 추정. 명시 기간과 시간 허가는 roleplay_time_authorization의 LLM 판정 사용."
+    "note": "초안 범위·소요 분 검사와 중요한 결과의 원문 근거 추출. 명시 기간과 시간 허가는 roleplay_time_authorization의 LLM 판정 사용."
   },
   "roleplay_scene_consistency": {
     "provider": "deepseek_anthropic",

@@ -106,6 +106,36 @@ class ProjectionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.project('한 시간 쉬어',elapsed='explicit',activity='keep')
 
+    def test_ready_routine_can_complete_with_elapsed_time(self):
+        before = initial(story_events=[{'id': 'dinner', 'title': '저녁 배식',
+            'kind': 'routine', 'status': 'ready', 'due_minute': 0, 'created_minute': 0}])
+        for action, status in [('complete', 'completed'), ('cancel', 'cancelled')]:
+            with self.subTest(action=action):
+                after, applied = self.project('배식을 처리한다', before, story_0=action)
+                self.assertEqual(after['scene_minute'], 3)
+                self.assertEqual(after['story_events'][0]['status'], status)
+                self.assertFalse(applied.get('interrupted'))
+        self.assertEqual(before['story_events'][0]['status'], 'ready')
+        after, applied = self.project('기다린다', before, story_0='keep')
+        self.assertTrue(applied['interrupted'])
+        self.assertEqual(after['scene_minute'], 0)
+
+    def test_completing_ready_event_does_not_bypass_other_barriers(self):
+        before = initial(story_events=[
+            {'id': 'dinner', 'title': '배식', 'status': 'ready', 'due_minute': 0},
+            {'id': 'visit', 'title': '방문', 'status': 'pending', 'due_minute': 2}])
+        after, applied = self.project('배식 뒤 방문', before, story_0='complete', story_1='complete')
+        self.assertTrue(applied['interrupted'])
+        self.assertEqual(after['scene_minute'], 2)
+        self.assertEqual(after['story_events'][1]['status'], 'ready')
+
+    def test_ready_meal_settles_intake_once(self):
+        before = initial(story_events=[{'id': 'dinner', 'title': '배식',
+            'status': 'ready', 'due_minute': 0}])
+        after, applied = self.project('배식을 받아 먹었다', before, story_0='complete', event='meal')
+        self.assertFalse(applied.get('interrupted'))
+        self.assertEqual(after['hunger'], 25.15)
+
     def test_recognition_survives_uncertain_time_without_movement(self):
         text = '"내일 아침은 성실하게 임해야 한다. 잘해 줬으니 오늘 소원을 들어주지."'
         v = verdict(event='recognition', intensity='moderate', location='감방', activity='rest')

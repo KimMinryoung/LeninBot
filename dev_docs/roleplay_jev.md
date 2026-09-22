@@ -8,7 +8,7 @@ Telegram의 새 처리 절차는 사용자 허용 범위를 확인하고 초안�
 |---|---|
 | 사용자 실행/상담/계획·시간 허가·명시 기간·수치 정정의 대상과 최종값 해석 | 초안 전 LLM `roleplay_time_authorization` |
 | 사건·활동·접촉·부상·인물 출입·예정 사건 판정 | Jev의 고정 선택지 |
-| 명시적 기간이 없는 단일 사건의 소요 분 | 별도 LLM 원샷 `roleplay_duration_estimate` |
+| 초안 범위·시각·소요 분과 중요한 결과의 원문 근거 | 별도 LLM 원샷 `roleplay_duration_estimate` |
 | 시간 허가(진행·개방형 휴식·다음 날·정정·초기화) | 초안 전 LLM의 라벨과 선택된 duration_minutes; Python은 형식·범위·일관성 검증 |
 | 수치 변화·시간 적분·달력·예정 사건 도래·저장 | Python 코드 |
 | 초안 연기·목적·기분·질적 관찰 | 기존 연기 모델 |
@@ -32,15 +32,15 @@ Telegram은 scene 모드에만 이 사건 분류를 호출한다. discussion/cor
 [입력 모드별 처리](roleplay_postdraft.md#입력-모드별-세-처리-경로)를 따른다.
 
 시간 검사는 모든 scene 초안에서 호출한다. 원문·초안·저장 시계·허가·일과·예정 중단점을 전달하고
-elapsed_minutes/reason/within_scope/timeline_anchor를 받는다. 명시 기간은 여전히 허가된 분으로 정산하며
+elapsed_minutes/reason/within_scope/timeline_anchor와 important_evidence를 받는다. 명시 기간은 여전히 허가된 분으로 정산하며
 시간 검사는 초안이 그 범위를 넘었는지만 확인한다. 비명시 기간은 검증된 추정값을 사용한다.
 초안의 마지막 명시 시각은 날짜·시각·원문 인용으로 추출하고, Python이 저장 시계와의 차이를 계산한다.
 인용이 초안에 없거나 과거 시각·허용 상한·예정 중단점을 넘으면 저장하지 않는다. -1이나 상한 초과도
 절단하지 않고 초안을 다시 쓴다. 명시 시각의 추출과 행위 범위의 의미 판정은 여전히 모델에 의존한다.
 
 규칙 버전 11부터 holdout/bargain/story 미확정은 별도 roleplay-record-review로 한 번 재판정한다.
-그래도 미확정이면 항목별 PendingChoice를 발생시켜 기본 자동 처리 또는 /ask 선택으로 정산한다.
-최신 확률순 후보를 쓰며 확률 부재·동률이면 keep을 우선하고, 자동 선택은 확정 한 줄에 표시한다.
+규칙 버전 12에서는 미확정 holdout/bargain을 중요한 결과 확인으로 남긴다. story 등 일반 기록은 기본 모드에서
+최신 확률순으로 한 번에 선택하며 확률 부재·동률이면 keep을 우선한다. /ask 켜기에서는 일반 기록도 묻는다.
 이전처럼 미확정을 조용히 keep으로 버리지 않는다. 재판정 비용·지연·답변은 calls/answers에 포함한다.
 
 사건은 다섯 독립 축으로 판정한다(`EVENT_FAMILIES`). 물질적 축 harm(부상·구타·성적 가해)/care(처치)/intake(식사·간식·물)와
@@ -94,7 +94,8 @@ held 상태의 holdout마다 `holdout_<i>`(keep/lost), ready 상태의 `when_alo
 
 사건 축·강도·활동이 재판정 뒤에도 불확실하면 `project`는 `PendingChoice(key, candidates)`를 던진다. candidates는 미확정 축의 확률 상위 3개(+none),
 강도 3단계, 활동 8종이다. 처리(자동 또는 버튼)는 [roleplay_postdraft.md](roleplay_postdraft.md). 같은 verdict로 다시 정산할 때
-`roleplay_turn.prepare(verdict=…)`는 분류·시간 추정을 반복하지 않는다. 선택은 감사 기록의 verdict.labels에 남는다.
+`roleplay_turn.prepare(verdict=…)`는 기준 상태·인물·입력·초안·허가가 같으면 분류·시간 추정을 반복하지 않는다.
+Telegram은 prepare_result의 pending 데이터를 처리하며 중요한 결과에는 0.9 이상 신뢰도와 대상에 맞는 초안 원문 근거를 추가로 요구한다. 선택은 감사 기록의 verdict.labels에 남는다.
 
 ## 성적 가해와 당사자 활동
 

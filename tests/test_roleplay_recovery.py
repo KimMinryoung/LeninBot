@@ -110,6 +110,12 @@ class HistoryWindowTests(unittest.TestCase):
 
 class UnsettledDirectiveTests(unittest.IsolatedAsyncioTestCase):
     async def test_unsettled_user_message_leaves_roleplay_context(self):
+        await self._check_rejected_drafts(auto=False)
+
+    async def test_automatic_mode_rejection_supplies_revision_context(self):
+        await self._check_rejected_drafts(auto=True)
+
+    async def _check_rejected_drafts(self, auto):
         from contextlib import contextmanager
         message = SimpleNamespace(from_user=SimpleNamespace(id=1), text="의사 재방문", message_id=3,
                                   chat=SimpleNamespace(id=1), answer=AsyncMock(), bot=SimpleNamespace(send_chat_action=AsyncMock()))
@@ -119,11 +125,13 @@ class UnsettledDirectiveTests(unittest.IsolatedAsyncioTestCase):
         def fake_stage(uid):
             yield {"people": []}
         authorization = {"user_text": "의사 재방문", "labels": {"mode": "scene", "transition": "current", "span": "brief"}}
+        rejection = bot.DraftOutOfScope("초안이 사용자 지시의 사건 경계를 넘음")
         with patch.object(bot.asyncio, "to_thread", side_effect=inline_thread), \
              patch.object(bot.roleplay_turn, "committed_reply", return_value=None), \
              patch.object(bot.roleplay_turn, "authorize", return_value=authorization), \
              patch.object(bot.roleplay_turn, "staged_memory", side_effect=fake_stage), \
-             patch.object(bot.roleplay_turn, "prepare", side_effect=ValueError("초안이 사용자 지시의 사건 경계를 넘음")), \
+             patch.object(bot.roleplay_turn, "prepare", side_effect=rejection), \
+             patch.object(bot, "_asks_player", return_value=not auto), \
              patch.object(bot, "save_message", return_value=997) as save, \
              patch.object(bot, "exclude_history_message") as exclude, \
              patch.object(bot, "load_history", return_value=[]), patch.object(bot, "load_notes", return_value=[]), \
@@ -131,8 +139,10 @@ class UnsettledDirectiveTests(unittest.IsolatedAsyncioTestCase):
              patch.object(bot, "people_context", return_value={"index": [], "present": []}), \
              patch.object(bot, "build_system_prompt", return_value="sys"), \
              patch.object(bot, "_make_progress_callback", return_value=SimpleNamespace(flush=AsyncMock())), \
-             patch.object(bot, "chat_with_tools", new_callable=AsyncMock, return_value="초안"):
+             patch.object(bot, "chat_with_tools", new_callable=AsyncMock, return_value="초안") as generate:
             await bot.handle_message(message)
+        self.assertEqual(generate.await_count, 2)
+        self.assertIn('draft_revision', str(generate.await_args_list[1].args[0]))
         save.assert_called_once_with(1, "user", "의사 재방문")
         exclude.assert_called_once()
         self.assertEqual(exclude.call_args.args[:2], (1, 997))

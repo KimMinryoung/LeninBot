@@ -234,7 +234,7 @@ class BotChoiceFlowTests(unittest.IsolatedAsyncioTestCase):
             query = SimpleNamespace(from_user=SimpleNamespace(id=1), data='rp:5:event:interrogation', answer=AsyncMock(),
                                     message=SimpleNamespace(edit_text=AsyncMock(), answer=AsyncMock()))
             await bot.on_choice(query)
-            self.assertEqual(prepare.call_args.args[-2]['labels']['event'], 'interrogation')
+            self.assertEqual(prepare.call_args.args[-1]['labels']['event'], 'interrogation')
             settle.assert_called_once()
             self.assertEqual(settle.call_args.kwargs['prepared'], prepared)
             self.assertNotIn(1, bot.PENDING_CHOICES)
@@ -364,12 +364,12 @@ class AutoSettleTests(unittest.IsolatedAsyncioTestCase):
         auth = {'user_text': '죽을 건넸다', 'labels': {'mode': 'scene', 'transition': 'current', 'span': 'brief'}}
         pending = jev.PendingChoice('event', [('kindness', '배려·양보'), ('none', '뚜렷한 사건 없음')], '불확실')
         pending.verdict = {'labels': {'mode': 'scene', 'event_intake': 'meal'}, 'answers': {}}
-        prepared = {'reply': '초안', 'applied': {'event': 'kindness', 'events': ['kindness', 'meal'], 'minutes': 3}}
+        prepared = {'reply': '초안', 'applied': {'event': 'kindness', 'events': ['kindness', 'meal'], 'minutes': 3, 'auto_settled': {'event': 'kindness'}}}
         with patch.object(bot.asyncio, 'to_thread', side_effect=inline_thread), \
              patch.object(bot.roleplay_turn, 'committed_reply', return_value=None), \
              patch.object(bot.roleplay_turn, 'authorize', return_value=auth), \
              patch.object(bot.roleplay_turn, 'staged_memory', side_effect=fake_stage), \
-             patch.object(bot.roleplay_turn, 'prepare', side_effect=[pending, prepared]) as prepare, \
+             patch.object(bot.roleplay_turn, 'prepare', return_value=prepared) as prepare, \
              patch.object(bot, 'adjudicate_turn', side_effect=lambda *a, **k: {'status': 'applied', 'reply': '초안', 'applied': k['prepared']['applied']}) as settle, \
              patch.object(bot, 'save_message', return_value=5), patch.object(bot, 'load_history', return_value=[]), \
              patch.object(bot, 'get_preference', side_effect=lambda uid, key, default='': 'off' if key == bot.ASK_PREFERENCE else 'on'), \
@@ -379,10 +379,8 @@ class AutoSettleTests(unittest.IsolatedAsyncioTestCase):
              patch.object(bot, '_make_progress_callback', return_value=SimpleNamespace(flush=AsyncMock())), \
              patch.object(bot, 'chat_with_tools', new_callable=AsyncMock, return_value='초안'):
             await bot.handle_message(message)
-        self.assertEqual(prepare.call_count, 2)
-        second = prepare.call_args_list[1].args
-        self.assertEqual(second[8]['labels']['event'], 'kindness')
-        self.assertTrue(second[8]['player_settled'])
+        self.assertEqual(prepare.call_count, 1)
+        self.assertTrue(prepare.call_args.args[6]['auto_general'])
         self.assertNotIn(1, bot.PENDING_CHOICES)
         sent = [c.args[0] for c in message.answer.await_args_list]
         self.assertEqual(sent[0], '초안')
