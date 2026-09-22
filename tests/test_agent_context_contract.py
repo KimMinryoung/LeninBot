@@ -171,6 +171,13 @@ class VerificationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("restart_service is available:", prompt)
         self.assertNotIn("telegram_bot.py", prompt)
 
+    async def test_explicit_restart_action_is_persisted_and_logs_are_recoverable(self):
+        result = await self.verify(verdict(goal="partial", execution="error", retry="yes", verdict="FAIL") + "\nRestart: telegram")
+        self.assertEqual(result["restart"], "telegram")
+        self.assertIn('"restart": "telegram"', result["details"])
+        prompt = self.chat.call_args.args[0][0]["content"]
+        self.assertIn("field='tool_log'", prompt)
+
 
 class PromptBoundaryTests(unittest.TestCase):
     def test_all_registered_agents_receive_source_boundary_once(self):

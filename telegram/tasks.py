@@ -1109,7 +1109,7 @@ async def _verification_retry_state(task: dict) -> dict | None:
         if not parent or parent.get("id") != parent_id:
             return None
         if parent.get("status") == "handed_off":
-            root_id = parent_id if not used else root_id
+            root_id = parent_id
         elif is_retry:
             used += 1
             root_id = parent_id
@@ -2021,8 +2021,11 @@ async def recover_processing_tasks_on_startup(
 
             metadata = dict(_load_task_metadata(row))
             if restart_state:
-                restart_state = {**restart_state, "restart_completed": True,
-                                 "resumed_after_restart": True, "post_restart_phase": "verification"}
+                # This startup proves only the Telegram process restarted.
+                # Preserve pending API/browser restart claims as unconfirmed.
+                if restart_state.get("restart_target_service") == "telegram":
+                    restart_state = {**restart_state, "restart_completed": True,
+                                     "resumed_after_restart": True, "post_restart_phase": "verification"}
                 metadata[_RESTART_PHASE_KEY] = restart_state
             metadata_json = json.dumps(metadata) if metadata else None
 

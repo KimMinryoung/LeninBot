@@ -44,7 +44,7 @@ Registered in `agents/__init__.py`:
 
 Each agent is an `AgentSpec` with prompt IR or legacy prompt, tools, finalization tools, terminal tools, provider override, budget, input and output token ceilings, bounded output continuation, thinking policy, max rounds, and political-line inclusion flag. The current executable tool matrix is maintained in `dev_docs/agent_tool_matrix.md`.
 
-`commulingo_curator` is normally invoked by `scripts/commulingo_people_maintainer.py` or `scripts/commulingo_terms_maintainer.py`, not the Telegram task queue. Existing-person runs deterministically select one sparse record. The two lanes have independent editorial controls in `config/commulingo_maintainer.json`: `enrich_non_soviet_revolutionaries=false` pauses enrichment only for the `non-soviet-revolutionary` role, while `new_person_focus=soviet_institutions` constrains new-person discovery to documented Soviet party, state, security, military, diplomatic, economic, scientific, or cultural-administration figures. An explicitly forced existing-person ID still overrides the enrichment exclusion. New-person work is two-stage: read-only discovery must finish through the runner-local typed `commulingo_candidate_select` tool, which validates the candidate and rejects duplicates, then a separate creation call receives that exact target. Each stage exposes only applicable narrow writes (`commulingo_person_create`, `commulingo_person_update`, `commulingo_section_save`, `commulingo_event_link`, or `commulingo_term_create`). The global registry contains only the seven target-specific CommUlingo writes; the scheduled curator intentionally receives the five applicable person/glossary writes and neither office-row maintenance nor `commulingo_term_update` (its glossary lane is create-only by contract, while the orchestrator and analyst need the update path to revise an existing card). Every narrow write passes through one target-aware normalization and validation boundary; it hoists known misplaced person citations/confidence, canonicalizes supported legacy fields, rejects cross-target fields, and returns structured error codes with retryability metadata. The scheduled runner converts those errors into tool failures so the model can correct and retry. DSML/empty/non-terminal results may start one fresh attempt within the remaining job budget; output continuation is a separate allowance. If a new-person path still fails before any edit, the same run falls back to enrich and persists a bounded cooldown in ignored runtime state so the next timers do not repeat the failing mode. `config/commulingo_maintainer.json` controls cadence/cooldown/focus; inference limits, rounds, continuations, budget, and thinking are hot-reloadable through `config/agent_runtime.json`.
+`commulingo_curator` is normally invoked by `scripts/commulingo_people_maintainer.py` or `scripts/commulingo_terms_maintainer.py`, not the Telegram task queue. Existing-person runs deterministically select one sparse record. The two lanes have independent editorial controls in `config/commulingo_maintainer.json`: `enrich_non_soviet_revolutionaries=false` pauses enrichment only for the `non-soviet-revolutionary` role, while `new_person_focus=soviet_institutions` constrains new-person discovery to documented Soviet party, state, security, military, diplomatic, economic, scientific, or cultural-administration figures, and `new_person_focus=china` to the China shelf (the four china-* groups added on 2026-09-21). An explicitly forced existing-person ID still overrides the enrichment exclusion. New-person work is two-stage: read-only discovery must finish through the runner-local typed `commulingo_candidate_select` tool, which validates the candidate and rejects duplicates, then a separate creation call receives that exact target. Each stage exposes only applicable narrow writes (`commulingo_person_create`, `commulingo_person_update`, `commulingo_section_save`, `commulingo_event_link`, or `commulingo_term_create`). The global registry contains only the seven target-specific CommUlingo writes; the scheduled curator intentionally receives the five applicable person/glossary writes and neither office-row maintenance nor `commulingo_term_update` (its glossary lane is create-only by contract, while the orchestrator and analyst need the update path to revise an existing card). Every narrow write passes through one target-aware normalization and validation boundary; it hoists known misplaced person citations/confidence, canonicalizes supported legacy fields, rejects cross-target fields, and returns structured error codes with retryability metadata. The scheduled runner converts those errors into tool failures so the model can correct and retry. DSML/empty/non-terminal results may start one fresh attempt within the remaining job budget; output continuation is a separate allowance. If a new-person path still fails before any edit, the same run falls back to enrich and persists a bounded cooldown in ignored runtime state so the next timers do not repeat the failing mode. `config/commulingo_maintainer.json` controls cadence/cooldown/focus; inference limits, rounds, continuations, budget, and thinking are hot-reloadable through `config/agent_runtime.json`.
 
 Person nationality and name ingestion uses two explicit invariants at that same boundary. `nationalOrigin` means national/ethnic background, never birthplace or place of death (legacy `origin` is normalized internally). Patronymic PATCHes merge omitted Korean, English, and native-script subfields instead of replacing the whole row; Korean/English must be paired, Cyrillic native names with a localized patronymic require `cyrillicPatronymic`, and a base native name may not embed the separately stored patronymic.
 New Russian-language person discovery and creation prompts also state the official Korean transcription rule for `ш`: it is `시`, combines with a following vowel (`ша`→`샤`, `ше`→`셰`, `шу`→`슈`), and remains `시` before a consonant (`Штеменко`→`시테멘코`, `Шпигельглас`→`시피겔글라스`). Human-reviewed recurring variants are auto-normalized through `config/commulingo_name_normalization.json`; the rule explicitly preserves original-language or established Korean conventional exceptions instead of applying a blind global `슈`→`시` replacement.
@@ -284,28 +284,47 @@ Every completed task passes through `_run_verification()` (`telegram/tasks.py`),
 - **Policy.** A delegation may carry an explicit `verification` object (`checks`/`urls`/`log_service`/`log_grep`/`retry_limit`/`required`) on `delegate`/`multi_delegate`; without one, a per-agent default applies — programmer gets `task_report` + `server_logs`, analyst/scout/diplomat get `task_report`, all other agents skip (`_DEFAULT_VERIFICATION_POLICIES`). `verification: {required: false}` opts a task out. Skipped tasks are marked `passed` so `verification_status` never rots at `pending`.
 - **Verifier runtime.** The critic runs on the **low tier** of the executor's provider (codex/moon executors are verified by the task provider — an independent judge), budget-capped at $0.15, with a read-only tool surface (`read_self`, `read_file`, `search_files`, `list_directory`, `fetch_url`). `restart_service` is added only in enforce mode.
 - **Verdict flow.** The verdict + details persist to `telegram_tasks.verification_status`/`verification_details`; a FAIL is surfaced in the orchestrator report callback (in shadow mode as an advisory caveat for the user) and in the system alert. A FAIL attributed to an execution error also writes a deduped `mistake` lesson to `experiential_memory` (`source_type=task_verification`) so similar future tasks recall it via their `<past-experiences>` block.
-- **Enforce mode** additionally feeds a FAIL into `_maybe_redelegate_after_verification_failure()`: bounded auto-retry (`retry_limit`, chain-depth guard) that re-delegates with a "take a DIFFERENT approach" instruction, or the restart-handoff path when the verifier determines a telegram restart is required.
+- **Enforce mode** additionally feeds a FAIL into `_maybe_redelegate_after_verification_failure()`: bounded auto-retry (`retry_limit` counts additional executions across the task chain) that re-delegates with a "take a DIFFERENT approach" instruction, or the restart-handoff path when the verifier determines a telegram restart is required.
 
-The verifier now returns five explicit lines: `VERDICT`, `Reason`, `Execution`
-(`appropriate|error|unknown`), `Goal` (`complete|partial|blocked|unverified`), and
-`Retry` (`yes|conditional|no`). PASS requires appropriate execution and a complete
+The verifier returns six explicit lines: `VERDICT`, `Reason`, `Execution`
+(`appropriate|error|unknown`), `Goal` (`complete|partial|blocked|unverified`),
+`Retry` (`yes|conditional|no`), and `Restart` (`none|telegram`). Missing `Restart` is accepted
+as `none` for older responses; duplicate/invalid restart fields disable automatic
+action. PASS requires appropriate execution and a complete
 goal. A reasonable attempt blocked by an external service is not completion.
 Malformed/ambiguous output, provider errors and unavailable verification are
 recorded as unverified, never implicitly passed. An `outcome:` JSON line in
-`verification_details` persists the three axes without a schema migration.
+`verification_details` persists the three axes and restart action without a schema migration.
 The existing `verification_status` values remain; explicit opt-outs/no-policy
 paths retain legacy `passed` but their details explicitly say skipped/unverified.
 Consumers must read the details before treating a passed status as evidence.
 
-Enforce retries (including restart handoffs) run only for `Retry: yes`;
-conditional/no outcomes report the blocker without re-executing the task.
+Enforce retries (including worker-managed restart verification) require all of
+`Execution: error`, `Goal: partial`, and `Retry: yes`. Blocked/unverified outcomes
+never auto-retry, even if the model requests it: approvals, permissions, scope
+changes and missing verification evidence must be reported for follow-up.
+`retry_limit=1` permits exactly one additional execution. Durable
+`metadata.verification_retry` stores `root_task_id` and `used`; startup recovery
+preserves this state and the verification policy without consuming another try.
+For older tasks, the worker counts the current retry and ancestors, treating
+`handed_off` edges as continuations; missing/cyclic history disables auto-action.
+
+Only the explicit `Restart: telegram` field requests a Telegram restart; prose
+(including negated mentions) never does. The worker checks the common retry budget
+and prior restart state first, then creates a queued verification checkpoint
+before restarting. A failed insert prevents restart; a failed/blocked restart
+marks the checkpoint failed. The checkpoint makes no premature success claim and
+cannot be claimed by the live worker. Actual startup recovery or a confirmed
+successful restart releases continuation, preserving the retry budget.
 Only execution errors generate mistake lessons, so external blocks and verifier
-outages are not remembered as executor mistakes. Restart action instructions are
-included only when the actual tool/handler surface exposes `restart_service`.
+outages are not remembered as executor mistakes. Direct API restart instructions
+are included only when the tool/handler surface exposes `restart_service`;
+Telegram restart requests are handled by the worker only in enforce mode.
 The orchestrator receives the outcome details and must distinguish goal
 completion from execution quality.
 
-Smoke test: `scripts/smoke_task_verification.py` (hermetic — stubbed LLM + captured SQL).
+Smoke test: `scripts/smoke_task_verification.py` (hermetic — stubbed LLM/mail ledger + captured SQL).
+Regression tests: `tests/test_verification_retries.py` and `tests/test_task_report_pagination.py`.
 
 ### Report Reflexion (diagnose → author-revise)
 
@@ -359,6 +378,12 @@ Result previews retain a 5,000-character body limit and now mark truncation with
 the original length and a `read_self(content_type="task_report", id=...)`
 recovery call. Task-report detail reads expose the full original request and
 verification details as well as the result (with existing result pagination).
+`read_self(content_type="task_report", id=..., field="content"|"result"|"tool_log",
+offset=..., max_chars=...)` retrieves just the selected field, with a 5,000-character
+default and 20,000-character maximum page, total length, returned range and a
+continuation call. The legacy combined response labels its 5,000-character log
+preview and links to the missing log pages; the verifier must recover relevant
+later evidence rather than infer failure from the preview.
 Previous execution-log previews are also marked when clipped. This does not
 make older Redis chain excerpts full logs; agents must treat histories as
 historical evidence, reuse successful writes, and re-read material mutable state.

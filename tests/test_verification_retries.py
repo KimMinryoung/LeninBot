@@ -78,6 +78,12 @@ class RetryTests(unittest.IsolatedAsyncioTestCase):
         state = await tasks._verification_retry_state(self.rows[3])
         self.assertEqual(state, {"root_task_id": 1, "used": 1})
 
+    async def test_retry_after_legacy_handoff_keeps_original_root(self):
+        self.rows[1]["status"] = "handed_off"
+        self.rows[2] = task(2, 1, tasks._RESTART_COMPLETED_MARKER + "\nFix the report")
+        self.rows[3] = task(3, 2, "[AUTO-RETRY after verification failure for task #2]\nOriginal task:\nFix")
+        self.assertEqual(await tasks._verification_retry_state(self.rows[3]), {"root_task_id": 1, "used": 1})
+
     async def test_missing_cyclic_and_invalid_history_fail_closed(self):
         marker = "[AUTO-RETRY after verification failure for task #2]\nFix"
         self.rows[1] = task(1, 2, marker)
@@ -144,10 +150,22 @@ class RetryTests(unittest.IsolatedAsyncioTestCase):
             result = await tasks.recover_processing_tasks_on_startup()
         self.assertEqual(result["handed_off"], 1)
         self.assertIn("metadata", query.call_args_list[0].args[0])
-        saved = json.loads(query.call_args_list[1].args[1][8])
+        saved = json.loads(query.call_args_list[1].args[1][7])
         self.assertEqual(saved["verification_retry"], row["metadata"]["verification_retry"])
         self.assertEqual(saved["verification"], {"retry_limit": 3})
         self.assertTrue(saved["restart_state"]["restart_completed"])
+
+    async def test_telegram_startup_does_not_confirm_an_api_restart(self):
+        row = task(metadata={"restart_state": {"restart_initiated": True,
+                                               "restart_completed": False,
+                                               "restart_target_service": "api"}})
+        row.update(created_at=datetime.now(timezone.utc), depth=1, scratchpad="")
+        query = Mock(side_effect=[[row], [{"id": 2}]])
+        with patch.object(tasks, "_query", query), patch("redis_state.get_task_progress", return_value=[]), \
+                patch("redis_state.save_task_summary"), patch("redis_state.clear_task_progress"):
+            await tasks.recover_processing_tasks_on_startup()
+        saved = json.loads(query.call_args_list[1].args[1][7])
+        self.assertFalse(saved["restart_state"]["restart_completed"])
 
 
 class VerdictTests(unittest.TestCase):
