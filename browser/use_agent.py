@@ -16,7 +16,8 @@ import time
 from browser_use import Agent, Browser
 from browser_use.llm.anthropic.chat import ChatAnthropic
 from llm.provider_registry import (
-    DEEPSEEK_FLASH_MODEL, OPENAI_MODEL_MAP, TIER_MODEL_KEYS, resolve_deepseek_model,
+    DEEPSEEK_FLASH_MODEL, OPENAI_MODEL_MAP, TIER_MODEL_KEYS,
+    current_text_model, resolve_deepseek_model,
 )
 
 logger = logging.getLogger(__name__)
@@ -31,7 +32,7 @@ _DEFAULT_BROWSER_USE_MODEL = DEEPSEEK_FLASH_MODEL
 _DEFAULT_BROWSER_USE_MODELS = {
     "deepseek": DEEPSEEK_FLASH_MODEL,
     "openai": OPENAI_MODEL_MAP[TIER_MODEL_KEYS["openai"]["medium"]],
-    "google": "gemini-2.5-flash",
+    "google": "gemini-3.8-flash",
 }
 _DEFAULT_VISION_FALLBACK_PROVIDER = "google"
 
@@ -165,7 +166,8 @@ def _normalize_model(model: str | None, provider: str) -> str:
     if provider == "openai":
         if lowered in {"high", "medium", "low"}:
             return OPENAI_MODEL_MAP[TIER_MODEL_KEYS["openai"][lowered]]
-        return _OPENAI_MODEL_ALIASES.get(lowered, value)
+        selected = _OPENAI_MODEL_ALIASES.get(lowered, value)
+        return current_text_model("openai", selected) or selected
 
     return value
 
@@ -213,7 +215,9 @@ def _build_llm(model: str | None = None, provider: str | None = None):
             model=model,
             api_key=(get_secret("GEMINI_API_KEY", "") or "")
             or (PROXY_PLACEHOLDER_KEY if base else ""),
-            thinking_budget=0,
+            # browser-use 0.12.5 does not recognize 3.8 as Gemini 3 and drops
+            # its thinking_level field. The raw config reaches the GenAI SDK.
+            config={"thinking_config": {"thinking_level": "LOW"}},
             max_output_tokens=4096,
             **({"http_options": {"base_url": f"{base}/gemini"}} if base else {}),
         )
@@ -230,6 +234,8 @@ def _build_llm(model: str | None = None, provider: str | None = None):
 
         llm = _AuditedOpenAIBrowserChat(
             model=model,
+            **({"reasoning_models": [model], "reasoning_effort": "none"}
+               if model.startswith("gpt-6-") else {}),
             api_key=OPENAI_CLIENT_KEY,
             base_url=OPENAI_BASE_URL_EFFECTIVE,
             timeout=120,
@@ -358,7 +364,7 @@ async def _run_browser_use_agent(
             await _save_cookies_from_session(agent.browser_session)
 
         return {
-            "success": history.is_done() and not history.has_errors(),
+            "success": history.is_successful() is True and not history.has_errors(),
             "result": history.final_result() or "",
             "extracted_content": history.extracted_content(),
             "steps": history.number_of_steps(),
@@ -398,18 +404,28 @@ async def browse(
     max_steps: int = _DEFAULT_MAX_STEPS,
     model: str | None = None,
     start_url: str | None = None,
+    mode: str = "computer",
 ) -> dict:
-    """Run a browser-use agent to complete a web task.
+    """Run a browser task with native computer use by default.
 
     Args:
         task: Natural language description of the task.
         max_steps: Maximum number of browser interaction steps.
-        model: LLM model override (default: deepseek-v4-flash).
+        model: LLM model override (computer mode defaults to OpenAI low).
         start_url: Optional URL to open before starting the task.
+        mode: ``agent`` for browser-use or ``computer`` for the native tool.
 
     Returns:
         dict with keys: success, result, steps, urls, errors, duration_seconds
     """
+    if mode == "computer":
+        from browser.computer_use import browse_with_computer
+        return await browse_with_computer(
+            task, max_steps=max_steps, start_url=start_url,
+            model=model or "tier:low",
+        )
+    if mode != "agent":
+        raise ValueError(f"unknown browser mode: {mode}")
     provider, default_model = _resolve_provider_and_model()
     llm_model = _normalize_model(model or default_model, provider)
     use_vision = _browser_use_vision_enabled(provider)

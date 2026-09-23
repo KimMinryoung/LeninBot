@@ -34,7 +34,7 @@ Registered in `agents/__init__.py`:
 | `programmer` | code writing, modification, debugging | delegated to Codex CLI; normal tool list only includes `list_agent_tools` |
 | `analyst` | information analysis and KG cross-validation | uses search, corpus, KG, report/private-report tools |
 | `scout` | external platform reconnaissance and web patrol | uses web/fetch/social/platform tools |
-| `browser` | browser automation | talks to `browser/worker.py` through browser-use tooling |
+| `browser` | browser automation | talks to `browser/worker.py`; `browse_web` defaults to GPT-6 Luna native computer use, with browser-use available via `mode=agent` |
 | `visualizer` | image prompt/design specialist | image/media and publication support |
 | `diary` | scheduled diary writer and published diary maintenance owner | terminal `save_diary` is allowed only for the configured scheduled prompt `[diary] Write a periodic diary entry`; other diary tasks run autonomously with maintenance tools such as `edit_content`, including diary edit/delete/unpublish actions |
 | `stasova` | publication OpSec reviewer | small read/fetch/write tool set and low budget |

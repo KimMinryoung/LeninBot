@@ -60,10 +60,12 @@ GENERATE_IMAGE_TOOL = {
 BROWSE_WEB_TOOL = {
     "name": "browse_web",
     "description": (
-        "AI-driven browser automation using browser-use. "
+        "AI-driven browser automation. The default mode=computer uses GPT-6 Luna "
+        "with native screenshot-and-action computer use. Supply start_url when known; "
+        "without a URL, the browser starts at a search page. "
+        "Choose mode=agent for browser-use with DeepSeek and a vision fallback. "
         "An AI agent will autonomously navigate websites, fill forms, click buttons, "
-        "and extract information. Defaults to low-cost DeepSeek DOM/tool control "
-        "with a vision-capable fallback retry on failure. Use for complex multi-step web interactions "
+        "and extract information. Use for complex multi-step web interactions "
         "(e.g., login flows, form submissions, multi-page navigation, data extraction "
         "from dynamic sites). For simple page reads, prefer fetch_url (faster, cheaper)."
     ),
@@ -81,6 +83,14 @@ BROWSE_WEB_TOOL = {
             "max_steps": {
                 "type": "integer",
                 "description": "Maximum browser interaction steps (default: 20, max: 50).",
+            },
+            "mode": {
+                "type": "string", "enum": ["agent", "computer"],
+                "description": "computer (default): GPT-6 Luna native screen/mouse/keyboard control. agent: browser-use with DeepSeek by default.",
+            },
+            "model": {
+                "type": "string", "enum": ["tier:low", "tier:high"],
+                "description": "computer mode only: tier:low uses GPT-6 Luna (default); tier:high uses GPT-6 Sol.",
             },
         },
         "required": ["task"],
@@ -230,13 +240,15 @@ async def _exec_generate_image(
         return ToolFailure(f"Image generation failed: {exc}")
 
 
-async def _exec_browse_web(task: str, start_url: str | None = None, max_steps: int = 20, **_kw) -> str:
+async def _exec_browse_web(task: str, start_url: str | None = None, max_steps: int = 20,
+                           mode: str = "computer", model: str | None = None, **_kw) -> str:
     try:
         from browser.use_agent import browse
         from content_fetch.urls import diagnose_url_fetch_failure, extract_urls
 
         max_steps = max(1, min(int(max_steps), 50))
-        result = await browse(task, max_steps=max_steps, start_url=start_url)
+        result = await browse(task, max_steps=max_steps, start_url=start_url,
+                              mode=mode, model=model)
 
         parts = []
         if result["success"]:
@@ -245,6 +257,8 @@ async def _exec_browse_web(task: str, start_url: str | None = None, max_steps: i
             parts.append("[FAIL] Task did not complete successfully")
 
         parts.append(f"Steps: {result['steps']} | Duration: {result['duration_seconds']}s")
+        if result.get("mode") == "computer":
+            parts.append("Mode: native computer use")
         if result.get("provider") or result.get("model"):
             vision = "vision" if result.get("use_vision") else "non-vision"
             parts.append(f"LLM: {result.get('provider', 'unknown')} {result.get('model', 'unknown')} ({vision})")

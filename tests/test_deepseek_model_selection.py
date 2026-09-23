@@ -1,14 +1,15 @@
 """Selection compatibility across runtime entry points and scheduled jobs."""
 import json
 from pathlib import Path
+from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from llm.provider_registry import resolve_deepseek_model
 
 
 class DeepSeekSelectionTests(unittest.TestCase):
-    def test_runtime_entry_points_share_alias_and_explicit_id_behavior(self):
+    def test_runtime_entry_points_resolve_old_ids_to_current_model(self):
         from bot_config import _resolve_deepseek_model
         from browser.worker import _normalize_browser_model
         from browser.use_agent import _normalize_model
@@ -17,7 +18,7 @@ class DeepSeekSelectionTests(unittest.TestCase):
             for key in ("high", "medium", "low", "deepseek_pro", "deepseek_flash"):
                 with self.subTest(resolve=resolve, key=key):
                     self.assertEqual(resolve(key), "deepseek-flash")
-            self.assertEqual(resolve("deepseek-v4-pro"), "deepseek-v4-pro")
+            self.assertEqual(resolve("deepseek-v4-pro"), "deepseek-flash")
             self.assertEqual(resolve("deepseek-future"), "deepseek-future")
 
     def test_writer_saved_pro_choice_resolves_and_catalog_is_unique(self):
@@ -45,4 +46,32 @@ class DeepSeekSelectionTests(unittest.TestCase):
             for name, spec in entries.items():
                 if spec.get("provider") in ("deepseek", "deepseek_anthropic"):
                     with self.subTest(filename=filename, name=name):
-                        self.assertEqual(resolve_deepseek_model(spec.get("model")), "deepseek-flash")
+                        if filename == "llm_call_sites.json":
+                            from llm.call_registry import resolve as resolve_call_site
+                            model = resolve_call_site(name).model
+                        else:
+                            model = spec.get("model")
+                        self.assertEqual(resolve_deepseek_model(model), "deepseek-flash")
+
+
+class BrowserUseResultTests(unittest.IsolatedAsyncioTestCase):
+    async def test_unsuccessful_done_is_not_reported_as_success(self):
+        from browser.use_agent import _run_browser_use_agent
+
+        history = SimpleNamespace(
+            is_done=lambda: True, is_successful=lambda: False,
+            has_errors=lambda: False, final_result=lambda: "incomplete",
+            extracted_content=lambda: [], number_of_steps=lambda: 1,
+            urls=lambda: [], errors=lambda: [], total_duration_seconds=lambda: 1.0,
+        )
+        agent = SimpleNamespace(run=AsyncMock(return_value=history), browser_session=None)
+        browser = MagicMock()
+        with patch("browser.use_agent._build_llm", return_value=object()), \
+             patch("browser.use_agent._build_browser", return_value=browser), \
+             patch("browser.use_agent.Agent", return_value=agent):
+            result = await _run_browser_use_agent(
+                "inspect", provider="google", model="gemini-3.8-flash",
+                use_vision=True, max_steps=1, start_url=None,
+            )
+        self.assertFalse(result["success"])
+        self.assertEqual(result["result"], "incomplete")
