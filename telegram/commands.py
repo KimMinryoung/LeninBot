@@ -53,7 +53,9 @@ def _model_name_for_provider(provider: str) -> str:
         from llm.client import MOON_MODEL
         return MOON_MODEL
     if provider == "openai":
-        return _OPENAI_MODEL_MAP.get(alias, alias)
+        from llm.provider_registry import current_text_model
+        selected = _OPENAI_MODEL_MAP.get(alias, alias)
+        return current_text_model("openai", selected) or selected
     if provider == "deepseek":
         return _DEEPSEEK_MODEL_MAP.get(alias, alias)
     if provider == "kimi":

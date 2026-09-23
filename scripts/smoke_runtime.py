@@ -238,32 +238,35 @@ def _assert_provider_registry_and_recovery_policy() -> None:
     )
     from llm.openai_tool_loop import _is_tool_protocol_error, _is_transient_transport_error
 
-    assert bot_config._MODEL_ALIAS_MAP["opus"] == ("claude-opus-5", "claude-opus-5")
+    assert bot_config._MODEL_ALIAS_MAP["opus"] == ("claude-opus-5-5", "claude-opus-5-5")
     assert bot_config._OPENAI_MODEL_MAP == {
-        "gpt56": "gpt-5.6-sol",
-        "gpt56terra": "gpt-5.6-terra",
-        "gpt56luna": "gpt-5.6-luna",
+        "gpt6": "gpt-6-sol",
+        "gpt6luna": "gpt-6-luna",
+        "gpt56": "gpt-6-sol",
+        "gpt56terra": "gpt-6-sol",
+        "gpt56luna": "gpt-6-luna",
     }
     assert bot_config._TIER_MAP["openai"] == {
-        "high": "gpt56",
-        "medium": "gpt56terra",
-        "low": "gpt56luna",
+        "high": "gpt6",
+        "medium": "gpt6",
+        "low": "gpt6luna",
     }
     from browser.use_agent import _normalize_model as normalize_browser_use_model
     from browser.worker import _normalize_browser_model
 
     expected_browser_tiers = {
-        "high": "gpt-5.6-sol",
-        "medium": "gpt-5.6-terra",
-        "low": "gpt-5.6-luna",
+        "high": "gpt-6-sol",
+        "medium": "gpt-6-sol",
+        "low": "gpt-6-luna",
     }
     for tier, expected in expected_browser_tiers.items():
         assert normalize_browser_use_model(tier, "openai") == expected
         assert _normalize_browser_model(tier, "openai") == expected
-    assert OPENAI_COMPATIBLE_PRICING["gpt-5.6-sol"] == {
-        "input": 5.0 / 1_000_000,
-        "output": 30.0 / 1_000_000,
-        "cached_input": 0.5 / 1_000_000,
+    assert OPENAI_COMPATIBLE_PRICING["gpt-6-sol"] == {
+        "input": 2.0 / 1_000_000,
+        "output": 10.0 / 1_000_000,
+        "cached_input": 0.2 / 1_000_000,
+        "cache_write": 2.5 / 1_000_000,
     }
     assert anthropic_pricing_table(date(2026, 8, 31))["claude-sonnet-5"]["input"] == 2 / 1_000_000
     assert anthropic_pricing_table(date(2026, 9, 1))["claude-sonnet-5"]["input"] == 3 / 1_000_000

@@ -675,6 +675,101 @@ async def _call_sdk_raw_stream(kwargs: dict, on_progress, idle_timeout_sec: floa
     )
 
 
+def _responses_input(messages: list[dict]) -> list[dict]:
+    """Carry complete GPT-6 output items through a stateless tool loop.
+
+    Reasoning items (including encrypted content) must accompany their tool
+    calls on the next request. The loop keeps them on its assistant message.
+    """
+    items = []
+    for message in messages:
+        if message.get("_responses_output"):
+            items.extend(message["_responses_output"])
+        elif message.get("role") == "assistant" and message.get("tool_calls"):
+            if message.get("content"):
+                items.append({"role": "assistant", "content": message["content"]})
+            for call in message["tool_calls"]:
+                fn = call.get("function") or {}
+                items.append({"type": "function_call", "call_id": call["id"],
+                              "name": fn.get("name"), "arguments": fn.get("arguments") or "{}"})
+        elif message.get("role") == "tool":
+            items.append({"type": "function_call_output", "call_id": message["tool_call_id"],
+                          "output": str(message.get("content") or "")})
+        else:
+            items.append({"role": message.get("role", "user"),
+                          "content": message.get("content") or ""})
+    return items
+
+
+async def _call_gpt6_responses(client, model, messages, tools, max_tokens,
+                               parallel_tool_calls, on_progress, extra_body,
+                               idle_timeout_sec):
+    """Adapt Responses output to the shared ChatCompletion-shaped loop."""
+    effort = (extra_body or {}).get("reasoning_effort") or "medium"
+    kwargs = {
+        "model": model,
+        "input": _responses_input(messages),
+        "max_output_tokens": max_tokens,
+        "reasoning": {"effort": effort},
+        "store": False,
+        "include": ["reasoning.encrypted_content"],
+    }
+    if tools:
+        kwargs["tools"] = [
+            {"type": "function", "strict": False, **tool["function"]}
+            for tool in tools if tool.get("type") == "function"
+        ]
+        kwargs["parallel_tool_calls"] = parallel_tool_calls
+    if on_progress:
+        kwargs["stream"] = True
+    kwargs = with_audit_owner(client, kwargs, "loop")
+    call = client.responses.create(**kwargs)
+    result = (await asyncio.wait_for(call, timeout=idle_timeout_sec)
+              if idle_timeout_sec else await call)
+    if on_progress:
+        response = None
+        iterator = result.__aiter__()
+        while True:
+            try:
+                event = (await asyncio.wait_for(iterator.__anext__(), timeout=idle_timeout_sec)
+                         if idle_timeout_sec else await iterator.__anext__())
+            except StopAsyncIteration:
+                break
+            event_type = _obj_get(event, "type", "")
+            if event_type == "response.output_text.delta":
+                await emit_progress(on_progress, "text_delta", _obj_get(event, "delta", ""))
+            elif event_type in {"response.completed", "response.incomplete"}:
+                response = _obj_get(event, "response")
+            elif event_type == "response.failed":
+                raise RuntimeError(f"GPT-6 Responses stream failed: {_obj_get(event, 'response')}")
+        if response is None:
+            raise RuntimeError("GPT-6 Responses stream ended without a final response")
+    else:
+        response = result
+    output = [item.model_dump(exclude_none=True) if hasattr(item, "model_dump") else item
+              for item in response.output]
+    calls = [_to_tool_call_namespace({
+        "id": item["call_id"], "function": {
+            "name": item["name"], "arguments": item.get("arguments") or "{}"},
+    }) for item in output if item.get("type") == "function_call"]
+    content = response.output_text or ""
+    usage = response.usage
+    details = getattr(usage, "input_tokens_details", None)
+    chat_usage = SimpleNamespace(
+        prompt_tokens=getattr(usage, "input_tokens", 0) or 0,
+        completion_tokens=getattr(usage, "output_tokens", 0) or 0,
+        prompt_tokens_details=SimpleNamespace(
+            cached_tokens=getattr(details, "cached_tokens", 0) or 0,
+            cache_write_tokens=getattr(details, "cache_write_tokens", 0) or 0,
+        ),
+    )
+    message = SimpleNamespace(content=content, tool_calls=calls or None,
+                              refusal=None, _responses_output=output)
+    finish = "tool_calls" if calls else ("length" if response.status == "incomplete" else "stop")
+    return SimpleNamespace(model=response.model, usage=chat_usage,
+                           choices=[SimpleNamespace(finish_reason=finish, message=message)])
+
+
 async def _call_sdk(
     client,
     model: str,
@@ -695,6 +790,11 @@ async def _call_sdk(
     chunk). Falls back to non-streaming create() for non-strict tool schemas.
     Returns an accumulated ChatCompletion either way.
     """
+    if model.startswith("gpt-6-"):
+        return await _call_gpt6_responses(
+            client, model, messages, tools, max_tokens, parallel_tool_calls,
+            on_progress, extra_body, idle_timeout_sec,
+        )
     kwargs = {
         "model": model,
         "messages": messages,
@@ -1324,6 +1424,9 @@ class _OpenAIProtocolAdapter:
             "content": content_text if content_text.strip() else None,
             "tool_calls": turn.extra["tc_list"],
         }
+        responses_output = getattr(turn.extra.get("message_obj"), "_responses_output", None)
+        if responses_output:
+            assistant_msg["_responses_output"] = responses_output
         if self.preserve_reasoning_content:
             reasoning_content = _message_reasoning_content(turn.extra.get("message_obj"))
             if reasoning_content:
@@ -1657,6 +1760,9 @@ async def chat_with_tools(
     single-slot backend.
     """
     from llm.execution_context import prepare_execution_context
+    if client is not None:
+        from llm.provider_registry import current_text_model
+        model = current_text_model("openai", model) or model
     messages, system_prompt = prepare_execution_context(messages, system_prompt)
     adapter = _OpenAIProtocolAdapter(
         client=client,

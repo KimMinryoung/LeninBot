@@ -27,7 +27,7 @@ DRAFT_ROUNDS = 8
 CONTENT_RISK = 'Content Exists Risk'
 FALLBACK_PROVIDER = 'openai'
 # Terra, not Luna: the stage has to read the refused sources and judge them.
-FALLBACK_MODEL = 'gpt56terra'
+FALLBACK_MODEL = 'gpt6'
 
 READS = {'wiki_search','wiki_get','web_search','fetch_url','commulingo_people'}
 

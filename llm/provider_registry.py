@@ -2,19 +2,23 @@
 
 from __future__ import annotations
 
+import re
 from datetime import date, datetime, timezone
 
 
 CLAUDE_MODEL_ALIASES = {
     "haiku": ("claude-haiku-4-5", "claude-haiku-4-5-20251001"),
     "sonnet": ("claude-sonnet-5", "claude-sonnet-5"),
-    "opus": ("claude-opus-5", "claude-opus-5"),
+    "opus": ("claude-opus-5-5", "claude-opus-5-5"),
 }
 
 OPENAI_MODEL_MAP = {
-    "gpt56": "gpt-5.6-sol",
-    "gpt56terra": "gpt-5.6-terra",
-    "gpt56luna": "gpt-5.6-luna",
+    "gpt6": "gpt-6-sol",
+    "gpt6luna": "gpt-6-luna",
+    # Persisted selector names remain accepted, but never pin an old model.
+    "gpt56": "gpt-6-sol",
+    "gpt56terra": "gpt-6-sol",
+    "gpt56luna": "gpt-6-luna",
 }
 
 DEEPSEEK_FLASH_MODEL = "deepseek-flash"
@@ -26,9 +30,90 @@ DEEPSEEK_MODEL_MAP = {
 
 KIMI_MODEL_MAP = {"kimi_k3": "kimi-k3"}
 
+# Stable model-selection contract for application code and proxy clients.
+# These IDs are pinned by the providers; update this catalog at each release.
+CURRENT_TEXT_MODELS = {
+    "claude": {
+        "frontier": "claude-fable-5-1", "high": "claude-opus-5-5",
+        "medium": "claude-sonnet-5", "low": "claude-haiku-4-5",
+    },
+    "openai": {
+        "frontier": "gpt-6-astra", "high": "gpt-6-sol",
+        "medium": "gpt-6-sol", "low": "gpt-6-luna",
+    },
+    "gemini": {
+        "high": "gemini-3.1-pro-preview", "medium": "gemini-3.8-flash",
+        "low": "gemini-3.5-flash-lite",
+    },
+    "deepseek": {
+        "high": DEEPSEEK_FLASH_MODEL, "medium": DEEPSEEK_FLASH_MODEL,
+        "low": DEEPSEEK_FLASH_MODEL,
+    },
+}
+
+_PREVIOUS_TEXT_MODEL_TIERS = {
+    "claude": {
+        "claude-fable-5": "frontier", "claude-opus-5": "high",
+        "claude-haiku-4-5-20251001": "low",
+        "claude-haiku-3-5-20241022": "low", "claude-3-5-haiku-20241022": "low",
+    },
+    "openai": {
+        "gpt-5.6-sol": "high", "gpt-5.6-terra": "medium",
+        "gpt-5.6-luna": "low",
+    },
+    "gemini": {
+        "gemini-3.7-flash": "medium", "gemini-3.6-flash": "medium",
+        "gemini-3.5-flash": "medium", "gemini-2.5-flash": "medium",
+        "gemini-3.1-flash-lite": "low", "gemini-2.5-flash-lite": "low",
+    },
+    "deepseek": {
+        "deepseek-v4-pro": "high", "deepseek-v4-flash": "low",
+        "deepseek_pro": "high", "deepseek_flash": "low",
+    },
+}
+
+
+def current_text_model(provider: str, selection: str) -> str | None:
+    """Resolve a tier or known earlier text model to today's same-tier ID.
+
+    Unknown IDs return None so the proxy can refuse unregistered text models
+    instead of silently routing an old snapshot. Non-text endpoints bypass it.
+    """
+    provider = "claude" if provider == "anthropic" else provider
+    catalog = CURRENT_TEXT_MODELS.get(provider)
+    if catalog is None:
+        return None
+    value = str(selection or "").strip()
+    if value.startswith("tier:"):
+        return catalog.get(value[5:])
+    if value in catalog.values():
+        return value
+    tier = _PREVIOUS_TEXT_MODEL_TIERS.get(provider, {}).get(value)
+    if tier is None and provider == "openai":
+        for old, old_tier in _PREVIOUS_TEXT_MODEL_TIERS[provider].items():
+            if value.startswith(old + "-"):
+                tier = old_tier
+                break
+    if tier is None and provider == "claude":
+        match = re.fullmatch(r"claude-(fable|opus|sonnet|haiku)(?:-\d+)+", value)
+        if match:
+            tier = {"fable": "frontier", "opus": "high", "sonnet": "medium", "haiku": "low"}[match.group(1)]
+    if tier is None and provider == "openai":
+        match = re.fullmatch(r"gpt-\d+(?:\.\d+)?-(sol|terra|luna)(?:-\d{8})?", value)
+        if match:
+            tier = {"sol": "high", "terra": "medium", "luna": "low"}[match.group(1)]
+    if tier is None and provider == "gemini":
+        match = re.fullmatch(r"gemini-\d+(?:\.\d+)?-(pro|flash-lite|flash)(?:-preview)?", value)
+        if match:
+            tier = {"pro": "high", "flash": "medium", "flash-lite": "low"}[match.group(1)]
+    if tier is None and provider == "deepseek":
+        if re.fullmatch(r"deepseek-v\d+(?:\.\d+)?-(?:pro|flash)", value):
+            tier = "medium"
+    return catalog.get(tier) if tier else None
+
 TIER_MODEL_KEYS = {
     "claude": {"high": "opus", "medium": "sonnet", "low": "haiku"},
-    "openai": {"high": "gpt56", "medium": "gpt56terra", "low": "gpt56luna"},
+    "openai": {"high": "gpt6", "medium": "gpt6", "low": "gpt6luna"},
     "deepseek": {
         "high": "deepseek_flash",
         "medium": "deepseek_flash",
@@ -40,17 +125,21 @@ TIER_MODEL_KEYS = {
 
 
 def resolve_deepseek_model(model: str | None = None) -> str:
-    """Resolve application tiers/aliases, preserving explicit upstream model IDs.
-
-    In particular, an explicit V4 Pro ID remains usable for comparison and
-    historical billing is independent of this application selection policy.
-    """
+    """Resolve application tiers and old IDs to the current DeepSeek model."""
     value = str(model or "").strip() or "deepseek_flash"
+    current = current_text_model("deepseek", value)
+    if current:
+        return current
     key = TIER_MODEL_KEYS["deepseek"].get(value.lower(), value.lower())
     return DEEPSEEK_MODEL_MAP.get(key, value)
 
 
 MODEL_DISPLAY_NAMES = {
+    "claude-fable-5-1": "Claude Fable 5.1",
+    "gemini-3.8-flash": "Gemini 3.8 Flash",
+    "claude-opus-5-5": "Claude Opus 5.5",
+    "gpt-6-sol": "GPT-6 Sol",
+    "gpt-6-luna": "GPT-6 Luna",
     "claude-opus-5": "Claude Opus 5",
     "claude-sonnet-5": "Claude Sonnet 5",
     "claude-haiku-4-5": "Claude Haiku 4.5",
@@ -149,6 +238,10 @@ def deepseek_price_triple(
 
 
 OPENAI_COMPATIBLE_PRICING = {
+    # https://developers.openai.com/api/docs/models/gpt-6-sol and /gpt-6-luna
+    # (2026-09-23); cache writes cost 1.25x ordinary input.
+    "gpt-6-sol": _per_token(2.00, 10.00, 0.20, 2.50),
+    "gpt-6-luna": _per_token(0.10, 0.50, 0.01, 0.125),
     # OpenAI standard short-context rates, audited 2026-08-29. GPT-5.6 cache
     # writes cost 1.25x ordinary input. Sol's $4/$20 promotional price lasts
     # at least through 2026-11-21.
@@ -162,6 +255,8 @@ OPENAI_COMPATIBLE_PRICING = {
 
 GPT56_LONG_CONTEXT_THRESHOLD = 272_000
 _OPENAI_GPT56_LONG_CONTEXT_PRICING = {
+    "gpt-6-sol": _per_token(4.00, 15.00, 0.40, 5.00),
+    "gpt-6-luna": _per_token(0.20, 0.75, 0.02, 0.25),
     "gpt-5.6-sol": _per_token(8.00, 30.00, 0.80, 10.00),
     "gpt-5.6-terra": _per_token(4.00, 18.00, 0.40, 5.00),
     "gpt-5.6-luna": _per_token(0.40, 1.80, 0.04, 0.50),
@@ -173,10 +268,10 @@ _OPENAI_GPT56_LONG_CONTEXT_PRICING = {
 # cached prompt tokens with OpenAI-like semantics, but has its own models and
 # prices.  See dev_docs/llm_gateway.md for the pricing-source link/date.
 GEMINI_PRICING = {
-    # 2026-08-31 갱신: 현행 라인업은 pro=3.1-pro-preview(stable 별칭 없음,
-    # 3.5 Pro는 존재하지 않음), flash=3.7, flash-lite=3.5로 고정한다(사용자
-    # 결정 — 3.5/3.6 flash는 선택지로 두지 않음). >200K 입력의 $4/$18 장문
-    # 티어는 미모델링. 3.7 Flash는 출시가 $0.75/$3.75, 2027-01-01부터
+    "gemini-3.8-flash": _per_token(0.75, 3.75, 0.075),
+    # 2026-09-23 현행 라인업: pro=3.1-pro-preview, flash=3.8,
+    # flash-lite=3.5. >200K 입력의 Pro 장문 티어는 미모델링.
+    # 3.8 Flash는 2026-12-31까지 $0.75/$3.75, 2027-01-01부터
     # $1.50/$7.50 예정. 캐시 입력가는 관례(입력의 10%) — 3.1 Pro만 공식 $0.20.
     # 2.5/3.1 구모델 행은 라이브 call site들이 아직 쓰므로 가격 산정용으로만 유지.
     "gemini-3.1-pro-preview": _per_token(2.00, 12.00, 0.20),
@@ -214,7 +309,7 @@ def openai_compatible_pricing(
     """Return pricing for an exact or provider-pinned model ID.
 
     DeepSeek rows are time-of-day dependent (peak/off-peak) and resolved live;
-    GPT-5.6 uses the full-request long-context tier above 272K input tokens;
+    GPT-5.6 and GPT-6 use the full-request long-context tier above 272K input tokens;
     everything else is a static row with a Terra fallback for unknowns."""
     triple = deepseek_price_triple(model, now)
     if triple is not None:
@@ -246,11 +341,12 @@ def _anthropic_row(
     input_price: float,
     output_price: float,
     cache_read: float,
+    cache_creation: float | None = None,
 ) -> dict[str, float]:
     return {
         "input": input_price / 1_000_000,
         "output": output_price / 1_000_000,
-        "cache_creation": (input_price * 2.0) / 1_000_000,
+        "cache_creation": (input_price * 2.0 if cache_creation is None else cache_creation) / 1_000_000,
         "cache_read": cache_read / 1_000_000,
     }
 
@@ -289,7 +385,9 @@ def anthropic_pricing_table(
         }
 
     return {
+        "claude-fable-5-1": _anthropic_row(10.00, 50.00, 0.25, 20.00),
         "claude-fable-5": _anthropic_row(10.00, 50.00, 1.00),
+        "claude-opus-5-5": _anthropic_row(4.00, 20.00, 0.20, 5.00),
         "claude-opus-5": _anthropic_row(5.00, 25.00, 0.50),
         "claude-sonnet-5": sonnet,
         "claude-haiku-4-5": _anthropic_row(1.00, 5.00, 0.10),

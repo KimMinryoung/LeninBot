@@ -116,7 +116,7 @@ class TestPlainTextTurn(unittest.TestCase):
              patch("llm.agent_loop.record_llm_call") as loop_record:
             result = asyncio.run(chat_with_tools(
                 [{"role": "user", "content": "q"}],
-                client=client, model="gpt-5.6-luna",
+                client=client, model="deepseek-chat",
                 **BASE_KWARGS,
             ))
         self.assertEqual(result, "ok")

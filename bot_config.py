@@ -297,7 +297,7 @@ _KIMI_MODEL_MAP = {
 # Human-readable display names keyed by API model ID. Used when injecting
 # "current model" context into the orchestrator prompt so the model sees its
 # own official product name ("Claude Opus 5") rather than the internal API
-# slug ("claude-opus-5"). Match by prefix: pinned date suffixes (e.g.
+# slug ("claude-opus-5-5"). Match by prefix: pinned date suffixes (e.g.
 # "-20251001") share the display name of the base family.
 _MODEL_DISPLAY_NAMES = MODEL_DISPLAY_NAMES
 
@@ -401,8 +401,11 @@ async def _get_model_by_alias(alias: str) -> str:
 
 
 def _resolve_openai_model(alias: str) -> str:
-    """Resolve an OpenAI tier alias to its canonical GPT-5.6 model ID."""
-    return _OPENAI_MODEL_MAP.get(alias, alias)
+    """Resolve an OpenAI tier alias to its canonical model ID."""
+    from llm.provider_registry import current_text_model
+
+    model = _OPENAI_MODEL_MAP.get(alias, alias)
+    return current_text_model("openai", model) or model
 
 
 def _resolve_deepseek_model(alias: str) -> str:
@@ -444,7 +447,7 @@ def resolve_agent_tool_loop(spec, policy) -> AgentLoopBinding:
             raise RuntimeError("OPENAI_API_KEY is not configured")
         return AgentLoopBinding(
             chat_with_tools, _openai_client,
-            _resolve_openai_model(spec.model or "gpt56luna"), "openai", reasoning,
+            _resolve_openai_model(spec.model or "gpt6luna"), "openai", reasoning,
         )
     if provider == "deepseek":
         from llm.claude_loop import chat_with_tools

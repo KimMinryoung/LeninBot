@@ -257,13 +257,13 @@ class AuditedAsyncAnthropic:
 
 def _openai_usage(response) -> dict[str, int]:
     usage = getattr(response, "usage", None)
-    details = getattr(usage, "prompt_tokens_details", None)
+    details = getattr(usage, "prompt_tokens_details", None) or getattr(usage, "input_tokens_details", None)
     cached = getattr(usage, "prompt_cache_hit_tokens", 0) or 0
     if details and not cached:
         cached = getattr(details, "cached_tokens", 0) or 0
     return {
-        "tokens_in": getattr(usage, "prompt_tokens", 0) or 0,
-        "tokens_out": getattr(usage, "completion_tokens", 0) or 0,
+        "tokens_in": getattr(usage, "prompt_tokens", None) or getattr(usage, "input_tokens", 0) or 0,
+        "tokens_out": getattr(usage, "completion_tokens", None) or getattr(usage, "output_tokens", 0) or 0,
         "cache_read": cached,
         "cache_create": getattr(details, "cache_write_tokens", 0) or 0,
     }
@@ -339,6 +339,9 @@ class AuditedAsyncOpenAI:
         self._leninbot_audit_wrapper = True
         self._client = client
         self.chat = _AuditedChat(client.chat, caller, provider)
+        if hasattr(client, "responses"):
+            self.responses = _AuditedOpenAIEndpoint(
+                client.responses, caller, provider, "responses.create")
         self.embeddings = _AuditedOpenAIEndpoint(
             client.embeddings, caller, provider, "embeddings.create")
 

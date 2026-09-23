@@ -1,4 +1,4 @@
-"""GPT-5.6 Luna 경량 호출부 스모크.
+"""GPT-6 Luna 경량 호출부 스모크.
 
 레지스트리(config/llm_call_sites.json)에 등록된 경량 호출부를 실제 API로 한 번씩
 호출해 openai 계약(max_completion_tokens / temperature 생략 / reasoning_effort)이
@@ -23,7 +23,7 @@ from llm.call_registry import _EXECUTORS, resolve  # noqa: E402
 
 # 호출부별 (max_completion_tokens, reasoning_effort) 목표치.
 #
-# GPT-5.6의 기본 effort는 medium이다. 아래 호출부는 대부분 요약·분류·추출이라
+# GPT-6의 기본 effort는 medium이다. 아래 호출부는 대부분 요약·분류·추출이라
 # 추론이 필요 없어 "none"으로 끈다 (OpenAI reasoning 가이드가 분류·빠른 검색을
 # none 권장 용도로 명시). 추론을 끄면 max_completion_tokens를 본문이 다 쓰므로
 # 상한도 기존 gemini 값 수준으로 되돌린다.
@@ -45,7 +45,7 @@ def luna_profile(feature: str):
     return dataclasses.replace(
         resolve(feature),
         provider="openai",
-        model="gpt-5.6-luna",
+        model="gpt-6-luna",
         max_tokens=max_tokens,
         extra={"reasoning_effort": effort},
     )
@@ -102,7 +102,7 @@ def reasoning_token_probe() -> str | None:
                                         "OpenAI가 API 단가를 인하했다."}]
     for effort in ("none", "medium"):
         resp = client.chat.completions.create(
-            model="gpt-5.6-luna", messages=msgs,
+            model="gpt-6-luna", messages=msgs,
             max_completion_tokens=512, reasoning_effort=effort,
         )
         u = resp.usage

@@ -16,8 +16,8 @@ from llm.provider_registry import (
 from writer.store import get_writer_setting, set_writer_setting
 from writer.config import WriterCallPolicy
 
-WRITER_MODEL = "claude-fable-5"
-WRITER_MODEL_DISPLAY = "Claude Fable 5"
+WRITER_MODEL = "claude-fable-5-1"
+WRITER_MODEL_DISPLAY = "Claude Fable 5.1"
 WRITER_INPUT_PRICE_PER_MTOK = 10.0
 WRITER_OUTPUT_PRICE_PER_MTOK = 50.0
 
@@ -29,11 +29,11 @@ WRITER_OUTPUT_PRICE_PER_MTOK = 50.0
 WRITER_MODEL_CHOICES: dict[str, dict] = {
     "fable": {
         "provider": "anthropic",
-        "model": "claude-fable-5",
-        "display": "Claude Fable 5",
+        "model": "claude-fable-5-1",
+        "display": "Claude Fable 5.1",
         "input_price_per_mtok": 10.0,
         "output_price_per_mtok": 50.0,
-        # Fable 5 uses adaptive thinking: the model decides when and how much
+        # Fable 5.1 uses adaptive thinking: the model decides when and how much
         # to think, scaled by output_config.effort. High effort buys scene
         # planning (structure, beats, imagery) on turns that warrant it;
         # trivial turns stay cheap because thinking is adaptive, not forced.
@@ -49,7 +49,7 @@ WRITER_MODEL_CHOICES: dict[str, dict] = {
     },
     "fable_fast": {
         "provider": "anthropic",
-        "model": "claude-fable-5",
+        "model": "claude-fable-5-1",
         "display": "Claude Fable 5 (low effort)",
         "input_price_per_mtok": 10.0,
         "output_price_per_mtok": 50.0,

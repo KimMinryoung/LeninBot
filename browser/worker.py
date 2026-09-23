@@ -19,7 +19,8 @@ from pathlib import Path
 import importlib
 
 from llm.provider_registry import (
-    DEEPSEEK_FLASH_MODEL, OPENAI_MODEL_MAP, TIER_MODEL_KEYS, resolve_deepseek_model,
+    DEEPSEEK_FLASH_MODEL, OPENAI_MODEL_MAP, TIER_MODEL_KEYS,
+    current_text_model, resolve_deepseek_model,
 )
 
 BROWSER_MODEL_OVERRIDE = os.getenv("BROWSER_MODEL", "").strip() or None
@@ -45,8 +46,9 @@ def _normalize_browser_model(raw_model: str | None, provider: str = "deepseek") 
 
     if provider == "deepseek":
         model = resolve_deepseek_model(model)
-    if provider == "openai" and lowered in _OPENAI_BROWSER_MODEL_ALIASES:
-        return _OPENAI_BROWSER_MODEL_ALIASES[lowered]
+    if provider == "openai":
+        selected = _OPENAI_BROWSER_MODEL_ALIASES.get(lowered, model)
+        return current_text_model("openai", selected) or selected
 
     if lowered in {"opus", "sonnet", "haiku"} or lowered.startswith("claude"):
         print(f"[browser_worker] WARNING: Claude model override '{model}' ignored for browser worker")

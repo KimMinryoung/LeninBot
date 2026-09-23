@@ -926,6 +926,9 @@ async def chat_with_tools(
             "tool_result" (tool finished), "budget" (budget status update).
     """
     from llm.execution_context import prepare_execution_context
+    if model.startswith("claude-"):
+        from llm.provider_registry import current_text_model
+        model = current_text_model("claude", model) or model
     messages, system_prompt = prepare_execution_context(messages, system_prompt)
     adapter = _ClaudeProtocolAdapter(
         client=client,
