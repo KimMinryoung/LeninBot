@@ -255,11 +255,15 @@ are enforced from day one.
 - `scripts/smoke_url_security.py` — validates unsafe addresses, mixed DNS answers,
   redirects, and diagnostic fail-closed behavior.
 
-## Out of scope (future)
+## 남은 보강 항목
 
-Low-level connector wrapping (`db.py` / `kg_runtime` / HTTP clients) and routing the
-inbound `mcp_gateway` through this same policy. The tool layer is where capability is
-granted, so it is the right first control plane.
+- `security_gateway/audit.py:redact_args`의 최상위 인자 마스킹을 중첩 dict/list와 progress/tool log까지 일관되게 확장한다.
+- 감사 큐·sink 장애 시 durable spool과 drop 지표를 마련한다. 감사 실패가 handler 재실행을 유발해서는 안 된다.
+- MCP 호출을 공통 authorization/audit 경계에 통합하고, inspect/operator를 OS wrapper·계정·credential 수준에서도 분리한다. `bounded_query_db`는 작은 수정 도구이며 읽기 전용이 아니다. SQL parser·최소 DB role 또는 도메인별 operator action으로 mutation 경계를 보강한다. 현재 경계는 [mcp_gateway.md](mcp_gateway.md)를 따른다.
+- KG maintenance는 사전 backup 명령 성공뿐 아니라 artifact 유효성도 변경 전에 검사하도록 보강한다. 현재 절차는 [knowledge_graph_design.md](knowledge_graph_design.md)를 따른다.
+- Connector가 지원하면 native idempotency key를 전달하고, 서비스별 systemd hardening을 점검한다. 프록시 unit에는 이미 `NoNewPrivileges` 등이 설정되어 있다.
+
+변경 시 hidden tool, public A2A mutation, schema 밖 인자, authorization/Redis 장애의 차단을 확인한다. URL 정책은 private/link-local·mixed DNS·redirect·browser subrequest를 포함하고, idempotency는 성공 재사용과 `outcome_unknown` 재실행 금지를 확인한다. SQL은 data-modifying CTE와 multi-statement, 감사는 중첩 secret, KG maintenance는 backup 실패 후 mutation 미실행을 검증한다.
 
 ## Bounded result diagnostics
 

@@ -1,6 +1,6 @@
 # Project State
 
-2026-09-07 문서 정리: 서비스 맵과 운영 절차를 분리했다. 아래 배포 이력은 당시 기록이며, 이번 정리는 서비스 활성 상태를 재검증한 기록이 아니다.
+2026-09-23 저장소 코드·프런트엔드 프록시 설정·설치된 Nginx 설정을 대조했다. 서비스 활성 상태는 별도 점검 대상이다.
 
 Cyber-Lenin은 하나의 런타임 정체성을 여러 인터페이스로 노출하는 시스템이다. 주요 사용자 인터페이스는 Telegram bot, public web chat API, scheduled autonomous/diary/background workers다. 장기 상태는 로컬 PostgreSQL(`leninbot-pg` Docker 컨테이너 — 활성 `leninbot`·`writer` DB와 읽기 전용 보관 `legacy_game` DB, `dev_docs/db_migration_plan.md`)과 Neo4j에 저장하고, Redis는 실행 중인 task 상태와 mission board 같은 단기 공유 상태를 맡는다.
 
@@ -10,9 +10,14 @@ Cyber-Lenin은 하나의 런타임 정체성을 여러 인터페이스로 노출
 cyber-lenin.com (Cloudflare -> Nginx, Cloudflare Origin Certificate)
         |
         v
-frontend
-        |
-        v
+frontend (Node/Express :3000, separate repository)
+        |-- pages, CommuLingo, admin UI -> frontend routes
+        |-- /api/proxy/* -> route by path prefix
+        |      |-- /writer/* -> novel-writer-api :8001
+        |      |-- /email/* -> leninbot-email-api :8002
+        |      `-- other paths -> leninbot-api :8000
+        `-- /.well-known/agent-card.json, /a2a -> leninbot-a2a-api :8003
+
 leninbot-api (:8000, FastAPI)
         |-- /chat, /chat/feedback, /personas -> services/api.py + services/web_chat.py
         |-- admin/chat-history/report/private-report JSON -> api_routes/* modules
@@ -71,7 +76,18 @@ developer MCP clients
         |-- explicit MCP profile allow-list
         |-- read-only adapters over runtime_tools, dev_docs, task/corpus state
         |-- operator-only readonly_query_db and bounded_query_db via existing DB guards
+
+LLM-consuming services -> llm_proxy (127.0.0.1:8110) -> model providers
+paid search/extraction -> web_gateway (127.0.0.1:8111) -> Tavily/Brave
 ```
+
+## 공개 진입점과 프록시 경계
+
+Nginx는 Cloudflare 뒤에서 `cyber-lenin.com`의 HTTPS를 받고 모든 일반 공개 경로를 프런트엔드 Node/Express(`127.0.0.1:3000`)로 보낸다. 포트 80은 HTTPS로 넘긴다. 공개 `/admin`은 404이며, Tailscale 주소의 별도 HTTP server block은 같은 프런트엔드로 전달한다. 채팅·writer SSE를 위해 Nginx 프록시 버퍼링을 끄고 읽기·쓰기 타임아웃을 둔다. Nginx의 `/api/proxy/`와 `/commulingo/api/`에는 IP별 요청 제한을 적용한다. 설정 원본은 별도 프런트엔드 저장소의 `/home/grass/frontend/nginx/leninbot-frontend.conf`이며 설치본은 `/etc/nginx/sites-available/leninbot-frontend`다.
+
+프런트엔드 `server.js`는 세션·채팅 신원 미들웨어 다음에 `config/proxies.js`를 설치한다. `/api/proxy` 접두사를 제거한 뒤 `/writer`는 writer API, `/email`은 email API, 나머지는 main API로 보낸다. `/.well-known/agent-card.json`과 `/a2a`는 별도 A2A 프록시가 처리한다. `/api/proxy/sessions`와 `/api/proxy/history`의 일부 GET은 `routes/chat-history.js`가 프록시보다 먼저 프런트엔드 DB에서 답한다. 프런트엔드는 클라이언트가 보낸 신원·관리자 헤더를 제거하고, 확인한 세션과 자체 secret을 바탕으로 백엔드용 헤더를 주입한다. 목적지 기본값은 `config/services.js`에 있지만 실제 배포값은 프런트엔드 환경변수가 우선한다. 요청별 경로와 인증 계약은 [api_reference.md](api_reference.md)를 따른다.
+
+Nginx·프런트엔드의 역방향 HTTP 프록시와 내부 서비스 게이트웨이는 별개다. `llm_proxy`는 loopback `:8110`에서 모델 제공자 키를 보관·주입하고 정책·감사를 수행한다([llm_gateway.md](llm_gateway.md)). `web_gateway`는 loopback `:8111`에서 유료 검색·본문 추출 키와 공용 예산을 관리한다([web_research.md](web_research.md)). 두 서비스는 공개 Nginx 라우트가 아니다. 모델이 호출하는 도구의 가시성과 실행 권한은 [tool_gateway.md](tool_gateway.md), [security_gateway.md](security_gateway.md)가 담당한다.
 
 ## Service Units
 
@@ -102,8 +118,6 @@ developer MCP clients
 | `leninbot-commulingo-terms.service` | `scripts/commulingo_terms_maintainer.py` | independent glossary-term creation lane |
 
 Dependency direction is simple: `leninbot-llm-proxy.service` waits for network-online and a credential-complete `/health`, then every LLM-consuming unit starts after it; Neo4j/Redis and embedding also start before Telegram/API; browser starts after Telegram. API can optionally run Telegram in-process only when `RUN_TELEGRAM_IN_API=true`, but production uses the dedicated Telegram unit.
-
-Public HTTPS terminates at Nginx for `cyber-lenin.com` with a Cloudflare Origin Certificate under `/etc/ssl/cloudflare/`.
 
 ## API Boundary Status
 
@@ -157,7 +171,7 @@ Current default chunking for new corpus ingestion is language-specific in `corpu
 | KG implementation | `graph_memory/service.py`, `graph_memory/entities.py`, `graph_memory/edges.py`, `graph_memory/structured_writer.py` |
 | Public content | `research_store.py`, `site_publishing.py`, `publication_records.py`, `runtime_tools/research.py`, `runtime_tools/post_edit.py`, `api_routes/private_reports.py` (JSON), frontend `/admin/private-reports` shell |
 | Hub 큐레이션 (`/curate`) | `telegram/curate.py` (URL 정규화·중복 검사·태스크 등록, 쓰기 경계 검증 래퍼, 결정적 결과 DM), `agents/hub_curator.py` (DeepSeek V4.1 Flash 작성자 스펙, `CURATION_LIMITS` 단일 출처), `site_publishing.py` (`publish_hub_curation` 툴, `hub_curations` 테이블) |
-| CommuLingo 인물·용어 사전 | `runtime_tools/commulingo_people.py` (read + six target-specific narrow writes; shared normalization, structured errors; direct/staging switch in `config/commulingo_people.json`), `tool_gateway/profiles.py` + `agents/analyst.py` (Telegram direct/delegated narrow-write surfaces), `agents/commulingo_curator.py` + `scripts/commulingo_people_maintainer.py` / `scripts/commulingo_terms_maintainer.py` (typed discovery and stage-scoped scheduled direct maintenance), `scripts/commulingo_suggestions.py` (staging 리뷰 CLI). 인물/절 저장·승인은 frontend 공통 서비스의 Docker RPC를 사용한다. 필수 버전·근거·검토·보강 상태는 [인물 편집 계약](commulingo_editorial.md), 데이터/렌더링은 `frontend/dev_docs/commulingo_people_handoff.md` 참고 |
+| CommuLingo 인물·용어 사전 | `runtime_tools/commulingo_people.py` (read + six target-specific narrow writes; shared normalization, structured errors; direct/staging switch in `config/commulingo_people.json`), `tool_gateway/profiles.py` + `agents/analyst.py` (Telegram direct/delegated narrow-write surfaces), `agents/commulingo_curator.py` + `scripts/commulingo_people_maintainer.py` / `scripts/commulingo_terms_maintainer.py` (typed discovery and stage-scoped scheduled direct maintenance), `scripts/commulingo_suggestions.py` (staging 리뷰 CLI). 인물/절 저장·승인은 frontend 공통 서비스의 Docker RPC를 사용한다. 필수 버전·근거·검토·보강 상태는 [인물 편집 계약](commulingo_editorial.md), 데이터/렌더링은 별도 저장소 `/home/grass/frontend/dev_docs/commulingo_people_handoff.md` 참고 |
 | 웹 검색 gateway | `leninbot-web-gateway.service` (`127.0.0.1:8111`) owns Tavily/Brave keys, routing, cache/coalescing and the $10/UTC-day budget. `runtime_tools/web_search.py` and paid `content_fetch/urls.py` extraction use `web_gateway/client.py`; no direct-provider fallback. Policy: `config/web_research.json`; private ledger: `/var/lib/leninbot-web-gateway/usage.sqlite3`. See [web_research.md](web_research.md). |
 | Admin user API routes | `api_routes/admin_users.py` |
 | Chat history/API routes | `api_routes/chat_history.py`, `services/chat_history_sanitize.py`, `services/web_chat.py` |

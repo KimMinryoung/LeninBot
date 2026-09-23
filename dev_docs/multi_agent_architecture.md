@@ -430,3 +430,7 @@ Prompt/context regression checks (no live LLM or database required):
 ## Mail briefing state
 
 `mail_runtime/` persists raw mail, per-task body coverage and per-audience Telegram delivery receipts. `check_inbox` defaults to unbriefed mail in delegated tasks; scout can stage exact per-mail summaries with the write tool `prepare_mail_briefing`. Successful task callbacks send these summaries and record each accepted message, bypassing model rewriting. See [mail_briefing.md](mail_briefing.md) for tool semantics, migration and failure behavior.
+
+## 품질 실험 후보
+
+비판 모델의 provider 독립성, planner 품질, 자율 tick 비용은 실제 결과로 평가해야 한다. Public web chat에 경험 메모리를 주입하려면 공개 범위를 먼저 정해야 한다. 현재 entity-gated KG 회상과는 별개다. 읽기 전용 작업의 best-of-N은 품질 개선이 추가 비용을 정당화할 때 검토할 실험이며 현재 구현된 실행 정책은 아니다. Side effect가 있는 작업의 복제·롤백과 비용 문제가 해결되기 전에는 전체 LATS를 적용하지 않는다.

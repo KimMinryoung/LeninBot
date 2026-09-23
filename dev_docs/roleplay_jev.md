@@ -168,4 +168,4 @@ Telegram은 `roleplay_time_authorization`의 mode/시간 결정을 초안 판정
 초안 후 명시 기간이 없는 행동의 실제 소요 추정은 기존 `roleplay_duration_estimate`가 맡는다.
 
 폐렴은 부상과 별도의 `illnesses` 상태로 기록한다. 현재 장면 판정·시간 효과·회복과 재발·표시 계약은
-[질병 상태](roleplay_illness.md)를 따른다. 과거 사료로 현재 발병을 소급 적용하지 않는다.
+[질병 상태](roleplay_game_balance.md#질병-상태)를 따른다. 과거 사료로 현재 발병을 소급 적용하지 않는다.

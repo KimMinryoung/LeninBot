@@ -53,8 +53,9 @@ DB의 research/draft 단계명은 호환용이며 둘 다 Editor를 실행한다
 Jev에 질의한다. 질문별 판정은 독립적이므로 후속 질의 state에 앞선 선택을 명시한다.
 발췌 원문도 state에 포함하며, 허용 목록 밖 응답이나 근거 없는 선택은 보류한다.
 국적·거주·학술 연구 대상을 국가기관 복무로 추정하지 않는다.
-2026-09-22 혼합 분류 897명 이관의 출처·검토 방식·운영 반영 기록은 프런트엔드
-`dev_docs/commulingo-role-model-plan.md`와 `scripts/content/person-activities-mixed-reviewed-20260922.json`에 있다.
+2026-09-22 혼합 분류 이관의 출처·검토 방식·운영 반영 기록은 별도 프런트엔드 저장소
+`/home/grass/frontend/dev_docs/commulingo-role-model-plan.md`와
+`/home/grass/frontend/scripts/content/person-activities-mixed-reviewed-20260922.json`에 있다.
 
 ### 원문 캐시와 문단 라벨
 
