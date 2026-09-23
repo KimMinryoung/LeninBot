@@ -1,0 +1,9 @@
+[Unit]
+Description=LeninBot weekly backup restore drill timer (Sunday 05:00 KST)
+
+[Timer]
+OnCalendar=Sun *-*-* 05:00:00 Asia/Seoul
+Persistent=true
+
+[Install]
+WantedBy=timers.target

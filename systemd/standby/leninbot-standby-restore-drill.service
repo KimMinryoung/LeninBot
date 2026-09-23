@@ -1,0 +1,20 @@
+# Installed on leninbot-standby. Restores the newest R2 dumps into a throwaway
+# container and validates them; production is never touched.
+[Unit]
+Description=LeninBot weekly backup restore drill from R2
+Wants=network-online.target
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/leninbot
+EnvironmentFile=/opt/leninbot/.env
+LoadCredentialEncrypted=r2_s3_access_key_id:/etc/credstore.encrypted/r2_s3_access_key_id.cred
+LoadCredentialEncrypted=r2_s3_secret_access_key:/etc/credstore.encrypted/r2_s3_secret_access_key.cred
+# The host has 3.8 GB with 1 GB already in the standby's shared_buffers, so
+# restore serially with a small maintenance_work_mem; speed does not matter.
+# --max-age-days 2 fails the drill when the daily backups have stopped.
+ExecStart=/opt/leninbot/venv/bin/python /opt/leninbot/scripts/restore_db.py drill --from-r2 --max-age-days 2 --jobs 1 --maintenance-work-mem 128MB
+TimeoutStartSec=3600
+Nice=10
+ExecStartPost=-/usr/bin/curl -fsS -m 10 --retry 3 ${WATCHDOG_PING_BASE}/restore-drill

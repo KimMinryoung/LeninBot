@@ -19,19 +19,25 @@ from __future__ import annotations
 import argparse
 import hashlib
 import os
+import re
 import shlex
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "scripts"))
 
 from secrets_loader import get_secret
 
 PRODUCTION_CONTAINER = "leninbot-pg"
+R2_BUCKET = "cyber-lenin-backups"
+KST = timezone(timedelta(hours=9))
 DRILL_IMAGE = "pgvector/pgvector:pg17"
 NORMAL_CONFIRMATION = "RECREATE_DATABASES"
 PRODUCTION_CONFIRMATION = "RECREATE_LENINBOT_PRODUCTION"
@@ -122,6 +128,41 @@ def _resolve_backup(explicit: str | None, spec: BackupSpec) -> Path:
     return candidates[-1].resolve()
 
 
+def _fetch_latest_from_r2(spec: BackupSpec, dest_dir: Path, max_age_days: int | None) -> Path:
+    """Download the newest dated R2 object for spec, so a drill covers the
+    off-site copy and the download path rather than a local file."""
+    from _r2_backup import r2_get, r2_list_keys
+
+    key_prefix = spec.pattern.removesuffix("-*.dump")
+    dated = re.compile(rf"^{re.escape(key_prefix)}-(\d{{4}}-\d{{2}}-\d{{2}})\.dump$")
+    try:
+        keys = r2_list_keys(R2_BUCKET, key_prefix)
+    except Exception as exc:
+        raise RestoreError(f"R2 listing failed for {key_prefix}: {exc}") from exc
+    candidates = sorted(
+        (datetime.strptime(m.group(1), "%Y-%m-%d").date(), key)
+        for key in keys
+        if (m := dated.match(key))
+    )
+    if not candidates:
+        raise RestoreError(f"no {spec.scope} backup in R2 under {key_prefix}")
+    backup_date, key = candidates[-1]
+    if max_age_days is not None:
+        age = (datetime.now(KST).date() - backup_date).days
+        if age > max_age_days:
+            raise RestoreError(
+                f"newest {spec.scope} backup in R2 is {key} ({age} days old, "
+                f"limit {max_age_days}); backups have stopped"
+            )
+    path = dest_dir / key
+    print(f"+ R2 download {R2_BUCKET}/{key}", flush=True)
+    try:
+        r2_get(R2_BUCKET, key, str(path))
+    except Exception as exc:
+        raise RestoreError(f"R2 download failed for {key}: {exc}") from exc
+    return path
+
+
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as source:
@@ -162,7 +203,7 @@ def _wait_for_postgres(container: str, timeout_seconds: int = 60) -> None:
     raise RestoreError(f"Postgres did not become ready: {logs.stderr or logs.stdout}")
 
 
-def _create_drill_container(name: str, image: str) -> None:
+def _create_drill_container(name: str, image: str, maintenance_work_mem: str) -> None:
     _run(
         [
             "docker",
@@ -181,7 +222,7 @@ def _create_drill_container(name: str, image: str) -> None:
             "-c",
             "shared_preload_libraries=pg_stat_statements",
             "-c",
-            "maintenance_work_mem=512MB",
+            f"maintenance_work_mem={maintenance_work_mem}",
             "-c",
             "max_wal_size=2GB",
         ]
@@ -387,7 +428,8 @@ def _stage_archive(container: str, path: Path, scope: str) -> str:
     return target
 
 
-def _restore_archive(container: str, spec: BackupSpec, staged: str) -> float:
+def _restore_archive(container: str, spec: BackupSpec, staged: str, max_jobs: int | None) -> float:
+    jobs = min(spec.jobs, max_jobs) if max_jobs else spec.jobs
     started = time.monotonic()
     _run(
         [
@@ -402,7 +444,7 @@ def _restore_archive(container: str, spec: BackupSpec, staged: str) -> float:
             "--no-owner",
             "--no-privileges",
             "--exit-on-error",
-            f"--jobs={spec.jobs}",
+            f"--jobs={jobs}",
             staged,
         ]
     )
@@ -676,6 +718,7 @@ def _restore_selected(
     backups: dict[str, Path],
     writer_password: str | None,
     frontend_password: str | None,
+    max_jobs: int | None = None,
 ) -> None:
     staged: dict[str, str] = {}
     try:
@@ -688,7 +731,7 @@ def _restore_selected(
             _ensure_frontend_role(container, frontend_password)
         for spec in specs:
             _recreate_database(container, spec, writer_password)
-            elapsed = _restore_archive(container, spec, staged[spec.scope])
+            elapsed = _restore_archive(container, spec, staged[spec.scope], max_jobs)
             print(f"Restored {spec.database} in {elapsed:.1f}s", flush=True)
             if spec.scope == "main":
                 _grant_frontend_access(container)
@@ -735,12 +778,28 @@ def _build_parser() -> argparse.ArgumentParser:
         subparser.add_argument("--writer-backup")
         subparser.add_argument("--writer-password-file")
         subparser.add_argument("--frontend-password-file")
+        subparser.add_argument(
+            "--from-r2",
+            action="store_true",
+            help="download the newest dated backups from R2 instead of using local copies",
+        )
+        subparser.add_argument(
+            "--max-age-days",
+            type=int,
+            help="with --from-r2, fail when the newest backup is older than this",
+        )
+        subparser.add_argument(
+            "--jobs",
+            type=int,
+            help="cap pg_restore parallelism (small hosts)",
+        )
 
     drill = subparsers.add_parser("drill", help="restore into a disposable container")
     add_backup_args(drill)
     drill.add_argument("--container-name", default=f"leninbot-pg-restore-drill-{os.getpid()}")
     drill.add_argument("--image", default=DRILL_IMAGE)
     drill.add_argument("--keep-container", action="store_true")
+    drill.add_argument("--maintenance-work-mem", default="512MB")
 
     restore = subparsers.add_parser("restore", help="recreate DBs in an existing container")
     add_backup_args(restore)
@@ -752,6 +811,14 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
+    if not args.from_r2:
+        return _main(args, None)
+    # /var/tmp, not /tmp: the main dump is ~400 MB and /tmp may be tmpfs.
+    with tempfile.TemporaryDirectory(prefix="leninbot-restore-", dir="/var/tmp") as download_dir:
+        return _main(args, Path(download_dir))
+
+
+def _main(args: argparse.Namespace, download_dir: Path | None) -> int:
     try:
         if args.command == "restore":
             _check_restore_confirmation(args)
@@ -780,15 +847,20 @@ def main(argv: list[str] | None = None) -> int:
             else None
         )
 
-
         backups = {
-            spec.scope: _resolve_backup(getattr(args, f"{spec.scope}_backup"), spec)
+            spec.scope: (
+                _fetch_latest_from_r2(spec, download_dir, args.max_age_days)
+                if download_dir and not getattr(args, f"{spec.scope}_backup")
+                else _resolve_backup(getattr(args, f"{spec.scope}_backup"), spec)
+            )
             for spec in specs
         }
 
         if args.command == "restore":
             _verify_target(args.target_container)
-            _restore_selected(args.target_container, specs, backups, writer_password, frontend_password)
+            _restore_selected(
+                args.target_container, specs, backups, writer_password, frontend_password, args.jobs
+            )
             print("RESTORE PASS", flush=True)
             return 0
 
@@ -797,10 +869,12 @@ def main(argv: list[str] | None = None) -> int:
             raise RestoreError(f"drill container already exists: {container}")
         created = False
         try:
-            _create_drill_container(container, args.image)
+            _create_drill_container(container, args.image, args.maintenance_work_mem)
             created = True
             _wait_for_postgres(container)
-            _restore_selected(container, specs, backups, writer_password, frontend_password)
+            _restore_selected(
+                container, specs, backups, writer_password, frontend_password, args.jobs
+            )
             print("DRILL PASS", flush=True)
             return 0
         finally:

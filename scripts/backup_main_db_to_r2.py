@@ -29,7 +29,8 @@ promote_systemd_credentials()
 from r2_retention import prune_r2_prefix
 
 BUCKET = "cyber-lenin-backups"
-CONTAINER = "leninbot-pg"
+# The standby runs these same jobs against its hot-standby replica.
+CONTAINER = os.environ.get("BACKUP_PG_CONTAINER", "leninbot-pg")
 KST = timezone(timedelta(hours=9))
 R2_RETENTION_DAYS = 15
 LOCAL_RETENTION_DAYS = 3

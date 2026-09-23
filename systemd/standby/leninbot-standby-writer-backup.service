@@ -1,0 +1,18 @@
+# Installed on leninbot-standby (not the main VM). See dev_docs/standby_operations.md.
+[Unit]
+Description=LeninBot Writer DB Backup from the standby replica (daily dump to Cloudflare R2)
+Wants=network-online.target
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/leninbot
+EnvironmentFile=/opt/leninbot/.env
+LoadCredentialEncrypted=r2_s3_access_key_id:/etc/credstore.encrypted/r2_s3_access_key_id.cred
+LoadCredentialEncrypted=r2_s3_secret_access_key:/etc/credstore.encrypted/r2_s3_secret_access_key.cred
+ExecStart=/opt/leninbot/venv/bin/python /opt/leninbot/scripts/backup_writer_db_to_r2.py
+TimeoutStartSec=900
+Nice=10
+# Same watchdog job name as the old main-VM unit, so the dead-man's switch
+# needs no change for the move.
+ExecStartPost=-/usr/bin/curl -fsS -m 10 --retry 3 ${WATCHDOG_PING_BASE}/writer-backup

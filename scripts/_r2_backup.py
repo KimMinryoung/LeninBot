@@ -32,19 +32,21 @@ def promote_systemd_credentials(pairs: tuple[tuple[str, str], ...] = R2_CREDENTI
             os.environ[env_name] = path.read_text().rstrip("\n")
 
 
-def r2_put(bucket: str, key: str, path: str, content_type: str = "application/octet-stream") -> None:
-    """Upload through R2's S3 API, which switches to multipart for large files.
+_TRANSFER_PART = 64 * 1024 * 1024
 
-    The Cloudflare REST object endpoint takes the whole body in one request and
-    rejects it with 413 above roughly 300 MiB; the main DB dump crossed that on
-    2026-09-20 and every upload failed until this moved to the S3 API.
+
+def r2_client():
+    """S3 client for R2, authenticated by the bucket-scoped key pair.
+
+    Every backup-side R2 call (upload, list, download, delete) goes through
+    this one key, so a host that only runs backups (the standby) needs no
+    account-wide Cloudflare token.
     """
     import boto3
-    from boto3.s3.transfer import TransferConfig
     from botocore.config import Config
     from secrets_loader import require_secret
 
-    client = boto3.client(
+    return boto3.client(
         "s3",
         endpoint_url=f"https://{os.environ['R2_CF_ACCOUNT_ID']}.r2.cloudflarestorage.com",
         aws_access_key_id=require_secret("R2_S3_ACCESS_KEY_ID"),
@@ -52,13 +54,41 @@ def r2_put(bucket: str, key: str, path: str, content_type: str = "application/oc
         region_name="auto",
         config=Config(retries={"max_attempts": 5, "mode": "standard"}),
     )
-    client.upload_file(
-        path,
-        bucket,
-        key,
-        ExtraArgs={"ContentType": content_type},
-        Config=TransferConfig(multipart_threshold=64 * 1024 * 1024, multipart_chunksize=64 * 1024 * 1024),
+
+
+def _transfer_config():
+    from boto3.s3.transfer import TransferConfig
+
+    return TransferConfig(multipart_threshold=_TRANSFER_PART, multipart_chunksize=_TRANSFER_PART)
+
+
+def r2_put(bucket: str, key: str, path: str, content_type: str = "application/octet-stream") -> None:
+    """Upload through R2's S3 API, which switches to multipart for large files.
+
+    The Cloudflare REST object endpoint takes the whole body in one request and
+    rejects it with 413 above roughly 300 MiB; the main DB dump crossed that on
+    2026-09-20 and every upload failed until this moved to the S3 API.
+    """
+    r2_client().upload_file(
+        path, bucket, key, ExtraArgs={"ContentType": content_type}, Config=_transfer_config()
     )
+
+
+def r2_get(bucket: str, key: str, path: str) -> None:
+    r2_client().download_file(bucket, key, path, Config=_transfer_config())
+
+
+def r2_list_keys(bucket: str, key_prefix: str) -> list[str]:
+    """Return every object key under key_prefix, following pagination."""
+    keys: list[str] = []
+    paginator = r2_client().get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=bucket, Prefix=key_prefix):
+        keys.extend(item["Key"] for item in page.get("Contents", []))
+    return keys
+
+
+def r2_delete(bucket: str, key: str) -> None:
+    r2_client().delete_object(Bucket=bucket, Key=key)
 
 
 def prune_local_backups(backup_dir: Path, key_prefix: str, suffix: str, cutoff) -> None:

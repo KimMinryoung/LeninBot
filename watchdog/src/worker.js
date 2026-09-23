@@ -57,6 +57,9 @@ const JOBS = {
   "main-backup": { periodMin: 1440, graceMin: 180, label: "메인 DB 백업" },
   "writer-backup": { periodMin: 1440, graceMin: 180, label: "writer DB 백업" },
   "kg-backup": { periodMin: 1440, graceMin: 180, label: "KG 백업" },
+  // Weekly on the standby: restores the newest R2 dumps into a throwaway
+  // container. Silence means backups are no longer proven restorable.
+  "restore-drill": { periodMin: 10080, graceMin: 360, label: "백업 복원 드릴" },
 };
 
 async function sendTelegram(env, text) {

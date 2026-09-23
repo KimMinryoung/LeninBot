@@ -18,59 +18,10 @@ Safety properties:
     A bad cutoff can then only make us keep too much, never wipe the bucket.
 """
 
-import os
 import re
 from datetime import date, datetime
 
-import requests
-
-from secrets_loader import require_secret
-
-_API = "https://api.cloudflare.com/client/v4"
-_LIST_PAGE = 1000
-
-
-def _headers() -> dict:
-    return {"Authorization": f"Bearer {require_secret('R2_CF_API_TOKEN')}"}
-
-
-def _bucket_url(bucket: str) -> str:
-    account = os.environ["R2_CF_ACCOUNT_ID"]
-    return f"{_API}/accounts/{account}/r2/buckets/{bucket}"
-
-
-def _list_keys(bucket: str, key_prefix: str) -> list[str]:
-    """Return every object key under key_prefix, following pagination."""
-    keys: list[str] = []
-    cursor = None
-    while True:
-        params = {"prefix": key_prefix, "per_page": _LIST_PAGE}
-        if cursor:
-            params["cursor"] = cursor
-        response = requests.get(
-            f"{_bucket_url(bucket)}/objects",
-            headers=_headers(),
-            params=params,
-            timeout=60,
-        )
-        response.raise_for_status()
-        payload = response.json()
-        if not payload.get("success"):
-            raise RuntimeError(f"R2 list failed: {payload.get('errors')}")
-        keys.extend(item["key"] for item in payload.get("result") or [])
-        cursor = (payload.get("result_info") or {}).get("cursor")
-        if not cursor:
-            return keys
-
-
-def _delete(bucket: str, key: str) -> bool:
-    response = requests.delete(
-        f"{_bucket_url(bucket)}/objects/{key}", headers=_headers(), timeout=60
-    )
-    if response.status_code == 404:
-        return False
-    response.raise_for_status()
-    return True
+from _r2_backup import r2_delete, r2_list_keys
 
 
 def prune_r2_prefix(
@@ -91,7 +42,7 @@ def prune_r2_prefix(
     dated = re.compile(rf"^{re.escape(key_prefix)}-(\d{{4}}-\d{{2}}-\d{{2}}){re.escape(suffix)}$")
 
     try:
-        keys = _list_keys(bucket, key_prefix)
+        keys = r2_list_keys(bucket, key_prefix)
     except Exception as exc:  # network, auth, malformed payload
         print(f"WARNING: R2 sweep skipped for {key_prefix}: {exc}")
         return []
@@ -123,7 +74,8 @@ def prune_r2_prefix(
         if dry_run:
             print(f"[dry-run] would delete expired R2 backup: {key}")
             deleted.append(key)
-        elif _delete(bucket, key):
+        else:
+            r2_delete(bucket, key)
             print(f"Deleted expired R2 backup: {key}")
             deleted.append(key)
     return deleted
