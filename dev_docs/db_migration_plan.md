@@ -16,10 +16,13 @@
 
 | 대상 | timer / 스크립트 | 보관 |
 |---|---|---|
-| main + legacy | `leninbot-main-backup.timer`, 매일 03:40 KST → `scripts/backup_main_db_to_r2.py` | 로컬 3일, R2 15일 |
-| writer | `leninbot-writer-backup.timer`, 매일 03:20 KST → `scripts/backup_writer_db_to_r2.py` | 로컬 3일, R2 15일 |
+| main + legacy | standby의 `leninbot-standby-main-backup.timer`, 매일 03:40 KST → `scripts/backup_main_db_to_r2.py` | standby 로컬 3일, R2 15일 |
+| writer | standby의 `leninbot-standby-writer-backup.timer`, 매일 03:20 KST → `scripts/backup_writer_db_to_r2.py` | standby 로컬 3일, R2 15일 |
+| 복원 드릴 | standby의 `leninbot-standby-restore-drill.timer`, 매주 일요일 05:00 KST → `scripts/restore_db.py drill --from-r2` | — |
 
-백업은 Postgres custom dump와 archive TOC 검증을 사용한다. 업로드는 `scripts/_r2_backup.py`의 `r2_put`이 R2 S3 API(boto3, 64MiB 멀티파트)로 한다. 자격 증명은 버킷 한정 Object Read & Write 토큰의 `r2_s3_access_key_id`·`r2_s3_secret_access_key`이고, R2 정리(`r2_retention.py`)는 기존 `r2_cf_api_token`을 쓴다. Cloudflare REST 객체 API는 약 300MiB 넘는 본문을 413으로 거부해 main 덤프가 2026-09-20~23 업로드되지 못했다. 로컬 사본은 업로드 전에 저장하고, main 스크립트는 한 DB가 실패해도 나머지를 계속 뜬 뒤 실패로 끝난다. `scripts/r2_retention.py`는 날짜 형식이 일치하는 prefix만 정리하고, 목록 조회 실패 또는 최소 보관 수 미달이면 삭제하지 않는다. KG 백업은 [knowledge_graph_design.md](knowledge_graph_design.md)를 따른다.
+2026-09-23부터 main/writer 덤프와 복원 드릴은 standby(`/opt/leninbot`, root, unit 원본 `systemd/standby/`)에서 돈다. 스크립트는 `BACKUP_PG_CONTAINER=leninbot-pg-standby`로 hot standby 복제본을 덤프하므로 primary의 I/O·스냅샷을 쓰지 않는다. standby에는 `hot_standby_feedback=on`(ALTER SYSTEM)이 걸려 있어 덤프가 WAL 재생과 충돌해 취소되지 않는다. main VM의 `leninbot-main-backup`·`leninbot-writer-backup` unit은 이전 전 경로로 남아 있으며 타이머는 끈다. 로컬 사본은 standby의 `/opt/leninbot/data/*_db_backups/`에 있고, main에서 복원할 때는 `--from-r2`를 쓴다. standby 갱신은 `ssh root@100.124.58.85 'cd /opt/leninbot && git pull'` 후 unit이 바뀌었으면 `systemd/standby/`를 `/etc/systemd/system/`에 복사하고 daemon-reload.
+
+백업은 Postgres custom dump와 archive TOC 검증을 사용한다. 업로드는 `scripts/_r2_backup.py`의 `r2_put`이 R2 S3 API(boto3, 64MiB 멀티파트)로 한다. 자격 증명은 버킷 한정 Object Read & Write 토큰의 `r2_s3_access_key_id`·`r2_s3_secret_access_key`이고, R2 목록·다운로드·삭제(`r2_retention.py`, 드릴)도 같은 키를 쓰므로 백업 경로에는 계정 단위 `r2_cf_api_token`이 필요 없다. main과 standby는 각자 별도 키를 가진다. Cloudflare REST 객체 API는 약 300MiB 넘는 본문을 413으로 거부해 main 덤프가 2026-09-20~23 업로드되지 못했다. 로컬 사본은 업로드 전에 저장하고, main 스크립트는 한 DB가 실패해도 나머지를 계속 뜬 뒤 실패로 끝난다. `scripts/r2_retention.py`는 날짜 형식이 일치하는 prefix만 정리하고, 목록 조회 실패 또는 최소 보관 수 미달이면 삭제하지 않는다. KG 백업은 [knowledge_graph_design.md](knowledge_graph_design.md)를 따른다.
 
 복구 검증은 프로젝트 venv로 실행한다:
 
@@ -27,7 +30,7 @@
 venv/bin/python scripts/restore_db.py drill
 ```
 
-기본 드릴은 최신 로컬 main/legacy/writer 백업을 일회용 Postgres 17 컨테이너에 복원하고 테이블 행수·인덱스·시퀀스·HNSW·legacy 체크섬·writer 소유권/본문을 검증한다. `--scope {all,main,legacy,writer}`, 개별 `--*-backup`, `--keep-container`를 지원한다. 로컬 사본 드릴만으로 R2 다운로드 경로까지 검증했다고 간주하지 않는다.
+기본 드릴은 최신 로컬 main/legacy/writer 백업을 일회용 Postgres 17 컨테이너에 복원하고 테이블 행수·인덱스·시퀀스·HNSW·legacy 체크섬·writer 소유권/본문을 검증한다. `--scope {all,main,legacy,writer}`, 개별 `--*-backup`, `--keep-container`를 지원한다. 로컬 사본 드릴만으로 R2 다운로드 경로까지 검증했다고 간주하지 않는다. `--from-r2`는 R2에서 가장 최근 날짜의 덤프를 `/var/tmp`로 내려받아 쓰고, `--max-age-days N`은 최신 덤프가 N일보다 오래되면 실패시킨다. 작은 호스트용으로 `--jobs`(pg_restore 병렬도 상한)와 `--maintenance-work-mem`이 있다. 주간 드릴은 `--from-r2 --max-age-days 2 --jobs 1 --maintenance-work-mem 128MB`로 돈다.
 
 실제 복구는 `restore --target-container <name> --confirm RECREATE_DATABASES`로 선택 DB를 drop/create한다. 활성 DB client가 남아 있으면 거부한다. 운영 컨테이너에는 추가로 `--force-production --confirm RECREATE_LENINBOT_PRODUCTION`이 필요하다. `/dev/shm` 1GiB와 Postgres major version 17을 검사한다.
 

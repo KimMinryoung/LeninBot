@@ -471,7 +471,9 @@ BEGIN
     SELECT table_name, column_name,
            pg_get_serial_sequence(format('%I.%I', table_schema, table_name), column_name) seq_name
     FROM information_schema.columns
-    WHERE table_schema='public' AND column_default LIKE 'nextval(%'
+    -- Identity columns own a sequence too but have no nextval() default;
+    -- skipping them undercounted against the frontend grant check.
+    WHERE table_schema='public' AND (column_default LIKE 'nextval(%' OR is_identity='YES')
   LOOP
     IF r.seq_name IS NOT NULL THEN
       EXECUTE format('SELECT last_value FROM %s', r.seq_name) INTO lv;

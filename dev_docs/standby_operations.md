@@ -40,7 +40,7 @@ SQL
 
 ### 3. 백업을 primary 대신 여기서 뜨기
 
-현재 일일 덤프 3종은 전부 primary에서 뜬다. 스탠바이에서 뜨면 primary의 I/O와 잠금을 아예 건드리지 않는다. 지금 규모(main 덤프 8초)에서는 이득이 작아 옮기지 않았다.
+2026-09-23부터 main/legacy/writer 일일 덤프는 여기서 뜬다(`leninbot-standby-{main,writer}-backup.timer`, `/opt/leninbot`). KG는 Neo4j가 main에만 있어 main에 남는다. 구성과 갱신 절차는 [db_migration_plan.md](db_migration_plan.md)의 "백업과 복구".
 
 ### 4. 조용한 손상 탐지
 
@@ -54,7 +54,7 @@ ssh root@100.124.58.85 'docker exec leninbot-pg-standby psql -U postgres -d leni
 
 ### 5. 복구 드릴 호스트
 
-`scripts/restore_db.py drill`을 여기서 돌리면 R2 백업 검증을 프로덕션 자원 없이 매일 할 수 있다. 다만 드릴은 HNSW 인덱스를 재빌드하고 `/dev/shm` 1 GiB를 요구해서 **3.8 GB RAM으로는 빠듯하다.** 아직 primary에 남겨 두었다.
+2026-09-23부터 매주 일요일 05:00 KST에 `leninbot-standby-restore-drill.timer`가 R2의 최신 덤프를 내려받아 일회용 컨테이너에 복원·검증한다. 3.8 GB RAM에 맞춰 4 GB 스왑(`vm.swappiness=10`)을 붙이고 `--jobs 1 --maintenance-work-mem 128MB`로 돌린다. 성공하면 watchdog `restore-drill`에 핑한다.
 
 ## 할 수 없는 일 / 함정
 
