@@ -108,10 +108,12 @@ def _build_upload_and_save(
             f"Dump built and verified: {archive_key} "
             f"({size_mb:.1f} MB, {entries} TOC entries)"
         )
-        r2_put(BUCKET, archive_key, tmp_path)
-        print(f"Uploaded to R2: {BUCKET}/{archive_key}")
+        # Local copy first: a failed upload must not also cost the local one
+        # (2026-09-20..23 left neither when R2 rejected the upload).
         shutil.copyfile(tmp_path, backup_dir / archive_key)
         print(f"Saved local copy: {backup_dir / archive_key}")
+        r2_put(BUCKET, archive_key, tmp_path)
+        print(f"Uploaded to R2: {BUCKET}/{archive_key}")
     finally:
         os.unlink(tmp_path)
 
@@ -120,8 +122,17 @@ def main() -> int:
     today = datetime.now(KST)
     date = today.strftime("%Y-%m-%d")
 
+    # One database failing must not skip the others (legacy_game went
+    # unbacked while main's upload failed).
+    failed = []
     for spec in BACKUP_SPECS:
-        _build_upload_and_save(*spec, date)
+        try:
+            _build_upload_and_save(*spec, date)
+        except Exception as exc:
+            print(f"Backup failed for {spec[0]}: {exc!r}", file=sys.stderr)
+            failed.append(spec[0])
+    if failed:
+        raise SystemExit(f"backup failed for: {', '.join(failed)}")
 
     r2_cutoff = (today - timedelta(days=R2_RETENTION_DAYS)).date()
     for _database, key_prefix, _backup_dir, _marker in BACKUP_SPECS:

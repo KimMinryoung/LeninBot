@@ -84,12 +84,12 @@ def main() -> int:
         size_mb = os.path.getsize(tmp_path) / 1024 / 1024
         print(f"Dump built and verified: {archive_key} ({size_mb:.1f} MB, {entries} TOC entries)")
 
-        r2_put(BUCKET, archive_key, tmp_path)
-        print(f"Uploaded to R2: {BUCKET}/{archive_key}")
-
-        # Local copy after successful upload (fast restore without R2 roundtrip).
+        # Local copy first, so a failed upload does not also cost the local one.
         shutil.copyfile(tmp_path, backup_dir / archive_key)
         print(f"Saved local copy: {backup_dir / archive_key}")
+
+        r2_put(BUCKET, archive_key, tmp_path)
+        print(f"Uploaded to R2: {BUCKET}/{archive_key}")
     finally:
         os.unlink(tmp_path)
 

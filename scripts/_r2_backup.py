@@ -12,7 +12,14 @@ from datetime import datetime
 from pathlib import Path
 
 
-def promote_systemd_credentials(pairs: tuple[tuple[str, str], ...] = (("r2_cf_api_token", "R2_CF_API_TOKEN"),)) -> None:
+R2_CREDENTIAL_PAIRS = (
+    ("r2_cf_api_token", "R2_CF_API_TOKEN"),
+    ("r2_s3_access_key_id", "R2_S3_ACCESS_KEY_ID"),
+    ("r2_s3_secret_access_key", "R2_S3_SECRET_ACCESS_KEY"),
+)
+
+
+def promote_systemd_credentials(pairs: tuple[tuple[str, str], ...] = R2_CREDENTIAL_PAIRS) -> None:
     """Expose LoadCredentialEncrypted secrets to legacy env-based helpers."""
     cred_dir = os.environ.get("CREDENTIALS_DIRECTORY")
     if not cred_dir:
@@ -25,27 +32,33 @@ def promote_systemd_credentials(pairs: tuple[tuple[str, str], ...] = (("r2_cf_ap
             os.environ[env_name] = path.read_text().rstrip("\n")
 
 
-def r2_url(bucket: str, key: str) -> str:
-    acct = os.environ["R2_CF_ACCOUNT_ID"]
-    return f"https://api.cloudflare.com/client/v4/accounts/{acct}/r2/buckets/{bucket}/objects/{key}"
-
-
-def r2_headers() -> dict:
-    from secrets_loader import require_secret
-    return {"Authorization": f"Bearer {require_secret('R2_CF_API_TOKEN')}"}
-
-
 def r2_put(bucket: str, key: str, path: str, content_type: str = "application/octet-stream") -> None:
-    import requests
-    with open(path, "rb") as f:
-        data = f.read()
-    resp = requests.put(
-        r2_url(bucket, key),
-        headers={**r2_headers(), "Content-Type": content_type},
-        data=data,
-        timeout=300,
+    """Upload through R2's S3 API, which switches to multipart for large files.
+
+    The Cloudflare REST object endpoint takes the whole body in one request and
+    rejects it with 413 above roughly 300 MiB; the main DB dump crossed that on
+    2026-09-20 and every upload failed until this moved to the S3 API.
+    """
+    import boto3
+    from boto3.s3.transfer import TransferConfig
+    from botocore.config import Config
+    from secrets_loader import require_secret
+
+    client = boto3.client(
+        "s3",
+        endpoint_url=f"https://{os.environ['R2_CF_ACCOUNT_ID']}.r2.cloudflarestorage.com",
+        aws_access_key_id=require_secret("R2_S3_ACCESS_KEY_ID"),
+        aws_secret_access_key=require_secret("R2_S3_SECRET_ACCESS_KEY"),
+        region_name="auto",
+        config=Config(retries={"max_attempts": 5, "mode": "standard"}),
     )
-    resp.raise_for_status()
+    client.upload_file(
+        path,
+        bucket,
+        key,
+        ExtraArgs={"ContentType": content_type},
+        Config=TransferConfig(multipart_threshold=64 * 1024 * 1024, multipart_chunksize=64 * 1024 * 1024),
+    )
 
 
 def prune_local_backups(backup_dir: Path, key_prefix: str, suffix: str, cutoff) -> None:

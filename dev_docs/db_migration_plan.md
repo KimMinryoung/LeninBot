@@ -19,7 +19,7 @@
 | main + legacy | `leninbot-main-backup.timer`, 매일 03:40 KST → `scripts/backup_main_db_to_r2.py` | 로컬 3일, R2 15일 |
 | writer | `leninbot-writer-backup.timer`, 매일 03:20 KST → `scripts/backup_writer_db_to_r2.py` | 로컬 3일, R2 15일 |
 
-백업은 Postgres custom dump와 archive TOC 검증을 사용한다. `scripts/r2_retention.py`는 날짜 형식이 일치하는 prefix만 정리하고, 목록 조회 실패 또는 최소 보관 수 미달이면 삭제하지 않는다. KG 백업은 [knowledge_graph_design.md](knowledge_graph_design.md)를 따른다.
+백업은 Postgres custom dump와 archive TOC 검증을 사용한다. 업로드는 `scripts/_r2_backup.py`의 `r2_put`이 R2 S3 API(boto3, 64MiB 멀티파트)로 한다. 자격 증명은 버킷 한정 Object Read & Write 토큰의 `r2_s3_access_key_id`·`r2_s3_secret_access_key`이고, R2 정리(`r2_retention.py`)는 기존 `r2_cf_api_token`을 쓴다. Cloudflare REST 객체 API는 약 300MiB 넘는 본문을 413으로 거부해 main 덤프가 2026-09-20~23 업로드되지 못했다. 로컬 사본은 업로드 전에 저장하고, main 스크립트는 한 DB가 실패해도 나머지를 계속 뜬 뒤 실패로 끝난다. `scripts/r2_retention.py`는 날짜 형식이 일치하는 prefix만 정리하고, 목록 조회 실패 또는 최소 보관 수 미달이면 삭제하지 않는다. KG 백업은 [knowledge_graph_design.md](knowledge_graph_design.md)를 따른다.
 
 복구 검증은 프로젝트 venv로 실행한다:
 

@@ -26,12 +26,9 @@ sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(ROOT / "skills" / "kg-maintenance" / "scripts"))
 
 
-from _r2_backup import promote_systemd_credentials, prune_local_backups, r2_put
+from _r2_backup import R2_CREDENTIAL_PAIRS, promote_systemd_credentials, prune_local_backups, r2_put
 
-promote_systemd_credentials((
-    ("neo4j_password", "NEO4J_PASSWORD"),
-    ("r2_cf_api_token", "R2_CF_API_TOKEN"),
-))
+promote_systemd_credentials((("neo4j_password", "NEO4J_PASSWORD"), *R2_CREDENTIAL_PAIRS))
 
 from backup_kg import backup as _dump_kg
 from r2_retention import prune_r2_prefix

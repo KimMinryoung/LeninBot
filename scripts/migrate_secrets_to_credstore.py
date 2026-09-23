@@ -49,6 +49,8 @@ TIER_A = [
     "OPENROUTER_API_KEY",
     "TYPESAFE_API_KEY",
     "R2_CF_API_TOKEN",
+    "R2_S3_ACCESS_KEY_ID",
+    "R2_S3_SECRET_ACCESS_KEY",
     "REPLICATE_API_TOKEN",
     "RESEND_API_KEY",
     "TAVILY_API_KEY",
@@ -146,7 +148,12 @@ SERVICE_CREDS: dict[str, set[str]] = {
     },
 
     # KG backup (daily 03:00) — R2 upload + Neo4j dump.
-    "leninbot-kg-backup": {"R2_CF_API_TOKEN", "NEO4J_PASSWORD"},
+    "leninbot-kg-backup": {
+        "R2_CF_API_TOKEN",
+        "R2_S3_ACCESS_KEY_ID",
+        "R2_S3_SECRET_ACCESS_KEY",
+        "NEO4J_PASSWORD",
+    },
 
     # Read-only roleplay search surface. DeepSeek is supplied by the proxy.
     "leninbot-roleplay": {

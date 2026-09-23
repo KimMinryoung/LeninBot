@@ -8,6 +8,8 @@ User=grass
 WorkingDirectory=/home/grass/leninbot
 EnvironmentFile=/home/grass/leninbot/.env
 LoadCredentialEncrypted=r2_cf_api_token:/etc/credstore.encrypted/r2_cf_api_token.cred
+LoadCredentialEncrypted=r2_s3_access_key_id:/etc/credstore.encrypted/r2_s3_access_key_id.cred
+LoadCredentialEncrypted=r2_s3_secret_access_key:/etc/credstore.encrypted/r2_s3_secret_access_key.cred
 ExecStart=/home/grass/leninbot/venv/bin/python /home/grass/leninbot/scripts/backup_writer_db_to_r2.py
 TimeoutStartSec=900
 # Dead-man's switch ping to the off-VM watchdog (Cloudflare Worker). Prefixed
