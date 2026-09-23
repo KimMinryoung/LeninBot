@@ -1,7 +1,7 @@
 {
   "archival_document_translation_ru": {
     "provider": "gemini",
-    "model": "gemini-3.1-pro-preview",
+    "model": "tier:high",
     "temperature": 0.2,
     "max_tokens": 48000,
     "timeout": 600,
@@ -9,7 +9,7 @@
   },
   "archival_document_translation_zh": {
     "provider": "deepseek_anthropic",
-    "model": "deepseek-flash",
+    "model": "tier:high",
     "temperature": 0.2,
     "max_tokens": 48000,
     "timeout": 600,
@@ -23,7 +23,7 @@
   },
   "archival_document_translation_it": {
     "provider": "gemini",
-    "model": "gemini-3.1-pro-preview",
+    "model": "tier:high",
     "temperature": 0.2,
     "max_tokens": 48000,
     "timeout": 600,
@@ -31,7 +31,7 @@
   },
   "archival_document_translation_fr": {
     "provider": "gemini",
-    "model": "gemini-3.1-pro-preview",
+    "model": "tier:high",
     "temperature": 0.2,
     "max_tokens": 48000,
     "timeout": 600,
@@ -39,7 +39,7 @@
   },
   "archival_document_translation_de": {
     "provider": "gemini",
-    "model": "gemini-3.1-pro-preview",
+    "model": "tier:high",
     "temperature": 0.2,
     "max_tokens": 48000,
     "timeout": 600,
@@ -47,7 +47,7 @@
   },
   "archival_document_translation_en": {
     "provider": "gemini",
-    "model": "gemini-3.1-pro-preview",
+    "model": "tier:high",
     "temperature": 0.2,
     "max_tokens": 48000,
     "timeout": 600,
@@ -55,7 +55,7 @@
   },
   "archival_term_extraction": {
     "provider": "deepseek",
-    "model": "deepseek-flash",
+    "model": "tier:high",
     "temperature": 0.0,
     "max_tokens": 8000,
     "timeout": 180,
@@ -67,7 +67,7 @@
   },
   "commulingo_event_evidence_labels": {
     "provider": "deepseek",
-    "model": "deepseek-flash",
+    "model": "tier:high",
     "temperature": 0.1,
     "max_tokens": 8000,
     "timeout": 180,
@@ -76,7 +76,7 @@
   },
   "chunk_summary": {
     "provider": "openai",
-    "model": "gpt-5.6-luna",
+    "model": "tier:low",
     "max_tokens": 1024,
     "reasoning_effort": "none",
     "timeout": 60,
@@ -87,7 +87,7 @@
   },
   "conversation_reflection": {
     "provider": "openai",
-    "model": "gpt-5.6-luna",
+    "model": "tier:low",
     "max_tokens": 768,
     "reasoning_effort": "none",
     "timeout": 60,
@@ -98,7 +98,7 @@
   },
   "scout_kg_classify": {
     "provider": "openai",
-    "model": "gpt-5.6-luna",
+    "model": "tier:low",
     "max_tokens": 64,
     "reasoning_effort": "none",
     "timeout": 30,
@@ -109,7 +109,7 @@
   },
   "experience_extraction": {
     "provider": "openai",
-    "model": "gpt-5.6-luna",
+    "model": "tier:low",
     "max_tokens": 4096,
     "reasoning_effort": "none",
     "timeout": 120,
@@ -120,7 +120,7 @@
   },
   "vector_query_translation": {
     "provider": "deepseek",
-    "model": "deepseek-flash",
+    "model": "tier:high",
     "temperature": 0.0,
     "max_tokens": 200,
     "timeout": 12,
@@ -132,7 +132,7 @@
   },
   "task_routing_advisor": {
     "provider": "deepseek",
-    "model": "deepseek-flash",
+    "model": "tier:high",
     "temperature": 0.0,
     "max_tokens": 500,
     "timeout": 12,
@@ -144,13 +144,13 @@
   },
   "writer_critic_diagnosis": {
     "provider": "deepseek",
-    "model": "deepseek_flash",
+    "model": "tier:high",
     "managed": "model-only",
     "note": "writer 퇴고 진단 critic 모델 별칭. 실행은 writer 자체 클라이언트 (writer/models.py에서 조회)"
   },
   "razvedchik_comment": {
     "provider": "deepseek_anthropic",
-    "model": "deepseek-flash",
+    "model": "tier:high",
     "temperature": 0.85,
     "max_tokens": 2048,
     "timeout": 120,
@@ -161,7 +161,7 @@
   },
   "razvedchik_observation": {
     "provider": "deepseek_anthropic",
-    "model": "deepseek-flash",
+    "model": "tier:high",
     "temperature": 0.9,
     "max_tokens": 2048,
     "timeout": 120,
@@ -172,7 +172,7 @@
   },
   "razvedchik_reply": {
     "provider": "deepseek_anthropic",
-    "model": "deepseek-flash",
+    "model": "tier:high",
     "temperature": 0.8,
     "max_tokens": 2048,
     "timeout": 120,
@@ -183,7 +183,7 @@
   },
   "razvedchik_debrief_scout": {
     "provider": "deepseek_anthropic",
-    "model": "deepseek-flash",
+    "model": "tier:high",
     "temperature": 0.7,
     "max_tokens": 2048,
     "timeout": 120,
@@ -194,7 +194,7 @@
   },
   "razvedchik_debrief_commander": {
     "provider": "deepseek_anthropic",
-    "model": "deepseek-flash",
+    "model": "tier:high",
     "temperature": 0.7,
     "max_tokens": 2048,
     "timeout": 120,
@@ -205,7 +205,7 @@
   },
   "writer_research_digest": {
     "provider": "deepseek",
-    "model": "deepseek_flash",
+    "model": "tier:high",
     "managed": "model-only",
     "note": "writer 웹리서치 소화 경량 모델 별칭. 실행은 writer 자체 클라이언트 (writer/models.py에서 조회)"
   },
@@ -229,13 +229,13 @@
   },
   "kg_extraction_main": {
     "provider": "gemini",
-    "model": "gemini-3.5-flash-lite",
+    "model": "tier:low",
     "managed": "model-only",
     "note": "KG graphiti 엔티티/엣지 추출 메인 모델 (graph_memory/service.py에서 조회)"
   },
   "kg_extraction_small": {
     "provider": "gemini",
-    "model": "gemini-3.5-flash-lite",
+    "model": "tier:low",
     "managed": "model-only",
     "note": "KG graphiti 보조(small) 모델 — 고볼륨이라 저가 2.5 유지, 2.5 폐기 공지 시 3.1로 2026-08-31 사용자 결정으로 저가 유지 철회, 2.5→3.5-flash-lite (최신 lite, 가격 3배 감수)."
   },
@@ -247,7 +247,7 @@
   },
   "kg_document_extraction": {
     "provider": "gemini",
-    "model": "gemini-3.5-flash-lite",
+    "model": "tier:low",
     "temperature": 0.0,
     "max_tokens": 4096,
     "timeout": 120,
@@ -259,7 +259,7 @@
   },
   "research_spelling_proofread": {
     "provider": "openai",
-    "model": "gpt-5.6-luna",
+    "model": "tier:low",
     "max_tokens": 1024,
     "reasoning_effort": "low",
     "timeout": 45,
@@ -270,7 +270,7 @@
   },
   "db_content_translation": {
     "provider": "deepseek",
-    "model": "deepseek-flash",
+    "model": "tier:high",
     "temperature": 0.1,
     "max_tokens": 12000,
     "timeout": 180,
@@ -282,7 +282,7 @@
   },
   "research_markdown_translation": {
     "provider": "deepseek",
-    "model": "deepseek-flash",
+    "model": "tier:high",
     "temperature": 0.1,
     "max_tokens": 20000,
     "timeout": 240,
@@ -293,7 +293,7 @@
   },
   "kg_entity_classification": {
     "provider": "gemini",
-    "model": "gemini-3.7-flash",
+    "model": "tier:medium",
     "temperature": 0.0,
     "max_tokens": 4096,
     "timeout": 120,
@@ -302,7 +302,7 @@
   },
   "kg_entity_merge_grouping": {
     "provider": "gemini",
-    "model": "gemini-3.7-flash",
+    "model": "tier:medium",
     "temperature": 0.0,
     "max_tokens": 8192,
     "timeout": 120,
@@ -311,7 +311,7 @@
   },
   "kg_edge_name_normalization": {
     "provider": "gemini",
-    "model": "gemini-3.7-flash",
+    "model": "tier:medium",
     "temperature": 0.0,
     "max_tokens": 16384,
     "timeout": 120,
@@ -320,7 +320,7 @@
   },
   "kg_type_assignment": {
     "provider": "claude",
-    "model": "claude-3-5-haiku-20241022",
+    "model": "tier:low",
     "temperature": 0.0,
     "max_tokens": 2048,
     "timeout": 120,
@@ -445,7 +445,7 @@
   },
   "roleplay_duration_estimate": {
     "provider": "deepseek",
-    "model": "deepseek-flash",
+    "model": "tier:high",
     "temperature": 0,
     "max_tokens": 2048,
     "timeout": 20,
@@ -457,7 +457,7 @@
   },
   "roleplay_scene_consistency": {
     "provider": "deepseek_anthropic",
-    "model": "deepseek-flash",
+    "model": "tier:high",
     "temperature": 0.0,
     "max_tokens": 2048,
     "timeout": 30,
@@ -482,7 +482,7 @@
   },
   "roleplay_time_authorization": {
     "provider": "deepseek",
-    "model": "deepseek-flash",
+    "model": "tier:high",
     "temperature": 0,
     "max_tokens": 768,
     "timeout": 20,
@@ -494,7 +494,7 @@
   },
   "commulingo_activity_migration_review": {
     "provider": "deepseek",
-    "model": "deepseek-flash",
+    "model": "tier:high",
     "temperature": 0.1,
     "max_tokens": 2500,
     "timeout": 120,

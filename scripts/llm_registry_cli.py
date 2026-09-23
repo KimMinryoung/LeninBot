@@ -6,7 +6,7 @@ Usage:
   python scripts/llm_registry_cli.py show <feature>   # 한 기능의 JSON 원본 + 유효값
   python scripts/llm_registry_cli.py set <feature> <key> <value>
                                                       # config/llm_call_sites.json 수정 (핫리로드 반영)
-  python scripts/llm_registry_cli.py add <feature> --provider P --model M [--temperature T] ...
+  python scripts/llm_registry_cli.py add <feature> --provider P --tier low [--temperature T] ...
 
   python scripts/llm_registry_cli.py agent-show <agent>
   python scripts/llm_registry_cli.py agent-set <agent> <key> <value>
@@ -128,7 +128,13 @@ def cmd_add(args) -> None:
     if args.feature in data:
         print(f"'{args.feature}'는 이미 등록돼 있습니다. 'set'으로 수정하세요.")
         sys.exit(1)
-    entry = {"provider": args.provider, "model": args.model}
+    model = f"tier:{args.tier}" if args.tier else args.model
+    if args.tier:
+        from llm.provider_registry import current_text_model
+        if current_text_model(args.provider, model) is None:
+            print(f"provider {args.provider!r}에는 {model!r} 티어가 없습니다.")
+            sys.exit(1)
+    entry = {"provider": args.provider, "model": model}
     for key in ("temperature", "max_tokens", "timeout"):
         val = getattr(args, key)
         if val is not None:
@@ -153,7 +159,7 @@ _AGENT_KEYS = {"provider", "model", "budget_usd", "max_rounds"}
 # provider별 모델 별칭 힌트 (bot_config 티어/별칭 맵 기준; 오타 경고용, 차단 아님)
 _AGENT_MODEL_HINTS = {
     "claude": {"haiku", "sonnet", "opus"},
-    "openai": {"gpt56", "gpt56terra", "gpt56luna"},
+    "openai": {"gpt6", "gpt6luna", "gpt56", "gpt56terra", "gpt56luna"},
     "deepseek": {"deepseek_pro", "deepseek_flash"},
     "kimi": {"kimi_k3"},
 }
@@ -307,7 +313,7 @@ _CHEAT_SHEET = """\
 │   ./llmctl agent-set <에이전트> <키> <값>   (핫리로드)               │
 │                                                                  │
 │ 예시: ./llmctl agent-set diary budget_usd 5.0                        │
-│       ./llmctl set chunk_summary model gemini-3.5-flash              │
+│       ./llmctl set chunk_summary model tier:medium                   │
 │                                                                  │
 │ 팁: Claude Code에게 "일기 예산 5달러로 올려줘"라고 말해도 됩니다   │
 ╰──────────────────────────────────────────────────────────────────╯"""
@@ -346,7 +352,9 @@ def main() -> None:
     p_add = sub.add_parser("add")
     p_add.add_argument("feature")
     p_add.add_argument("--provider", required=True, choices=["gemini", "deepseek", "kimi", "openai", "claude"])
-    p_add.add_argument("--model", required=True)
+    model_selection = p_add.add_mutually_exclusive_group(required=True)
+    model_selection.add_argument("--tier", choices=["frontier", "high", "medium", "low"])
+    model_selection.add_argument("--model", help="특수 모델만 직접 지정; 일반 텍스트 호출은 --tier 사용")
     p_add.add_argument("--temperature", type=float)
     p_add.add_argument("--max-tokens", dest="max_tokens", type=int)
     p_add.add_argument("--timeout", type=float)

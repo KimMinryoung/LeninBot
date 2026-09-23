@@ -77,7 +77,7 @@ developer MCP clients
         |-- read-only adapters over runtime_tools, dev_docs, task/corpus state
         |-- operator-only readonly_query_db and bounded_query_db via existing DB guards
 
-LLM-consuming services -> llm_proxy (127.0.0.1:8110) -> model providers
+LLM-consuming services -> llm_proxy (127.0.0.1:8110; text tier resolution + key injection) -> model providers
 paid search/extraction -> web_gateway (127.0.0.1:8111) -> Tavily/Brave
 ```
 

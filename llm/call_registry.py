@@ -228,9 +228,16 @@ def resolve(feature: str, **defaults) -> CallSiteProfile:
     def _pick(key, fallback):
         return entry.get(key, defaults.get(key, fallback))
 
+    provider = str(_pick("provider", "gemini"))
+    from llm.provider_registry import current_text_model
+
+    model = current_text_model(
+        "deepseek" if provider == "deepseek_anthropic" else provider, model,
+    ) or model
+
     return CallSiteProfile(
         feature=feature,
-        provider=str(_pick("provider", "gemini")),
+        provider=provider,
         model=model,
         temperature=float(_pick("temperature", 0.0)),
         max_tokens=int(_pick("max_tokens", 1024)),
@@ -394,7 +401,7 @@ def _generate_openai_compat(p: CallSiteProfile, prompt: str, system: str | None)
     if p.json_mode:
         kwargs["response_format"] = {"type": "json_object"}
     if p.provider == "openai":
-        # GPT-5.6은 추론 모델 — max_tokens가 아니라 max_completion_tokens를 받고,
+        # GPT-5.6/GPT-6은 추론 모델 — max_tokens가 아니라 max_completion_tokens를 받고,
         # temperature는 기본값만 허용한다 (openai_tool_loop._call_sdk와 같은 계약).
         # max_completion_tokens는 추론 토큰까지 포함하므로 reasoning_effort로 억제하지
         # 않으면 짧은 상한에서 본문이 비어 돌아온다.

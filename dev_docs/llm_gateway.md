@@ -1,6 +1,6 @@
 # LLM 게이트웨이 (llm/gateway.py + llm_proxy/)
 
-최종 확인: 2026-08-29 (툴 루프 SDK 이중 감사 제거, GPT-5.6 가격·캐시 쓰기·장문 티어 갱신).
+최종 확인: 2026-09-23 (GPT-6 Sol/Luna 가격·Responses 경로와 Opus 5.5 가격 확인).
 
 모든 LLM API 호출이 지나는 단일 seam. 툴 보안 게이트웨이(`security_gateway/`)의
 LLM 버전으로, 같은 패턴을 따른다: 단일 관문 + 이중 싱크 감사 + shadow→enforce 롤아웃.
@@ -9,11 +9,9 @@ LLM 버전으로, 같은 패턴을 따른다: 단일 관문 + 이중 싱크 감�
 - **관찰/정책 절반** — `llm/gateway.py` (in-process): 호출 전 정책 체크, 호출 후
   토큰/비용 감사. LiteLLM proxy의 spend-log/예산 데이터 모델 차용.
 - **강제 절반** — `llm_proxy/` (`leninbot-llm-proxy.service`, 127.0.0.1:8110):
-  **바이트 패스스루 키 주입 프록시**. 프로바이더 API 키는 이 서비스의 systemd
+  **키 주입·텍스트 모델 정규화 프록시**. 프로바이더 API 키는 이 서비스의 systemd
   credential에만 있고, 다른 서비스의 클라이언트는 placeholder 키(`via-llm-proxy`) +
-  프록시 base_url로 구성된다. 요청/응답 본문은 건드리지 않고(스트리밍은 `aiter_raw`
-  원시 바이트 그대로) auth 헤더만 교체하므로, LiteLLM 같은 *번역형* 프록시와 달리
-  SSE·prompt cache·thinking 블록 계약에 회귀 여지가 없다. 키 제거는 완료됐다(아래
+  프록시 base_url로 구성된다. 텍스트 생성 요청의 모델 선택만 `tier:high|medium|low`(Claude/OpenAI는 `frontier`도 지원) 또는 등록된 이전 ID에서 현행 ID로 정규화한다. 알 수 없는 텍스트 모델은 400으로 거절한다. 그 밖의 본문과 응답 스트림은 바이트 그대로 중계하며(`aiter_raw`), 인증 헤더만 교체한다. 키 제거는 완료됐다(아래
   "Enforcement — 키 제거 완료") — 키 없는 코드는 프로바이더를 직접 호출할 수 없다.
 
 ## Seam이 되는 지점
@@ -24,10 +22,10 @@ LLM 버전으로, 같은 패턴을 따른다: 단일 관문 + 이중 싱크 감�
 | `llm.agent_loop.run_tool_loop` 진입부 | 에이전트 턴당 1회 정책 체크 (`check_llm_call`) |
 | `llm.call_registry.generate_sync` | 등록된 원샷 호출 전부 (gemini/deepseek/openai/claude/kimi executor) |
 | `llm.instrumented_clients.AuditedGenAIClient` | graphiti-core가 소유하는 Gemini 추출·임베딩 SDK 호출 (임베딩 토큰은 SDK 미제공이라 `embed_content:estimated` 라벨의 보수적 추정치) |
-| `browser.use_agent._AuditedBrowserChatMixin`, `telegram.commands.handle_photo` | browser-use 매 step과 Telegram vision 직접 호출 |
+| `browser.use_agent._AuditedBrowserChatMixin`, `browser.computer_use`, `telegram.commands.handle_photo` | browser-use 매 step, native OpenAI computer-use Responses 호출, Telegram vision 직접 호출 |
 
 새 호출부를 만들 때: 루프면 `chat_with_tools`를, 원샷이면 registry `generate()`를
-쓰는 한 자동으로 seam을 지난다. 그 밖의 직접 SDK 호출은 만들지 말 것.
+쓰고 모델은 ID 대신 `tier:low`처럼 지정한다. 레지스트리는 실행 전에 티어를 현행 ID로 해석한다. 직접 SDK 스크립트도 프록시 URL에 `model="tier:low"`를 보낼 수 있다. 기존 구형 ID는 동일 티어의 현재 ID로 정규화하며, GPT-6 Chat Completions 도구 호출이 추론을 켠 경우에는 Responses API로 옮기도록 400을 반환한다. 그 밖의 직접 SDK 호출은 만들지 말 것.
 `bot_config`의 SDK 객체는 애드혹 직접 사용도 놓치지 않도록 `AuditedAsyncAnthropic`/
 `AuditedAsyncOpenAI`로 감싸지만, 툴 루프 요청은 `with_audit_owner(..., "loop")`로 소유자를
 표시한다(2026-09-19부터 프록시는 `x-llm-caller`를 감사 행에만 쓰고 상류 제공자에게는 전달하지 않는다). 래퍼는 caller 헤더·DeepSeek thinking 기본값은 그대로 주입하면서 자체
@@ -107,13 +105,13 @@ status(ok|error|denied|would_deny), error_excerpt.
 OpenAI 호환과 Gemini는 prompt_tokens가 캐시 히트를 **포함**한다. DeepSeek/Kimi처럼
 가격표가 프로토콜별로 겹치는 모델은 호출부가 `token_semantics`를 명시한다. Gemini
 가격은 [Google AI Gemini API pricing](https://ai.google.dev/gemini-api/docs/pricing)의
-2026-08-05 standard tier를 기준으로 `provider_registry.GEMINI_PRICING`에 둔다.
+2026-09-23 standard tier를 기준으로 `provider_registry.GEMINI_PRICING`에 둔다.
 
-GPT-5.6은 OpenAI 호환 의미론에서도 입력을 ordinary/cache-read/cache-write 세 종류로
+GPT-5.6과 GPT-6은 OpenAI 호환 의미론에서도 입력을 ordinary/cache-read/cache-write 세 종류로
 나눈다. `usage.prompt_tokens_details.cache_write_tokens`를 `cache_create`에 보존하고,
 ordinary input에서는 cache read와 write를 모두 뺀 뒤 각각 공식 단가로 다시 계산한다.
 272K 입력 토큰을 초과하면 전체 요청에 long-context 단가(입력 2배·출력 1.5배)를
-적용한다. 현재 Standard 단가는 `dev_docs/llm_provider_architecture.md`에 정리한다.
+적용한다. GPT-6 Responses 응답의 `input_tokens_details.cached_tokens`도 같은 비용 계산에 대응한다. 공식 단가: [GPT-6 Sol](https://developers.openai.com/api/docs/models/gpt-6-sol), [GPT-6 Luna](https://developers.openai.com/api/docs/models/gpt-6-luna), [Claude Opus 5.5](https://www.anthropic.com/claude-opus-5-5).
 
 DeepSeek V4는 **시간대별 요금**이다: 2026-08-16 16:00 UTC(베이징 08-17 00:00)부터
 평면 단가를 버리고 피크(UTC 01–04·06–10시)/오프피크(그 외, 피크의 절반) 티어로
@@ -297,10 +295,13 @@ moonshot/openai 키 credential을 주석 처리했다. **이제 실키는 leninb
   provider 키를 마운트하지 않는다(DB credential만 사용).
 - **gemini도 편입 완료 (2026-08-05 2차)**: graphiti 추출·임베딩은 `client=`로
   프록시 경유 `genai.Client`를 주입받고, browser-use vision 폴백(ChatGoogle
-  `http_options` / ChatOpenAI `base_url`)도 프록시 경유. gemini 키 제거 후
+  `http_options` / ChatOpenAI `base_url`)도 프록시 경유한다. ChatGoogle의
+  Gemini 3.8 Flash 기본값은 `config.thinking_config.thinking_level=LOW`를 쓴다
+  (설치된 browser-use 0.12.5는 3.8을 신규 모델로 판별하지 못해 생성 옵션으로 전달).
+  gemini 키 제거 후
   keyless 상태에서 KG 스모크 ok=true + 프록시 로그의
-  `POST /gemini/.../batchEmbedContents → 200`으로 검증. ad-hoc KG 스크립트는
-  `GEMINI_API_KEY="$(cat /run/credentials/leninbot-llm-proxy.service/gemini_api_key)"`.
+  `POST /gemini/.../batchEmbedContents → 200`으로 검증. ad-hoc KG 스크립트도
+  프록시 URL과 placeholder 키를 사용한다.
 
 ## Seam 밖에 남은 호출
 

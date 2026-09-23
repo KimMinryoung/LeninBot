@@ -1,6 +1,6 @@
 # LLM 호출 레지스트리 (llm/call_registry.py)
 
-최종 확인: 2026-08-05.
+최종 확인: 2026-09-23.
 
 프로젝트의 LLM API 호출은 두 층으로 관리한다.
 
@@ -14,6 +14,7 @@
 기능 키별 JSON 항목: `{provider, model, temperature, max_tokens, timeout, json_mode, managed, env, note}`.
 
 모델 해석 우선순위: **레거시 env(`env` 배열) > 제네릭 env `LLM_SITE_<KEY>_MODEL` > JSON > 콜사이트 기본값**.
+선택값은 `tier:high|medium|low`(Claude/OpenAI의 `frontier` 포함)를 권장한다. 우선순위 적용 뒤 `provider_registry.current_text_model()`이 실제 ID로 해석하므로 예전 ID를 담은 env도 해당 티어의 현재 모델로 바뀐다. 특수 모델(임베딩·Jev 등)은 ID를 그대로 둔다.
 
 `managed` 값:
 - `executor` — `generate()/generate_sync()`가 직접 실행 (gemini/deepseek/openai/claude/kimi 지원, system·json_mode·timeout 옵션). provider가 `openrouter`/`typesafe`인 항목은 `decide()`가 실행한다(아래)
@@ -64,7 +65,7 @@ TypeSafe Jev는 텍스트를 생성하지 않고 typed 판정을 돌려주는 �
 python scripts/llm_registry_cli.py list              # 원샷 + 에이전트 루프 통합 조회
 python scripts/llm_registry_cli.py show <feature>    # 원본 + env 오버라이드 반영 유효값
 python scripts/llm_registry_cli.py set <feature> <key> <value>   # 핫리로드 반영
-python scripts/llm_registry_cli.py add <feature> --provider gemini --model ... 
+venv/bin/python scripts/llm_registry_cli.py add <feature> --provider gemini --tier low
 python scripts/llm_registry_cli.py agent-show <agent>            # 에이전트 루프 설정 조회
 python scripts/llm_registry_cli.py agent-set <agent> <key> <value>
 #   key: provider|model|budget_usd|max_rounds — agent_runtime.json 수정, 핫리로드
@@ -73,13 +74,13 @@ python scripts/llm_registry_cli.py agent-set <agent> <key> <value>
 
 ## 새 호출부 등록 방법
 
-1. `scripts/llm_registry_cli.py add my_feature --provider gemini --model gemini-3.1-flash-lite --temperature 0 --max-tokens 256 --note "설명"`
+1. `venv/bin/python scripts/llm_registry_cli.py add my_feature --provider gemini --tier low --temperature 0 --max-tokens 256 --note "설명"`
 2. 코드에서: `from llm.call_registry import generate` → `await generate("my_feature", prompt, system=...)` (sync는 `generate_sync`)
 3. 실패(None) 폴백을 콜사이트에 마련할 것.
 
 ## 출력 예산 보장 (2026-08-30)
 
-추론이 켜진 호출(DeepSeek `thinking: enabled`, GPT-5.6 reasoning)은 추론이 max_tokens를 다 먹으면 본문이 비었거나 잘린 채 200이 돌아온다. 이걸 그대로 돌려주면 추론은 비용만 쓰고 결과를 못 낸 것이다 — 1925 대회 번역에서 20k 예산이 통째로 추론에 들어가 본문 0자가 다섯 청크였다. 그래서 executor가 보장한다 (`_with_output_budget`):
+추론이 켜진 호출(DeepSeek `thinking: enabled`, GPT-5.6/GPT-6 reasoning)은 추론이 max_tokens를 다 먹으면 본문이 비었거나 잘린 채 200이 돌아온다. 이걸 그대로 돌려주면 추론은 비용만 쓰고 결과를 못 낸 것이다 — 1925 대회 번역에서 20k 예산이 통째로 추론에 들어가 본문 0자가 다섯 청크였다. 그래서 executor가 보장한다 (`_with_output_budget`):
 
 - 길이 때문에 멈췄고(`stop_reason=max_tokens` / `finish_reason=length`) **본문이 비었거나 추론이 켜진 호출**이면 max_tokens를 2배로 늘려 다시 부른다. 최대 2단계, 상한 `OUTPUT_BUDGET_CAP=65536`.
 - 상한까지 늘려도 완결되지 않으면 `OutputBudgetExhausted`를 던진다. `generate_sync`는 이를 실패로 기록하고(`status=error`) 경고 로그에 원인을 남긴 뒤 None을 돌려준다 — 조용한 빈 문자열이 아니다.

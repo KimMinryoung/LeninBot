@@ -7,15 +7,11 @@ client base_url at http://127.0.0.1:8110/<provider>. Once the provider keys
 are removed from the other services' credential sets, bypassing the gateway
 becomes physically impossible — code without a key cannot call a provider.
 
-Deliberately a BYTE passthrough, not a translating router (the reason
-LiteLLM proxy was rejected): the request body and the response stream are
-forwarded untouched, so provider protocol details the adapters depend on —
-SSE streaming, prompt-cache markers, thinking blocks, tool_use shapes —
-cannot be altered by this hop. The only mutations are the auth header swap
-and ONE guarded request-body default: a DeepSeek completion request that
-says nothing about thinking gets {"type": "disabled"} injected (see
-apply_deepseek_thinking_default) — requests that state a thinking value
-pass through byte-identical.
+The proxy preserves provider protocols and response streams. It rewrites only
+the model in text-generation requests to the current ID for that tier, replaces
+auth headers, and applies one guarded DeepSeek default: completion requests
+with no thinking field get {"type": "disabled"} (see
+apply_deepseek_thinking_default). Other request bodies pass through unchanged.
 
 Routes:  /{provider}/{path}  →  {upstream}/{path}   (GET/POST)
          POST /audit/{llm|tool} — audit sink: the ONLY process that inserts
@@ -48,6 +44,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 import audit_sink
 from llm.gateway import evaluate_policy, record_llm_call
+from llm.provider_registry import current_text_model
 
 logger = logging.getLogger("llm_proxy")
 
@@ -192,6 +189,73 @@ def model_from_request(provider: str, path: str, body: bytes) -> str | None:
         if match:
             return match.group(1)
     return None
+
+
+_TEXT_BODY_PATHS = {
+    "openai": re.compile(r"(?:^|/)(?:chat/completions|responses)$"),
+    "anthropic": re.compile(r"(?:^|/)v1/messages$"),
+    "deepseek": re.compile(r"(?:^|/)(?:chat/completions|v1/messages)$"),
+}
+_GEMINI_GENERATE_PATH = re.compile(
+    r"(?P<prefix>(?:^|/)models/)(?P<model>.+?)(?P<suffix>:(?:generateContent|streamGenerateContent))$"
+)
+
+
+def normalize_text_model_request(
+    provider: str, path: str, body: bytes,
+) -> tuple[str, bytes, str | None, str | None]:
+    """Resolve tier/known old model at the key-owning proxy boundary.
+
+    Return (path, body, original_model, error). Unrelated endpoints stay byte
+    identical. Unknown text models fail closed so newly written scripts cannot
+    silently bypass the current-tier catalog with a pinned old ID.
+    """
+    if provider == "gemini":
+        decoded = unquote(path)
+        match = _GEMINI_GENERATE_PATH.search(decoded)
+        if not match:
+            return path, body, None, None
+        original = match.group("model")
+        current = current_text_model(provider, original)
+        if current is None:
+            return path, body, original, "unregistered Gemini text model; use tier:high|medium|low"
+        if current == original:
+            return path, body, original, None
+        new_path = (decoded[:match.start("model")] + current + decoded[match.end("model"):])
+        return new_path, body, original, None
+
+    pattern = _TEXT_BODY_PATHS.get(provider)
+    if pattern is None or not pattern.search(path):
+        return path, body, None, None
+    try:
+        payload = json.loads(body)
+    except (ValueError, TypeError):
+        return path, body, None, "text generation request must contain a JSON model"
+    if not isinstance(payload, dict) or not isinstance(payload.get("model"), str):
+        return path, body, None, "text generation request must contain a model string"
+    original = payload["model"]
+    current = current_text_model(provider, original)
+    if current is None:
+        return path, body, original, "unregistered text model; use tier:frontier|high|medium|low"
+    if provider == "openai" and path.endswith("chat/completions"):
+        if payload.get("tools") or payload.get("functions"):
+            effort = payload.get("reasoning_effort")
+            if effort is None:
+                reasoning = payload.get("reasoning")
+                effort = reasoning.get("effort") if isinstance(reasoning, dict) else None
+            if current == "gpt-6-astra" or effort != "none":
+                return path, body, original, (
+                    "GPT-6 Chat Completions function calls require reasoning_effort=none "
+                    "(Sol/Luna); use Responses API for reasoning with tools"
+                )
+    if provider == "anthropic" and current in {"claude-opus-5-5", "claude-fable-5-1"}:
+        thinking = payload.get("thinking")
+        if isinstance(thinking, dict) and thinking.get("type") == "disabled":
+            return path, body, original, "current Claude model requires adaptive thinking"
+    if current == original:
+        return path, body, original, None
+    payload["model"] = current
+    return path, json.dumps(payload, ensure_ascii=False).encode("utf-8"), original, None
 
 
 # DeepSeek completion endpoints, both protocol families: the OpenAI-compatible
@@ -507,19 +571,28 @@ async def proxy(provider: str, path: str, request: Request):
     # Gemini SDKs may carry the key as a query parameter; drop it.
     params = [(k, v) for k, v in request.query_params.multi_items() if k != "key"]
     body = await request.body()
+    path, body, requested_model, model_error = normalize_text_model_request(provider, path, body)
+    if model_error:
+        logger.warning("proxy rejected model selection %s/%s: %s", provider, requested_model, model_error)
+        return JSONResponse({"error": model_error, "requested_model": requested_model}, status_code=400)
     body, thinking_injected = apply_deepseek_thinking_default(provider, path, body)
     if thinking_injected:
         logger.info(
             "proxy deepseek /%s: request had no thinking field; "
             "injected {'type': 'disabled'}", path,
         )
-    audit_label = (path + (" +think-off-default" if thinking_injected else ""))[:200]
+    normalized_model = model_from_request(provider, path, body)
+    model_rewritten = bool(requested_model and normalized_model != requested_model)
+    if model_rewritten:
+        logger.info("proxy %s model %s -> %s", provider, requested_model, normalized_model)
+    audit_label = (path + (" +model-normalized" if model_rewritten else "")
+                   + (" +think-off-default" if thinking_injected else ""))[:200]
 
     # Authoritative policy gate. The decision logic is shared with the
     # in-process seam (llm/gateway.evaluate_policy — single source); THIS
     # evaluation is the one a caller cannot skip, because the provider key
     # only exists on the far side of it.
-    model = model_from_request(provider, path, body)
+    model = normalized_model
     policy_provider = POLICY_PROVIDER.get(provider, provider)
     reason, enforce = evaluate_policy(provider=policy_provider, model=model)
     if reason is not None:

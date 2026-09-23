@@ -725,5 +725,78 @@ class TestGatewayCLIOverrides(unittest.TestCase):
             )
 
 
+class TestLatestTierRouting(unittest.TestCase):
+    def test_old_ids_and_tier_selectors_are_resolved(self):
+        from llm.provider_registry import current_text_model
+
+        cases = [
+            ("openai", "tier:low", "gpt-6-luna"),
+            ("openai", "gpt-5.6-terra", "gpt-6-sol"),
+            ("anthropic", "claude-opus-5", "claude-opus-5-5"),
+            ("anthropic", "claude-opus-4-8", "claude-opus-5-5"),
+            ("anthropic", "claude-fable-5", "claude-fable-5-1"),
+            ("anthropic", "claude-haiku-4-5-20251001", "claude-haiku-4-5"),
+            ("gemini", "gemini-3.7-flash", "gemini-3.8-flash"),
+            ("deepseek", "deepseek-v4-pro", "deepseek-flash"),
+        ]
+        for provider, old, expected in cases:
+            with self.subTest(provider=provider, old=old):
+                self.assertEqual(current_text_model(provider, old), expected)
+
+    def test_proxy_rewrites_body_before_policy_and_upstream(self):
+        from llm_proxy.app import normalize_text_model_request, model_from_request
+
+        body = b'{"model":"gpt-5.6-luna","messages":[{"role":"user","content":"hi"}]}'
+        path, rewritten, original, error = normalize_text_model_request(
+            "openai", "v1/chat/completions", body,
+        )
+        self.assertIsNone(error)
+        self.assertEqual(original, "gpt-5.6-luna")
+        self.assertEqual(model_from_request("openai", path, rewritten), "gpt-6-luna")
+        self.assertEqual(json.loads(rewritten)["messages"], json.loads(body)["messages"])
+
+        path, rewritten, original, error = normalize_text_model_request(
+            "gemini", "v1beta/models/gemini-3.7-flash:generateContent", b'{}',
+        )
+        self.assertIsNone(error)
+        self.assertEqual(path, "v1beta/models/gemini-3.8-flash:generateContent")
+        self.assertEqual(original, "gemini-3.7-flash")
+
+    def test_unknown_text_model_and_incompatible_gpt_tools_fail_closed(self):
+        from llm_proxy.app import normalize_text_model_request
+
+        _, _, _, error = normalize_text_model_request(
+            "anthropic", "v1/messages", b'{"model":"claude-experimental"}',
+        )
+        self.assertIn("unregistered", error)
+        _, _, _, error = normalize_text_model_request(
+            "openai", "v1/chat/completions",
+            b'{"model":"gpt-5.6-sol","tools":[{"type":"function"}],"reasoning_effort":"high"}',
+        )
+        self.assertIn("Responses API", error)
+
+    def test_non_text_endpoint_is_byte_identical(self):
+        from llm_proxy.app import normalize_text_model_request
+
+        body = b'{"model":"text-embedding-3-large","input":"hi"}'
+        path, forwarded, original, error = normalize_text_model_request(
+            "openai", "v1/embeddings", body,
+        )
+        self.assertEqual(path, "v1/embeddings")
+        self.assertIs(forwarded, body)
+        self.assertIsNone(original)
+        self.assertIsNone(error)
+
+    def test_registry_env_override_cannot_pin_old_model(self):
+        from llm import call_registry
+
+        config = {"probe_latest_tier": {"provider": "openai", "model": "tier:low",
+                                           "env": ["PROBE_LATEST_TIER_MODEL"]}}
+        with patch.object(call_registry, "_load_config", return_value=config), \
+             patch.dict(os.environ, {"PROBE_LATEST_TIER_MODEL": "gpt-5.6-luna"}):
+            profile = call_registry.resolve("probe_latest_tier")
+        self.assertEqual(profile.model, "gpt-6-luna")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
