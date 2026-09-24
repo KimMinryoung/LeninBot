@@ -23,6 +23,10 @@ choice/noul/score, confidence, 실제 모델·usage·비용을 공통 객체로 
 | `task_routing_decision` | 태스크 담당 에이전트 후보 | 기존 LLM 라우팅 advisor |
 | `scout_kg_fact_filter` | KG에 넣을 문장의 사실성 | 기존 문장 유지 |
 
+크레딧 소진이나 키 문제로 TypeSafe 경로가 거부되면 OpenRouter 경로로 우회하고 소유자에게 한 번 알린다.
+두 경로가 모두 막히면 위 표의 판정 불가 처리를 따른다. 세부는
+[호출 레지스트리](llm_call_registry.md#system-one-판정-호출-decide)의 소진 항목을 따른다.
+
 CommuLingo의 필요한 설명·라벨·원문 발췌 전송과 자동 실행은 지속 승인되어 있다.
 정상 호출마다 재승인을 요청하지 않는다. 상세 범위는 [파이프라인 승인](commulingo_pipeline.md#운영-경로와-승인-범위)을 따른다.
 

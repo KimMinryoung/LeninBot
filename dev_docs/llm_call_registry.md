@@ -31,8 +31,8 @@ TypeSafe Jev는 텍스트를 생성하지 않고 typed 판정을 돌려주는 �
 
 - 항목: `{"provider": "openrouter"|"typesafe", "model": "typesafe/jev-1.13"|"jev-1.13.0", "timeout", "kind": "system_one", "note"}`.
   `openrouter`는 `POST /api/alpha/decisions`, `typesafe`는 `POST /v1/systemone` — body·answers는 동일.
-  현재 Jev 항목은 `typesafe`(직접 API, `jev-1.13.0` 고정)다; `openrouter`는 예비 경로로 코드와
-  프록시 라우트에 남아 있다. `kind`는 표시용이며 실행은 provider가 결정한다.
+  현재 Jev 항목은 `typesafe`(직접 API, `jev-1.13.0` 고정)다; `openrouter`는 아래 소진 대체 경로다.
+  `kind`는 표시용이며 실행은 provider가 결정한다.
 - `decide_detailed(feature, state, questions, label=) → DecisionResult`, `decide_sync(...) → Decision | None`,
   `async decide(...)`. `state`는 문자열 또는 JSON 구조(질문에 필요한 필드만), `questions`는
   `{key: {"type": "noul"|"choice"|"score", "instructions": str|dict|list, "criteria": dict|list}}`.
@@ -48,6 +48,16 @@ TypeSafe Jev는 텍스트를 생성하지 않고 typed 판정을 돌려주는 �
   LLM 분류로 대체하지 않는다. 429·5xx·연결 거부/끊김은 한 번 더 시도한다(Retry-After
   존중, 최대 2초 대기; 항목 `retries`로 조정, 기본 1). 읽기 타임아웃은 재시도하지 않는다 — 첫 요청이 이미 처리됐을
   수 있고 게이트가 단계를 두 배로 세우게 된다. `async decide()`의 바깥 timeout은 항목의 시도 수 전체를 덮는다.
+- **크레딧 소진·키 문제 (2026-09-24)**: TypeSafe에는 잔액 조회 API가 없어, 거부된 첫 호출을 신호로 쓴다.
+  `quota`(402·insufficient/credit/billing 문구)나 `authentication`(401/403)을 받은 경로는 Redis
+  `jev:exhausted:<provider>`(TTL 1시간)로 모든 프로세스에서 건너뛰고, 처음 표시할 때 한 번 소유자 알림을
+  Redis `owner_alerts`에 넣는다(텔레그램 봇 `system_monitor`가 2분마다 비워 DM과 시스템 알림으로 보낸다).
+  `typesafe`가 이렇게 실패하면 같은 버전을 OpenRouter Decisions(`jev-1.13.0` → `typesafe/jev-1.13`)로
+  한 번 다시 보낸다. 둘 다 표시되면 요청 없이 `error_kind="exhausted"`로 돌아와 콜사이트 대체 처리를 탄다.
+  프록시 자신의 정책 거부(403 `llm gateway policy`, 예: 일일 예산 초과)는 `policy`로 분류해 표시·우회하지
+  않는다 — 경로를 바꿔 예산 한도를 건너뛰면 안 된다.
+  OpenRouter 잔액은 프록시 경유 `GET /openrouter/api/v1/credits`로 볼 수 있다. Redis가 없으면 차단기 없이
+  평소대로 호출한다. 충전 뒤 바로 복구하려면 `jev:exhausted:<provider>` 키를 지운다.
 - 현재 등록 항목은 `config/llm_call_sites.json`을 따른다. 게이트의 `enabled`/`enforce`/`thresholds`는 핫리로드된다.
 - 스모크: `venv/bin/python scripts/smoke_jev.py` (항목 `system_one_smoke`, 실제 외부 호출).
 

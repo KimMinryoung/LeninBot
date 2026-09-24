@@ -2332,6 +2332,13 @@ async def system_monitor(
                 add_alert_fn("Redis reconnected")
                 await _send_owner(bot, owner_id, "🟢 Redis 재연결 성공 — 태스크 상태 추적 정상.")
             redis_was_up = redis_is_up
+
+            # Alerts queued by processes without a Telegram token (timer jobs,
+            # the roleplay bot): DM the owner and surface them to the orchestrator.
+            from memory_store.redis_state import pop_owner_alerts
+            for alert in await asyncio.to_thread(pop_owner_alerts):
+                add_alert_fn(alert)
+                await _send_owner(bot, owner_id, alert)
         except Exception as e:
             logger.error("System monitor error: %s", e)
 

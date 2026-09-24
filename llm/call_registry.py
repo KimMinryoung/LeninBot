@@ -36,10 +36,11 @@ import asyncio
 import json
 import logging
 import os
+import re
 import threading
 import time
 from contextvars import ContextVar
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from secrets_loader import get_secret
@@ -535,6 +536,10 @@ def _error_kind(exc: Exception) -> str:
     message = str(exc).lower()
     if isinstance(exc, OutputBudgetExhausted):
         return "output_budget"
+    if "llm gateway policy" in message:
+        # The proxy's own denial (budget cap, blocked model) arrives as a 403;
+        # it is policy, not a provider key or balance problem.
+        return "policy"
     if status in (401, 403):
         return "authentication"
     if status == 429:
@@ -655,6 +660,53 @@ _QUESTION_TYPES = ("noul", "choice", "score")
 _DECISION_RETRIES = 1            # extra attempts after a retryable failure
 _DECISION_RETRY_PAUSE = 0.5      # seconds when the provider names no Retry-After
 _DECISION_RETRY_PAUSE_MAX = 2.0
+
+
+# A route whose credits ran out (or whose key stopped working) is skipped for
+# an hour across every process, and the owner hears about it once. TypeSafe
+# exposes no balance API, so the first refused call is the signal.
+_EXHAUSTION_KINDS = {"quota", "authentication"}
+_EXHAUSTED_KEY = "jev:exhausted:{provider}"
+_EXHAUSTED_TTL = 3600
+# The direct TypeSafe route falls back to OpenRouter's Decisions route, which
+# serves the same Jev versions at the same price and has its own credits.
+_DECISION_FAILOVER = {"typesafe": "openrouter"}
+
+
+def _decision_route_exhausted(provider: str) -> bool:
+    try:
+        from memory_store.redis_state import get_redis
+        r = get_redis()
+        return bool(r and r.exists(_EXHAUSTED_KEY.format(provider=provider)))
+    except Exception:
+        return False
+
+
+def _mark_decision_route_exhausted(provider: str, feature: str, kind: str, error: str) -> None:
+    """Flag ``provider`` for _EXHAUSTED_TTL and alert the owner the first time."""
+    logger.error("[llm-registry] %s decision route unusable (%s) at %s: %s", provider, kind, feature, error)
+    try:
+        from memory_store.redis_state import get_redis, push_owner_alert
+        r = get_redis()
+        if r is None or not r.set(_EXHAUSTED_KEY.format(provider=provider), kind, nx=True, ex=_EXHAUSTED_TTL):
+            return
+        fallback = _DECISION_FAILOVER.get(provider)
+        push_owner_alert(
+            f"🔴 Jev 판정 경로 {provider} 사용 불가 ({kind}) — 크레딧 소진 또는 키 문제로 보임. "
+            + (f"{fallback} 경로로 우회 중. " if fallback else "대체 경로 없음: Jev 판정이 멈춘다. ")
+            + f"{_EXHAUSTED_TTL // 60}분 동안 이 경로를 건너뛴다. 오류: {error[:200]}")
+    except Exception as exc:
+        logger.warning("[llm-registry] could not flag exhausted decision route %s: %s", provider, exc)
+
+
+def _failover_model(provider: str, model: str) -> str | None:
+    """The same Jev version under ``provider``'s model spelling."""
+    if provider == "openrouter":
+        if model.startswith("typesafe/"):
+            return model
+        m = re.fullmatch(r"jev-(\d+)\.(\d+)(?:\.\d+)?", model)
+        return f"typesafe/jev-{m.group(1)}.{m.group(2)}" if m else None
+    return None
 
 
 def _decision_attempts(profile: CallSiteProfile) -> int:
@@ -819,6 +871,45 @@ def _post_decision(p: CallSiteProfile, state, questions: dict) -> tuple[dict, in
     return payload, latency_ms
 
 
+def _decision_on_route(profile: CallSiteProfile, feature: str, state, questions: dict,
+                       label: str | None) -> "tuple[dict, int] | DecisionResult":
+    """(payload, latency_ms) from ``profile``'s route, or the failure.
+
+    A route flagged as exhausted is skipped without a request. A rate limit,
+    5xx or dropped connection gets one more try after a short pause
+    (Retry-After when the provider names one, capped so a gate never stalls
+    its stage). A None answer costs the caller more than the retry: the
+    citation gate passes the claim unchecked and route_task falls back to a
+    chat model four times slower. ``retries`` in the entry overrides.
+    """
+    from llm.gateway import record_llm_call
+
+    if _decision_route_exhausted(profile.provider):
+        return DecisionResult(error_kind="exhausted",
+                              error=f"{profile.provider} decision route is flagged as exhausted")
+    attempts = _decision_attempts(profile)
+    for attempt in range(1, attempts + 1):
+        started = time.monotonic()
+        try:
+            return _post_decision(profile, state, questions)
+        except Exception as exc:
+            kind = _error_kind(exc)
+            retry_after = getattr(exc, "retry_after", None)
+            logger.warning("[llm-registry] %s (%s/%s) decision failed (attempt %d/%d): %s",
+                           feature, profile.provider, profile.model, attempt, attempts, exc)
+            record_llm_call(surface="oneshot", caller=feature, provider=profile.provider,
+                            model=profile.model, label=label, status="error", error_excerpt=str(exc),
+                            latency_ms=int((time.monotonic() - started) * 1000), estimate_cost=False)
+            result = DecisionResult(error_kind=kind, error=str(exc), retry_after=retry_after)
+            if kind in _EXHAUSTION_KINDS:
+                _mark_decision_route_exhausted(profile.provider, feature, kind, str(exc))
+                return result
+            if attempt == attempts or not _decision_retryable(exc, kind):
+                return result
+            time.sleep(min(retry_after or _DECISION_RETRY_PAUSE, _DECISION_RETRY_PAUSE_MAX))
+    return DecisionResult(error_kind="provider", error="no decision attempt ran")
+
+
 def decide_detailed(feature: str, state, questions: dict, *, label: str | None = None,
                     profile: CallSiteProfile | None = None, **defaults) -> DecisionResult:
     """Audited System One call. Never raises for provider failures — the
@@ -845,29 +936,23 @@ def decide_detailed(feature: str, state, questions: dict, *, label: str | None =
         check_llm_call(surface="oneshot", caller=feature, provider=profile.provider, model=profile.model)
     except LLMGatewayDenied as exc:
         return DecisionResult(error_kind="policy", error=str(exc))
-    # A rate limit, 5xx or dropped connection gets one more try after a short
-    # pause (Retry-After when the provider names one, capped so a gate never
-    # stalls its stage). A None answer costs the caller more than the retry:
-    # the citation gate passes the claim unchecked and route_task falls back
-    # to a chat model four times slower. ``retries`` in the entry overrides.
-    attempts = _decision_attempts(profile)
-    for attempt in range(1, attempts + 1):
-        started = time.monotonic()
-        try:
-            payload, latency_ms = _post_decision(profile, state, questions)
-            break
-        except Exception as exc:
-            kind = _error_kind(exc)
-            retry_after = getattr(exc, "retry_after", None)
-            logger.warning("[llm-registry] %s (%s/%s) decision failed (attempt %d/%d): %s",
-                           feature, profile.provider, profile.model, attempt, attempts, exc)
-            record_llm_call(surface="oneshot", caller=feature, provider=profile.provider,
-                            model=profile.model, label=label, status="error", error_excerpt=str(exc),
-                            latency_ms=int((time.monotonic() - started) * 1000), estimate_cost=False)
-            result = DecisionResult(error_kind=kind, error=str(exc), retry_after=retry_after)
-            if attempt == attempts or not _decision_retryable(exc, kind):
-                return result
-            time.sleep(min(retry_after or _DECISION_RETRY_PAUSE, _DECISION_RETRY_PAUSE_MAX))
+    outcome = _decision_on_route(profile, feature, state, questions, label)
+    fallback = _DECISION_FAILOVER.get(profile.provider)
+    if isinstance(outcome, DecisionResult) and fallback and outcome.error_kind in _EXHAUSTION_KINDS | {"exhausted"}:
+        model = _failover_model(fallback, profile.model)
+        if model:
+            failover = replace(profile, provider=fallback, model=model)
+            try:
+                check_llm_call(surface="oneshot", caller=feature, provider=fallback, model=model)
+            except LLMGatewayDenied:
+                return outcome
+            logger.warning("[llm-registry] %s: %s unavailable (%s); retrying on %s",
+                           feature, profile.provider, outcome.error_kind, fallback)
+            outcome = _decision_on_route(failover, feature, state, questions, label)
+            profile = failover
+    if isinstance(outcome, DecisionResult):
+        return outcome
+    payload, latency_ms = outcome
     usage = payload.get("usage") or {}
     tokens_in = int(usage.get("input_tokens") or 0)
     tokens_out = int(usage.get("output_tokens") or 0)
@@ -897,6 +982,9 @@ async def decide(feature: str, state, questions: dict, **defaults) -> Decision |
     profile = resolve(feature, **defaults)
     attempts = _decision_attempts(profile)
     budget = profile.timeout * attempts + _DECISION_RETRY_PAUSE_MAX * (attempts - 1) + 5
+    if profile.provider in _DECISION_FAILOVER:
+        # An exhausted route fails fast, then the failover route gets a full try.
+        budget += profile.timeout
     try:
         result = await asyncio.wait_for(
             asyncio.to_thread(decide_detailed, feature, state, questions, profile=profile, **defaults),

@@ -58,6 +58,46 @@ def redis_available() -> bool:
     return r is not None
 
 
+# ── Owner alerts from any process ─────────────────────────────────────
+#
+# Timer jobs and the roleplay bot have no Telegram token. They queue alerts
+# here; the Telegram bot's system_monitor drains the list and DMs the owner.
+
+_OWNER_ALERTS_KEY = "owner_alerts"
+_OWNER_ALERTS_MAX = 50
+
+
+def push_owner_alert(text: str) -> bool:
+    """Queue ``text`` for the owner's Telegram DM. False when Redis is down."""
+    r = get_redis()
+    if r is None:
+        return False
+    try:
+        r.rpush(_OWNER_ALERTS_KEY, text)
+        r.ltrim(_OWNER_ALERTS_KEY, -_OWNER_ALERTS_MAX, -1)
+        return True
+    except Exception as e:
+        logger.warning("push_owner_alert failed: %s", e)
+        return False
+
+
+def pop_owner_alerts(limit: int = 10) -> list[str]:
+    """Remove and return up to ``limit`` queued owner alerts, oldest first."""
+    r = get_redis()
+    if r is None:
+        return []
+    alerts = []
+    try:
+        for _ in range(limit):
+            item = r.lpop(_OWNER_ALERTS_KEY)
+            if item is None:
+                break
+            alerts.append(item)
+    except Exception as e:
+        logger.warning("pop_owner_alerts failed: %s", e)
+    return alerts
+
+
 # ── Task Execution Progress (survives restart) ────────────────────────
 
 def save_task_progress(

@@ -39,19 +39,26 @@ class _Resp:
         return self._payload
 
 
-class DecideTests(unittest.TestCase):
+class _DecideCase(unittest.TestCase):
     def setUp(self):
         self.recorded = []
         patches = [
             mock.patch.object(gateway, "record_llm_call", side_effect=lambda **kw: self.recorded.append(kw)),
             mock.patch.object(gateway, "check_llm_call", return_value=None),
-            mock.patch.object(cr, "resolve_provider_connection", return_value=cr.ProviderConnection(
-                provider="openrouter", credential_name="OPENROUTER_API_KEY",
-                base_url="http://127.0.0.1:8110/openrouter", api_key="via-llm-proxy")),
+            mock.patch.object(cr, "resolve_provider_connection", side_effect=lambda provider: cr.ProviderConnection(
+                provider=provider, credential_name=f"{provider.upper()}_API_KEY",
+                base_url=f"http://127.0.0.1:8110/{provider}", api_key="via-llm-proxy")),
+            # The exhaustion breaker lives in Redis; keep it in memory here.
+            mock.patch.object(cr, "_decision_route_exhausted", side_effect=lambda provider: provider in self.exhausted),
+            mock.patch.object(cr, "_mark_decision_route_exhausted",
+                              side_effect=lambda provider, *a: self.exhausted.add(provider)),
         ]
+        self.exhausted = set()
         for p in patches:
             p.start(); self.addCleanup(p.stop)
 
+
+class DecideTests(_DecideCase):
     def test_success_returns_typed_answers_and_audits_reported_cost(self):
         with mock.patch("httpx.post", return_value=_Resp(200, PAYLOAD)) as post:
             result = cr.decide_detailed("t", {"msg": "help"}, QUESTIONS, profile=_profile(), label="smoke")
@@ -95,6 +102,8 @@ class DecideTests(unittest.TestCase):
         self.assertIsNone(result.decision)
         self.assertEqual(result.error_kind, "authentication")
         self.assertEqual(self.recorded[0]["status"], "error")
+        self.assertEqual(self.exhausted, {"openrouter"})  # an unusable key flags its route
+        self.exhausted.clear()
         with mock.patch("httpx.post", return_value=_Resp(429, text="slow down", headers={"retry-after": "7"})):
             result = cr.decide_detailed("t", "s", QUESTIONS, profile=_profile())
         self.assertTrue(result.retryable)
@@ -191,6 +200,115 @@ class PricingTests(unittest.TestCase):
         self.assertEqual(gateway.infer_provider("typesafe/jev-1.13"), "openrouter")
         self.assertEqual(gateway.infer_provider("jev-1.13.0"), "typesafe")
         self.assertEqual(gateway.infer_provider("gemini-3.7-flash"), "gemini")
+
+class DecisionFailoverTests(_DecideCase):
+    """TypeSafe credits or key failing: flag the route, retry on OpenRouter."""
+
+    def run_detailed(self, responses):
+        calls = []
+
+        def post(url, **kwargs):
+            calls.append((url, kwargs["json"]["model"]))
+            return responses.pop(0)
+        with mock.patch("httpx.post", side_effect=post):
+            result = cr.decide_detailed("t", "s", QUESTIONS, profile=_profile("typesafe", "jev-1.13.0"))
+        return result, calls
+
+    def test_exhausted_typesafe_fails_over_to_openrouter_with_its_model_id(self):
+        for status, text in [(402, "payment required"), (401, "invalid key"), (403, "credit balance too low")]:
+            with self.subTest(status=status):
+                self.exhausted.clear(); self.recorded.clear()
+                result, calls = self.run_detailed([_Resp(status, text=text), _Resp(200, PAYLOAD)])
+                self.assertIsNotNone(result.decision)
+                self.assertEqual(calls, [("http://127.0.0.1:8110/typesafe/v1/systemone", "jev-1.13.0"),
+                                         ("http://127.0.0.1:8110/openrouter/api/alpha/decisions", "typesafe/jev-1.13")])
+                self.assertEqual(self.exhausted, {"typesafe"})
+                self.assertEqual(self.recorded[-1]["provider"], "openrouter")
+
+    def test_flagged_route_is_skipped_without_a_request(self):
+        self.exhausted.add("typesafe")
+        result, calls = self.run_detailed([_Resp(200, PAYLOAD)])
+        self.assertIsNotNone(result.decision)
+        self.assertEqual([url.rsplit("/", 1)[-1] for url, _ in calls], ["decisions"])
+
+    def test_both_routes_exhausted_returns_the_failure_without_requests(self):
+        self.exhausted.update({"typesafe", "openrouter"})
+        result, calls = self.run_detailed([])
+        self.assertIsNone(result.decision)
+        self.assertEqual(result.error_kind, "exhausted")
+        self.assertEqual(calls, [])
+
+    def test_proxy_policy_denial_neither_flags_nor_fails_over(self):
+        # A budget cap must not be sidestepped by switching routes.
+        result, calls = self.run_detailed([_Resp(403, text='{"error": "llm gateway policy: daily cap reached"}')])
+        self.assertEqual(result.error_kind, "policy")
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(self.exhausted, set())
+
+    def test_transient_errors_do_not_fail_over_or_flag(self):
+        result, calls = self.run_detailed([_Resp(429, text="slow"), _Resp(503, text="down")])
+        self.assertIsNone(result.decision)
+        self.assertEqual({url.rsplit("/", 1)[-1] for url, _ in calls}, {"systemone"})
+        self.assertEqual(self.exhausted, set())
+
+    def test_failover_model_spelling(self):
+        self.assertEqual(cr._failover_model("openrouter", "jev-1.13.0"), "typesafe/jev-1.13")
+        self.assertEqual(cr._failover_model("openrouter", "typesafe/jev-1.13"), "typesafe/jev-1.13")
+        self.assertIsNone(cr._failover_model("openrouter", "other-model"))
+
+
+class ExhaustionFlagTests(unittest.TestCase):
+    def test_first_flag_alerts_owner_once_and_expires(self):
+        class FakeRedis:
+            def __init__(self):
+                self.keys = {}
+            def set(self, key, value, nx=False, ex=None):
+                if nx and key in self.keys:
+                    return None
+                self.keys[key] = (value, ex)
+                return True
+            def exists(self, key):
+                return int(key in self.keys)
+        fake, alerts = FakeRedis(), []
+        with mock.patch("memory_store.redis_state.get_redis", return_value=fake), \
+             mock.patch("memory_store.redis_state.push_owner_alert", side_effect=alerts.append):
+            cr._mark_decision_route_exhausted("typesafe", "t", "quota", "HTTP 402: payment required")
+            cr._mark_decision_route_exhausted("typesafe", "t", "quota", "HTTP 402: payment required")
+            self.assertTrue(cr._decision_route_exhausted("typesafe"))
+            self.assertFalse(cr._decision_route_exhausted("openrouter"))
+        self.assertEqual(fake.keys["jev:exhausted:typesafe"], ("quota", cr._EXHAUSTED_TTL))
+        self.assertEqual(len(alerts), 1)
+        self.assertIn("openrouter 경로로 우회", alerts[0])
+
+    def test_redis_down_never_blocks_a_decision(self):
+        with mock.patch("memory_store.redis_state.get_redis", return_value=None):
+            self.assertFalse(cr._decision_route_exhausted("typesafe"))
+            cr._mark_decision_route_exhausted("typesafe", "t", "quota", "x")  # no raise
+
+
+
+
+class OwnerAlertQueueTests(unittest.TestCase):
+    def test_alerts_queue_in_order_and_drain(self):
+        class FakeRedis:
+            def __init__(self):
+                self.items = []
+            def rpush(self, key, value):
+                self.items.append(value)
+            def ltrim(self, key, start, end):
+                self.items = self.items[start:] if end == -1 else self.items[start:end + 1]
+            def lpop(self, key):
+                return self.items.pop(0) if self.items else None
+        from memory_store import redis_state
+        fake = FakeRedis()
+        with mock.patch.object(redis_state, "get_redis", return_value=fake):
+            for i in range(55):
+                self.assertTrue(redis_state.push_owner_alert(f"a{i}"))
+            self.assertEqual(len(fake.items), 50)  # oldest dropped past the cap
+            self.assertEqual(redis_state.pop_owner_alerts(3), ["a5", "a6", "a7"])
+        with mock.patch.object(redis_state, "get_redis", return_value=None):
+            self.assertFalse(redis_state.push_owner_alert("x"))
+            self.assertEqual(redis_state.pop_owner_alerts(), [])
 
 
 if __name__ == "__main__":
