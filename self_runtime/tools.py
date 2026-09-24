@@ -493,6 +493,74 @@ def _format_delegation_contract(
     return "<delegation-contract>\n" + "\n".join(parts) + "\n</delegation-contract>"
 
 
+def _resolve_delegation_mission(title_source, *, failure_label: str, log_created: bool) -> int | None:
+    """Return the operator's active mission id, auto-creating one if none is active.
+
+    ``title_source`` is a zero-arg callable producing the task text used for the
+    mission title; it is only evaluated when a mission must be created.
+    """
+    try:
+        from db import query as _db_q
+        user_id_for_mission = _resolve_recent_operator_user_id()
+        active = _db_q(
+            "SELECT id FROM telegram_missions WHERE user_id = %s AND status = 'active' "
+            "ORDER BY created_at DESC LIMIT 1",
+            (user_id_for_mission,),
+        )
+        if active:
+            return active[0]["id"]
+        # Auto-create mission from delegation context
+        from telegram.mission import create_mission
+        mission_title = title_source()[:80].replace("\n", " ").strip()
+        if user_id_for_mission:
+            new_mission = create_mission(user_id_for_mission, mission_title)
+            task_mission_id = new_mission["id"]
+            if log_created:
+                logger.info("Auto-created mission #%d from delegate: %s", task_mission_id, mission_title)
+            return task_mission_id
+    except Exception as e:
+        logger.debug("%s: %s", failure_label, e)
+    return None
+
+
+async def _recent_conversation_block() -> str:
+    """Recent Telegram chat as a <recent-conversation> block ("" if unavailable)."""
+    try:
+        from memory_store.queries import fetch_chat_logs
+        recent_chats = await asyncio.to_thread(
+            fetch_chat_logs, 6, None, None, source="telegram"
+        )
+        if recent_chats:
+            chat_lines = []
+            for msg in reversed(recent_chats):  # chronological order
+                role = "user" if msg.get("role") == "user" else "agent"
+                text = str(msg.get("content") or "")[:500]
+                chat_lines.append(f"[{role}] {text}")
+            return (
+                "<recent-conversation>\n"
+                + "\n".join(chat_lines)
+                + "\n</recent-conversation>"
+            )
+    except Exception:
+        pass  # non-critical: mission context will still be injected by process_task
+    return ""
+
+
+def _compose_delegated_content(
+    *, agent: str, task: str, context: str, contract: str, chat_block: str,
+) -> str:
+    """Assemble a delegated task body: context, contract, recent chat, task."""
+    content_parts = []
+    if context:
+        content_parts.append(f"<delegation-context>\n{context}\n</delegation-context>")
+    if contract:
+        content_parts.append(contract)
+    if chat_block:
+        content_parts.append(chat_block)
+    content_parts.append(f"<task agent=\"{agent}\">\n{task}\n</task>")
+    return "\n\n".join(content_parts)
+
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # 1. TOOL DEFINITIONS (Anthropic API format)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1843,14 +1911,6 @@ async def _exec_read_server_logs(
     return f"=== SERVER LOGS ({service}, last {minutes_back}min{grep_desc}) ===\n{output}"
 
 
-async def _exec_read_recent_updates(max_entries: int = 3) -> str:
-    return (
-        "=== RECENT SYSTEM UPDATES ===\n\n"
-        "Disabled: dev_docs/project_state.md is a stale human-maintained snapshot "
-        "and must not be injected into agent context."
-    )
-
-
 def _normalize_for_overlap(text: str) -> set[str]:
     """Normalize text to a token set for self-poisoning loop detection."""
     import re as _re
@@ -2343,66 +2403,27 @@ async def _exec_delegate(
     # Inherit mission from parent task if chaining, otherwise use/create mission
     task_mission_id = None
     if not parent_task_id:
-        try:
-            from db import query as _db_q
-            user_id_for_mission = _resolve_recent_operator_user_id()
-            active = _db_q(
-                "SELECT id FROM telegram_missions WHERE user_id = %s AND status = 'active' "
-                "ORDER BY created_at DESC LIMIT 1",
-                (user_id_for_mission,),
-            )
-            if active:
-                task_mission_id = active[0]["id"]
-            else:
-                # Auto-create mission from delegation context
-                from telegram.mission import create_mission
-                mission_title = task[:80].replace("\n", " ").strip()
-                if user_id_for_mission:
-                    new_mission = create_mission(user_id_for_mission, mission_title)
-                    task_mission_id = new_mission["id"]
-                    logger.info("Auto-created mission #%d from delegate: %s", task_mission_id, mission_title)
-        except Exception as e:
-            logger.debug("Mission auto-create in delegate failed: %s", e)
+        task_mission_id = _resolve_delegation_mission(
+            lambda: task,
+            failure_label="Mission auto-create in delegate failed",
+            log_created=True,
+        )
 
     # ── Assemble full task content with context ──────────────────
     # 1. Orchestrator-provided context (conversation summary, reasoning)
     # 2. Recent chat history from DB (automatic, as fallback/supplement)
     # 3. The actual task instructions
-    content_parts = []
-
-    if context:
-        content_parts.append(f"<delegation-context>\n{context}\n</delegation-context>")
     contract = _format_delegation_contract(
         success_criteria=success_criteria,
         required_capabilities=required_capabilities,
         target_identifiers=target_identifiers,
         forbidden_assumptions=forbidden_assumptions,
     )
-    if contract:
-        content_parts.append(contract)
-
     # Fetch recent chat history to give agent conversational backdrop
-    try:
-        from memory_store.queries import fetch_chat_logs
-        recent_chats = await asyncio.to_thread(
-            fetch_chat_logs, 6, None, None, source="telegram"
-        )
-        if recent_chats:
-            chat_lines = []
-            for msg in reversed(recent_chats):  # chronological order
-                role = "user" if msg.get("role") == "user" else "agent"
-                text = str(msg.get("content") or "")[:500]
-                chat_lines.append(f"[{role}] {text}")
-            content_parts.append(
-                "<recent-conversation>\n"
-                + "\n".join(chat_lines)
-                + "\n</recent-conversation>"
-            )
-    except Exception:
-        pass  # non-critical: mission context will still be injected by process_task
-
-    content_parts.append(f"<task agent=\"{agent}\">\n{task}\n</task>")
-    full_content = "\n\n".join(content_parts)
+    chat_block = await _recent_conversation_block()
+    full_content = _compose_delegated_content(
+        agent=agent, task=task, context=context, contract=contract, chat_block=chat_block,
+    )
 
     # Record delegation event to mission timeline
     if task_mission_id:
@@ -2476,46 +2497,14 @@ async def _exec_multi_delegate(
                 )
 
     # Resolve mission (same logic as delegate)
-    task_mission_id = None
-    try:
-        from db import query as _db_q
-        user_id_for_mission = _resolve_recent_operator_user_id()
-        active = _db_q(
-            "SELECT id FROM telegram_missions WHERE user_id = %s AND status = 'active' "
-            "ORDER BY created_at DESC LIMIT 1",
-            (user_id_for_mission,),
-        )
-        if active:
-            task_mission_id = active[0]["id"]
-        else:
-            from telegram.mission import create_mission
-            mission_title = tasks[0]["task"][:80].replace("\n", " ").strip()
-            if user_id_for_mission:
-                new_mission = create_mission(user_id_for_mission, mission_title)
-                task_mission_id = new_mission["id"]
-    except Exception as e:
-        logger.debug("Mission resolution in multi_delegate failed: %s", e)
+    task_mission_id = _resolve_delegation_mission(
+        lambda: tasks[0]["task"],
+        failure_label="Mission resolution in multi_delegate failed",
+        log_created=False,
+    )
 
     # Fetch recent chat for context (shared across all subtasks)
-    chat_block = ""
-    try:
-        from memory_store.queries import fetch_chat_logs
-        recent_chats = await asyncio.to_thread(
-            fetch_chat_logs, 6, None, None, source="telegram"
-        )
-        if recent_chats:
-            chat_lines = []
-            for msg in reversed(recent_chats):
-                role = "user" if msg.get("role") == "user" else "agent"
-                text = str(msg.get("content") or "")[:500]
-                chat_lines.append(f"[{role}] {text}")
-            chat_block = (
-                "<recent-conversation>\n"
-                + "\n".join(chat_lines)
-                + "\n</recent-conversation>"
-            )
-    except Exception:
-        pass
+    chat_block = await _recent_conversation_block()
 
     # Create subtasks. Independent tasks start pending (parallel); tasks with
     # depends_on start blocked with the resolved dependency task IDs in
@@ -2542,21 +2531,15 @@ async def _exec_multi_delegate(
             created_info.append(f"  SKIPPED [{agent}]: a dependency task failed to create")
             continue
 
-        content_parts = []
-        if context:
-            content_parts.append(f"<delegation-context>\n{context}\n</delegation-context>")
         contract = _format_delegation_contract(
             success_criteria=str(t.get("success_criteria") or ""),
             required_capabilities=t.get("required_capabilities"),
             target_identifiers=t.get("target_identifiers"),
             forbidden_assumptions=t.get("forbidden_assumptions"),
         )
-        if contract:
-            content_parts.append(contract)
-        if chat_block:
-            content_parts.append(chat_block)
-        content_parts.append(f"<task agent=\"{agent}\">\n{task_content}\n</task>")
-        full_content = "\n\n".join(content_parts)
+        full_content = _compose_delegated_content(
+            agent=agent, task=task_content, context=context, contract=contract, chat_block=chat_block,
+        )
 
         subtask_metadata: dict = {}
         if isinstance(t.get("verification"), dict):
@@ -2929,7 +2912,7 @@ def build_task_context_tools(task_id: int, user_id: int, depth: int = 0, mission
             from redis_state import post_to_board
             agent_type_str = ""
             try:
-                from telegram.bot import current_task_ctx
+                from llm.runtime_context import current_task_ctx
                 ctx = current_task_ctx.get()
                 agent_type_str = (ctx or {}).get("agent_type", "")
             except Exception:
@@ -2971,6 +2954,23 @@ def build_task_context_tools(task_id: int, user_id: int, depth: int = 0, mission
     return list(TASK_CONTEXT_TOOLS), handlers
 
 
+# Plural/legacy content_type spellings accepted by read_self. The web
+# visitor surface (services/web_chat.py) reuses the public subset.
+READ_SELF_ALIASES = {
+    "task_reports": "task_report",
+    "task_report": "task_report",
+    "research": "research_document",
+    "research_documents": "research_document",
+    "private_research_documents": "private_research_document",
+    "private_reports": "private_research_document",
+    "curation": "hub_curation",
+    "curations": "hub_curation",
+    "static_pages": "static_page",
+    "posts": "blog_post",
+    "post": "blog_post",
+}
+
+
 async def _exec_read_self(
     content_type: str | None = None, source: str | None = None,
     id: int | None = None, limit: int | None = None, keyword: str | None = None,
@@ -2983,20 +2983,7 @@ async def _exec_read_self(
 ) -> str:
     """Dispatcher for all read_self sources."""
     raw_type = (content_type or source or "").strip()
-    alias_map = {
-        "task_reports": "task_report",
-        "task_report": "task_report",
-        "research": "research_document",
-        "research_documents": "research_document",
-        "private_research_documents": "private_research_document",
-        "private_reports": "private_research_document",
-        "curation": "hub_curation",
-        "curations": "hub_curation",
-        "static_pages": "static_page",
-        "posts": "blog_post",
-        "post": "blog_post",
-    }
-    source = alias_map.get(raw_type, raw_type)
+    source = READ_SELF_ALIASES.get(raw_type, raw_type)
     if id is not None:
         if post_id is None:
             post_id = id
@@ -3030,8 +3017,6 @@ async def _exec_read_self(
         return await _exec_read_system_status()
     if source == "server_logs":
         return await _exec_read_server_logs(service=service, minutes_back=(hours_back or 1) * 60, limit=limit or 50, grep=grep)
-    if source == "recent_updates":
-        return await _exec_read_recent_updates(max_entries=limit or 3)
     if source == "file_registry":
         return await _exec_read_file_registry(limit=limit or 20, keyword=keyword, category=None)
     if source == "research_document":
@@ -3136,39 +3121,14 @@ async def _exec_read_autonomous_project(
     legacy_notes = proj.get("research_notes") or []
     plan = proj.get("plan") or {}
     note_limit = min(limit, 10)
-    note_total = len(legacy_notes)
-    note_source = "legacy JSONB"
-    try:
-        note_clauses = ["project_id = %s"]
-        note_params: list = [project_id]
-        if keyword:
-            note_clauses.append("text ILIKE %s")
-            note_params.append(f"%{keyword}%")
-        note_count = await asyncio.to_thread(
-            db_query_one,
-            f"SELECT COUNT(*) AS count FROM autonomous_project_notes WHERE {' AND '.join(note_clauses)}",
-            tuple(note_params),
-        )
-        note_total = int((note_count or {}).get("count") or 0)
-        note_rows = await asyncio.to_thread(
-            db_query,
-            f"""
-            SELECT turn, text, sources, created_at
-              FROM autonomous_project_notes
-             WHERE {' AND '.join(note_clauses)}
-             ORDER BY created_at DESC, id DESC
-             LIMIT %s
-            """,
-            tuple([*note_params, note_limit]),
-        )
-        recent_notes = list(reversed([dict(row) for row in note_rows]))
-        note_source = "autonomous_project_notes"
-    except Exception:
-        notes = legacy_notes
-        if keyword:
-            notes = [n for n in notes if keyword.lower() in (n.get("text") or "").lower()]
-        note_total = len(notes)
-        recent_notes = notes[-note_limit:]
+    from jobs.autonomous_project import recent_project_notes_with_total
+    recent_notes, note_total, note_source = await asyncio.to_thread(
+        recent_project_notes_with_total,
+        project_id,
+        legacy_notes=legacy_notes,
+        limit=note_limit,
+        keyword=keyword,
+    )
 
     # Recent events (last `limit` entries)
     try:

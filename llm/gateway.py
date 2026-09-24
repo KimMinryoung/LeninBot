@@ -45,7 +45,6 @@ Coverage and the enforcement runbook: dev_docs/llm_gateway.md.
 
 from __future__ import annotations
 
-import atexit
 import json
 import logging
 import os
@@ -53,6 +52,8 @@ import queue
 import threading
 import time
 from pathlib import Path
+
+import audit_sink
 
 logger = logging.getLogger("llm_gateway.audit")
 
@@ -443,66 +444,31 @@ def ensure_llm_audit_log_table() -> None:
         conn.commit()
 
 
-_DB_QUEUE: "queue.Queue[dict]" = queue.Queue(maxsize=2000)
-_worker_started = False
-_worker_lock = threading.Lock()
-_insert_failed_before = False
+# 종료 시 감사 큐를 비우는 데 기다릴 최대 시간(초).
+FLUSH_TIMEOUT_SECONDS = float(os.getenv("LENINBOT_LLM_AUDIT_FLUSH_SECONDS", "5"))
 
-
-_DRAIN_BATCH = 50
+# Background DB writer (queue, batching, worker thread) lives in audit_sink.
+# 짧게 살다 죽는 프로세스를 위한 보험으로 atexit flush를 건다. 아래 flush_audit 설명 참조.
+_WRITER = audit_sink.BatchedAuditWriter(
+    "llm",
+    thread_name="llm-audit-writer",
+    log=logger,
+    label="llm audit",
+    maxsize=2000,
+    batch_size=50,
+    flush_at_exit=True,
+    flush_timeout=FLUSH_TIMEOUT_SECONDS,
+)
+_DB_QUEUE: "queue.Queue[dict]" = _WRITER.queue
+_DRAIN_BATCH = _WRITER.batch_size
 
 
 def _drain_batch(rows: list[dict]) -> None:
-    """Persist a batch: POST to the proxy sink (audit_sink.mode() == "proxy"),
-    else insert directly (the proxy itself, or no proxy configured)."""
-    global _insert_failed_before
-    import audit_sink
-
-    if audit_sink.mode() == "proxy":
-        audit_sink.post_rows("llm", rows)
-        return
-    try:
-        audit_sink.insert_rows("llm", rows)
-        _insert_failed_before = False
-    except Exception as e:
-        # First failure at WARNING, repeats at DEBUG: an ad-hoc process under
-        # the read-only DB guard would otherwise warn on every single call.
-        log = logger.debug if _insert_failed_before else logger.warning
-        log("llm audit DB insert failed (%d row(s) dropped): %s", len(rows), e)
-        _insert_failed_before = True
-
-
-def _worker_loop() -> None:
-    while True:
-        rows = [_DB_QUEUE.get()]
-        while len(rows) < _DRAIN_BATCH:
-            try:
-                rows.append(_DB_QUEUE.get_nowait())
-            except queue.Empty:
-                break
-        try:
-            _drain_batch(rows)
-        finally:
-            for _ in rows:
-                _DB_QUEUE.task_done()
+    _WRITER.drain_batch(rows)
 
 
 def _ensure_worker() -> None:
-    global _worker_started
-    if _worker_started:
-        return
-    with _worker_lock:
-        if _worker_started:
-            return
-        t = threading.Thread(target=_worker_loop, name="llm-audit-writer", daemon=True)
-        t.start()
-        _worker_started = True
-        # 짧게 살다 죽는 프로세스를 위한 보험. 아래 flush_audit 설명 참조.
-        atexit.register(_flush_at_exit)
-
-
-# 종료 시 감사 큐를 비우는 데 기다릴 최대 시간(초).
-FLUSH_TIMEOUT_SECONDS = float(os.getenv("LENINBOT_LLM_AUDIT_FLUSH_SECONDS", "5"))
+    _WRITER.ensure_worker()
 
 
 def flush_audit(timeout: float = FLUSH_TIMEOUT_SECONDS) -> bool:
@@ -517,29 +483,7 @@ def flush_audit(timeout: float = FLUSH_TIMEOUT_SECONDS) -> bool:
     큐 자신의 조건변수를 쓰므로 Queue.join()의 타임아웃 있는 판본과 같다.
     큐가 시간 안에 비면 True.
     """
-    if not _worker_started:
-        return True
-    deadline = time.monotonic() + max(0.0, timeout)
-    with _DB_QUEUE.all_tasks_done:
-        while _DB_QUEUE.unfinished_tasks:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                logger.warning(
-                    "llm audit flush timed out; %d row(s) dropped",
-                    _DB_QUEUE.unfinished_tasks,
-                )
-                return False
-            _DB_QUEUE.all_tasks_done.wait(remaining)
-    return True
-
-
-def _flush_at_exit() -> None:
-    # atexit에서는 절대 예외를 올리지 않는다 — 종료 경로를 깨는 것보다 감사
-    # 행 몇 개를 잃는 편이 낫다.
-    try:
-        flush_audit()
-    except Exception:
-        pass
+    return _WRITER.flush(timeout)
 
 
 def _emit(row: dict, *, warn: bool = False) -> None:

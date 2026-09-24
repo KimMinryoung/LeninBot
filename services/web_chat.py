@@ -25,6 +25,7 @@ from bot_config import (
 from prompt_context import uses_xml
 from llm.runtime_profile import RuntimeProfile, resolve_runtime_profile
 from runtime_tools.registry import TOOLS, TOOL_HANDLERS
+from self_runtime.tools import READ_SELF_ALIASES
 from tool_gateway.selection import build_toolset
 from llm.claude_loop import chat_with_tools
 from llm.provider_failover import run_with_provider_failover
@@ -429,6 +430,14 @@ async def _build_gramsci_preflight_context(message: str, provider: str = "claude
     return f"### Preflight Retrieval: Gramsci Corpus\n{body}"
 
 
+_WEB_PUBLIC_READ_TYPES = frozenset({"diary", "research_document", "static_page", "blog_post", "hub_curation"})
+# Only aliases resolving to a public type; private aliases stay unrecognized here.
+_WEB_READ_SELF_ALIASES = {
+    alias: target for alias, target in READ_SELF_ALIASES.items()
+    if target in _WEB_PUBLIC_READ_TYPES
+}
+
+
 async def _exec_web_read_self(
     content_type: str | None = None,
     source: str | None = None,
@@ -442,16 +451,7 @@ async def _exec_web_read_self(
 ) -> str:
     """Web-safe self-inspection for public visitors."""
     raw_type = (content_type or source or "overview").strip().lower()
-    compat_aliases = {
-        "research": "research_document",
-        "research_documents": "research_document",
-        "static_pages": "static_page",
-        "curation": "hub_curation",
-        "curations": "hub_curation",
-        "post": "blog_post",
-        "posts": "blog_post",
-    }
-    content_type = compat_aliases.get(raw_type, raw_type)
+    content_type = _WEB_READ_SELF_ALIASES.get(raw_type, raw_type)
     if id is not None and post_id is None:
         post_id = id
     limit = max(1, min(int(limit or 8), 20))
@@ -459,7 +459,7 @@ async def _exec_web_read_self(
     if content_type == "model_config":
         return await _format_public_model_config()
 
-    if content_type in {"diary", "research_document", "static_page", "blog_post", "hub_curation"}:
+    if content_type in _WEB_PUBLIC_READ_TYPES:
         handler = TOOL_HANDLERS.get("read_self")
         if not handler:
             return "Public self-reading is unavailable right now."
