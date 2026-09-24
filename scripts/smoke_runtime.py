@@ -65,10 +65,19 @@ def _assert_prompt_context() -> None:
         "- [2026-04-26] (task#1) task_created: started"
     )
 
-    subtasks = [{"id": 11, "agent_type": "scout", "content": "Find facts", "result": "Facts"}]
+    # Since d0f9039 synthesis sees each subtask's status and verification plus
+    # guidance that a done status is not goal completion.
+    from prompt_context import _SYNTHESIS_GUIDANCE
+
+    subtasks = [{
+        "id": 11, "agent_type": "scout", "content": "Find facts", "result": "Facts",
+        "status": "done", "verification_status": "passed", "verification_details": "checked",
+    }]
     assert format_subtask_results(subtasks, "claude") == (
         "<subtask-results>\n"
-        '  <subtask id="11" agent="scout">\n'
+        + _SYNTHESIS_GUIDANCE + "\n"
+        '  <subtask id="11" agent="scout" status="done" verification="passed">\n'
+        "    <verification-details>checked</verification-details>\n"
         "    <task-brief>Find facts</task-brief>\n"
         "    <result>\nFacts\n    </result>\n"
         "  </subtask>\n"
@@ -76,10 +85,15 @@ def _assert_prompt_context() -> None:
     )
     assert format_subtask_results(subtasks, "deepseek") == (
         "### Subtask Results\n\n"
-        "#### Subtask #11 [scout]\n"
+        + _SYNTHESIS_GUIDANCE + "\n\n"
+        "#### Subtask #11 [scout] \u2014 done; verification: passed\n"
+        "**Verification details:** checked\n"
         "**Task brief:** Find facts\n\n"
         "**Result:**\n\nFacts"
     )
+    bare = format_subtask_results([{"id": 12, "agent_type": "scout", "content": "x", "result": "y"}], "openai")
+    assert "#### Subtask #12 [scout] \u2014 unknown; verification: unverified" in bare
+    assert "**Verification details:** No verification evidence available." in bare
 
     assert format_agent_execution_history(
         agent_type="analyst",
@@ -778,10 +792,16 @@ def _assert_staged_drafts_prioritize_project_events() -> None:
 
 async def _assert_read_self_autonomous_project_uses_note_table() -> None:
     import db
+    import jobs.autonomous_project as ap
     import self_runtime.tools as tools
 
+    # Since 0c9dd47 the note read lives in jobs.autonomous_project
+    # (recent_project_notes_with_total), which binds db.query at import time,
+    # so it is patched there as well as on the db module.
     original_query = db.query
     original_query_one = db.query_one
+    original_ap_query = ap.db_query
+    original_ap_query_one = ap.db_query_one
 
     def fake_query_one(sql, params=()):
         if "FROM autonomous_projects WHERE id" in sql:
@@ -829,6 +849,8 @@ async def _assert_read_self_autonomous_project_uses_note_table() -> None:
     try:
         db.query = fake_query
         db.query_one = fake_query_one
+        ap.db_query = fake_query
+        ap.db_query_one = fake_query_one
         output = await tools._exec_read_autonomous_project(project_id=7, limit=2)
         assert "source=autonomous_project_notes" in output
         assert "2 shown / 2 total" in output
@@ -847,6 +869,8 @@ async def _assert_read_self_autonomous_project_uses_note_table() -> None:
     finally:
         db.query = original_query
         db.query_one = original_query_one
+        ap.db_query = original_ap_query
+        ap.db_query_one = original_ap_query_one
 
 
 def _assert_autonomous_project_selection_prioritizes_advice() -> None:
@@ -1484,11 +1508,16 @@ def _assert_autonomous_cli_list_includes_operational_signals() -> None:
 
 def _assert_autonomous_cli_show_uses_note_table() -> None:
     import argparse
+    import jobs.autonomous_project as ap
     import scripts.autonomous_cli as cli
 
+    # The CLI reads notes through jobs.autonomous_project's shared
+    # recent_project_notes_with_total (0c9dd47), so patch its db bindings too.
     original_ensure = cli._ensure_tables
     original_query = cli.db_query
     original_query_one = cli.db_query_one
+    original_ap_query = ap.db_query
+    original_ap_query_one = ap.db_query_one
 
     def fake_query_one(sql, params=()):
         if "FROM autonomous_projects WHERE id" in sql:
@@ -1537,6 +1566,8 @@ def _assert_autonomous_cli_show_uses_note_table() -> None:
         cli._ensure_tables = lambda: None
         cli.db_query = fake_query
         cli.db_query_one = fake_query_one
+        ap.db_query = fake_query
+        ap.db_query_one = fake_query_one
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             rc = cli._cmd_show(argparse.Namespace(project_id=7))
@@ -1562,6 +1593,8 @@ def _assert_autonomous_cli_show_uses_note_table() -> None:
         cli._ensure_tables = original_ensure
         cli.db_query = original_query
         cli.db_query_one = original_query_one
+        ap.db_query = original_ap_query
+        ap.db_query_one = original_ap_query_one
 
 
 def _assert_orchestrator_autonomous_status_includes_operational_signals() -> None:
@@ -2037,14 +2070,18 @@ async def _assert_diary_runtime_route_fallbacks() -> None:
     # Keyword-heuristic fallback was removed 2026-07-11: with the LLM
     # classifier unavailable, route_task must return NO recommendation and
     # hand the orchestrator the curated routing cards instead of a
-    # substring guess.
+    # substring guess. Since 0b0ea56 the System One (Jev) classifier runs
+    # first, so it is stubbed too: unstubbed it makes a paid call and its real
+    # recommendation breaks the no-guess assertions.
     import self_runtime.tools as tools
 
     original_classifier = tools._classify_route_with_llm
+    original_jev = tools._classify_route_with_jev
     try:
         async def unavailable_classifier(_task: str, _candidates=None):
             return None
 
+        tools._classify_route_with_jev = unavailable_classifier
         tools._classify_route_with_llm = unavailable_classifier
         result = json.loads(await tools._exec_route_task("일기 123번 오타 수정해줘", include_store_guide=False))
         rec = result["recommendation"]
@@ -2057,6 +2094,7 @@ async def _assert_diary_runtime_route_fallbacks() -> None:
         assert any("CommuLingo" in u for u in cards["analyst"].get("use_for", []))
     finally:
         tools._classify_route_with_llm = original_classifier
+        tools._classify_route_with_jev = original_jev
 
 
 async def _assert_guarded_diary_save_handler_accepts_tool_payloads() -> None:
@@ -2186,11 +2224,21 @@ async def main() -> None:
     _assert_staged_drafts_prioritize_project_events()
     await _assert_read_self_autonomous_project_uses_note_table()
     _assert_autonomous_project_selection_prioritizes_advice()
-    await _assert_autonomous_tick_failure_updates_cooldown()
-    _assert_collect_tick_actions_includes_publications()
-    await _assert_successful_durable_tick_consumes_advisories()
-    await _assert_successful_staged_draft_tick_consumes_advisories()
-    await _assert_successful_noop_tick_logs_no_durable_action()
+    # Failed and no-op ticks write a lesson to experiential memory; keep the
+    # smoke from writing into the real store (and embedding the text).
+    import jobs.autonomous_project as ap
+    original_record_experience = ap._record_tick_experience
+    recorded_experiences: list[str] = []
+    ap._record_tick_experience = recorded_experiences.append
+    try:
+        await _assert_autonomous_tick_failure_updates_cooldown()
+        _assert_collect_tick_actions_includes_publications()
+        await _assert_successful_durable_tick_consumes_advisories()
+        await _assert_successful_staged_draft_tick_consumes_advisories()
+        await _assert_successful_noop_tick_logs_no_durable_action()
+    finally:
+        ap._record_tick_experience = original_record_experience
+    assert any("tick failed" in text for text in recorded_experiences), recorded_experiences
     _assert_autonomous_cli_status_uses_config_without_db()
     _assert_autonomous_cli_main_reports_missing_db_config()
     _assert_autonomous_cli_events_orders_by_id()
