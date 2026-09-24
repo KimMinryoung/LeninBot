@@ -698,20 +698,12 @@ def _build_project_tools(project_id: int) -> tuple[list[dict], dict]:
         }
         db_execute(
             """
-            UPDATE autonomous_projects
-               SET research_notes = research_notes || %s::jsonb,
-                   updated_at = NOW()
-             WHERE id = %s
-            """,
-            (json.dumps([note]), project_id),
-        )
-        db_execute(
-            """
             INSERT INTO autonomous_project_notes(project_id, turn, text, sources, kind)
             VALUES (%s, %s, %s, %s, %s)
             """,
             (project_id, note["turn"], note["text"], json.dumps(note["sources"]), kind),
         )
+        db_execute("UPDATE autonomous_projects SET updated_at = NOW() WHERE id = %s", (project_id,))
         _log_event(project_id, "note_added", text[:400], {"sources": note["sources"], "kind": kind})
         return f"ok: {kind} note saved ({len(note['sources'])} sources)"
 
@@ -1007,41 +999,41 @@ def _current_turn_counter(project_id: int) -> int:
 
 # ── Prompt context assembly ─────────────────────────────────────────
 def _recent_notes(project: dict) -> list[dict]:
+    """Last RECENT_NOTES_WINDOW notes for the tick prompt, oldest first.
+
+    ``autonomous_project_notes`` is the only store written since 2026-09-24;
+    the ``research_notes`` JSONB column is a frozen pre-table copy, so a failed
+    lookup yields no notes rather than stale ones.
+    """
     project_id = project.get("id")
-    if project_id:
-        try:
-            rows = db_query(
-                """
-                SELECT id, turn, text, sources, created_at, kind
-                  FROM autonomous_project_notes
-                 WHERE project_id = %s
-                 ORDER BY created_at DESC, id DESC
-                 LIMIT %s
-                """,
-                (project_id, RECENT_NOTES_WINDOW),
-            )
-            if rows:
-                out = []
-                for row in reversed(rows):
-                    out.append({
-                        "id": row.get("id"),
-                        "turn": row.get("turn"),
-                        "kind": row.get("kind"),
-                        "text": row.get("text"),
-                        "sources": row.get("sources") or [],
-                        "created_at": row["created_at"].astimezone(KST).isoformat(timespec="seconds")
-                        if row.get("created_at") else "?",
-                    })
-                return out
-        except Exception as e:
-            logger.warning("autonomous_project_notes lookup failed; falling back to project JSONB notes: %s", e)
-    notes = project.get("research_notes") or []
-    if isinstance(notes, str):
-        try:
-            notes = json.loads(notes)
-        except Exception:
-            notes = []
-    return notes[-RECENT_NOTES_WINDOW:]
+    if not project_id:
+        return []
+    try:
+        rows = db_query(
+            """
+            SELECT id, turn, text, sources, created_at, kind
+              FROM autonomous_project_notes
+             WHERE project_id = %s
+             ORDER BY created_at DESC, id DESC
+             LIMIT %s
+            """,
+            (project_id, RECENT_NOTES_WINDOW),
+        )
+    except Exception as e:
+        logger.warning("autonomous_project_notes lookup failed: %s", e)
+        return []
+    return [
+        {
+            "id": row.get("id"),
+            "turn": row.get("turn"),
+            "kind": row.get("kind"),
+            "text": row.get("text"),
+            "sources": row.get("sources") or [],
+            "created_at": row["created_at"].astimezone(KST).isoformat(timespec="seconds")
+            if row.get("created_at") else "?",
+        }
+        for row in reversed(rows)
+    ]
 
 
 def recent_project_notes_with_total(
