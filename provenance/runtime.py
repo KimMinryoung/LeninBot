@@ -1,9 +1,9 @@
 """Runtime provenance and external-source wrapping helpers."""
 
 import contextvars as _contextvars
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 
-KST = timezone(timedelta(hours=9))
+from shared import KST
 
 _kg_provenance_ctx = _contextvars.ContextVar("kg_provenance_buffer", default=None)
 

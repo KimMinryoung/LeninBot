@@ -10,12 +10,12 @@ lessons/mistakes/insights that make the agent smarter over time.
 
 import json
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 from db import query as db_query, execute as db_execute
 from memory_store.queries import fetch_chat_logs
 
-KST = timezone(timedelta(hours=9))
+from shared import KST
 
 logger = logging.getLogger("experience_writer")
 

@@ -25,9 +25,8 @@ import json
 import logging
 import os
 import re
-import subprocess
 import unicodedata
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -42,7 +41,6 @@ from jobs.autonomous_publication_controls import (
     was_staged_this_tick,
 )
 import research_store
-from ops import paths as _paths
 from tool_gateway.results import ToolFailure
 from runtime_tools.research_review import review_research_document
 
@@ -54,13 +52,9 @@ RESEARCH_DIR = _PROJECT_ROOT / "research"
 LEGACY_RESEARCH_DIR = _PROJECT_ROOT / "output" / "research"
 PRIVATE_RESEARCH_DIR = RESEARCH_DIR / "private"
 PUBLICATION_DRAFT_DIR = _PROJECT_ROOT / "data" / "publication_drafts" / "research"
-FRONTEND_DIR = str(_paths.FRONTEND_DIR)
-CF_PURGE_SCRIPT = os.getenv(
-    "CF_PURGE_SCRIPT",
-    os.path.join(FRONTEND_DIR, "scripts", "cloudflare-purge.js"),
-)
+from runtime_tools.cloudflare_purge import FRONTEND_DIR, purge_paths
 
-KST = timezone(timedelta(hours=9))
+from shared import KST
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -108,15 +102,13 @@ def _resolve_existing(filename: str) -> Path | None:
 
 
 def _atomic_write(path: Path, content: str) -> None:
-    """Write content atomically: stage to .tmp then os.replace.
+    """Write content atomically (fsynced temp file, then replace).
 
     Prevents a half-written file from appearing in the public listing if the
     write is interrupted (signal, OOM, disk-full).
     """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(content, encoding="utf-8")
-    os.replace(tmp, path)
+    from translation_runtime.storage import atomic_write
+    atomic_write(path, content)
 
 
 def _extract_h1(path: Path) -> str | None:
@@ -532,43 +524,7 @@ def _cloudflare_purge_paths(filename: str) -> list[str]:
 
 
 def _purge_cloudflare_sync(filename: str) -> dict[str, Any]:
-    paths = list(dict.fromkeys(_cloudflare_purge_paths(filename)))
-    if not os.path.isfile(CF_PURGE_SCRIPT):
-        return {
-            "ok": False,
-            "purged": 0,
-            "urls": paths,
-            "reason": f"script_missing: {CF_PURGE_SCRIPT}",
-        }
-    try:
-        proc = subprocess.run(
-            ["node", CF_PURGE_SCRIPT, *paths],
-            cwd=FRONTEND_DIR,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=30,
-            check=False,
-        )
-    except Exception as e:
-        logger.warning("research Cloudflare purge failed before execution for %s: %s", filename, e)
-        return {
-            "ok": False,
-            "purged": 0,
-            "urls": paths,
-            "reason": f"{type(e).__name__}: {e}",
-        }
-
-    output = "\n".join(part.strip() for part in (proc.stdout, proc.stderr) if part.strip())
-    if proc.returncode != 0:
-        logger.warning("research Cloudflare purge failed for %s: %s", filename, output)
-        return {
-            "ok": False,
-            "purged": 0,
-            "urls": paths,
-            "reason": output or f"exit_{proc.returncode}",
-        }
-    return {"ok": True, "purged": len(paths), "urls": paths, "output": output}
+    return purge_paths(_cloudflare_purge_paths(filename), f"research {filename}")
 
 
 def _format_cache_note(cache: dict[str, Any], filename: str, *, missing_msg: str | None = None) -> str:

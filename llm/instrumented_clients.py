@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import time
 
+from llm.call_registry import _anthropic_usage, _gemini_usage
 from llm.gateway import check_llm_call, record_llm_call
 from llm.tool_loop_common import estimate_text_tokens
 
@@ -37,18 +38,6 @@ def _pop_audit_owner(kwargs: dict) -> str | None:
     ):
         return str(marker[1])
     return None
-
-
-def _gemini_usage(response) -> dict[str, int]:
-    meta = getattr(response, "usage_metadata", None)
-    return {
-        "tokens_in": getattr(meta, "prompt_token_count", 0) or 0,
-        "tokens_out": (
-            (getattr(meta, "candidates_token_count", 0) or 0)
-            + (getattr(meta, "thoughts_token_count", 0) or 0)
-        ),
-        "cache_read": getattr(meta, "cached_content_token_count", 0) or 0,
-    }
 
 
 def _model_arg(args: tuple, kwargs: dict) -> str | None:
@@ -149,16 +138,6 @@ class AuditedGenAIClient:
 
     def __getattr__(self, name):
         return getattr(self._client, name)
-
-
-def _anthropic_usage(response) -> dict[str, int]:
-    usage = getattr(response, "usage", None)
-    return {
-        "tokens_in": getattr(usage, "input_tokens", 0) or 0,
-        "tokens_out": getattr(usage, "output_tokens", 0) or 0,
-        "cache_read": getattr(usage, "cache_read_input_tokens", 0) or 0,
-        "cache_create": getattr(usage, "cache_creation_input_tokens", 0) or 0,
-    }
 
 
 class _AuditedAsyncMessages:

@@ -11,7 +11,7 @@ import asyncio
 import hashlib
 import logging
 import re
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from typing import Any
 
 from db import query as db_query, query_one as db_query_one
@@ -20,7 +20,7 @@ from tool_gateway.results import ToolFailure
 
 logger = logging.getLogger(__name__)
 
-KST = timezone(timedelta(hours=9))
+from shared import KST
 _SLUG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,119}$")
 _ready = False
 
