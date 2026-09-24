@@ -4,16 +4,6 @@
 
 [문서 유지 원칙](README.md#문서-유지-원칙)대로 이 파일은 임시 목록이다. 항목을 처리하면 여기서 지우고, 목록이 비면 파일을 지운다. 줄 번호는 적지 않는다. 작업 전에 코드에서 다시 찾는다.
 
-## A. 사람이 적용할 항목
-
-### C4. `self_modification_core.py`
-
-자동 편집이 권한 분류기에 막혀 적용하지 못했다. 봇의 자가수정 안전 모듈이라 사람이 직접 보고 적용한다.
-
-- `request_user_approval`(`input()` 대기)과 `self_modify_with_safety`의 승인 단계는 도달할 수 없다. 유일한 호출부인 Telegram `/modify` 콜백은 `request_approval=False`로 부른다. 이 둘을 지우고, `request_approval=True`면 `ValueError`를 내게 한다.
-- `git_backup_before_modification`/`git_reset_to_commit`은 git을 쓰지 않는다. `.bak.TIMESTAMP` 파일을 복사하고 복원한다. 이름을 `backup_file`/`restore_backup`으로 바꾸고, 옛 이름은 별칭으로 남긴다. `runtime_tools/filesystem.py`가 옛 이름을 import한다.
-- 모듈을 `self_runtime/`으로 옮기고 루트에는 shim을 남긴다. 로그 경로는 `__file__` 기준이므로 `ops.paths.PROJECT_ROOT / "logs"`로 고정한다.
-
 ## B. 남은 분할
 
 B 목록의 대형 함수 10개 가운데 9개를 분할했다. 모두 로직을 그대로 옮긴 분할이고, 분할 전후 호출 순서와 출력을 비교 스크립트로 대조했다. 남은 것:

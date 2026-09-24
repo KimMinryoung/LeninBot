@@ -1946,7 +1946,7 @@ async def cb_modify_approve(callback: CallbackQuery):
     await callback.message.edit_text("⚙️ 패치 적용 중…")
     await callback.answer()
 
-    from self_modification_core import self_modify_with_safety
+    from self_runtime.self_modification_core import self_modify_with_safety
     try:
         result = await asyncio.to_thread(
             self_modify_with_safety,
