@@ -86,7 +86,8 @@ CITIZENSHIP_OVERRIDES = {
     "nikolai-shchelokov": "soviet", "valery-sablin": "soviet",
 }
 
-# Only exceptions to origin == citizenship (or Soviet -> Russian) belong here.
+# National origin is never inferred from citizenship (83733c2); a blank origin
+# needs an entry here.
 # These encode documented family/national identity, never birthplace alone.
 ORIGIN_OVERRIDES = {
     "kim-alexandra-petrovna": "korea",
