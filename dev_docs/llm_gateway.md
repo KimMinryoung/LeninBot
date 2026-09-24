@@ -69,12 +69,20 @@ record_llm_call(surface=..., caller=..., model=..., tokens_in=..., tokens_out=..
 | `proxy` | 정책의 `proxy_base` 설정됨 (프로덕션 기본) | 워커가 최대 50행씩 `POST {proxy}/audit/{llm\|tool}` |
 | `db` | proxy_base 없음 (테스트·독립 도구) | 예전처럼 직접 INSERT |
 
-`LENINBOT_AUDIT_SINK=db|proxy`로 강제할 수 있다. 워커·큐·`flush_audit()` 계약은
-그대로다 — 바뀐 것은 배치 드레인과 DB INSERT가 HTTP POST로 바뀐 것뿐이다.
+`LENINBOT_AUDIT_SINK=db|proxy`로 강제할 수 있다. 큐 포화나 sink 실패 시 행은
+`data/audit_spool/`에 저장되고 워커가 다시 전송한다. 프록시의 DynamicUser는
+`StateDirectory=leninbot-audit-spool`을 쓰며 환경변수
+`LENINBOT_AUDIT_SPOOL_DIR=/var/lib/leninbot-audit-spool`로 경로를 지정한다.
+설치된 unit에 이 설정이 아직 없으면 쓰기 불가 경로를 감지해 서비스 전용
+`PrivateTmp`로 폴백한다. 이 임시 폴백은 unit 재시작 후 보존을 보장하지 않으므로
+unit 원본을 `/etc/systemd/system/`에 설치하고 daemon-reload·재시작해야 한다.
+`venv/bin/python scripts/audit_spool_status.py`로 현재 계정의 미전송 행 수를 확인한다.
+실제 유실은 spool 쓰기 실패 로그로 구분한다. sink 수락 직후 프로세스가 종료되면
+재전송된 행이 중복될 수 있다.
 
 프록시 쪽: `POST /audit/{kind}`는 본문 1 MB·200행 캡, 미지 컬럼은 400(스키마
 드리프트는 테스트에서 드러나야지 null로 묻히면 안 된다), 문자열은 캡으로 잘라
-저장, DB 장애는 503(클라이언트가 로그 남기고 드롭). `GET /audit/spend/today`는
+저장, DB 장애는 503(클라이언트가 로그 남기고 spool 저장). `GET /audit/spend/today`는
 클라이언트 프로세스의 예산 정책(`_today_spend`)이 읽는다 — 프록시가 권위 판정
 지점이므로 클라이언트가 DB를 읽을 이유가 없어졌다. `/health`에 `audit_sink`
 필드가 붙지만 상태 코드에는 영향 없다: DB 장애가 LLM 트래픽을 막으면 안 된다.

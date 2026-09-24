@@ -11,6 +11,8 @@ import os
 import sys
 import unittest
 import urllib.error
+import tempfile
+import logging
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -184,9 +186,12 @@ class GatewayWorkerTests(unittest.TestCase):
         def boom(kind, rows):
             raise RuntimeError("no db")
 
-        with patch.object(audit_sink, "mode", return_value="db"), \
+        with tempfile.TemporaryDirectory() as directory, \
+             patch.dict(os.environ, {"LENINBOT_AUDIT_SPOOL_DIR": directory}), \
+             patch.object(audit_sink, "mode", return_value="db"), \
              patch.object(audit_sink, "insert_rows", boom):
-            gw._drain_batch([{"surface": "loop", "status": "ok"}])  # must not raise
+            with patch.object(gw._WRITER, "_spool_path", Path(directory) / "test.sqlite3"):
+                gw._drain_batch([{"surface": "loop", "status": "ok"}])  # must not raise
 
     def test_tool_audit_batches_to_proxy(self):
         import importlib
@@ -215,9 +220,40 @@ class GatewayWorkerTests(unittest.TestCase):
         with patch.dict(os.environ, {"LENINBOT_LLM_AUDIT_DB": "1"}), \
              patch.dict(os.environ, {"INVOCATION_ID": "", "LENINBOT_SERVICE": ""}), \
              patch.object(gw, "_ensure_worker"), \
-             patch.object(gw._DB_QUEUE, "put_nowait", captured.append):
+             patch.object(gw._WRITER, "enqueue", captured.append):
             gw.record_llm_call(surface="oneshot", caller="c", model="gemini-embedding-001", label="embed")
         self.assertEqual(captured[0]["label"], "embed [adhoc]")
+
+
+class SpoolTests(unittest.TestCase):
+    def test_failed_batch_survives_and_replays(self):
+        with tempfile.TemporaryDirectory() as directory, \
+             patch.dict(os.environ, {"LENINBOT_AUDIT_SPOOL_DIR": directory}), \
+             patch.object(audit_sink, "mode", return_value="proxy"):
+            writer = audit_sink.BatchedAuditWriter(
+                "tool", thread_name="test-spool", log=logging.getLogger(__name__), label="tool",
+            )
+            row = {"tool_name": "t", "decision": "allow"}
+            with patch.object(audit_sink, "post_rows", return_value=False):
+                writer.drain_batch([row])
+            self.assertEqual(audit_sink.spool_stats()["tool"], 1)
+            sent = []
+            with patch.object(audit_sink, "post_rows", side_effect=lambda kind, rows: sent.extend(rows) or True):
+                writer.replay_spool()
+            self.assertEqual(sent, [row])
+            self.assertEqual(audit_sink.spool_stats()["tool"], 0)
+
+    def test_queue_overflow_is_spooled(self):
+        with tempfile.TemporaryDirectory() as directory, \
+             patch.dict(os.environ, {"LENINBOT_AUDIT_SPOOL_DIR": directory}):
+            writer = audit_sink.BatchedAuditWriter(
+                "llm", thread_name="test-overflow", log=logging.getLogger(__name__),
+                label="llm", maxsize=1,
+            )
+            with patch.object(writer, "ensure_worker"):
+                writer.enqueue({"surface": "loop", "status": "ok"})
+                writer.enqueue({"surface": "loop", "status": "error"})
+            self.assertEqual(audit_sink.spool_stats()["llm"], 1)
 
 
 class ProxyEndpointTests(unittest.TestCase):

@@ -220,8 +220,9 @@ def save_redis_progress(
     if task_id is None:
         return
     try:
+        from security_gateway.redaction import redact_log_text
         from memory_store.redis_state import save_task_progress
-        save_task_progress(task_id, round_num, tool_name, input_summary, result, is_error)
+        save_task_progress(task_id, round_num, tool_name, redact_log_text(input_summary), redact_log_text(result), is_error)
     except Exception:
         pass
 

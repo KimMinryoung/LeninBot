@@ -18,18 +18,13 @@ from __future__ import annotations
 import json
 import logging
 import queue
-import re
+from security_gateway.redaction import redact_log_text, tool_input_summary, redact_value
 
 from ops import audit_sink
 logger = logging.getLogger("security_gateway.audit")
 
 _ARGS_SUMMARY_CAP = 2000
 _ERROR_EXCERPT_CAP = 1000
-_SECRET_KEY_RE = re.compile(
-    r"(token|api[_-]?key|secret|password|passwd|private|credential|bearer|cookie)",
-    re.IGNORECASE,
-)
-_MASK = "«redacted»"
 
 # ── DDL ───────────────────────────────────────────────────────────────
 _DDL = """
@@ -128,24 +123,7 @@ def redact_args(args: dict | None) -> str:
     """Return a redacted, truncated JSON summary of tool arguments."""
     if not args:
         return "{}"
-    safe: dict = {}
-    for key, value in args.items():
-        if _SECRET_KEY_RE.search(str(key)):
-            safe[key] = _MASK
-        elif isinstance(value, str) and len(value) > 300:
-            safe[key] = value[:300] + "…"
-        elif isinstance(value, (dict, list)):
-            try:
-                blob = json.dumps(value, ensure_ascii=False)
-            except Exception:
-                blob = str(value)
-            safe[key] = blob[:300] + ("…" if len(blob) > 300 else "")
-        else:
-            safe[key] = value
-    try:
-        out = json.dumps(safe, ensure_ascii=False, default=str)
-    except Exception:
-        out = str(safe)
+    out = tool_input_summary(args)
     if len(out) > _ARGS_SUMMARY_CAP:
         out = out[:_ARGS_SUMMARY_CAP] + "…"
     return out
@@ -197,6 +175,7 @@ def audit(
         deny_reason = None if decision.label == ALLOW else decision.reason
         if error_excerpt and len(error_excerpt) > _ERROR_EXCERPT_CAP:
             error_excerpt = error_excerpt[:_ERROR_EXCERPT_CAP] + "…"
+        error_excerpt = redact_log_text(error_excerpt) if error_excerpt else error_excerpt
 
         row = {
             "interface": ctx.interface,
@@ -237,7 +216,7 @@ def audit(
             "result_status": result_status,
             "latency_ms": latency_ms,
             "error_excerpt": error_excerpt,
-            "result_metadata": result_metadata,
+            "result_metadata": redact_value(result_metadata) if result_metadata else result_metadata,
         }
 
         # Sink 1: structured log line (always, synchronous, cheap).
@@ -251,10 +230,6 @@ def audit(
         )
 
         # Sink 2: Postgres, via the background worker (fire-and-forget).
-        _ensure_worker()
-        try:
-            _DB_QUEUE.put_nowait(row)
-        except queue.Full:
-            logger.warning("audit queue full; dropped DB row for %s", tool_name)
+        _WRITER.enqueue(row)
     except Exception as e:  # pragma: no cover - defensive
         logger.warning("audit() failed (ignored) for %s: %s", tool_name, e)

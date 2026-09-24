@@ -1,6 +1,6 @@
 # Translation Pipeline
 
-확인 기준: 2026-09-24 사료 Batch 경로 코드와 2026-09-07 운영 DB 마이그레이션 검증. Batch 실호출은 미검증.
+확인 기준: 2026-09-24 사료 Batch 경로 코드와 한 청크 실제 제출·회수·감사 확인, 2026-09-07 운영 DB 마이그레이션 검증.
 
 사료 번역과 사이트 영어 번역은 `translation_runtime/`의 실행 함수를 공유하고, 언어·형식별 프롬프트와 검증·조립은 각 어댑터가 맡는다. 이 문서는 현재 구현·운영 경계를 설명한다. 과거 모델 비교와 배치 산출물은 `output/archival_translations/compare-*.md` 등에 있으며, 현재 설정은 `config/llm_call_sites.json`이 기준이다.
 
@@ -79,9 +79,11 @@ venv/bin/python scripts/archival_translation_batch.py collect --spec <spec-id>
 venv/bin/python scripts/translate_archival_documents.py --spec <spec-id>
 ```
 
+작은 운영 확인이나 비용 제한에는 `submit --max-chunks 1`처럼 제출할 미캐시 청크 수를 제한한다. 이 제한은 제출에만 적용되며 `status`와 `collect`는 manifest의 모든 청크를 확인한다.
+
 제출은 기존 청크 키·원문 해시·검수 TM·캐시를 사용하며 19 MB 안전 상한을 둔다. 초대형 단일 블록은 동기 분할 경로로 돌린다. `output/archival_translations/<spec-id>.batch.json`에 job 이름과 청크별 key를 원자적으로 보관해 중복 제출을 막는다. 요청 결과가 불확실하면 display name으로 공급자 목록을 조회해 복구하며, 찾지 못하면 새 작업을 자동 생성하지 않는다. `status`는 공급자 상태만 읽는다. `collect`는 응답 key·현재 원문·프롬프트·모델·청크 옵션을 대조하고 기존 파서·검증기를 통과한 결과만 정상 JSONL 캐시에 저장한다. 실패하거나 형식이 틀린 청크는 기존 동기 `run`으로 교정·조립한다. 이전 배치가 종료되고 결과를 회수한 뒤에도 남은 청크를 다시 Batch로 보내려면 `submit --new-batch`를 명시한다.
 
-Batch 생성은 비멱등이고 완료 목표는 최대 24시간이다. Gemini 공식 가격은 해당 모델의 일반 요청 대비 50%이며, 캐시 적중분은 일반 캐시 요율이다. 회수 시 보고된 토큰으로 이 비율의 추정 비용을 감사한다. 현재 경로는 작은 inline 배치만 지원하고 파일 기반 대형 배치는 지원하지 않는다. 이 경로의 실제 유료 제출·회수는 아직 수행하지 않았으며 SDK/공급자 연결과 비용 원장은 첫 운영 건에서 확인해야 한다. [Gemini Batch API 공식 문서](https://ai.google.dev/gemini-api/docs/batch-api).
+Batch 생성은 비멱등이고 완료 목표는 최대 24시간이다. Gemini 공식 가격은 해당 모델의 일반 요청 대비 50%이며, 캐시 적중분은 일반 캐시 요율이다. 회수 시 보고된 토큰으로 이 비율의 추정 비용을 감사한다. 현재 경로는 작은 inline 배치만 지원하고 파일 기반 대형 배치는 지원하지 않는다. 2026-09-24 `financial-manifesto-1905` 한 청크를 `/tmp` 격리 캐시로 실제 제출해 `batches/6xdlpawb1satxxnm2zxjbzx04rxnylo993xa` 작업이 성공했고, `collect`가 한 청크를 구조 검증 후 캐시에 저장했다. `llm_audit_log`에서 해당 작업의 `ok` 행(입력 2,320·출력 7,259 토큰, 추정 $0.045874)을 확인했다. 이 격리 결과는 공개 문서를 수정하지 않았다. [Gemini Batch API 공식 문서](https://ai.google.dev/gemini-api/docs/batch-api).
 
 ### 사이트 실행과 타이머
 

@@ -2,7 +2,7 @@
 
 2026-09-07 기본 inspect 도구 목록과 profile 경계를 확인했다. SQL·KG mutation을 실행한 검증은 아니다.
 
-`mcp_gateway.server` is an inbound MCP server for local developer/operator clients. Its purpose is to give tools like Codex or Claude Code a typed, narrow path into project state without exposing raw shell, broad DB credentials, filesystem writes, publishing, service restart, payment, or send capabilities. The default `inspect` profile is read-only; `operator` additionally exposes bounded SQL corrections and KG maintenance, including guarded mutations.
+`mcp_gateway.server` is an inbound MCP server for local developer/operator clients. Its purpose is to give tools like Codex or Claude Code a typed, narrow path into project state without exposing raw shell, broad DB credentials, filesystem writes, publishing, service restart, payment, or send capabilities. The default `inspect` profile is read-only; `operator` additionally exposes read-only SQL diagnostics and guarded KG maintenance.
 
 The current gateway is a minimal stdio JSON-RPC MCP implementation using standard `Content-Length` framing, with newline-delimited JSON retained for manual probes. It supports `initialize`, `tools/list`, `tools/call`, and `ping`. It deliberately avoids adding a new Python package dependency.
 
@@ -92,7 +92,7 @@ Human quick checks:
 | Profile | Purpose | Additional risk boundary |
 |---|---|---|
 | `inspect` | Developer context, docs, task/report/corpus status, selected runtime search/fetch | No raw SQL and no writes |
-| `operator` | Local operator diagnostics and bounded maintenance | Adds `readonly_query_db`, `bounded_query_db`, and `kg_maintenance_run` |
+| `operator` | Local operator diagnostics and bounded maintenance | Adds `readonly_query_db` and `kg_maintenance_run`; only the repository owner UID may select this profile |
 
 Both profiles use explicit allow-lists sourced from `tool_gateway.profiles` and exposed through compatibility names in `mcp_gateway/policy.py`. The gateway never exports `runtime_tools.registry.TOOLS` wholesale.
 
@@ -120,12 +120,13 @@ Selected runtime tools:
 Operator-only:
 
 - `readonly_query_db`
-- `bounded_query_db`
 - `kg_maintenance_run`
 
 `readonly_query_db` delegates to `scripts/query-db`, preserving the existing guard that allows only a single `SELECT`, `WITH`, `SHOW`, or `EXPLAIN` diagnostic and runs it in a read-only transaction through `scripts/psql-main` (DB는 2026-07-28부터 로컬 `leninbot-pg`; 구 `psql-supabase` 심링크는 제거됨).
 
-`bounded_query_db` delegates to the existing `runtime_tools.db` `query_db` handler. It allows one SQL statement, blocks `DROP` and `TRUNCATE`, and rolls back `UPDATE`/`DELETE` statements that would affect 10 or more rows. This is the MCP path for small operator-approved DB corrections. Use domain-specific tools such as `edit_content` outside MCP when cache invalidation or publication side effects matter.
+Every `tools/call` checks the profile allow-list and the shared security gateway authorization policy. Allowed and denied calls both emit `tool_audit_log` rows with `interface=mcp`, the local UID and profile; arguments use the common recursive redactor. The `operator` profile is downgraded to `inspect` when the MCP server process is not running as the repository owner UID. This is an account boundary for the local stdio server, not a separate operator credential.
+
+`bounded_query_db` is no longer exposed by MCP. Use a domain-specific operator command for corrections so its cache and publication side effects are handled explicitly.
 
 ## KG Maintenance
 
@@ -140,7 +141,7 @@ Operator-only:
 - `classify_untyped` -> `scripts/classify_untyped_entities.py`
 - `full_cleanup` -> `skills/kg-maintenance/scripts/run_cleanup.py`
 
-Mutating actions default to dry-run. To apply changes, callers must pass `execute=true` and `confirm=APPLY_KG_MAINTENANCE`. The wrapper runs a KG backup first for direct mutating actions that do not already include backup in their own pipeline.
+Mutating actions default to dry-run. To apply changes, callers must pass `execute=true` and `confirm=APPLY_KG_MAINTENANCE`. Before every mutating action, including `full_cleanup`, the wrapper runs a KG backup and checks that fresh entity, edge and mention JSON artifacts can be parsed. It refuses mutation if the backup or validation fails.
 
 ## Non-Goals
 

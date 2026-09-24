@@ -25,6 +25,19 @@ logger = logging.getLogger(__name__)
 # Maps every registered tool to a coarse risk class. Moved here from
 # scripts/smoke_tool_allowlists.py, which now imports it from this module.
 TOOL_RISK_CLASS: dict[str, str] = {
+    # Local MCP gateway diagnostics. Profile membership is checked separately.
+    "gateway_status": "read",
+    "list_mcp_tools": "read",
+    "list_runtime_tool_profiles": "read",
+    "search_dev_docs": "read",
+    "get_project_runtime_summary": "read",
+    "list_recent_tasks": "read",
+    "get_task_status": "read",
+    "list_recent_task_reports": "read",
+    "corpus_metadata_audit": "read",
+    "kg_integrity_check": "read",
+    "readonly_query_db": "read",
+    "kg_maintenance_run": "admin",
     # Coordination / routing
     "delegate": "delegate",
     "multi_delegate": "delegate",

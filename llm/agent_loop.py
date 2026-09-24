@@ -372,10 +372,12 @@ async def run_tool_loop(
             if turn.tool_calls:
                 exec_results = await adapter.run_batch(turn.tool_calls, round_num)
                 for tid, tname, tinput, result, is_error in exec_results:
-                    input_summary = json.dumps(tinput, ensure_ascii=False)
+                    from security_gateway.redaction import tool_input_summary, redact_log_text
+                    input_summary = tool_input_summary(tinput)
+                    safe_result = redact_log_text(result)
                     tool_call_log.append(f"  [{round_num}/{max_rounds}] {tname}({input_summary})")
-                    tool_work_details.append(f"  [{round_num}] {tname}({input_summary}) → {result}")
-                    save_redis_progress(task_id, round_num, tname, input_summary, result, is_error)
+                    tool_work_details.append(f"  [{round_num}] {tname}({input_summary}) → {safe_result}")
+                    save_redis_progress(task_id, round_num, tname, input_summary, safe_result, is_error)
                 adapter.note_exec_results(round_num, exec_results)
 
             # Safety net: every tool call must get a result (adapter appends a
@@ -481,11 +483,13 @@ async def run_tool_loop(
                     )
                     final_exec = await adapter.run_batch(final_turn.batch, round_num + final_attempt)
                     for tid, tname, tinput, result, is_error in final_exec:
-                        input_summary = json.dumps(tinput, ensure_ascii=False)
+                        from security_gateway.redaction import tool_input_summary, redact_log_text
+                        input_summary = tool_input_summary(tinput)
+                        safe_result = redact_log_text(result)
                         tool_call_log.append(f"  [final] {tname}({input_summary})")
-                        tool_work_details.append(f"  [final] {tname}({input_summary}) → {result}")
+                        tool_work_details.append(f"  [final] {tname}({input_summary}) → {safe_result}")
                         save_redis_progress(
-                            task_id, round_num + final_attempt, tname, input_summary, result, is_error,
+                            task_id, round_num + final_attempt, tname, input_summary, safe_result, is_error,
                         )
                 adapter.append_final_results(working_msgs, final_turn, final_exec)
 

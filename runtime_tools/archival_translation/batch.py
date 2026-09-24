@@ -150,7 +150,7 @@ def _recover(client, manifest: dict, path: Path) -> None:
 
 
 def submit(spec: dict, opts: at.Options | None = None, *, client=None,
-           new_batch: bool = False) -> dict:
+           new_batch: bool = False, max_chunks: int | None = None) -> dict:
     """Submit uncached chunks once; never automatically repeat an uncertain create."""
     opts = opts or at.Options()
     path = _manifest_path(spec, opts)
@@ -171,6 +171,10 @@ def submit(spec: dict, opts: at.Options | None = None, *, client=None,
                 raise at.SpecError(f"이전 배치 보관 파일이 이미 있다: {archive}")
             path.replace(archive)
         prepared, profile, _, pending = _pending(spec, opts)
+        if max_chunks is not None:
+            if max_chunks < 1:
+                raise at.SpecError("max_chunks는 양수여야 한다")
+            pending = pending[:max_chunks]
         if not pending:
             return {"state": "nothing_pending", "chunks": 0}
         at.preflight(opts, prepared["_lang"])

@@ -28,8 +28,15 @@ import json
 import logging
 import os
 import queue
+import sqlite3
+import stat
 import threading
+import tempfile
 import time
+import uuid
+from pathlib import Path
+from contextlib import contextmanager
+import fcntl
 import urllib.error
 import urllib.request
 
@@ -322,7 +329,7 @@ def post_rows(kind: str, rows: list[dict]) -> bool:
     global _post_failed_before
     base = proxy_base()
     if not base:
-        logger.debug("audit sink: no proxy_base; %d %s row(s) dropped", len(rows), kind)
+        logger.debug("audit sink: no proxy_base; %d %s row(s) pending spool", len(rows), kind)
         return False
     body = json.dumps(rows, ensure_ascii=False, default=str).encode("utf-8")
     req = urllib.request.Request(
@@ -345,7 +352,7 @@ def post_rows(kind: str, rows: list[dict]) -> bool:
         if attempt + 1 < POST_ATTEMPTS:
             time.sleep(0.5)
     log = logger.debug if _post_failed_before else logger.warning
-    log("audit sink POST failed (%d %s row(s) dropped): %s", len(rows), kind, last)
+    log("audit sink POST failed (%d %s row(s) pending spool): %s", len(rows), kind, last)
     _post_failed_before = True
     return False
 
@@ -366,13 +373,78 @@ def fetch_today_spend() -> dict[str, float] | None:
 
 # ── Producer side: batched background writer ──────────────────────────
 
+_fallback_warned = False
+
+def spool_dir() -> Path:
+    global _fallback_warned
+    preferred = Path(os.getenv("LENINBOT_AUDIT_SPOOL_DIR") or Path(__file__).resolve().parents[1] / "data" / "audit_spool")
+    try:
+        preferred.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if preferred.stat().st_uid == os.geteuid():
+            preferred.chmod(0o700)
+        with tempfile.TemporaryFile(dir=preferred):
+            pass
+        return preferred
+    except OSError:
+        # A stale installed DynamicUser unit may not yet have StateDirectory.
+        # Its PrivateTmp remains writable for this service lifetime.
+        fallback = Path(tempfile.gettempdir()) / f"leninbot-audit-spool-{os.geteuid()}"
+        fallback.mkdir(mode=0o700, parents=True, exist_ok=True)
+        info = fallback.lstat()
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid() or stat.S_IMODE(info.st_mode) != 0o700:
+            raise OSError(f"unsafe audit spool fallback: {fallback}")
+        if not _fallback_warned:
+            logger.warning("audit spool directory %s is not writable; using %s", preferred, fallback)
+            _fallback_warned = True
+        return fallback
+
+
+def _spool_files() -> list[Path]:
+    directory = spool_dir()
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    return sorted(directory.glob("*.sqlite3"))
+
+
+@contextmanager
+def _spool_lock(path: Path):
+    with open(str(path) + ".lock", "a+b") as lock:
+        os.chmod(str(path) + ".lock", 0o600)
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            yield False
+            return
+        try:
+            yield True
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+
+
+def _spool_connect(path: Path):
+    conn = sqlite3.connect(path, timeout=5)
+    os.chmod(path, 0o600)
+    conn.execute("CREATE TABLE IF NOT EXISTS pending (id INTEGER PRIMARY KEY, kind TEXT NOT NULL, payload TEXT NOT NULL)")
+    return conn
+
+
+def spool_stats() -> dict[str, int]:
+    """Outstanding durable rows, grouped by ledger; readable without the DB."""
+    counts = {"llm": 0, "tool": 0}
+    for path in _spool_files():
+        try:
+            with _spool_connect(path) as conn:
+                for kind, count in conn.execute("SELECT kind, count(*) FROM pending GROUP BY kind"):
+                    counts[kind] = counts.get(kind, 0) + count
+        except (OSError, sqlite3.Error):
+            logger.warning("audit spool unreadable: %s", path)
+    return counts
+
 class BatchedAuditWriter:
     """Bounded queue + one daemon thread draining it in batches to ``kind``.
 
     Shared by llm/gateway.py and security_gateway/audit.py. Producers call
-    ``ensure_worker()`` then ``queue.put_nowait(row)`` and handle
-    ``queue.Full`` themselves. Each batch goes through ``post_rows`` in proxy
-    mode, else ``insert_rows``; a failed direct insert drops the batch. With
+    ``enqueue(row)``. Each batch goes through ``post_rows`` in proxy
+    mode, else ``insert_rows``; failed batches are spooled. With
     ``flush_at_exit`` the first worker start also registers an atexit flush
     (see llm.gateway.flush_audit).
     """
@@ -400,26 +472,79 @@ class BatchedAuditWriter:
         self.started = False
         self._lock = threading.Lock()
         self._insert_failed_before = False
+        self._spool_name = f"{os.getpid()}-{uuid.uuid4().hex}.sqlite3"
+        self._spool_path: Path | None = None
+
+    def _spool(self, rows: list[dict]) -> None:
+        try:
+            if self._spool_path is None:
+                self._spool_path = spool_dir() / self._spool_name
+            self._spool_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            with _spool_connect(self._spool_path) as conn:
+                conn.executemany(
+                    "INSERT INTO pending (kind, payload) VALUES (?, ?)",
+                    [(self.kind, json.dumps(row, ensure_ascii=False, default=str)) for row in rows],
+                )
+        except (OSError, sqlite3.Error) as e:
+            self.log.error("%s audit spool write failed; %d row(s) lost: %s", self.label, len(rows), e)
+
+    def enqueue(self, row: dict) -> None:
+        self.ensure_worker()
+        try:
+            self.queue.put_nowait(row)
+        except queue.Full:
+            self.log.warning("%s audit queue full; spooling row", self.label)
+            self._spool([row])
+
+    def _send(self, rows: list[dict]) -> bool:
+        if mode() == "proxy":
+            return post_rows(self.kind, rows)
+        try:
+            insert_rows(self.kind, rows)
+            self._insert_failed_before = False
+            return True
+        except Exception as e:
+            log = self.log.debug if self._insert_failed_before else self.log.warning
+            log("%s DB insert failed (%d row(s) pending spool): %s", self.label, len(rows), e)
+            self._insert_failed_before = True
+            return False
 
     def drain_batch(self, rows: list[dict]) -> None:
         """Persist a batch: POST to the proxy sink (mode() == "proxy"),
         else insert directly (the proxy itself, or no proxy configured)."""
-        if mode() == "proxy":
-            post_rows(self.kind, rows)
-            return
-        try:
-            insert_rows(self.kind, rows)
-            self._insert_failed_before = False
-        except Exception as e:
-            # First failure at WARNING, repeats at DEBUG: an ad-hoc process under
-            # the read-only DB guard would otherwise warn on every single call.
-            log = self.log.debug if self._insert_failed_before else self.log.warning
-            log("%s DB insert failed (%d row(s) dropped): %s", self.label, len(rows), e)
-            self._insert_failed_before = True
+        if not self._send(rows):
+            self._spool(rows)
+
+    def replay_spool(self) -> None:
+        for path in _spool_files():
+            with _spool_lock(path) as acquired:
+                if not acquired:
+                    continue
+                try:
+                    with _spool_connect(path) as conn:
+                        rows = conn.execute(
+                            "SELECT id, payload FROM pending WHERE kind=? ORDER BY id LIMIT ?",
+                            (self.kind, self.batch_size),
+                        ).fetchall()
+                    if not rows:
+                        continue
+                    if not self._send([json.loads(payload) for _, payload in rows]):
+                        return
+                    with _spool_connect(path) as conn:
+                        conn.executemany("DELETE FROM pending WHERE id=?", [(row_id,) for row_id, _ in rows])
+                except (OSError, sqlite3.Error, ValueError) as e:
+                    self.log.warning("%s audit spool replay failed at %s: %s", self.label, path, e)
 
     def _worker_loop(self) -> None:
         while True:
-            rows = [self.queue.get()]
+            try:
+                rows = [self.queue.get(timeout=30)]
+            except queue.Empty:
+                try:
+                    self.replay_spool()
+                except Exception as e:
+                    self.log.warning("%s audit spool poll failed: %s", self.label, e)
+                continue
             while len(rows) < self.batch_size:
                 try:
                     rows.append(self.queue.get_nowait())
@@ -427,6 +552,10 @@ class BatchedAuditWriter:
                     break
             try:
                 self.drain_batch(rows)
+                try:
+                    self.replay_spool()
+                except Exception as e:
+                    self.log.warning("%s audit spool replay failed: %s", self.label, e)
             finally:
                 for _ in rows:
                     self.queue.task_done()
@@ -455,7 +584,7 @@ class BatchedAuditWriter:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     self.log.warning(
-                        "%s flush timed out; %d row(s) dropped",
+                        "%s flush timed out; %d row(s) still queued",
                         self.label,
                         self.queue.unfinished_tasks,
                     )

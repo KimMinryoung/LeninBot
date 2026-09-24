@@ -7,6 +7,9 @@ allow-list.
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
+
 from tool_gateway.profiles import (
     MCP_FORBIDDEN_TOOL_NAMES,
     MCP_GATEWAY_INSPECT_TOOLS,
@@ -42,6 +45,8 @@ def normalize_profile(profile: str | None) -> str:
     profile = (profile or INSPECT_PROFILE).strip().lower()
     profile = PROFILE_ALIASES.get(profile, profile)
     if profile not in PROFILE_TOOLS:
+        return INSPECT_PROFILE
+    if profile == OPERATOR_PROFILE and os.geteuid() != Path(__file__).resolve().parents[1].stat().st_uid:
         return INSPECT_PROFILE
     return profile
 

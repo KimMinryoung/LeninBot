@@ -35,7 +35,7 @@ class _Encoder(json.JSONEncoder):
 
 def backup(include_embeddings: bool = True):
     os.makedirs(BACKUP_DIR, exist_ok=True)
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASS))
 
     with driver.session() as session:

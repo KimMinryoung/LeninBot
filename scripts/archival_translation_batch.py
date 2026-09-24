@@ -29,14 +29,18 @@ def main() -> int:
     parser.add_argument("--glossary-limit", type=int, default=60)
     parser.add_argument("--new-batch", action="store_true",
                         help="완료된 이전 배치를 보관하고 남은 청크를 새로 제출")
+    parser.add_argument("--max-chunks", type=int,
+                        help="submit에서 한 번에 제출할 미캐시 청크 수 제한")
     args = parser.parse_args()
     if args.new_batch and args.action != "submit":
         parser.error("--new-batch는 submit에만 쓸 수 있다")
+    if args.max_chunks is not None and args.action != "submit":
+        parser.error("--max-chunks는 submit에만 쓸 수 있다")
     opts = Options(cache_path=args.cache, max_chars=args.max_chars,
                    glossary_limit=args.glossary_limit)
     try:
         spec = load_spec(args.spec)
-        result = (batch.submit(spec, opts, new_batch=args.new_batch) if args.action == "submit"
+        result = (batch.submit(spec, opts, new_batch=args.new_batch, max_chunks=args.max_chunks) if args.action == "submit"
                   else getattr(batch, args.action)(spec, opts))
     except SpecError as exc:
         print(f"배치 오류: {exc}", file=sys.stderr)

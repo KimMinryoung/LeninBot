@@ -60,6 +60,11 @@ class BatchTests(unittest.TestCase):
             self._submit()
         self.assertEqual(len(self.batches.created), 1)
 
+    def test_submit_can_limit_chunks_without_changing_collection_scope(self):
+        result = self._submit(max_chunks=1)
+        self.assertEqual(result["chunks"], 1)
+        self.assertEqual(len(self.batches.created[0]["src"]), 1)
+
     def test_collect_only_valid_matching_chunks(self):
         self._submit()
         good = NS(metadata={"key": "key-one"}, error=None,

@@ -161,7 +161,6 @@ MCP_GATEWAY_INSPECT_TOOLS = frozenset({
 
 MCP_GATEWAY_OPERATOR_TOOLS = frozenset({
     "readonly_query_db",
-    "bounded_query_db",
     "kg_maintenance_run",
 })
 

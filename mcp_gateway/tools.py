@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 import subprocess
+import time
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
@@ -172,36 +173,10 @@ GATEWAY_TOOLS: list[dict[str, Any]] = [
         ),
     },
     {
-        "name": "bounded_query_db",
-        "description": (
-            "Operator profile only. Run one SQL statement through the existing runtime_tools.db query_db guard. "
-            "SELECT/WITH/SHOW/EXPLAIN return rows; INSERT/UPDATE/DELETE return affected row count; "
-            "DROP/TRUNCATE are blocked; UPDATE/DELETE affecting >=10 rows are rolled back."
-        ),
-        "input_schema": _schema(
-            {
-                "sql": {
-                    "type": "string",
-                    "description": "A single SQL statement. Use %s placeholders with params for dynamic values.",
-                },
-                "params": {
-                    "type": "array",
-                    "items": {},
-                    "description": "Optional positional parameters for %s placeholders.",
-                },
-                "max_rows": {
-                    "type": "integer",
-                    "description": "Cap on SELECT rows in the response. Default 100, max 1000.",
-                },
-            },
-            ["sql"],
-        ),
-    },
-    {
         "name": "kg_maintenance_run",
         "description": (
             "Operator profile only. Run a bounded KG maintenance script. Mutating actions require "
-            "execute=true and confirm='APPLY_KG_MAINTENANCE'; the wrapper runs a KG backup before mutation."
+            "execute=true and confirm='APPLY_KG_MAINTENANCE'; the wrapper verifies fresh KG backup artifacts before mutation."
         ),
         "input_schema": _schema(
             {
@@ -636,14 +611,20 @@ async def kg_maintenance_run(
 
     try:
         sections: list[str] = []
-        if execute and mutating and action != "full_cleanup":
+        if execute and mutating:
             backup_cmd = _kg_maintenance_command("backup", False)
             assert backup_cmd is not None
-            sections.append("## Pre-mutation KG backup\n" + await asyncio.to_thread(
-                _run_project_command,
-                backup_cmd,
-                min(timeout_seconds, 600),
-            ))
+            backup_started = time.time()
+            backup_output = await asyncio.to_thread(
+                _run_project_command, backup_cmd, min(timeout_seconds, 600),
+            )
+            if backup_output.startswith("Error:"):
+                return "Error: KG backup failed; mutation refused.\n" + backup_output
+            try:
+                verified = _verify_kg_backup(backup_output, backup_started)
+            except (ValueError, OSError, json.JSONDecodeError) as exc:
+                return f"Error: KG backup artifact invalid; mutation refused: {exc}"
+            sections.append("## Pre-mutation KG backup\n" + backup_output + f"\nVerified: {verified}")
         sections.append(f"## KG maintenance: {action} ({'execute' if execute else 'dry-run'})\n" + await asyncio.to_thread(
             _run_project_command,
             command,
@@ -654,16 +635,25 @@ async def kg_maintenance_run(
         return f"Error: KG maintenance action '{action}' timed out after {timeout_seconds}s"
 
 
-async def bounded_query_db(
-    sql: str,
-    params: list | None = None,
-    max_rows: int = 100,
-    **_: Any,
-) -> str:
-    from runtime_tools.db import DB_TOOL_HANDLERS
+def _verify_kg_backup(output: str, started: float) -> str:
+    """Require three fresh, parseable artifacts before an MCP KG mutation."""
+    import re
 
-    handler = DB_TOOL_HANDLERS["query_db"]
-    return await handler(sql=sql, params=params, max_rows=max_rows)
+    match = re.search(r"백업 완료.*\(timestamp: ([0-9_]+)\)", output)
+    if not match:
+        raise ValueError("backup completion marker missing")
+    stamp = match.group(1)
+    backup_dir = ROOT / "data" / "kg_backups"
+    counts = {}
+    for name in ("entities", "edges", "mentions"):
+        path = backup_dir / f"{name}_{stamp}.json"
+        if not path.is_file() or path.stat().st_mtime < started:
+            raise ValueError(f"{name} backup missing or stale")
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, list) or (name == "entities" and not data):
+            raise ValueError(f"{name} backup is not a valid nonempty KG snapshot")
+        counts[name] = len(data)
+    return ", ".join(f"{name}={count}" for name, count in counts.items())
 
 
 async def readonly_query_db(sql: str, timeout_seconds: int = 30, **_: Any) -> str:
@@ -703,7 +693,6 @@ GATEWAY_HANDLERS: dict[str, ToolHandler] = {
     "corpus_metadata_audit": corpus_metadata_audit,
     "kg_integrity_check": kg_integrity_check,
     "readonly_query_db": readonly_query_db,
-    "bounded_query_db": bounded_query_db,
     "kg_maintenance_run": kg_maintenance_run,
 }
 
@@ -743,4 +732,3 @@ def build_handlers(profile: str = "inspect") -> dict[str, ToolHandler]:
         if name in allowed
     })
     return handlers
-

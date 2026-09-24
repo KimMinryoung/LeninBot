@@ -258,14 +258,17 @@ def _normalize_messages(messages: list[dict]) -> list[dict]:
                         parts.append(block.get("text", ""))
                     elif btype == "tool_use":
                         name = block.get("name", "?")
-                        inp = json.dumps(block.get("input", {}), ensure_ascii=False)[:500]
+                        from security_gateway.redaction import tool_input_summary
+                        inp = tool_input_summary(block.get("input", {}))[:500]
                         parts.append(f"[도구 호출: {name}({inp})]")
                     elif btype == "tool_result":
                         rc = block.get("content", "")
                         if isinstance(rc, str):
-                            parts.append(f"[도구 결과: {rc[:2000]}]")
+                            from security_gateway.redaction import redact_log_text
+                            parts.append(f"[도구 결과: {redact_log_text(rc)[:2000]}]")
                     else:
-                        parts.append(str(block))
+                        from security_gateway.redaction import redact_log_text
+                        parts.append(redact_log_text(block))
             text = "\n".join(p for p in parts if p)
         else:
             text = str(content)
@@ -1447,9 +1450,10 @@ class _OpenAIProtocolAdapter:
         # API call fails after state has already been changed.
         for _tid, tname, tinput, result, is_error in exec_results:
             if is_side_effect_tool(tname) and not is_error:
-                input_summary = json.dumps(tinput, ensure_ascii=False)
+                from security_gateway.redaction import tool_input_summary, redact_log_text
+                input_summary = tool_input_summary(tinput)
                 self.side_effect_work_details.append(
-                    f"  [{round_num}] {tname}({input_summary}) → {result}"
+                    f"  [{round_num}] {tname}({input_summary}) → {redact_log_text(result)}"
                 )
 
     def append_tool_results(self, msgs, turn, exec_results, missing, warning_texts):

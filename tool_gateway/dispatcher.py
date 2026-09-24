@@ -519,7 +519,8 @@ async def execute_tool(
                 logger.warning("gateway reservation conflict audit failed for %s: %s", name, exc)
             return result, is_error
 
-    logger.info("Tool call: %s(%s)", name, json.dumps(args, ensure_ascii=False)[:200])
+    from security_gateway.redaction import tool_input_summary, redact_log_text
+    logger.info("Tool call: %s(%s)", name, tool_input_summary(args)[:200])
     rejected = False
     try:
         raw = handler(**args)
@@ -535,7 +536,7 @@ async def execute_tool(
         if handler_reported_failure:
             logger.warning("Tool %s reported failure: %s", name, str(result)[:200])
             if log_event:
-                log_event("warning", "tool", f"Tool {name} failed: {str(result)[:200]}")
+                log_event("warning", "tool", f"Tool {name} failed: {redact_log_text(result)[:200]}")
             if durable_record is not None and durable_record.acquired:
                 # The handler knows the call failed, but a side effect may have
                 # landed before it did. Same conservative verdict as a raised
@@ -550,7 +551,7 @@ async def execute_tool(
         # A rule the tool exists to enforce, not a malfunction. It is raised
         # before any side effect, so nothing about the external world is in
         # doubt and the generic failure prefix would only mislead.
-        logger.info("Tool %s rejected the call: %s", name, exc)
+        logger.info("Tool %s rejected the call: %s", name, redact_log_text(str(exc)))
         result = str(exc)
         is_error = True
         rejected = True
@@ -567,9 +568,9 @@ async def execute_tool(
             except Exception as store_exc:
                 logger.error("failed to persist outcome_unknown for %s: %s", name, store_exc)
     except Exception as exc:
-        logger.error("Tool %s execution error: %s", name, exc)
+        logger.error("Tool %s execution error: %s", name, redact_log_text(str(exc)))
         if log_event:
-            log_event("warning", "tool", f"Tool {name} failed: {exc}")
+            log_event("warning", "tool", f"Tool {name} failed: {redact_log_text(str(exc))}")
         result = f"Tool execution failed; external outcome may be unknown: {exc}"
         is_error = True
         if durable_record is not None and durable_record.acquired:
@@ -675,7 +676,8 @@ async def execute_tools_batch(
     schemas = tool_schema_map(tool_definitions)
 
     async def _run_one(idx: int, tid: str, tname: str, tinput: dict):
-        input_summary = json.dumps(tinput, ensure_ascii=False)
+        from security_gateway.redaction import tool_input_summary, redact_log_text
+        input_summary = tool_input_summary(tinput)
         await _emit_progress(on_progress, "tool_call", f"[{round_num}] 🔧 {tname}({input_summary})")
         result, is_error = await execute_tool(
             tname,
@@ -686,7 +688,7 @@ async def execute_tools_batch(
             tool_schema=schemas.get(tname),
             tool_call_id=tid,
         )
-        await _emit_progress(on_progress, "tool_result", f"  {'❌' if is_error else '✓'} {tname}: {result[:200]}")
+        await _emit_progress(on_progress, "tool_result", f"  {'❌' if is_error else '✓'} {tname}: {redact_log_text(result)[:200]}")
         results[idx] = (tid, tname, tinput, result, is_error)
 
     i = 0

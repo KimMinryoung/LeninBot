@@ -97,13 +97,37 @@ def _resolve_profile(args: argparse.Namespace) -> str:
 
 
 async def _call_tool(name: str, arguments: dict[str, Any], profile: str) -> dict[str, Any]:
+    import time
+    from security_gateway.audit import audit as audit_tool
+    from security_gateway.context import CallerContext
+    from security_gateway.gateway import Decision, authorize
+    from security_gateway.policy import risk_class
+    from security_gateway.redaction import redact_log_text
+
+    profile = normalize_profile(profile)
+    ctx = CallerContext(interface="mcp", agent_name=profile, user_id=str(os.geteuid()),
+                        is_owner=profile == OPERATOR_PROFILE)
+    started = time.monotonic()
     handlers = build_handlers(profile)
     handler = handlers.get(name)
     if handler is None:
+        decision = Decision(False, "deny", risk_class(name),
+                            f"tool is not exposed by MCP profile '{profile}'", "enforce", "mcp_profile")
+        audit_tool(ctx, name, arguments, decision, result_status="denied", latency_ms=0)
         return {
             "content": [{"type": "text", "text": f"Tool is not exposed by MCP profile '{profile}': {name}"}],
             "isError": True,
         }
+    decision = authorize(ctx, name)
+    if decision.denied:
+        audit_tool(ctx, name, arguments, decision, result_status="denied",
+                   latency_ms=int((time.monotonic() - started) * 1000))
+        return {
+            "content": [{"type": "text", "text": f"Tool denied by security gateway: {decision.reason}"}],
+            "isError": True,
+        }
+    status = "ok"
+    error_excerpt = None
     try:
         call_args = dict(arguments or {})
         signature = inspect.signature(handler)
@@ -119,10 +143,18 @@ async def _call_tool(name: str, arguments: dict[str, Any], profile: str) -> dict
             text = result
         return {"content": [{"type": "text", "text": str(text)}], "isError": False}
     except TypeError as exc:
+        status = "invalid_args"
+        error_excerpt = str(exc)
         return {"content": [{"type": "text", "text": f"Invalid arguments for {name}: {exc}"}], "isError": True}
     except Exception as exc:
-        logger.exception("MCP tool call failed: %s", name)
+        status = "error"
+        error_excerpt = str(exc)
+        logger.error("MCP tool call failed: %s: %s", name, redact_log_text(str(exc)))
         return {"content": [{"type": "text", "text": f"{type(exc).__name__}: {exc}"}], "isError": True}
+    finally:
+        audit_tool(ctx, name, arguments, decision, result_status=status,
+                   latency_ms=int((time.monotonic() - started) * 1000),
+                   error_excerpt=error_excerpt)
 
 
 async def handle(request: dict[str, Any], profile: str) -> dict[str, Any] | None:

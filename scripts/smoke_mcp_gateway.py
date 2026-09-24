@@ -37,13 +37,13 @@ def _assert_policy() -> None:
     assert "bounded_query_db" not in inspect
     assert "kg_maintenance_run" not in inspect
     assert "readonly_query_db" in operator
-    assert "bounded_query_db" in operator
+    assert "bounded_query_db" not in operator
     assert "kg_maintenance_run" in operator
     assert inspect == readonly_alias
     assert inspect < operator
 
     forbidden_inspect = sorted(inspect & FORBIDDEN_TOOL_NAMES)
-    forbidden_operator = sorted((operator - {"readonly_query_db", "bounded_query_db", "kg_maintenance_run"}) & FORBIDDEN_TOOL_NAMES)
+    forbidden_operator = sorted((operator - {"readonly_query_db", "kg_maintenance_run"}) & FORBIDDEN_TOOL_NAMES)
     assert not forbidden_inspect, f"inspect MCP exposes forbidden tools: {forbidden_inspect}"
     assert not forbidden_operator, f"operator MCP exposes forbidden tools: {forbidden_operator}"
 
@@ -161,7 +161,7 @@ def _assert_cli_help() -> None:
     )
     assert proc.returncode == 0, proc.stderr
     assert "readonly_query_db" in proc.stdout
-    assert "bounded_query_db" in proc.stdout
+    assert "bounded_query_db" not in proc.stdout
     assert "kg_maintenance_run" in proc.stdout
 
 

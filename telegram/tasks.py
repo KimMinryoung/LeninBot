@@ -1471,9 +1471,11 @@ async def _persist_task_success(
     tool_log_text = ""
     progress_text = budget_tracker.get("progress_text", "")
     if tool_details or progress_text:
+        from security_gateway.redaction import redact_log_text
         tool_log_text = "\n".join(str(d)[:500] for d in tool_details)[:20000]
         if progress_text:
             tool_log_text += "\n\n--- execution commentary (not final report) ---\n" + progress_text[:8000]
+        tool_log_text = redact_log_text(tool_log_text)
         try:
             await asyncio.to_thread(
                 _execute,

@@ -501,11 +501,7 @@ def _emit(row: dict, *, warn: bool = False) -> None:
             # Ad-hoc scripts now reach the ledger through the proxy sink;
             # mark them so cost reports can separate them from services.
             row["label"] = ((row.get("label") or "") + " [adhoc]").strip()
-        _ensure_worker()
-        try:
-            _DB_QUEUE.put_nowait(row)
-        except queue.Full:
-            logger.warning("llm audit queue full; dropped row for %s", row.get("caller"))
+        _WRITER.enqueue(row)
     except Exception as e:  # pragma: no cover - defensive
         logger.warning("llm audit emit failed (ignored): %s", e)
 
