@@ -4,14 +4,7 @@
 
 [문서 유지 원칙](README.md#문서-유지-원칙)대로 이 파일은 임시 목록이다. 항목을 처리하면 여기서 지우고, 목록이 비면 파일을 지운다. 줄 번호는 적지 않는다. 작업 전에 코드에서 다시 찾는다.
 
-## A. 결정이 필요한 항목
-
-### A7. legacy stage 삭제로 드러난 editor의 빠진 동작
-
-2026-09-24에 legacy stage(`stages.Research/Draft/Review`, legacy `validate`/`submit`)를 지우고 테스트를 editor 경로로 옮기는 과정에서 두 가지가 드러났다. 둘 다 2026-09-20 editor 전환 때부터 운영에 없던 동작이고, 자세한 내용은 `commulingo_pipeline.md`에 있다.
-
-- **검토 판정 노트:** legacy `Review`는 escalate/reject로 끝나면 사전 항목에 `note` RPC로 사유를 남겼다. editor는 판정을 작업의 review artifact에만 남긴다. editor의 `reject`는 `escalated`로 끝나고, legacy는 `complete`로 끝났다. 다음 작성자에게 사유를 보여 줄지 정한다.
-- **이미 수동 처리된 원본을 교정하는 작업:** legacy `submit`은 원본 상태를 먼저 확인하고 조용히 끝냈다. editor는 `replacesSuggestionId`를 발행 RPC 하나에 담아 보낸다. frontend 서비스가 트랜잭션 안에서 거부하므로 원본은 바뀌지 않지만, 작업은 오류로 재시도·escalate 경로를 탄다. 조용히 완료할지 정한다.
+## A. 사람이 적용할 항목
 
 ### C4. `self_modification_core.py`
 

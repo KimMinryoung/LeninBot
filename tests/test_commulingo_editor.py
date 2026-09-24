@@ -904,8 +904,13 @@ class ReviewAndPublishTests(EditorCase):
     async def run_review(self, job, artifacts, decision, prompts=None, proposals=None):
         handlers, model = self.fake_review([decision], prompts, proposals)
         a, b, c, d, e = self.review_patches(handlers, model)
-        with a, b, c, d, e:
-            return await workflow.Review()(job, artifacts, Usage(), .2)
+        with a as rpc, b, c, d, e:
+            result = await workflow.Review()(job, artifacts, Usage(), .2)
+        self.review_rpcs = [call.args[0] for call in rpc.call_args_list]
+        return result
+
+    def review_notes(self):
+        return [r for r in self.review_rpcs if r['command']=='note']
 
     def verdict(self, decision, corrections=()):
         return {'decision':decision,'reason':'Verified against the original archive.','checks':[],
@@ -916,10 +921,20 @@ class ReviewAndPublishTests(EditorCase):
         for decision, corrections, expected in [('revise',correction,('draft','ready')),
                                                 ('approve',[],('submit','ready')),
                                                 ('escalate',[],('complete','escalated')),
-                                                ('reject',[],('complete','escalated'))]:
+                                                ('reject',[],('complete','complete'))]:
             with self.subTest(decision=decision):
                 result = await self.run_review(JOB,self.artifacts(),self.verdict(decision,corrections))
                 self.assertEqual((result.next_stage,result.status),expected)
+                # A review that ends unpublished leaves its reason on the entry for the next author.
+                notes = self.review_notes()
+                if decision in ('escalate','reject'):
+                    self.assertEqual(len(notes),1)
+                    self.assertTrue(notes[0]['note'].startswith(f'검토 {decision} (작업 {JOB["id"]}'))
+                    self.assertIn('Verified against the original archive.',notes[0]['note'])
+                    self.assertEqual((notes[0]['target'],notes[0]['id'],notes[0]['changedBy']),
+                                     (JOB['kind'],JOB['target'],'commulingo-pipeline-reviewer'))
+                else:
+                    self.assertEqual(notes,[])
         # Lifetime counters from older jobs do not hold a corrected draft.
         job = {**JOB,'payload':{'review_revisions':20}}
         history = self.artifacts()
@@ -927,11 +942,14 @@ class ReviewAndPublishTests(EditorCase):
         self.assertEqual(first.next_stage,'draft')
         history.append({'stage':'review','value':first.value})
         # The same patch comes back: held before a paid review.
-        with patch('commulingo_pipeline.service.call',return_value=CURRENT), \
+        with patch('commulingo_pipeline.service.call',return_value=CURRENT) as rpc, \
              patch('commulingo_pipeline.stages.model_call') as model:
             stalled = await workflow.Review()(job,history,Usage(),.2)
         model.assert_not_called()
         self.assertEqual(stalled.status,'escalated')
+        held = [c.args[0] for c in rpc.call_args_list if c.args[0]['command']=='note']
+        self.assertEqual(len(held),1)
+        self.assertTrue(held[0]['note'].startswith('검토 revise (held)'))
         corrected = deepcopy(history[0]['value']['draft'])
         corrected['fields']['body']['en'] = 'A corrected documented historical context.'
         history.append({'stage':'research','value':{'editor_version':2,'research':{'baseline':CURRENT['revision']},'draft':corrected}})
@@ -997,22 +1015,34 @@ class ReviewAndPublishTests(EditorCase):
     async def test_correction_replaces_the_original_only_inside_approved_publication(self):
         job = {**JOB,'topic':'review-repair:7','payload':{'workflow':'editor','replaces_suggestion_id':7}}
         artifacts, digest = self.approved(job)
+        pending = {'id':7,'status':'pending','review_note':None}
         with patch('commulingo_pipeline.config.load',return_value={'phase':'live'}), \
+             patch('runtime_tools.commulingo_review_queue.suggestion',return_value=pending), \
              patch('commulingo_pipeline.service.call',return_value={'status':'approved','suggestionId':8}) as rpc:
             result = await workflow.publish(job,artifacts,Usage(),.2)
-            await workflow.publish(job,artifacts,Usage(),.2)
         self.assertEqual(result.value['status'],'approved')
-        first, second = [c.args[0] for c in rpc.call_args_list]
+        # Replay after this job's own publish replaced the original: the same
+        # request goes out again and the service returns the stored receipt.
+        ours = {'id':7,'status':'rejected','review_note':workflow.REPLACED_NOTE_PREFIX+digest}
+        with patch('commulingo_pipeline.config.load',return_value={'phase':'live'}), \
+             patch('runtime_tools.commulingo_review_queue.suggestion',return_value=ours), \
+             patch('commulingo_pipeline.service.call',return_value={'status':'approved','suggestionId':8}) as replay:
+            await workflow.publish(job,artifacts,Usage(),.2)
+        first, second = rpc.call_args.args[0], replay.call_args.args[0]
         self.assertEqual(first,second)
         self.assertEqual((first['command'],first['replacesSuggestionId'],first['approvedPatchHash']),('publish',7,digest))
-        # A manually resolved original is refused by the service inside the same
-        # transaction; the stage surfaces it instead of reporting publication.
-        with patch('commulingo_pipeline.config.load',return_value={'phase':'live'}), \
-             patch('commulingo_pipeline.service.call',side_effect=ValueError(
-                 '400: original suggestion is no longer eligible for replacement')) as rpc:
-            with self.assertRaisesRegex(ValueError,'no longer eligible'):
-                await workflow.publish(job,artifacts,Usage(),.2)
-        rpc.assert_called_once()
+        # An original resolved by hand (or missing) is no longer ours to replace:
+        # the job completes quietly and nothing is published.
+        for original in ({'id':7,'status':'approved','review_note':'looks right'},
+                         {'id':7,'status':'rejected','review_note':'duplicate'},
+                         None):
+            with self.subTest(original=original), \
+                 patch('commulingo_pipeline.config.load',return_value={'phase':'live'}), \
+                 patch('runtime_tools.commulingo_review_queue.suggestion',return_value=original), \
+                 patch('commulingo_pipeline.service.call') as rpc:
+                result = await workflow.publish(job,artifacts,Usage(),.2)
+            rpc.assert_not_called()
+            self.assertEqual((result.next_stage,result.status),('complete','complete'))
         # Without an approval bound to this patch nothing is written.
         unapproved = artifacts[:-1]+[{'stage':'review','value':{'decision':'revise'}}]
         with patch('commulingo_pipeline.config.load',return_value={'phase':'live'}), \
