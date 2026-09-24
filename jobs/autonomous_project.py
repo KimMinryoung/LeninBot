@@ -11,6 +11,7 @@ enforces the boundary via its tool whitelist and prompt constraints.
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import logging
 import os
@@ -555,6 +556,119 @@ def _pick_next_project() -> dict | None:
 _READ_DOCUMENT_ALLOWED_PREFIXES = ("data/downloads/", "data/converted/")
 
 
+# Schemas for the per-tick project tools. They do not depend on project_id;
+# _build_project_tools deep-copies them per call so callers get fresh dicts.
+_PROJECT_TOOL_SCHEMAS: list[dict] = [
+    {
+        "name": "add_research_note",
+        "description": (
+            "Persist a single research finding to the project's note log. Use this IMMEDIATELY after "
+            "a research step — chat memory does not persist across hourly ticks, only notes do. "
+            "When the prompt marks synthesis as due, write one note_type='synthesis' note that "
+            "consolidates accumulated findings into standing memory."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string", "description": "The finding, in dense prose. Cite sources inline."},
+                "sources": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "URLs, KG node ids, or vector-DB ids that back this finding. Unsourced notes are discouraged.",
+                },
+                "note_type": {
+                    "type": "string",
+                    "enum": ["finding", "synthesis"],
+                    "description": (
+                        "finding (default): one research result. synthesis: a consolidation note that "
+                        "distills the durable findings, corrections, open questions, and dead ends from "
+                        "many earlier notes — your future ticks read the latest synthesis first."
+                    ),
+                    "default": "finding",
+                },
+            },
+            "required": ["text"],
+        },
+    },
+    {
+        "name": "read_research_notes",
+        "description": (
+            "Read this project's saved research notes in FULL TEXT. The Recent Notes section of "
+            "your prompt shows only 500-char snippets of the last few notes — before drafting a "
+            "report or other long-form artifact, use this to load the complete findings you saved "
+            "on earlier ticks instead of re-searching or writing from memory."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "keyword": {"type": "string", "description": "Case-insensitive substring filter on note text."},
+                "note_ids": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "description": "Specific note ids (shown as #id in the Recent Notes list).",
+                },
+                "limit": {"type": "integer", "description": "Max notes to return (1-10).", "default": 5},
+                "note_type": {
+                    "type": "string",
+                    "enum": ["finding", "synthesis"],
+                    "description": "Filter by note kind. Omit for both.",
+                },
+            },
+        },
+    },
+    {
+        "name": "read_document",
+        "description": (
+            "Read a downloaded source file or converted document with character pagination. "
+            "Only serves paths under data/downloads/ and data/converted/ — i.e. what "
+            "download_file and convert_document return. Use to read long primary sources "
+            "(PDF reports, statistical releases) in full; the result header shows the next "
+            "char_offset when more remains."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "Path returned by download_file or convert_document."},
+                "char_offset": {"type": "integer", "description": "0-indexed start character. Default 0.", "default": 0},
+                "char_limit": {"type": "integer", "description": "Max characters to return (default 20,000, max 100,000).", "default": 20000},
+            },
+            "required": ["path"],
+        },
+    },
+    {
+        "name": "revise_plan",
+        "description": (
+            "Overwrite the project's plan. The previous plan is preserved in the event log. "
+            "Use only when accumulated research genuinely justifies a change — not every tick."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "goals": {"type": "array", "items": {"type": "string"}, "description": "Top-level outcomes the project pursues."},
+                "steps": {"type": "array", "items": {"type": "string"}, "description": "Ordered concrete steps to advance the goals."},
+                "rationale": {"type": "string", "description": "Why the previous plan was insufficient. Required."},
+            },
+            "required": ["rationale"],
+        },
+    },
+    {
+        "name": "set_project_state",
+        "description": (
+            "Transition the project state. Allowed: researching | planning | paused | archived. "
+            "Do not flip state every tick; justify transitions in `reason`."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "state": {"type": "string", "enum": ["researching", "planning", "paused", "archived"]},
+                "reason": {"type": "string", "description": "Why this transition is warranted. Required."},
+            },
+            "required": ["state", "reason"],
+        },
+    },
+]
+
+
 def _build_project_tools(project_id: int) -> tuple[list[dict], dict]:
     """Return (tool_schemas, handlers) for the per-tick project tools:
     add_research_note / read_research_notes / read_document / revise_plan /
@@ -754,115 +868,7 @@ def _build_project_tools(project_id: int) -> tuple[list[dict], dict]:
         )
         return f"ok: state → {target}"
 
-    schemas = [
-        {
-            "name": "add_research_note",
-            "description": (
-                "Persist a single research finding to the project's note log. Use this IMMEDIATELY after "
-                "a research step — chat memory does not persist across hourly ticks, only notes do. "
-                "When the prompt marks synthesis as due, write one note_type='synthesis' note that "
-                "consolidates accumulated findings into standing memory."
-            ),
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "text": {"type": "string", "description": "The finding, in dense prose. Cite sources inline."},
-                    "sources": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "URLs, KG node ids, or vector-DB ids that back this finding. Unsourced notes are discouraged.",
-                    },
-                    "note_type": {
-                        "type": "string",
-                        "enum": ["finding", "synthesis"],
-                        "description": (
-                            "finding (default): one research result. synthesis: a consolidation note that "
-                            "distills the durable findings, corrections, open questions, and dead ends from "
-                            "many earlier notes — your future ticks read the latest synthesis first."
-                        ),
-                        "default": "finding",
-                    },
-                },
-                "required": ["text"],
-            },
-        },
-        {
-            "name": "read_research_notes",
-            "description": (
-                "Read this project's saved research notes in FULL TEXT. The Recent Notes section of "
-                "your prompt shows only 500-char snippets of the last few notes — before drafting a "
-                "report or other long-form artifact, use this to load the complete findings you saved "
-                "on earlier ticks instead of re-searching or writing from memory."
-            ),
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "keyword": {"type": "string", "description": "Case-insensitive substring filter on note text."},
-                    "note_ids": {
-                        "type": "array",
-                        "items": {"type": "integer"},
-                        "description": "Specific note ids (shown as #id in the Recent Notes list).",
-                    },
-                    "limit": {"type": "integer", "description": "Max notes to return (1-10).", "default": 5},
-                    "note_type": {
-                        "type": "string",
-                        "enum": ["finding", "synthesis"],
-                        "description": "Filter by note kind. Omit for both.",
-                    },
-                },
-            },
-        },
-        {
-            "name": "read_document",
-            "description": (
-                "Read a downloaded source file or converted document with character pagination. "
-                "Only serves paths under data/downloads/ and data/converted/ — i.e. what "
-                "download_file and convert_document return. Use to read long primary sources "
-                "(PDF reports, statistical releases) in full; the result header shows the next "
-                "char_offset when more remains."
-            ),
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "Path returned by download_file or convert_document."},
-                    "char_offset": {"type": "integer", "description": "0-indexed start character. Default 0.", "default": 0},
-                    "char_limit": {"type": "integer", "description": "Max characters to return (default 20,000, max 100,000).", "default": 20000},
-                },
-                "required": ["path"],
-            },
-        },
-        {
-            "name": "revise_plan",
-            "description": (
-                "Overwrite the project's plan. The previous plan is preserved in the event log. "
-                "Use only when accumulated research genuinely justifies a change — not every tick."
-            ),
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "goals": {"type": "array", "items": {"type": "string"}, "description": "Top-level outcomes the project pursues."},
-                    "steps": {"type": "array", "items": {"type": "string"}, "description": "Ordered concrete steps to advance the goals."},
-                    "rationale": {"type": "string", "description": "Why the previous plan was insufficient. Required."},
-                },
-                "required": ["rationale"],
-            },
-        },
-        {
-            "name": "set_project_state",
-            "description": (
-                "Transition the project state. Allowed: researching | planning | paused | archived. "
-                "Do not flip state every tick; justify transitions in `reason`."
-            ),
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "state": {"type": "string", "enum": ["researching", "planning", "paused", "archived"]},
-                    "reason": {"type": "string", "description": "Why this transition is warranted. Required."},
-                },
-                "required": ["state", "reason"],
-            },
-        },
-    ]
+    schemas = copy.deepcopy(_PROJECT_TOOL_SCHEMAS)
     handlers = {
         "add_research_note": _handle_add_note,
         "read_research_notes": _handle_read_notes,
