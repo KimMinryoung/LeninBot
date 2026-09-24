@@ -40,7 +40,7 @@ load_dotenv()
 logger = logging.getLogger("razvedchik")
 
 # ── 경로 설정 ──────────────────────────────────────────────────────────────────
-BASE_DIR     = Path("/home/grass/leninbot")
+BASE_DIR     = Path(__file__).resolve().parents[2]
 REPORTS_DIR  = BASE_DIR / "output" / "reports"
 CREDS_PATH   = Path.home() / ".config" / "moltbook" / "credentials.json"
 SEEN_POSTS_PATH = Path.home() / ".config" / "moltbook" / "seen_posts.json"

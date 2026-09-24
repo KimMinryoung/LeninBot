@@ -32,6 +32,7 @@ from db import execute as db_execute, query as db_query, query_one as db_query_o
 from jobs.autonomous_project import (  # noqa: E402
     _ensure_tables,
     _log_event,
+    recent_project_notes_with_total,
     run_tick,
     STATE_RESEARCHING,
     STATE_PAUSED,
@@ -236,29 +237,7 @@ def _coerce_note_sources(sources) -> list[str]:
 
 
 def _recent_project_notes(project_id: int, *, legacy_notes: list, limit: int = 5) -> tuple[list[dict], int, str]:
-    try:
-        count_row = db_query_one(
-            "SELECT COUNT(*) AS count FROM autonomous_project_notes WHERE project_id = %s",
-            (project_id,),
-        )
-        rows = db_query(
-            """
-            SELECT turn, text, sources, created_at
-              FROM autonomous_project_notes
-             WHERE project_id = %s
-             ORDER BY created_at DESC, id DESC
-             LIMIT %s
-            """,
-            (project_id, limit),
-        )
-        return (
-            list(reversed([dict(row) for row in rows])),
-            int((count_row or {}).get("count") or 0),
-            "autonomous_project_notes",
-        )
-    except Exception:
-        notes = legacy_notes or []
-        return notes[-limit:], len(notes), "legacy JSONB"
+    return recent_project_notes_with_total(project_id, legacy_notes=legacy_notes, limit=limit)
 
 
 def _latest_project_event(project_id: int, event_type: str) -> dict | None:

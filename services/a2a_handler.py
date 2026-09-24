@@ -288,13 +288,13 @@ async def handle_a2a_message(request_body: dict) -> dict:
     system_prompt = _render_prompt(prompt_ir, profile.provider)
 
     timeout_sec = 120
-    from telegram.bot import (
-        _build_runtime_prelude, _join_context_blocks,
-        _merge_runtime_context_into_last_user,
+    from llm.runtime_context import (
+        build_runtime_prelude, join_context_blocks,
+        merge_runtime_context_into_last_user,
     )
-    history = _merge_runtime_context_into_last_user(
+    history = merge_runtime_context_into_last_user(
         [{"role": "user", "content": user_text}],
-        _join_context_blocks(_build_runtime_prelude(profile.provider, kind="chat")),
+        join_context_blocks(build_runtime_prelude(profile.provider, kind="chat")),
     )
 
     # Run LLM

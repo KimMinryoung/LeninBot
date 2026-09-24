@@ -19,7 +19,8 @@ import json
 import logging
 import queue
 import re
-import threading
+
+import audit_sink
 
 logger = logging.getLogger("security_gateway.audit")
 
@@ -152,58 +153,27 @@ def redact_args(args: dict | None) -> str:
 
 
 # ── Background DB writer ──────────────────────────────────────────────
-_DB_QUEUE: "queue.Queue[dict]" = queue.Queue(maxsize=2000)
-_worker_started = False
-_worker_lock = threading.Lock()
-
-
-_DRAIN_BATCH = 50
-_insert_failed_before = False
+# Queue, batching and worker thread live in audit_sink (shared with
+# llm/gateway.py). No atexit flush here, unlike the LLM ledger.
+_WRITER = audit_sink.BatchedAuditWriter(
+    "tool",
+    thread_name="tool-audit-writer",
+    log=logger,
+    label="audit",
+    maxsize=2000,
+    batch_size=50,
+    flush_at_exit=False,
+)
+_DB_QUEUE: "queue.Queue[dict]" = _WRITER.queue
+_DRAIN_BATCH = _WRITER.batch_size
 
 
 def _drain_batch(rows: list[dict]) -> None:
-    """Persist a batch: POST to the proxy sink (audit_sink.mode() == "proxy"),
-    else insert directly (the proxy itself, or no proxy configured)."""
-    global _insert_failed_before
-    import audit_sink
-
-    if audit_sink.mode() == "proxy":
-        audit_sink.post_rows("tool", rows)
-        return
-    try:
-        audit_sink.insert_rows("tool", rows)
-        _insert_failed_before = False
-    except Exception as e:
-        log = logger.debug if _insert_failed_before else logger.warning
-        log("audit DB insert failed (%d row(s) dropped): %s", len(rows), e)
-        _insert_failed_before = True
-
-
-def _worker_loop() -> None:
-    while True:
-        rows = [_DB_QUEUE.get()]
-        while len(rows) < _DRAIN_BATCH:
-            try:
-                rows.append(_DB_QUEUE.get_nowait())
-            except queue.Empty:
-                break
-        try:
-            _drain_batch(rows)
-        finally:
-            for _ in rows:
-                _DB_QUEUE.task_done()
+    _WRITER.drain_batch(rows)
 
 
 def _ensure_worker() -> None:
-    global _worker_started
-    if _worker_started:
-        return
-    with _worker_lock:
-        if _worker_started:
-            return
-        t = threading.Thread(target=_worker_loop, name="tool-audit-writer", daemon=True)
-        t.start()
-        _worker_started = True
+    _WRITER.ensure_worker()
 
 
 # ── Public entry point ────────────────────────────────────────────────

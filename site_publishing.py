@@ -836,44 +836,6 @@ async def _exec_publish_comic(
 # Read helpers used by api.py (not agent tools)
 # ══════════════════════════════════════════════════════════════════════
 
-def list_hub_curations(limit: int = 20, offset: int = 0) -> list[dict]:
-    _ensure_hub_table()
-    rows = db_query(
-        """
-        SELECT id, slug, title, source_url, source_title, source_author,
-               source_publication, source_published_at,
-               selection_rationale, context, tags, published_at
-          FROM hub_curations
-         ORDER BY published_at DESC
-         LIMIT %s OFFSET %s
-        """,
-        (int(limit), int(offset)),
-    )
-    return rows
-
-
-def count_hub_curations() -> int:
-    _ensure_hub_table()
-    row = db_query_one("SELECT COUNT(*)::int AS n FROM hub_curations")
-    return int(row["n"]) if row else 0
-
-
-def get_hub_curation(slug: str) -> dict | None:
-    _ensure_hub_table()
-    if not _SLUG_RE.match(slug or ""):
-        return None
-    return db_query_one(
-        """
-        SELECT id, slug, title, source_url, source_title, source_author,
-               source_publication, source_published_at,
-               selection_rationale, context, tags, published_at
-          FROM hub_curations
-         WHERE slug = %s
-        """,
-        (slug,),
-    )
-
-
 def _normalize_static_page_lang(lang: str | None) -> str:
     return "en" if (lang or "").strip().lower() == "en" else "ko"
 

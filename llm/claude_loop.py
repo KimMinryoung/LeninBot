@@ -45,15 +45,12 @@ _REPLAY_ONLY_BLOCK_TYPES = {"thinking", "redacted_thinking"}
 _CACHE_CONTROL_1H = {"type": "ephemeral", "ttl": "1h"}
 
 
-# ── Pricing Constants (USD per million tokens) ──────────────────────
+# ── Pricing (USD per million tokens) ─────────────────────────────────
 # Per-tier list prices. Cache-creation shown for the **1-hour TTL** tier
 # (matches what this loop writes). cache_read is identical across TTL tiers.
 # Prefix-match picks by base model name so pinned-date variants reuse the row.
-PRICING_TABLE = anthropic_pricing_table()
-
-# Fallback when the model string doesn't match any known family — use Sonnet
-# (middle tier) so we don't wildly under- or over-report on unknown variants.
-PRICING = PRICING_TABLE["claude-sonnet-5"]
+# Unknown families fall back to Sonnet (middle tier) so we don't wildly under-
+# or over-report on unknown variants.
 
 
 def _pricing_for(model: str) -> dict:

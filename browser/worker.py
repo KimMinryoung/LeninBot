@@ -149,7 +149,7 @@ async def execute_browser_task(task: dict) -> dict:
 
     # Set per-coroutine context so tools (upload_to_r2 etc.) can identify the task
     try:
-        from telegram.bot import current_task_ctx
+        from llm.runtime_context import current_task_ctx
         current_task_ctx.set({"task_id": task_id, "agent_type": agent_type})
     except Exception:
         pass
@@ -240,13 +240,13 @@ async def execute_browser_task(task: dict) -> dict:
         # message so the system prompt stays byte-stable across invocations and
         # prompt caching hits. System alerts are a Telegram-chat concept and
         # intentionally skipped for this background worker.
-        from telegram.bot import (
-            _build_runtime_prelude, _join_context_blocks,
-            _merge_runtime_context_into_last_user,
+        from llm.runtime_context import (
+            build_runtime_prelude, join_context_blocks,
+            merge_runtime_context_into_last_user,
         )
-        messages = _merge_runtime_context_into_last_user(
+        messages = merge_runtime_context_into_last_user(
             messages,
-            _join_context_blocks(_build_runtime_prelude(provider, kind="task")),
+            join_context_blocks(build_runtime_prelude(provider, kind="task")),
         )
 
         loop_kwargs = dict(

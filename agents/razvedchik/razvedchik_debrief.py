@@ -19,7 +19,7 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-DEBRIEFS_DIR = Path("/home/grass/leninbot/output/debriefs")
+DEBRIEFS_DIR = Path(__file__).resolve().parents[2] / "output" / "debriefs"
 
 from agents.razvedchik.persona import build_prompt, DEBRIEF_SCOUT, DEBRIEF_COMMANDER
 
@@ -256,8 +256,8 @@ def _save_insights_to_memory(conversation: list[dict]) -> None:
         return
 
     try:
-        import shared
-        shared.save_experiential_memory(
+        from memory_store.experiential import save_experiential_memory
+        save_experiential_memory(
             observation=insights,
             source="razvedchik_debrief",
         )

@@ -336,9 +336,11 @@ async def _exec_moltbook(
         except Exception as exc:
             return ToolFailure(f"[ERROR] Failed to run Moltbook {action}: {exc}")
 
+    from ops.paths import PROJECT_ROOT
+    _project_root = os.environ.get("PROJECT_ROOT", str(PROJECT_ROOT))
     cmd = [
-        os.path.join(os.environ.get("PROJECT_ROOT", "/home/grass/leninbot"), "venv/bin/python"),
-        os.path.join(os.environ.get("PROJECT_ROOT", "/home/grass/leninbot"), "agents/razvedchik/razvedchik.py"),
+        os.path.join(_project_root, "venv/bin/python"),
+        os.path.join(_project_root, "agents/razvedchik/razvedchik.py"),
         f"--{action}",
     ]
 
@@ -355,7 +357,7 @@ async def _exec_moltbook(
     if dry_run:
         cmd.append("--dry-run")
 
-    env = {**os.environ, "PYTHONPATH": os.environ.get("PROJECT_ROOT", "/home/grass/leninbot")}
+    env = {**os.environ, "PYTHONPATH": _project_root}
 
     try:
         result = await asyncio.to_thread(
@@ -363,7 +365,7 @@ async def _exec_moltbook(
             cmd,
             capture_output=True,
             text=True,
-            cwd=os.environ.get("PROJECT_ROOT", "/home/grass/leninbot"),
+            cwd=_project_root,
             env=env,
             timeout=180,
         )

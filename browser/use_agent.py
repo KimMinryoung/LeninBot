@@ -4,7 +4,7 @@ Uses browser-use (Playwright + LLM) for tasks that require multi-step
 interaction: filling forms, navigating multi-page flows, extracting data
 from dynamic sites, etc.
 
-Simple page fetches should still use shared.fetch_url_text (faster, cheaper).
+Simple page fetches should still use content_fetch.urls.fetch_url_content (faster, cheaper).
 """
 
 import asyncio

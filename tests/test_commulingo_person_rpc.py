@@ -8,7 +8,7 @@ import uuid
 from unittest.mock import patch
 if os.environ.get('COMMULINGO_FRONTEND_CONTAINER') != 'commulingo-python-rpc':
     raise unittest.SkipTest('opt-in isolated RPC container required')
-sys.path.insert(0, '/home/grass/leninbot')
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 source_root = Path(os.environ.get('COMMULINGO_TEST_SOURCE', Path(__file__).resolve().parents[1]))
 import db
 db.query = lambda *a, **k: []

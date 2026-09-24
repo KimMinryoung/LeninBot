@@ -11,7 +11,7 @@ from types import SimpleNamespace
 from commulingo_test_support import EditorCase
 
 ROOT=Path(os.environ.get('COMMULINGO_REVIEW_SOURCE',Path(__file__).resolve().parents[1]))
-sys.path.insert(0,'/home/grass/leninbot')
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import runtime_tools, telegram
 runtime_tools.__path__.insert(0,str(ROOT/'runtime_tools'))
 telegram.__path__.insert(0,str(ROOT/'telegram'))

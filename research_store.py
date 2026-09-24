@@ -8,9 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any
+from datetime import datetime
 
 from db import execute as db_execute, query as db_query, query_one as db_query_one
 
@@ -238,12 +236,3 @@ def set_status(filename_or_slug: str, status: str) -> dict | None:
     return _row_to_dict(row)
 
 
-def timestamp_seconds(value: Any) -> float:
-    if isinstance(value, datetime):
-        dt = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
-        return dt.timestamp()
-    return 0.0
-
-
-def load_markdown_file(path: Path) -> str:
-    return path.read_text(encoding="utf-8")

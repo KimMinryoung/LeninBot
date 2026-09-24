@@ -5,7 +5,6 @@ which is populated by `register_handlers()` at startup.
 """
 
 import os
-import sys
 import json
 import asyncio
 import logging
@@ -187,8 +186,7 @@ _HELP_TEXT = """\
 *레닌봇 커맨드 목록*
 
 *대화*
-/chat <메시지> — CLAW 파이프라인 질의 (RAG+KG+전략)
-  일반 메시지 — Claude 직접 대화 (도구 사용 가능)
+일반 메시지 — 오케스트레이터와 직접 대화 (도구 사용 가능)
 /clear — 대화 히스토리 초기화
 
 *태스크*
@@ -1233,7 +1231,8 @@ async def cmd_restart(message: Message):
         pass
 
     status_msg = await message.answer(f"🔄 서비스 재시작 요청 확인 중... ({target})")
-    cmd = ["/home/grass/leninbot/venv/bin/python", "scripts/safe_restart.py", target]
+    from ops.paths import PROJECT_ROOT, VENV_PYTHON
+    cmd = [str(VENV_PYTHON), "scripts/safe_restart.py", target]
     if force:
         cmd.append("--force")
     try:
@@ -1241,7 +1240,7 @@ async def cmd_restart(message: Message):
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
-            cwd="/home/grass/leninbot",
+            cwd=str(PROJECT_ROOT),
             start_new_session=True,
         )
         stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=45)
@@ -1628,19 +1627,25 @@ async def handle_message(message: Message):
         # Bind mission tool handler to this user
         from runtime_tools.registry import build_mission_handler
         mission_handler = build_mission_handler(user_id)
-        progress_cb = _ctx["make_progress_callback"](message.chat.id)
-        bt = {}
-        reply = await _ctx["chat_with_tools"](
-            history, on_progress=progress_cb, budget_tracker=bt,
-            extra_handlers={"mission": mission_handler},
-            extra_system_context=extra_context,
-            user_id=str(user_id),
-            session_id=f"telegram:{message.chat.id}",
-            scope_type="telegram_message",
-            scope_id=str(message.message_id),
-        )
-        if hasattr(progress_cb, "flush"):
-            await progress_cb.flush()
+
+        async def _run_chat(msgs: list[dict], system_context: str) -> tuple[str, dict]:
+            """One orchestrator turn for this message; returns (reply, budget)."""
+            progress_cb = _ctx["make_progress_callback"](message.chat.id)
+            tracker = {}
+            out = await _ctx["chat_with_tools"](
+                msgs, on_progress=progress_cb, budget_tracker=tracker,
+                extra_handlers={"mission": mission_handler},
+                extra_system_context=system_context,
+                user_id=str(user_id),
+                session_id=f"telegram:{message.chat.id}",
+                scope_type="telegram_message",
+                scope_id=str(message.message_id),
+            )
+            if hasattr(progress_cb, "flush"):
+                await progress_cb.flush()
+            return out, tracker
+
+        reply, bt = await _run_chat(history, extra_context)
         if _is_near_user_echo(reply, user_text):
             logger.warning(
                 "near-echo reply blocked: user_id=%s provider=%s user_len=%d reply_len=%d",
@@ -1663,20 +1668,7 @@ async def handle_message(message: Message):
                     "phrase when analytically necessary."
                 ),
             )
-            progress_cb = _ctx["make_progress_callback"](message.chat.id)
-            retry_bt = {}
-            retry_reply = await _ctx["chat_with_tools"](
-                history, on_progress=progress_cb, budget_tracker=retry_bt,
-                extra_handlers={"mission": mission_handler},
-                extra_system_context=echo_guard_context,
-                user_id=str(user_id),
-                session_id=f"telegram:{message.chat.id}",
-                scope_type="telegram_message",
-                scope_id=str(message.message_id),
-            )
-            if hasattr(progress_cb, "flush"):
-                await progress_cb.flush()
-            bt = retry_bt
+            retry_reply, bt = await _run_chat(history, echo_guard_context)
             if _is_near_user_echo(retry_reply, user_text):
                 logger.error("near-echo retry also failed: user_id=%s provider=%s", user_id, _provider)
                 reply = "방금 응답 후보가 네 발화를 그대로 반복해서 폐기했다. 생성 파이프라인 이상으로 보고 기록했다."
@@ -1693,22 +1685,7 @@ async def handle_message(message: Message):
             _ctx["log_event"]("warning", "chat", f"Tool pair error auto-recovery (history preserved): {e}")
             try:
                 fresh_msgs = [{"role": "user", "content": user_text}]
-                progress_cb = _ctx["make_progress_callback"](message.chat.id)
-                retry_bt = {}
-                reply = await _ctx["chat_with_tools"](
-                    fresh_msgs,
-                    on_progress=progress_cb,
-                    budget_tracker=retry_bt,
-                    extra_handlers={"mission": mission_handler},
-                    extra_system_context=extra_context,
-                    user_id=str(user_id),
-                    session_id=f"telegram:{message.chat.id}",
-                    scope_type="telegram_message",
-                    scope_id=str(message.message_id),
-                )
-                bt = retry_bt
-                if hasattr(progress_cb, "flush"):
-                    await progress_cb.flush()
+                reply, bt = await _run_chat(fresh_msgs, extra_context)
             except Exception as e2:
                 summary = _exception_summary(e2)
                 logger.exception("Retry after tool pair recovery also failed: %s", summary)
@@ -1869,7 +1846,8 @@ async def cmd_modify(message: Message):
     filepath, reason, new_content = [p.strip() for p in parts]
 
     # 경로 보안: leninbot 디렉토리 밖 거부
-    base = "/home/grass/leninbot"
+    from ops.paths import PROJECT_ROOT
+    base = str(PROJECT_ROOT)
     abs_path = _os.path.realpath(_os.path.join(base, filepath))
     if not (abs_path == base or abs_path.startswith(base + "/")):
         await message.answer("❌ 허용된 디렉토리 밖의 파일은 수정할 수 없어.")
@@ -1942,7 +1920,6 @@ async def cb_modify_approve(callback: CallbackQuery):
     await callback.message.edit_text("⚙️ 패치 적용 중…")
     await callback.answer()
 
-    sys.path.insert(0, "/home/grass/leninbot")
     from self_modification_core import self_modify_with_safety
     try:
         result = await asyncio.to_thread(

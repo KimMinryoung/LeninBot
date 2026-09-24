@@ -87,7 +87,7 @@ create_task (자율, user_id=0) ── mission_id = 최신 active mission
 스케줄 태스크 ──────────────────── mission_id = NULL (미션과 무관)
 ```
 
-`shared.create_task_in_db`: `parent_task_id`가 있으면 부모의 `mission_id`를 자동 상속.
+`task_store.create_task_in_db`: `parent_task_id`가 있으면 부모의 `mission_id`를 자동 상속.
 
 ## 7. Context Injection
 

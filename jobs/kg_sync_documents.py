@@ -11,16 +11,15 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from datetime import datetime
-from pathlib import Path
 
 from db import query as db_query
+from ops import paths as _paths
 from kg_runtime import doc_extract as dx
 
 logger = logging.getLogger(__name__)
 
-FRONTEND_DIR = Path(os.getenv("FRONTEND_DIR", "/home/grass/frontend"))
+FRONTEND_DIR = _paths.FRONTEND_DIR
 MANIFEST_PATH = FRONTEND_DIR / "data" / "commulingo" / "docs" / "manifest.json"
 ORDER = ("research", "archival", "autonote")  # research first: closes the webchat content gap
 

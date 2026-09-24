@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import queue
 import threading
 import time
 import urllib.error
@@ -361,3 +362,110 @@ def fetch_today_spend() -> dict[str, float] | None:
     except Exception as e:
         logger.warning("audit sink spend lookup failed (fail-open): %s", e)
         return None
+
+
+# ── Producer side: batched background writer ──────────────────────────
+
+class BatchedAuditWriter:
+    """Bounded queue + one daemon thread draining it in batches to ``kind``.
+
+    Shared by llm/gateway.py and security_gateway/audit.py. Producers call
+    ``ensure_worker()`` then ``queue.put_nowait(row)`` and handle
+    ``queue.Full`` themselves. Each batch goes through ``post_rows`` in proxy
+    mode, else ``insert_rows``; a failed direct insert drops the batch. With
+    ``flush_at_exit`` the first worker start also registers an atexit flush
+    (see llm.gateway.flush_audit).
+    """
+
+    def __init__(
+        self,
+        kind: str,
+        *,
+        thread_name: str,
+        log: logging.Logger,
+        label: str,
+        maxsize: int = 2000,
+        batch_size: int = 50,
+        flush_at_exit: bool = False,
+        flush_timeout: float = 5.0,
+    ) -> None:
+        self.kind = kind
+        self.thread_name = thread_name
+        self.log = log
+        self.label = label
+        self.batch_size = batch_size
+        self.flush_at_exit = flush_at_exit
+        self.flush_timeout = flush_timeout
+        self.queue: "queue.Queue[dict]" = queue.Queue(maxsize=maxsize)
+        self.started = False
+        self._lock = threading.Lock()
+        self._insert_failed_before = False
+
+    def drain_batch(self, rows: list[dict]) -> None:
+        """Persist a batch: POST to the proxy sink (mode() == "proxy"),
+        else insert directly (the proxy itself, or no proxy configured)."""
+        if mode() == "proxy":
+            post_rows(self.kind, rows)
+            return
+        try:
+            insert_rows(self.kind, rows)
+            self._insert_failed_before = False
+        except Exception as e:
+            # First failure at WARNING, repeats at DEBUG: an ad-hoc process under
+            # the read-only DB guard would otherwise warn on every single call.
+            log = self.log.debug if self._insert_failed_before else self.log.warning
+            log("%s DB insert failed (%d row(s) dropped): %s", self.label, len(rows), e)
+            self._insert_failed_before = True
+
+    def _worker_loop(self) -> None:
+        while True:
+            rows = [self.queue.get()]
+            while len(rows) < self.batch_size:
+                try:
+                    rows.append(self.queue.get_nowait())
+                except queue.Empty:
+                    break
+            try:
+                self.drain_batch(rows)
+            finally:
+                for _ in rows:
+                    self.queue.task_done()
+
+    def ensure_worker(self) -> None:
+        if self.started:
+            return
+        with self._lock:
+            if self.started:
+                return
+            t = threading.Thread(target=self._worker_loop, name=self.thread_name, daemon=True)
+            t.start()
+            self.started = True
+            if self.flush_at_exit:
+                import atexit
+                atexit.register(self._flush_at_exit)
+
+    def flush(self, timeout: float) -> bool:
+        """Wait until queued rows are persisted; the timeout-capable form of
+        Queue.join(). True when the queue drained in time."""
+        if not self.started:
+            return True
+        deadline = time.monotonic() + max(0.0, timeout)
+        with self.queue.all_tasks_done:
+            while self.queue.unfinished_tasks:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    self.log.warning(
+                        "%s flush timed out; %d row(s) dropped",
+                        self.label,
+                        self.queue.unfinished_tasks,
+                    )
+                    return False
+                self.queue.all_tasks_done.wait(remaining)
+        return True
+
+    def _flush_at_exit(self) -> None:
+        # Never raise from atexit: losing a few audit rows beats breaking shutdown.
+        try:
+            self.flush(self.flush_timeout)
+        except Exception:
+            pass

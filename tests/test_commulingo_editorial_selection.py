@@ -5,7 +5,7 @@ from pathlib import Path
 import unittest
 from unittest.mock import patch
 
-ROOT = Path(os.environ.get('COMMULINGO_TEST_SOURCE', '/home/grass/leninbot'))
+ROOT = Path(os.environ.get('COMMULINGO_TEST_SOURCE', Path(__file__).resolve().parents[1]))
 source = ROOT / 'scripts/commulingo_people_maintainer.py'
 module = ast.parse(source.read_text())
 selected = [n for n in module.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))

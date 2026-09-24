@@ -27,11 +27,12 @@ from typing import Any
 
 from db import execute_returning_rowcount as db_exec, get_conn, query_one as db_query_one
 from psycopg2.extras import RealDictCursor
+from ops import paths as _paths
 from tool_gateway.results import ToolFailure
 
 logger = logging.getLogger(__name__)
 
-FRONTEND_DIR = os.getenv("FRONTEND_DIR", "/home/grass/frontend")
+FRONTEND_DIR = str(_paths.FRONTEND_DIR)
 CF_PURGE_SCRIPT = os.getenv(
     "CF_PURGE_SCRIPT",
     os.path.join(FRONTEND_DIR, "scripts", "cloudflare-purge.js"),

@@ -42,6 +42,7 @@ from jobs.autonomous_publication_controls import (
     was_staged_this_tick,
 )
 import research_store
+from ops import paths as _paths
 from tool_gateway.results import ToolFailure
 from runtime_tools.research_review import review_research_document
 
@@ -53,7 +54,7 @@ RESEARCH_DIR = _PROJECT_ROOT / "research"
 LEGACY_RESEARCH_DIR = _PROJECT_ROOT / "output" / "research"
 PRIVATE_RESEARCH_DIR = RESEARCH_DIR / "private"
 PUBLICATION_DRAFT_DIR = _PROJECT_ROOT / "data" / "publication_drafts" / "research"
-FRONTEND_DIR = os.getenv("FRONTEND_DIR", "/home/grass/frontend")
+FRONTEND_DIR = str(_paths.FRONTEND_DIR)
 CF_PURGE_SCRIPT = os.getenv(
     "CF_PURGE_SCRIPT",
     os.path.join(FRONTEND_DIR, "scripts", "cloudflare-purge.js"),

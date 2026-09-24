@@ -1038,6 +1038,49 @@ def _recent_notes(project: dict) -> list[dict]:
     return notes[-RECENT_NOTES_WINDOW:]
 
 
+def recent_project_notes_with_total(
+    project_id: int,
+    *,
+    legacy_notes: list,
+    limit: int,
+    keyword: str | None = None,
+) -> tuple[list[dict], int, str]:
+    """Operator-facing note read: (oldest-first notes, total count, source label).
+
+    Reads ``autonomous_project_notes`` (optionally ``text ILIKE`` keyword) and
+    falls back to the legacy ``research_notes`` JSONB list only when the table
+    query raises. Unlike ``_recent_notes`` (tick prompt), an empty table result
+    is returned as-is and rows are not reformatted.
+    """
+    try:
+        note_clauses = ["project_id = %s"]
+        note_params: list = [project_id]
+        if keyword:
+            note_clauses.append("text ILIKE %s")
+            note_params.append(f"%{keyword}%")
+        note_count = db_query_one(
+            f"SELECT COUNT(*) AS count FROM autonomous_project_notes WHERE {' AND '.join(note_clauses)}",
+            tuple(note_params),
+        )
+        note_total = int((note_count or {}).get("count") or 0)
+        note_rows = db_query(
+            f"""
+            SELECT turn, text, sources, created_at
+              FROM autonomous_project_notes
+             WHERE {' AND '.join(note_clauses)}
+             ORDER BY created_at DESC, id DESC
+             LIMIT %s
+            """,
+            tuple([*note_params, limit]),
+        )
+        return list(reversed([dict(row) for row in note_rows])), note_total, "autonomous_project_notes"
+    except Exception:
+        notes = legacy_notes or []
+        if keyword:
+            notes = [n for n in notes if keyword.lower() in (n.get("text") or "").lower()]
+        return notes[-limit:], len(notes), "legacy JSONB"
+
+
 def _format_plan(plan) -> str:
     if isinstance(plan, str):
         try:
