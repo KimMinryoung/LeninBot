@@ -141,14 +141,23 @@ async def _assert_route_task_fallbacks() -> None:
     new" contract but left this function asserting the old one, so it has been
     failing since. The contract now: no guess, hand back the curated routing
     cards and let the orchestrator decide.
+
+    Since 0b0ea56 route_task asks the System One (Jev) classifier first and
+    the LLM advisor only below its threshold, so "classifier unavailable"
+    means both engines return nothing. Both are stubbed here: an unstubbed
+    Jev would make a paid call and its real recommendation used to trip the
+    no-guess assertion. Jev/LLM ordering is covered by
+    tests/test_route_task_jev.py.
     """
     import self_runtime.tools as tools
 
     original_classifier = tools._classify_route_with_llm
+    original_jev = tools._classify_route_with_jev
     try:
         async def unavailable_classifier(_task: str, _candidates=None):
             return None
 
+        tools._classify_route_with_jev = unavailable_classifier
         tools._classify_route_with_llm = unavailable_classifier
         for task in ("이 공개 연구 글의 오타를 고쳐줘", "서비스 traceback 고치고 테스트 돌려줘"):
             out = json.loads(await tools._exec_route_task(task, include_store_guide=False))
@@ -161,6 +170,7 @@ async def _assert_route_task_fallbacks() -> None:
             assert out["classifier"]["attempted"] is True
             assert out["classifier"]["used"] is False
             assert out["classifier"]["fallback"] is None
+            assert out["classifier"]["engine"] is None
             # ...and the orchestrator is handed what it needs to decide instead.
             assert rec["routing_cards"], "routing cards must replace the removed guess"
             assert set(rec["routing_cards"]) <= set(out["delegatable_agents"])
@@ -193,8 +203,10 @@ async def _assert_route_task_fallbacks() -> None:
         assert passed["recommendation"]["recommended_agent"] == "programmer"
         assert passed["recommendation"]["source"] == "llm_classifier"
         assert passed["classifier"]["used"] is True
+        assert passed["classifier"]["engine"] == "llm"
     finally:
         tools._classify_route_with_llm = original_classifier
+        tools._classify_route_with_jev = original_jev
 
 
 def _assert_operator_trust_tier() -> None:
