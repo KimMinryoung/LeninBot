@@ -3109,37 +3109,59 @@ async def _read_autonomous_project_list(limit: int = 10, keyword: str | None = N
     return "\n".join(lines)
 
 
-async def _read_autonomous_project_detail(
-    project_id: int, limit: int = 10, keyword: str | None = None,
-) -> str:
-    """Detail mode of _exec_read_autonomous_project: goal, plan, notes, events."""
-    from db import query as db_query, query_one as db_query_one
+_PROJECT_LAST_TICK_LOG_SQL = """
+    SELECT content, meta, created_at
+      FROM autonomous_project_events
+     WHERE project_id = %s
+       AND event_type = 'tick_tool_log'
+     ORDER BY created_at DESC, id DESC
+     LIMIT 1
+"""
 
+_PROJECT_LAST_TICK_ERROR_SQL = """
+    SELECT content, created_at
+      FROM autonomous_project_events
+     WHERE project_id = %s
+       AND event_type = 'tick_error'
+     ORDER BY created_at DESC, id DESC
+     LIMIT 1
+"""
+
+_PROJECT_LAST_NO_ACTION_SQL = """
+    SELECT content, created_at
+      FROM autonomous_project_events
+     WHERE project_id = %s
+       AND event_type = 'tick_no_durable_action'
+     ORDER BY created_at DESC, id DESC
+     LIMIT 1
+"""
+
+_PROJECT_LAST_STAGED_DRAFT_SQL = """
+    SELECT ev.content, ev.meta, ev.created_at
+      FROM autonomous_project_events ev
+      JOIN research_documents rd
+        ON rd.id::text = ev.meta->>'research_document_id'
+        OR rd.filename = ev.meta->>'filename'
+        OR rd.slug = ev.meta->>'slug'
+     WHERE ev.project_id = %s
+       AND ev.event_type = 'research_draft_staged'
+       AND rd.status = 'staged'
+     ORDER BY ev.created_at DESC, ev.id DESC
+     LIMIT 1
+"""
+
+
+async def _latest_project_event(db_query, sql: str, project_id: int) -> dict | None:
+    """Newest row of one project-event query, or None when absent or failing."""
     try:
-        proj = await asyncio.to_thread(
-            db_query_one,
-            "SELECT id, title, topic, goal, state, plan, research_notes, "
-            "turn_count, last_run_at, created_at "
-            "FROM autonomous_projects WHERE id = %s",
-            (project_id,),
-        )
-    except Exception as e:
-        return ToolFailure(f"=== AUTONOMOUS PROJECT #{project_id} ===\n(error: {e})")
-    if not proj:
-        return f"=== AUTONOMOUS PROJECT #{project_id} ===\n(not found)"
+        rows = await asyncio.to_thread(db_query, sql, (project_id,))
+        return dict(rows[0]) if rows else None
+    except Exception:
+        return None
 
-    legacy_notes = proj.get("research_notes") or []
-    plan = proj.get("plan") or {}
-    note_limit = min(limit, 10)
-    from jobs.autonomous_project import recent_project_notes_with_total
-    recent_notes, note_total, note_source = await asyncio.to_thread(
-        recent_project_notes_with_total,
-        project_id,
-        legacy_notes=legacy_notes,
-        limit=note_limit,
-        keyword=keyword,
-    )
 
+async def _fetch_project_activity(db_query, project_id: int, limit: int) -> tuple:
+    """Recent events plus the latest tick log, tick error, no-action tick and staged draft."""
     # Recent events (last `limit` entries)
     try:
         events = await asyncio.to_thread(
@@ -3151,79 +3173,14 @@ async def _read_autonomous_project_detail(
     except Exception:
         events = []
 
-    try:
-        tick_logs = await asyncio.to_thread(
-            db_query,
-            """
-            SELECT content, meta, created_at
-              FROM autonomous_project_events
-             WHERE project_id = %s
-               AND event_type = 'tick_tool_log'
-             ORDER BY created_at DESC, id DESC
-             LIMIT 1
-            """,
-            (project_id,),
-        )
-        last_tick_log = dict(tick_logs[0]) if tick_logs else None
-    except Exception:
-        last_tick_log = None
+    last_tick_log = await _latest_project_event(db_query, _PROJECT_LAST_TICK_LOG_SQL, project_id)
+    last_tick_error = await _latest_project_event(db_query, _PROJECT_LAST_TICK_ERROR_SQL, project_id)
+    last_no_action = await _latest_project_event(db_query, _PROJECT_LAST_NO_ACTION_SQL, project_id)
+    last_staged_draft = await _latest_project_event(db_query, _PROJECT_LAST_STAGED_DRAFT_SQL, project_id)
+    return events, last_tick_log, last_tick_error, last_no_action, last_staged_draft
 
-    try:
-        tick_errors = await asyncio.to_thread(
-            db_query,
-            """
-            SELECT content, created_at
-              FROM autonomous_project_events
-             WHERE project_id = %s
-               AND event_type = 'tick_error'
-             ORDER BY created_at DESC, id DESC
-             LIMIT 1
-            """,
-            (project_id,),
-        )
-        last_tick_error = dict(tick_errors[0]) if tick_errors else None
-    except Exception:
-        last_tick_error = None
 
-    try:
-        no_action_rows = await asyncio.to_thread(
-            db_query,
-            """
-            SELECT content, created_at
-              FROM autonomous_project_events
-             WHERE project_id = %s
-               AND event_type = 'tick_no_durable_action'
-             ORDER BY created_at DESC, id DESC
-             LIMIT 1
-            """,
-            (project_id,),
-        )
-        last_no_action = dict(no_action_rows[0]) if no_action_rows else None
-    except Exception:
-        last_no_action = None
-
-    try:
-        staged_rows = await asyncio.to_thread(
-            db_query,
-            """
-            SELECT ev.content, ev.meta, ev.created_at
-              FROM autonomous_project_events ev
-              JOIN research_documents rd
-                ON rd.id::text = ev.meta->>'research_document_id'
-                OR rd.filename = ev.meta->>'filename'
-                OR rd.slug = ev.meta->>'slug'
-             WHERE ev.project_id = %s
-               AND ev.event_type = 'research_draft_staged'
-               AND rd.status = 'staged'
-             ORDER BY ev.created_at DESC, ev.id DESC
-             LIMIT 1
-            """,
-            (project_id,),
-        )
-        last_staged_draft = dict(staged_rows[0]) if staged_rows else None
-    except Exception:
-        last_staged_draft = None
-
+def _render_project_header(proj: dict) -> list[str]:
     out = [f"=== AUTONOMOUS PROJECT #{proj['id']}: {proj['title']} ==="]
     out.append(f"state: {proj['state']}   turns: {proj['turn_count']}   last_run: {_to_kst(proj.get('last_run_at')) if proj.get('last_run_at') else 'never'}")
     out.append(f"topic: {proj.get('topic') or ''}")
@@ -3231,7 +3188,12 @@ async def _read_autonomous_project_detail(
     out.append("-- goal --")
     out.append((proj.get("goal") or "").strip())
     out.append("")
+    return out
 
+
+async def _render_project_advisories(db_query, project_id: int) -> list[str]:
+    """Operator advisories block; fetched here, after the header, as before."""
+    out: list[str] = []
     # Operator advisories (pending + recent consumed)
     try:
         advisories = await asyncio.to_thread(
@@ -3255,7 +3217,11 @@ async def _read_autonomous_project_detail(
             out.append(f"[consumed #{a['id']} @ {ts}]")
             out.append(f"  {(a.get('content') or '')[:300]}")
         out.append("")
+    return out
 
+
+def _render_project_plan(plan: dict) -> list[str]:
+    out: list[str] = []
     out.append("-- plan --")
     goals = plan.get("goals") or []
     steps = plan.get("steps") or []
@@ -3271,7 +3237,11 @@ async def _read_autonomous_project_detail(
         if plan.get("rationale"):
             out.append(f"(rationale: {plan['rationale']})")
     out.append("")
+    return out
 
+
+def _render_project_notes(recent_notes: list, note_total, note_source) -> list[str]:
+    out: list[str] = []
     out.append(f"-- recent notes ({len(recent_notes)} shown / {note_total} total, source={note_source}) --")
     if not recent_notes:
         out.append("(no notes)")
@@ -3291,7 +3261,14 @@ async def _read_autonomous_project_detail(
             out.append(f"[turn {n.get('turn', '?')}, {_to_kst(n.get('created_at'))}]")
             out.append(f"  {text}{'…' if len(n.get('text') or '') > 600 else ''}{src}")
     out.append("")
+    return out
 
+
+def _render_project_tick_state(
+    last_staged_draft: dict | None, last_tick_error: dict | None,
+    last_no_action: dict | None, last_tick_log: dict | None,
+) -> list[str]:
+    out: list[str] = []
     if last_staged_draft:
         out.append("-- last staged research draft (" + _to_kst(last_staged_draft.get("created_at")) + ") --")
         content = str(last_staged_draft.get("content") or "")
@@ -3328,7 +3305,11 @@ async def _read_autonomous_project_detail(
         content = str(last_tick_log.get("content") or "")
         out.append(content[:1800] + ("…" if len(content) > 1800 else ""))
         out.append("")
+    return out
 
+
+def _render_project_events(events: list) -> list[str]:
+    out: list[str] = []
     out.append(f"-- recent events ({len(events)}) --")
     if not events:
         out.append("(no events)")
@@ -3336,7 +3317,50 @@ async def _read_autonomous_project_detail(
         for e in events:
             snippet = (e.get("content") or "").replace("\n", " ")[:160]
             out.append(f"[{_to_kst(e.get('created_at'))}] {e['event_type']}: {snippet}")
+    return out
 
+
+async def _read_autonomous_project_detail(
+    project_id: int, limit: int = 10, keyword: str | None = None,
+) -> str:
+    """Detail mode of _exec_read_autonomous_project: goal, plan, notes, events."""
+    from db import query as db_query, query_one as db_query_one
+
+    try:
+        proj = await asyncio.to_thread(
+            db_query_one,
+            "SELECT id, title, topic, goal, state, plan, research_notes, "
+            "turn_count, last_run_at, created_at "
+            "FROM autonomous_projects WHERE id = %s",
+            (project_id,),
+        )
+    except Exception as e:
+        return ToolFailure(f"=== AUTONOMOUS PROJECT #{project_id} ===\n(error: {e})")
+    if not proj:
+        return f"=== AUTONOMOUS PROJECT #{project_id} ===\n(not found)"
+
+    legacy_notes = proj.get("research_notes") or []
+    plan = proj.get("plan") or {}
+    note_limit = min(limit, 10)
+    from jobs.autonomous_project import recent_project_notes_with_total
+    recent_notes, note_total, note_source = await asyncio.to_thread(
+        recent_project_notes_with_total,
+        project_id,
+        legacy_notes=legacy_notes,
+        limit=note_limit,
+        keyword=keyword,
+    )
+
+    events, last_tick_log, last_tick_error, last_no_action, last_staged_draft = (
+        await _fetch_project_activity(db_query, project_id, limit)
+    )
+
+    out = _render_project_header(proj)
+    out.extend(await _render_project_advisories(db_query, project_id))
+    out.extend(_render_project_plan(plan))
+    out.extend(_render_project_notes(recent_notes, note_total, note_source))
+    out.extend(_render_project_tick_state(last_staged_draft, last_tick_error, last_no_action, last_tick_log))
+    out.extend(_render_project_events(events))
     return "\n".join(out)
 
 
