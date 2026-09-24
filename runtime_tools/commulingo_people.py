@@ -1660,13 +1660,20 @@ def _reader_call(action: str) -> str:
     return f"commulingo_people(action='{action}')"
 
 
-def _validate_person(cur, action: str, target_id: str, patch: dict) -> str | None:
+def _check_person_plain_strings(patch: dict) -> str | None:
     for key in ("id", "group", "groupId", "cyrillic", "cyrillicPatronymic", "years"):
         if key in patch and patch[key] is not None and not isinstance(patch[key], str):
             return (
                 f"Error: {key} must be a plain string, not an object or list. "
                 "Only bilingual public text fields use {ko, en}."
             )
+    return None
+
+
+def _check_person_native_names(
+    cur, action: str, target_id: str, patch: dict,
+) -> tuple[str | None, dict]:
+    """Native-script name checks; also returns the post-patch patronymic state."""
     stored = {}
     if action != "create":
         cur.execute(
@@ -1683,7 +1690,7 @@ def _validate_person(cur, action: str, target_id: str, patch: dict) -> str | Non
     )
     patronymic_error = _patronymic_problem(patronymic_state, cyrillic)
     if patronymic_error:
-        return f"Error: {patronymic_error}."
+        return f"Error: {patronymic_error}.", patronymic_state
     cyrillic_patronymic = patronymic_state["native"]
     # The native-name line must use the person's own script. Check it against
     # the citizenship the record will HAVE after this patch, so correcting a
@@ -1700,7 +1707,13 @@ def _validate_person(cur, action: str, target_id: str, patch: dict) -> str | Non
     for field, value in (("cyrillic", cyrillic), ("cyrillicPatronymic", cyrillic_patronymic)):
         problem = _check_native_script(value, nationality_codes, field)
         if problem:
-            return problem
+            return problem, patronymic_state
+    return None, patronymic_state
+
+
+def _check_person_embedded_patronymic(
+    cur, action: str, target_id: str, patch: dict, patronymic_state: dict,
+) -> str | None:
     # Same rule for the ko/en side: the name must never embed the patronymic.
     # The frontend composes given + patronymic + family on render, so an
     # embedded one doubles (오토 율리예비치 율리예비치 시미트 — the bug that
@@ -1734,6 +1747,10 @@ def _validate_person(cur, action: str, target_id: str, patch: dict) -> str | Non
                     "them automatically. A Western middle name is part of givenName, "
                     "not a patronymic."
                 )
+    return None
+
+
+def _check_person_text_fields(patch: dict) -> str | None:
     for key in _LOCALIZED_PERSON_KEYS:
         if key in patch and patch[key] is not None and not isinstance(patch[key], dict):
             return (
@@ -1761,6 +1778,10 @@ def _validate_person(cur, action: str, target_id: str, patch: dict) -> str | Non
                 f"characters). Cut the stated overflow; do not redraft from scratch. "
                 f"{overflow}"
             )
+    return None
+
+
+def _check_person_structured_fields(patch: dict) -> str | None:
     for key in ("citizenship", "origin"):
         if key not in patch or patch[key] is None:
             continue
@@ -1816,72 +1837,82 @@ def _validate_person(cur, action: str, target_id: str, patch: dict) -> str | Non
                 "with ' · ' (암살 · 멕시코). A deposed/exile fate keeps its event "
                 "year (실각 1964). Move burial and other detail to bio or sections."
             )
-    if action == "create":
-        nationality_problem = _person_create_nationality_problem(patch)
-        if nationality_problem:
+    return None
+
+
+def _check_person_create(cur, target_id: str, patch: dict) -> str | None:
+    nationality_problem = _person_create_nationality_problem(patch)
+    if nationality_problem:
+        return (
+            f"Error: {nationality_problem}. Both citizenship and nationalOrigin "
+            "are mandatory; nationalOrigin may equal citizenship but must not be blank."
+        )
+    if patch.get("id") and patch["id"] != target_id:
+        return f"Error: patch.id '{patch['id']}' conflicts with target_id '{target_id}' — they must match (or omit patch.id)."
+    if not _ID_RE.match(target_id):
+        return "Error: target_id must be a lowercase kebab-case slug (e.g. 'ordzhonikidze')."
+    cur.execute("SELECT 1 FROM commulingo_people WHERE id = %s", (target_id,))
+    if cur.fetchone():
+        return (
+            f"Error: person '{target_id}' already exists — edit it with "
+            f"{_write_tool_call('person', 'update')}(person_id='{target_id}', ...)."
+        )
+    duplicate = _existing_person_match(cur, target_id, patch)
+    if duplicate:
+        return (
+            f"Error: '{duplicate['id']}' ({duplicate['name_ko']}) is already "
+            f"{duplicate['why']} — this is the same person under a different "
+            f"slug. Call {_write_tool_call('person', 'update')}(person_id="
+            f"'{duplicate['id']}', ...) on that id, putting any alternate "
+            "spelling in the 'aliases' field of the same patch. If they are "
+            "genuinely two different people, give the new card an English name "
+            "and slug that do not collide with the existing one."
+        )
+    group = patch.get("groupId") or patch.get("group") or ""
+    cur.execute("SELECT 1 FROM commulingo_people_groups WHERE id = %s", (group,))
+    if not cur.fetchone():
+        return f"Error: unknown group '{group}'. Check commulingo_people(action='list_groups')."
+    for lang in ("ko", "en"):
+        _, _, full = _patch_name_parts(patch, lang)
+        if not full:
             return (
-                f"Error: {nationality_problem}. Both citizenship and nationalOrigin "
-                "are mandatory; nationalOrigin may equal citizenship but must not be blank."
+                "Error: person create requires a name per language — either "
+                "name {ko,en} or givenName/familyName {ko,en} (single-token "
+                "East Asian names go wholly in familyName)."
             )
-        if patch.get("id") and patch["id"] != target_id:
-            return f"Error: patch.id '{patch['id']}' conflicts with target_id '{target_id}' — they must match (or omit patch.id)."
-        if not _ID_RE.match(target_id):
-            return "Error: target_id must be a lowercase kebab-case slug (e.g. 'ordzhonikidze')."
-        cur.execute("SELECT 1 FROM commulingo_people WHERE id = %s", (target_id,))
-        if cur.fetchone():
-            return (
-                f"Error: person '{target_id}' already exists — edit it with "
-                f"{_write_tool_call('person', 'update')}(person_id='{target_id}', ...)."
-            )
-        duplicate = _existing_person_match(cur, target_id, patch)
-        if duplicate:
-            return (
-                f"Error: '{duplicate['id']}' ({duplicate['name_ko']}) is already "
-                f"{duplicate['why']} — this is the same person under a different "
-                f"slug. Call {_write_tool_call('person', 'update')}(person_id="
-                f"'{duplicate['id']}', ...) on that id, putting any alternate "
-                "spelling in the 'aliases' field of the same patch. If they are "
-                "genuinely two different people, give the new card an English name "
-                "and slug that do not collide with the existing one."
-            )
+    for key in ("bio", "epithet"):
+        value = patch.get(key) or {}
+        if not (isinstance(value, dict) and value.get("ko") and value.get("en")):
+            return f"Error: patch.{key}.ko and patch.{key}.en are required for person create."
+    if not patch.get("career"):
+        return "Error: at least one bilingual career entry is required for person create."
+    role = patch.get("role")
+    if not isinstance(role, dict) or not (
+        role.get("officeId") or role.get("category") or role.get("categoryId") or role.get("icon")
+    ):
+        return (
+            "Error: a primary role with officeId, category, or categoryId "
+            "is required for person create."
+        )
+    return None
+
+
+def _check_person_existing(cur, action: str, target_id: str, patch: dict) -> str | None:
+    cur.execute("SELECT 1 FROM commulingo_people WHERE id = %s", (target_id,))
+    if not cur.fetchone():
+        return (
+            f"Error: person '{target_id}' not found. Find the id with "
+            f"{_reader_call('search_people')}."
+        )
+    if action == "update" and ("group" in patch or "groupId" in patch):
         group = patch.get("groupId") or patch.get("group") or ""
         cur.execute("SELECT 1 FROM commulingo_people_groups WHERE id = %s", (group,))
         if not cur.fetchone():
-            return f"Error: unknown group '{group}'. Check commulingo_people(action='list_groups')."
-        for lang in ("ko", "en"):
-            _, _, full = _patch_name_parts(patch, lang)
-            if not full:
-                return (
-                    "Error: person create requires a name per language — either "
-                    "name {ko,en} or givenName/familyName {ko,en} (single-token "
-                    "East Asian names go wholly in familyName)."
-                )
-        for key in ("bio", "epithet"):
-            value = patch.get(key) or {}
-            if not (isinstance(value, dict) and value.get("ko") and value.get("en")):
-                return f"Error: patch.{key}.ko and patch.{key}.en are required for person create."
-        if not patch.get("career"):
-            return "Error: at least one bilingual career entry is required for person create."
-        role = patch.get("role")
-        if not isinstance(role, dict) or not (
-            role.get("officeId") or role.get("category") or role.get("categoryId") or role.get("icon")
-        ):
-            return (
-                "Error: a primary role with officeId, category, or categoryId "
-                "is required for person create."
-            )
-    else:
-        cur.execute("SELECT 1 FROM commulingo_people WHERE id = %s", (target_id,))
-        if not cur.fetchone():
-            return (
-                f"Error: person '{target_id}' not found. Find the id with "
-                f"{_reader_call('search_people')}."
-            )
-        if action == "update" and ("group" in patch or "groupId" in patch):
-            group = patch.get("groupId") or patch.get("group") or ""
-            cur.execute("SELECT 1 FROM commulingo_people_groups WHERE id = %s", (group,))
-            if not cur.fetchone():
-                return f"Error: unknown group '{group}'."
+            return f"Error: unknown group '{group}'."
+    return None
+
+
+def _check_person_fate_kind_and_role(cur, patch: dict) -> str | None:
     fate = patch.get("fate")
     if isinstance(fate, dict) and fate.get("kind") and fate["kind"] not in _FATE_KINDS:
         return f"Error: fate.kind must be one of {', '.join(_FATE_KINDS)}."
@@ -1909,6 +1940,33 @@ def _validate_person(cur, action: str, target_id: str, patch: dict) -> str | Non
                 valid = ", ".join(r["id"] for r in cur.fetchall())
                 return f"Error: unknown role category '{category}'. Valid: {valid}."
     return None
+
+
+def _validate_person(cur, action: str, target_id: str, patch: dict) -> str | None:
+    # Checks run in this order and the first error wins; the order is part of
+    # the contract (a patch with several problems reports the same one).
+    error = _check_person_plain_strings(patch)
+    if error is not None:
+        return error
+    error, patronymic_state = _check_person_native_names(cur, action, target_id, patch)
+    if error is not None:
+        return error
+    error = _check_person_embedded_patronymic(cur, action, target_id, patch, patronymic_state)
+    if error is not None:
+        return error
+    error = _check_person_text_fields(patch)
+    if error is not None:
+        return error
+    error = _check_person_structured_fields(patch)
+    if error is not None:
+        return error
+    if action == "create":
+        error = _check_person_create(cur, target_id, patch)
+    else:
+        error = _check_person_existing(cur, action, target_id, patch)
+    if error is not None:
+        return error
+    return _check_person_fate_kind_and_role(cur, patch)
 
 
 def _validate_person_section(cur, action: str, target_id: str, patch: dict) -> str | None:
@@ -2198,7 +2256,7 @@ def _validate_history_event_section(cur, action: str, target_id: str, patch: dic
     return None
 
 
-def _validate_term(cur, action: str, target_id: str, patch: dict) -> str | None:
+def _check_term_shapes(action: str, patch: dict) -> str | None:
     for key in ("id", "original"):
         if key in patch and patch[key] is not None and not isinstance(patch[key], str):
             return f"Error: {key} must be a plain string."
@@ -2229,6 +2287,11 @@ def _validate_term(cur, action: str, target_id: str, patch: dict) -> str | None:
     start, end = patch.get("startYear"), patch.get("endYear")
     if isinstance(start, int) and isinstance(end, int) and end < start:
         return f"Error: endYear ({end}) is before startYear ({start})."
+    return None
+
+
+def _check_term_period_and_text(action: str, patch: dict) -> str | None:
+    start = patch.get("startYear")
     # A dated label with no startYear sorts to the end of the chronological
     # view, which is why the years are asked for alongside the label.
     period = patch.get("period")
@@ -2258,6 +2321,10 @@ def _validate_term(cur, action: str, target_id: str, patch: dict) -> str | None:
                 "Error: aliases must be {\"ko\": [\"굴라크\"], \"en\": [\"Gulag\"]} — the exact "
                 "strings prose uses; they drive site-wide auto-linking."
             )
+    return None
+
+
+def _check_term_parent(cur, target_id: str, patch: dict) -> str | None:
     if "parentId" in patch and patch["parentId"] is not None:
         parent = str(patch["parentId"]).strip()
         if not parent:
@@ -2285,6 +2352,10 @@ def _validate_term(cur, action: str, target_id: str, patch: dict) -> str | None:
                 f"Error: '{target_id}' already has '{child['id']}' nested under it, so it "
                 "cannot become a child itself (the glossary nests one level only)."
             )
+    return None
+
+
+def _check_term_links(cur, patch: dict) -> str | None:
     for key, table, reader in (("people", "commulingo_people", "search_people"),
                                ("events", "commulingo_history_events", "list_events")):
         if key not in patch or patch[key] is None:
@@ -2299,59 +2370,85 @@ def _validate_term(cur, action: str, target_id: str, patch: dict) -> str | None:
                     f"Error: {key} id '{item}' not found. Find it with "
                     f"{_reader_call(reader)}."
                 )
-    if action == "create":
-        if patch.get("id") and patch["id"] != target_id:
-            return f"Error: patch.id '{patch['id']}' conflicts with target_id '{target_id}'."
-        if not _ID_RE.match(target_id):
-            return "Error: target_id must be a lowercase kebab-case slug (e.g. 'nomenklatura')."
-        cur.execute("SELECT 1 FROM commulingo_terms WHERE id = %s", (target_id,))
-        if cur.fetchone():
+    return None
+
+
+def _check_term_create(cur, target_id: str, patch: dict) -> str | None:
+    definition = patch.get("definition")
+    if patch.get("id") and patch["id"] != target_id:
+        return f"Error: patch.id '{patch['id']}' conflicts with target_id '{target_id}'."
+    if not _ID_RE.match(target_id):
+        return "Error: target_id must be a lowercase kebab-case slug (e.g. 'nomenklatura')."
+    cur.execute("SELECT 1 FROM commulingo_terms WHERE id = %s", (target_id,))
+    if cur.fetchone():
+        return (
+            f"Error: term '{target_id}' already exists — edit it with "
+            f"{_write_tool_call('term', 'update')}(term_id='{target_id}', ...), "
+            f"sending only the fields that change. Read it first with "
+            f"{_reader_call('get_term')}."
+        )
+    term = patch.get("term") or {}
+    if not (isinstance(term, dict) and term.get("ko") and term.get("en")):
+        return "Error: patch.term.ko and patch.term.en are required for term create."
+    if not (isinstance(definition, dict) and definition.get("ko") and definition.get("en")):
+        return "Error: patch.definition.ko and patch.definition.en are required for term create."
+    # An alias or name colliding with an existing term means this is the
+    # same concept under a different slug.
+    candidates = {term.get("ko"), term.get("en")}
+    aliases = patch.get("aliases") or {}
+    for values in (aliases.get("ko") or [], aliases.get("en") or []):
+        candidates.update(v for v in values if isinstance(v, str))
+    candidates.discard(None)
+    for candidate in candidates:
+        cur.execute(
+            """SELECT t.id FROM commulingo_terms t
+                WHERE lower(btrim(t.term_ko)) = lower(btrim(%(c)s))
+                   OR lower(btrim(t.term_en)) = lower(btrim(%(c)s))
+               UNION
+               SELECT a.term_id FROM commulingo_term_aliases a
+                WHERE lower(btrim(a.alias)) = lower(btrim(%(c)s))""",
+            {"c": candidate},
+        )
+        row = cur.fetchone()
+        if row:
             return (
-                f"Error: term '{target_id}' already exists — edit it with "
-                f"{_write_tool_call('term', 'update')}(term_id='{target_id}', ...), "
-                f"sending only the fields that change. Read it first with "
-                f"{_reader_call('get_term')}."
-            )
-        term = patch.get("term") or {}
-        if not (isinstance(term, dict) and term.get("ko") and term.get("en")):
-            return "Error: patch.term.ko and patch.term.en are required for term create."
-        if not (isinstance(definition, dict) and definition.get("ko") and definition.get("en")):
-            return "Error: patch.definition.ko and patch.definition.en are required for term create."
-        # An alias or name colliding with an existing term means this is the
-        # same concept under a different slug.
-        candidates = {term.get("ko"), term.get("en")}
-        aliases = patch.get("aliases") or {}
-        for values in (aliases.get("ko") or [], aliases.get("en") or []):
-            candidates.update(v for v in values if isinstance(v, str))
-        candidates.discard(None)
-        for candidate in candidates:
-            cur.execute(
-                """SELECT t.id FROM commulingo_terms t
-                    WHERE lower(btrim(t.term_ko)) = lower(btrim(%(c)s))
-                       OR lower(btrim(t.term_en)) = lower(btrim(%(c)s))
-                   UNION
-                   SELECT a.term_id FROM commulingo_term_aliases a
-                    WHERE lower(btrim(a.alias)) = lower(btrim(%(c)s))""",
-                {"c": candidate},
-            )
-            row = cur.fetchone()
-            if row:
-                return (
-                    f"Error: '{candidate}' is already registered on term "
-                    f"'{row['id']}' — this is the same concept, so it is not a gap. "
-                    "Move to a different candidate (or answer NO_CANDIDATE if the "
-                    f"material has none). To revise that card instead, call "
-                    f"{_write_tool_call('term', 'update')}(term_id='{row['id']}', ...) "
-                    "if you hold that tool."
-                )
-    else:
-        cur.execute("SELECT 1 FROM commulingo_terms WHERE id = %s", (target_id,))
-        if not cur.fetchone():
-            return (
-                f"Error: term '{target_id}' not found. Find the id with "
-                f"{_reader_call('list_terms')}."
+                f"Error: '{candidate}' is already registered on term "
+                f"'{row['id']}' — this is the same concept, so it is not a gap. "
+                "Move to a different candidate (or answer NO_CANDIDATE if the "
+                f"material has none). To revise that card instead, call "
+                f"{_write_tool_call('term', 'update')}(term_id='{row['id']}', ...) "
+                "if you hold that tool."
             )
     return None
+
+
+def _check_term_existing(cur, target_id: str) -> str | None:
+    cur.execute("SELECT 1 FROM commulingo_terms WHERE id = %s", (target_id,))
+    if not cur.fetchone():
+        return (
+            f"Error: term '{target_id}' not found. Find the id with "
+            f"{_reader_call('list_terms')}."
+        )
+    return None
+
+
+def _validate_term(cur, action: str, target_id: str, patch: dict) -> str | None:
+    # Checks run in this order and the first error wins, as for people.
+    error = _check_term_shapes(action, patch)
+    if error is not None:
+        return error
+    error = _check_term_period_and_text(action, patch)
+    if error is not None:
+        return error
+    error = _check_term_parent(cur, target_id, patch)
+    if error is not None:
+        return error
+    error = _check_term_links(cur, patch)
+    if error is not None:
+        return error
+    if action == "create":
+        return _check_term_create(cur, target_id, patch)
+    return _check_term_existing(cur, target_id)
 
 
 def _validate_office_row(cur, action: str, target_id: str, patch: dict) -> str | None:
