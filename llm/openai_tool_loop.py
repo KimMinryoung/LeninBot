@@ -839,20 +839,16 @@ async def _api_call(sdk_mode, client, base_url, model, messages, tools, max_toke
                     include_parallel_tool_calls: bool = True,
                     idle_timeout_sec: float | None = None):
     """Dispatch to SDK or httpx using the requested canonical model."""
-
-    async def _do_call(m: str):
-        if sdk_mode:
-            return await _call_sdk(client, m, messages, tools, max_tokens,
-                                   parallel_tool_calls=parallel_tool_calls,
-                                   include_parallel_tool_calls=include_parallel_tool_calls,
-                                   on_progress=on_progress,
-                                   extra_body=extra_body,
-                                   max_token_param=sdk_max_token_param,
-                                   idle_timeout_sec=idle_timeout_sec)
-        return await _call_api(base_url, m, messages, tools, max_tokens,
-                               enable_thinking=enable_thinking)
-
-    return await _do_call(model)
+    if sdk_mode:
+        return await _call_sdk(client, model, messages, tools, max_tokens,
+                               parallel_tool_calls=parallel_tool_calls,
+                               include_parallel_tool_calls=include_parallel_tool_calls,
+                               on_progress=on_progress,
+                               extra_body=extra_body,
+                               max_token_param=sdk_max_token_param,
+                               idle_timeout_sec=idle_timeout_sec)
+    return await _call_api(base_url, model, messages, tools, max_tokens,
+                           enable_thinking=enable_thinking)
 
 
 # <think>...</think> emitted by Qwen/Deepseek reasoning models. llama-server

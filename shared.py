@@ -1,111 +1,21 @@
-"""shared.py — Shared resources across web_chat, telegram_bot, and agents.
+"""shared.py — Small helpers shared across web_chat, the Telegram bot, and agents.
 
-Lightweight module — no heavy dependencies (no BGE-M3, no LangGraph).
-All external imports are deferred to first use.
+Lightweight module — no heavy dependencies. Domain code lives in its own
+package (memory_store, kg_runtime, corpus, content_fetch, ops, …); import
+from there rather than growing this module.
 """
 
-import asyncio
-import json
 import logging
 import os
-import socket
-import threading
-from concurrent.futures import Future
-from contextlib import contextmanager
-from datetime import timezone, timedelta, datetime
-import time
+from datetime import timezone, timedelta
 
 from secrets_loader import get_secret
 
 logger = logging.getLogger(__name__)
 
-
-def get_github_token() -> str:
-    """Return configured GitHub token.
-
-    Preferred key: GITHUB_TOKEN. Legacy fallback: GH_TOKEN.
-    """
-    return (get_secret("GITHUB_TOKEN") or get_secret("GH_TOKEN") or "").strip()
-
 # ── Constants ─────────────────────────────────────────────────────────
 KST = timezone(timedelta(hours=9))
 
-MODEL_MAIN = "gemini-3.1-flash-lite"
-MODEL_LIGHT = "gemini-3.1-flash-lite"
-
-
-# ── Broadcast tool compatibility re-exports ────────────────────────
-# Compatibility re-exports. New code should import from runtime_tools.broadcast.
-from runtime_tools.broadcast import BROADCAST_TO_CHANNEL_TOOL, broadcast_to_channel
-
-# ── Identity and provenance compatibility re-exports ────────────────
-# Compatibility re-exports. New code should import from identity.prompts and provenance.runtime.
-from identity.prompts import AGENT_CONTEXT, CORE_IDENTITY, EXTERNAL_SOURCE_RULE
-from provenance.runtime import (
-    ProvenanceBuffer,
-    _wrap_external,
-    get_provenance_buffer,
-    init_provenance_buffer,
-)
-
-
-
-# ── Text Extraction ──────────────────────────────────────────────────
-def extract_text_content(content) -> str:
-    """Normalize LLM response content to a plain string.
-    Gemini thinking models return content as a list of typed blocks:
-    [{'type': 'text', 'text': '...', 'extras': {...}}].
-    """
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        return " ".join(
-            b.get("text", "") for b in content
-            if isinstance(b, dict) and b.get("type") == "text"
-        )
-    return str(content)
-
-
-# ── Knowledge Graph runtime compatibility re-exports ────────────────
-# Compatibility re-exports. New code should import from kg_runtime.service_runtime.
-from kg_runtime.service_runtime import (
-    collect_kg_futures,
-    get_kg_service,
-    reset_kg_service,
-    run_kg_async,
-    run_kg_task,
-    start_kg_healthcheck,
-    submit_kg_task,
-)
-
-# ── Memory query and task-store compatibility re-exports ────────────
-# Compatibility re-exports. New code should import from memory_store.queries and task_store.
-from memory_store.queries import fetch_chat_logs, fetch_diaries, fetch_task_reports
-from task_store import create_task_in_db
-
-# ── KG stats/write compatibility re-exports ────────────────────────
-# Compatibility re-exports. New code should import from kg_runtime.search and kg_runtime.writes.
-from kg_runtime.search import _get_neo4j_sync_driver, fetch_kg_stats
-from kg_runtime.writes import (
-    add_kg_episode,
-    add_kg_episode_async,
-    add_kg_structured,
-    add_kg_structured_async,
-)
-
-def fetch_recent_updates(max_entries: int = 3, max_chars: int = 2000) -> str:
-    """Deprecated: do not inject dev_docs/project_state.md into agents.
-
-    That file is a human-maintained snapshot and routinely becomes stale. Agents
-    should use live state tools, DB-backed task reports, or targeted source files
-    instead of treating the snapshot as runtime context.
-    """
-    return "(Disabled: dev_docs/project_state.md is stale and excluded from agent context.)"
-
-
-# ── Ops log helper compatibility re-exports ────────────────────────
-# Compatibility re-exports. New code should import from ops.logs.
-from ops.logs import _normalize_grep_terms, fetch_server_logs, grep_matches_text
 
 def upload_to_r2(local_path: str, key: str | None = None, content_type: str | None = None) -> str | None:
     """Upload a file to Cloudflare R2 and return its public URL.
@@ -158,54 +68,13 @@ def upload_to_r2(local_path: str, key: str | None = None, content_type: str | No
         return None
 
 
-# ── Corpus and experiential memory compatibility re-exports ─────────
-# Compatibility re-exports. New code should import from corpus.* and memory_store.experiential.
-from corpus.embeddings import _get_exp_embeddings, set_shared_embeddings
-from corpus.public_index import (
-    delete_public_self_analysis_index,
-    index_public_self_analysis,
-    public_self_analysis_source,
-    save_self_produced_analysis,
-)
-from corpus.store import (
-    _chunk_text,
-    delete_corpus_source,
-    fetch_corpus_source_context,
-    ingest_to_corpus,
-    similarity_search,
-)
-from memory_store.experiential import search_experiential_memory, save_experiential_memory
-
-# ── KG search compatibility re-export ──────────────────────────────
-# Compatibility re-export. New code should import from kg_runtime.search.
-from kg_runtime.search import search_knowledge_graph
-
-# ── Content fetch compatibility re-exports ──────────────────────────
-# Compatibility re-exports. New code should import from content_fetch.urls,
-# content_fetch.documents, and content_fetch.browser_pool.
-from content_fetch.browser_pool import PW_COOKIE_PATH, _PW_COOKIE_PATH
-from content_fetch.documents import convert_document
-from content_fetch.urls import (
-    diagnose_url_fetch_failure,
-    extract_urls,
-    fetch_url_content,
-    fetch_url_content_async,
-    fetch_urls_as_documents,
-)
-
 # Module architecture description — static, for bot self-awareness
 MODULE_ARCHITECTURE = """\
 ## Architecture
-Modules: services/web_chat.py (claude_loop web pipeline), telegram_bot.py (multi-agent orchestrator), \
-agents/ (diary, analyst, scout, programmer, browser, visualizer), shared.py (singletons), api.py (FastAPI), graph_memory/ (Neo4j KG).
+Modules: telegram/bot.py (multi-agent orchestrator), telegram/tasks.py (background task worker), \
+agents/ (AgentSpec registry), runtime_tools/ (tool registry), services/api.py (FastAPI), \
+services/web_chat.py (web chat pipeline), kg_runtime/ + graph_memory/ (Neo4j KG), llm/ (provider loops and gateway).
 Data: PostgreSQL (local Docker, leninbot-pg), Neo4j (local Docker), Redis (live state).
 ## Infrastructure
 Server: Hetzner VPS (Ubuntu 24.04, 16 GB RAM), HTTPS via Nginx + Cloudflare Origin Certificate (cyber-lenin.com). \
 Deploy: git pull + systemctl restart, triggered by Telegram /deploy command."""
-
-
-
-# ── KG admin and scout ingest compatibility re-exports ──────────────
-# Compatibility re-exports. New code should import from kg_runtime.admin and kg_runtime.scout_ingest.
-from kg_runtime.admin import kg_cypher, kg_delete_episode, kg_merge_entities
-from kg_runtime.scout_ingest import process_scout_report_to_kg

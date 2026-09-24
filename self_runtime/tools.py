@@ -1818,10 +1818,9 @@ async def _exec_read_kg_status() -> str:
 
 
 async def _exec_read_system_status() -> str:
-    from shared import (
-        fetch_diaries, fetch_chat_logs, fetch_task_reports,
-        fetch_kg_stats, KST, MODULE_ARCHITECTURE,
-    )
+    from kg_runtime.search import fetch_kg_stats
+    from memory_store.queries import fetch_chat_logs, fetch_diaries, fetch_task_reports
+    from shared import KST, MODULE_ARCHITECTURE
 
     status_parts = []
 

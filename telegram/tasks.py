@@ -619,6 +619,22 @@ def _mail_task_evidence(task_id: int) -> dict:
     }
 
 
+async def _record_verification(
+    task_id: int, status: str, details: str, *, count_attempt: bool = True,
+) -> None:
+    """Persist a verification verdict; counted verdicts bump the attempt count."""
+    attempts = (
+        ", verification_attempts = COALESCE(verification_attempts, 0) + 1"
+        if count_attempt else ""
+    )
+    await asyncio.to_thread(
+        _execute,
+        "UPDATE telegram_tasks SET verification_status = %s, verification_details = %s, "
+        f"last_verification_at = NOW(){attempts} WHERE id = %s",
+        (status, details, task_id),
+    )
+
+
 async def _run_verification(
     bot: Bot,
     task: dict,
@@ -633,11 +649,7 @@ async def _run_verification(
     task_id = task["id"]
     if not policy or not policy.get("required", True):
         details = "No verification policy set; verification skipped, goal unverified. Legacy passed status is not evidence of completion."
-        await asyncio.to_thread(
-            _execute,
-            "UPDATE telegram_tasks SET verification_status = 'passed', verification_details = %s, last_verification_at = NOW() WHERE id = %s",
-            (details, task_id),
-        )
+        await _record_verification(task_id, "passed", details, count_attempt=False)
         return {"status": "passed", "details": details, "policy": policy, "retry_limit": 0, "goal": "unverified", "execution": "unknown", "retry": "no"}
 
     # Mail-reading tasks are verified by the mail ledger, not by a model round.
@@ -665,11 +677,7 @@ async def _run_verification(
             "summaries and records receipts. LLM verification skipped by policy: mail checks are verified by the "
             "ledger, and delivery only follows this verdict."
         )
-        await asyncio.to_thread(
-            _execute,
-            "UPDATE telegram_tasks SET verification_status = 'passed', verification_details = %s, last_verification_at = NOW(), verification_attempts = COALESCE(verification_attempts, 0) + 1 WHERE id = %s",
-            (details, task_id),
-        )
+        await _record_verification(task_id, "passed", details)
         return {"status": "passed", "details": details, "policy": policy, "retry_limit": policy.get("retry_limit", 1), **outcome}
 
     # Phase 1: fast automated checks (task_report, url_access)
@@ -789,11 +797,7 @@ async def _run_verification(
     outcome = {key: assessment[key] for key in ("execution", "goal", "retry")}
     outcome["restart"] = assessment.get("restart", "none")
     details = ("outcome: " + json.dumps(outcome, ensure_ascii=False) + "\n" + "\n".join(detail_lines))[:4000]
-    await asyncio.to_thread(
-        _execute,
-        "UPDATE telegram_tasks SET verification_status = %s, verification_details = %s, last_verification_at = NOW(), verification_attempts = COALESCE(verification_attempts, 0) + 1 WHERE id = %s",
-        (status, details, task_id),
-    )
+    await _record_verification(task_id, status, details)
     return {"status": status, "details": details, "policy": policy, "retry_limit": policy.get("retry_limit", 1), **outcome}
 
 

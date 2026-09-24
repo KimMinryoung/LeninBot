@@ -665,122 +665,6 @@ def _search_people(q: str, group_id: str, limit: int, function_id: str = "", aff
     )
 
 
-def _person_snapshot(cur, person_id: str) -> dict | None:
-    """Full person record via an existing cursor (transaction-consistent).
-
-    Returned in the canonical person-field shape accepted by the narrow writers.
-    """
-    cur.execute(
-        """SELECT id, group_id, cyrillic, years_label,
-                  name_ko, name_en, given_name_ko, given_name_en, family_name_ko, family_name_en,
-                  epithet_ko, epithet_en, bio_ko, bio_en,
-                  moment_ko, moment_en,
-                  fate_kind, fate_label_ko, fate_label_en,
-                  citizenship_code, citizenship_label_ko, citizenship_label_en,
-                  origin_code, origin_label_ko, origin_label_en
-           FROM commulingo_people WHERE id = %s""",
-        (person_id,),
-    )
-    row = cur.fetchone()
-    if not row:
-        return None
-    person = {
-        "id": row["id"],
-        "group": row["group_id"],
-        "cyrillic": row["cyrillic"],
-        "years": row["years_label"],
-        "name": {"ko": row["name_ko"], "en": row["name_en"]},
-        "givenName": {"ko": row["given_name_ko"], "en": row["given_name_en"]},
-        "familyName": {"ko": row["family_name_ko"], "en": row["family_name_en"]},
-        "epithet": {"ko": row["epithet_ko"], "en": row["epithet_en"]},
-        "bio": {"ko": row["bio_ko"], "en": row["bio_en"]},
-        "moment": {"ko": row["moment_ko"], "en": row["moment_en"]},
-        "fate": {
-            "kind": row["fate_kind"],
-            "label": {"ko": row["fate_label_ko"], "en": row["fate_label_en"]},
-        },
-        "citizenship": {
-            "code": row["citizenship_code"],
-            "label": {"ko": row["citizenship_label_ko"], "en": row["citizenship_label_en"]},
-        },
-        "origin": {
-            "code": row["origin_code"],
-            "label": {"ko": row["origin_label_ko"], "en": row["origin_label_en"]},
-        },
-    }
-    cur.execute("SELECT COALESCE(to_jsonb(p)->'activities', '[]'::jsonb) AS activities FROM commulingo_people p WHERE id=%s", (person_id,))
-    activity_row = cur.fetchone()
-    person["activities"] = activity_row.get("activities", []) if activity_row else []
-    person["nationalOrigin"] = person["origin"]
-    cur.execute(
-        """SELECT patronymic_ko, patronymic_en, cyrillic_patronymic
-           FROM commulingo_person_patronymics WHERE person_id = %s""",
-        (person_id,),
-    )
-    row = cur.fetchone()
-    person["patronymic"] = {"ko": row["patronymic_ko"], "en": row["patronymic_en"]} if row else None
-    person["cyrillicPatronymic"] = row["cyrillic_patronymic"] if row else ""
-    cur.execute(
-        """SELECT lang, alias FROM commulingo_person_aliases
-           WHERE person_id = %s ORDER BY lang, sort_order, alias""",
-        (person_id,),
-    )
-    person["aliases"] = {"ko": [], "en": []}
-    for r in cur.fetchall():
-        person["aliases"][r["lang"]].append(r["alias"])
-    cur.execute(
-        """SELECT collection_id, episode_id FROM commulingo_person_scenes
-           WHERE person_id = %s ORDER BY sort_order""",
-        (person_id,),
-    )
-    person["scenes"] = [[r["collection_id"], r["episode_id"]] for r in cur.fetchall()]
-    cur.execute(
-        """SELECT period_label, role_ko, role_en
-           FROM commulingo_person_career_entries
-           WHERE person_id = %s ORDER BY sort_order, id""",
-        (person_id,),
-    )
-    person["career"] = [
-        {"y": r["period_label"], "r": {"ko": r["role_ko"], "en": r["role_en"]}}
-        for r in cur.fetchall()
-    ]
-    cur.execute(
-        """SELECT r.office_id, r.category_id,
-                  COALESCE(NULLIF(c.icon, ''), NULLIF(r.icon, ''), o.icon, '') AS resolved_icon,
-                  COALESCE(NULLIF(c.label_ko, ''), NULLIF(r.label_ko, ''), o.title_ko, '') AS label_ko,
-                  COALESCE(NULLIF(c.label_en, ''), NULLIF(r.label_en, ''), o.title_en, '') AS label_en
-           FROM commulingo_person_roles r
-           LEFT JOIN commulingo_offices o ON o.id = r.office_id
-           LEFT JOIN commulingo_role_categories c ON c.id = r.category_id
-           WHERE r.person_id = %s""",
-        (person_id,),
-    )
-    row = cur.fetchone()
-    person["role"] = {
-        "officeId": row["office_id"] or "",
-        "category": row["category_id"] or "",
-        "label": {"ko": row["label_ko"], "en": row["label_en"]},
-        "resolvedIcon": row["resolved_icon"],
-    } if row else None
-    cur.execute(
-        """SELECT slug, sort_order, heading_ko, heading_en,
-                  length(body_ko) AS body_ko_chars, length(body_en) AS body_en_chars
-           FROM commulingo_person_sections
-           WHERE person_id = %s ORDER BY sort_order, id""",
-        (person_id,),
-    )
-    person["sections"] = [
-        {
-            "slug": r["slug"],
-            "sortOrder": r["sort_order"],
-            "heading": {"ko": r["heading_ko"], "en": r["heading_en"]},
-            "bodyChars": {"ko": r["body_ko_chars"], "en": r["body_en_chars"]},
-        }
-        for r in cur.fetchall()
-    ]
-    return person
-
-
 def _office_snapshot(cur, office_id: str) -> dict | None:
     cur.execute(
         """SELECT id, range_label, title_ko, title_en, blurb_ko, blurb_en
@@ -1274,25 +1158,6 @@ def _localized(value, lang: str) -> str:
 _SECTION_YEAR_RE = re.compile(r"(1[6-9]\d\d|20[0-2]\d)")
 
 
-def _section_sort_order(patch: dict, heading, fallback: int) -> int:
-    """Chronological key for a person section, as YYYYMM (MM=00 for year-only).
-
-    Sections render in sort_order, so this is what makes a life story read front
-    to back. An explicit sortOrder wins; otherwise the earliest year in the
-    heading stands in, which is right for the "... (1898-1918)" and "1991년 8월,
-    ..." heading shapes the sections actually use. Appending after the current
-    last row is the last resort, and it is the one that used to put a newly
-    written childhood section below a death scene.
-    """
-    if isinstance(patch.get("sortOrder"), int):
-        return patch["sortOrder"]
-    for lang in ("ko", "en"):
-        match = _SECTION_YEAR_RE.search(_localized(heading, lang))
-        if match:
-            return int(match.group(1)) * 100
-    return fallback
-
-
 def _nationality_values(patch: dict, key: str):
     """Extract (code, label_ko, label_en) for a citizenship/origin patch node.
 
@@ -1640,34 +1505,6 @@ def _existing_person_match(cur, target_id: str, patch: dict) -> dict | None:
             continue
         return {**row, "why": f"registered under the overlapping slug '{row['id']}'"}
     return None
-
-
-def _normalize_fate_label(label: str, death_year: int | None) -> str:
-    """Strip the death year from a fate label — it already lives in `years` /
-    deathYear and must not be repeated on the card. Political-event years (실각
-    1964) differ from the death year and are preserved; only the death-year token
-    is removed, then "년"/parens/dates/legacy "d." artifacts and separators are
-    tidied. Keep in sync with frontend/data/commulingo/people-standard.js
-    normalizeFateLabel — the CommuLingo fate standard both enforce."""
-    text = (label or "").strip()
-    if not text or not death_year:
-        return text
-    y = str(death_year)
-    out = text
-    out = re.sub(r"\(\s*" + y + r"\s*\)", "", out)                              # (1980)
-    out = re.sub(y + r"\s*년(?:\s*\d{1,2}\s*월)?(?:\s*\d{1,2}\s*일)?", "", out)  # 1956년 4월 20일
-    out = re.sub(r"\d{1,2}\s+[A-Z][a-z]+\s+" + y, "", out)                      # 20 April 1956
-    out = re.sub(r"[A-Z][a-z]+\s+\d{1,2},?\s+" + y, "", out)                    # April 20, 1956
-    out = re.sub(r"(?<![0-9])" + y + r"(?![0-9])", "", out)                     # bare death year
-    out = re.sub(r"\bd\.\s*", "", out)                                          # legacy EN "d." tail
-    out = re.sub(r"\(\s*\)", "", out)                                           # empty parens
-    out = re.sub(r"(^|[\s·,])년(?=[\s·,]|$)", r"\1", out)                        # orphan 년
-    out = re.sub(r"\s*·\s*", " · ", out)
-    out = re.sub(r"\s*,\s*", ", ", out)
-    out = re.sub(r"([·,])(?:\s*[·,])+", r"\1", out)
-    out = re.sub(r"\s{2,}", " ", out)
-    out = re.sub(r"^[\s·,]+|[\s·,]+$", "", out).strip()
-    return out
 
 
 def _parse_date_token(token: str, fallback_year: int | None):
@@ -2702,11 +2539,6 @@ def _split_event_body(body: str) -> list[tuple[str, str]]:
         end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
         parts.append((match.group(1).strip(), text[match.start():end].strip("\n")))
     return parts
-
-
-def event_section_headings(body: str) -> list[str]:
-    """The `## ` headings of an event body, in order (used by the lane prompt)."""
-    return [heading for heading, _ in _split_event_body(body) if heading]
 
 
 def _find_event_section(parts: list[tuple[str, str]], heading: str) -> int:

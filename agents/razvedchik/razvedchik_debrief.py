@@ -256,8 +256,8 @@ def _save_insights_to_memory(conversation: list[dict]) -> None:
         return
 
     try:
-        import shared
-        shared.save_experiential_memory(
+        from memory_store.experiential import save_experiential_memory
+        save_experiential_memory(
             observation=insights,
             source="razvedchik_debrief",
         )

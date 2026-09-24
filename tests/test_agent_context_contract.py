@@ -118,7 +118,7 @@ class VerificationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["goal"], "complete")
         self.assertEqual(result["retry"], "no")
         self.assertIn("2 summaries staged for mail [43, 44]", result["details"])
-        self.assertEqual(self.execute.call_args.args[1][0], result["details"])
+        self.assertEqual(self.execute.call_args.args[1][:2], ("passed", result["details"]))
 
     async def test_mail_check_without_new_mail_passes_without_a_model_round(self):
         result = await self.verify(verdict(verdict="FAIL"), report="새 메일 없음", checked_inbox=True)
