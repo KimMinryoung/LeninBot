@@ -1,12 +1,16 @@
 """Patch-centred workflow over the existing durable queue, leases and budget."""
 import asyncio
+import logging
 from copy import deepcopy
 
 from . import service
 from .editor import Editor
 from .engine import Result
 from .patches import patch_hash, changes
-from .bundles import advance
+from .bundles import advance, work_topics
+
+# Note the frontend service leaves on an original it replaced (editorial-pipeline-service.js).
+REPLACED_NOTE_PREFIX = 'Replaced by independently approved patch '
 
 
 class Review:
@@ -30,6 +34,7 @@ class Review:
         previous = [a['value'] for a in current_artifacts(artifacts)
                     if a['stage']=='review' and a['value'].get('decision')=='revise']
         if any(v.get('reviewed_patch_hash')==digest for v in previous):
+            await self.leave_note(job, artifacts, 'revise (held)', previous[-1].get('reason',''))
             return Result({'hold_reason':'review requested correction but patch and evidence are unchanged',
                            'patch_hash':digest}, 'complete', 'escalated')
         proposal = {'target_type':draft.get('target',job['kind']),'action':draft.get('action',job['action']),
@@ -106,8 +111,25 @@ class Review:
             local_tools=[context_tool(current)])
         if box['decision']=='revise':
             return Result(box, 'draft')
+        if box['decision']!='approve':
+            await self.leave_note(job, artifacts, box['decision'], box.get('reason',''))
+        # reject is a finished verdict; only escalate asks for a human.
         return Result(box, 'submit' if box['decision']=='approve' else 'complete',
-                      'ready' if box['decision']=='approve' else 'escalated')
+                      'ready' if box['decision']=='approve' else 'escalated' if box['decision']=='escalate' else 'complete')
+
+    async def leave_note(self, job, artifacts, decision, reason):
+        """A job that ends without publishing tells the entry's next author why.
+
+        Without it the verdict lives only in this job's review artifact, and the
+        next commission on the same entry runs into the same unresolved conflict.
+        """
+        text = f'검토 {decision} (작업 {job["id"]}, {work_topics(job)}): {(reason or "").strip()}'[:4000]
+        try:
+            await asyncio.to_thread(service.call,{'command':'note','target':job['kind'],'id':job['target'],
+                'note':text,'changedBy':'commulingo-pipeline-reviewer','jobRef':f'job {job["id"]} review',
+                'idempotencyKey':f'pipeline:{job["id"]}:{len(artifacts)}:review-note'})
+        except Exception as exc:  # the verdict itself is already persisted as an artifact
+            logging.getLogger(__name__).warning('review note not saved for %s: %s', job['target'], exc)
 
 
 async def validate(job, artifacts, usage, budget):
@@ -133,6 +155,18 @@ async def publish(job, artifacts, usage, budget):
     digest = patch_hash(request)
     if decision.get('decision')!='approve' or decision.get('approved_patch_hash')!=digest:
         return Result({'reason':'independent approval does not bind this exact patch'}, 'review')
+    replaced = (job.get('payload') or {}).get('replaces_suggestion_id')
+    if replaced:
+        # An original someone already approved or rejected by hand is no longer
+        # ours to replace; finish quietly instead of failing the atomic publish.
+        # One this job's own earlier publish replaced falls through, so the
+        # replay returns the stored receipt.
+        from runtime_tools import commulingo_review_queue as queue
+        original = await asyncio.to_thread(queue.suggestion, replaced)
+        ours = (original or {}).get('status')=='rejected' and \
+            (original.get('review_note') or '')==REPLACED_NOTE_PREFIX+digest
+        if not original or (original['status']!='pending' and not ours):
+            return Result({'reason':'original proposal no longer eligible for replacement'},'complete','complete')
     if config['phase']=='canary':
         await asyncio.to_thread(Store().publication_slot,job,config['canary_per_group_per_day'])
     request.update(command='publish', approvedPatchHash=digest,
@@ -143,7 +177,6 @@ async def publish(job, artifacts, usage, budget):
     if deferred:
         request['notes'] = (request['notes'] + '\nDeferred issues:\n' + '\n'.join(
             f"{i['id']}: {i['reason']}" for i in deferred)).strip()[:4000]
-    replaced = (job.get('payload') or {}).get('replaces_suggestion_id')
     if replaced:
         request['replacesSuggestionId'] = replaced
     try:

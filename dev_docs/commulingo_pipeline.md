@@ -160,8 +160,9 @@ Editor 시스템 문맥에 넣지 않는다. curator 기본 프롬프트 역시 
 검토자는 원문을 직접 가져와 핵심 변경 사실과 위험 항목을 확인한다.
 `required_corrections`는 사실 오류의 필드 위치와 이유를 담으며 `optional_suggestions`와 구분한다.
 선택 제안만으로 revise할 수 없고 내용·근거가 그대로인 거절안은 유료 재검토 전에 보류한다.
-reject와 escalate는 모두 escalated로 끝나며 판정은 작업의 review artifact에만 남는다.
-legacy Review가 하던 항목 메모 기록은 editor로 옮기지 않았다.
+reject는 complete, escalate는 escalated로 끝난다. 두 경우와, 수정 요청이 반영되지 않은 같은 patch가
+다시 와서 보류(`revise (held)`)되는 경우 모두 `note` RPC로 판정과 사유를 사전 항목에 남겨 다음 작성자가
+같은 충돌을 다시 겪지 않게 한다. 노트 저장 실패는 경고만 남긴다(판정은 review artifact에 이미 있다).
 Jev는 주장과 인용, 검토 finding과 인용의 지지 관계를 판정한다. 최종 서술과 사실 검토는
 작성자·독립 검토자가 담당한다. 인용 게이트 장애 정책은 분류 장애 정책과 다르다.
 
@@ -173,7 +174,10 @@ Jev는 주장과 인용, 검토 finding과 인용의 지지 관계를 판정한�
 
 기존 pending 제안의 revise는 원 제안과 근거를 보존하는 수정 작업으로 이어진다.
 수정안이 승인되기 전에는 원 제안을 대체하지 않으며 수동 처리된 원 제안을 덮어쓰지 않는다.
-원 제안이 이미 수동 처리됐으면 frontend `publish`가 트랜잭션 안에서 거부하고, 단계는 오류로 끝나 재시도 한도를 따른다.
+발행 전에 원 제안 상태를 확인한다. 없거나 사람이 이미 승인·반려했으면 발행하지 않고 조용히 complete로 끝낸다.
+이 작업의 이전 발행이 이미 원 제안을 대체했으면(반려 노트가 `Replaced by independently approved patch <hash>`)
+같은 요청을 다시 보내 저장된 receipt를 받는다. 확인과 발행 사이에 상태가 바뀌면 frontend `publish`가
+트랜잭션 안에서 거부한다.
 
 ## 대기열·예산·복구
 
