@@ -29,6 +29,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from content_fetch.url_security import UnsafeUrlError
 from content_fetch.url_security import validate_public_http_url as _validate_public_http_url
 from db import execute as _execute, query as _query, query_one as _query_one
+from task_store import load_task_metadata as _load_task_metadata
 from tool_gateway.results import ToolFailure
 
 logger = logging.getLogger(__name__)
@@ -240,16 +241,6 @@ def validate_curation_args(args: dict, *, expected_url: str) -> str | None:
     if published_at and not _DATE_RE.match(published_at):
         return "source_published_at은 YYYY-MM-DD 형식이어야 하며, 확실하지 않으면 비워라."
     return None
-
-
-def _load_task_metadata(task: dict) -> dict:
-    meta = task.get("metadata") or {}
-    if isinstance(meta, str):
-        try:
-            meta = json.loads(meta)
-        except Exception:
-            meta = {}
-    return meta if isinstance(meta, dict) else {}
 
 
 def make_guarded_publish_handler(inner: Callable[..., Any], task: dict) -> Callable[..., Awaitable[str]]:

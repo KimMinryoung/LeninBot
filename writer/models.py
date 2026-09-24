@@ -24,7 +24,7 @@ WRITER_OUTPUT_PRICE_PER_MTOK = 50.0
 # Selectable models. Fable is the default; DeepSeek and Kimi options route
 # through the same chat_with_tools loop via provider Anthropic-compatible
 # clients. Prices are display hints only — authoritative cost comes from
-# claude_loop.PRICING_TABLE (keyed by model id) at runtime.
+# claude_loop._pricing_for (keyed by model id) at runtime.
 # "extra" carries provider kwargs passed straight to chat_with_tools.
 WRITER_MODEL_CHOICES: dict[str, dict] = {
     "fable": {

@@ -1,5 +1,3 @@
-import contextvars
-import types
 import unittest
 from unittest.mock import patch
 
@@ -52,14 +50,8 @@ class BrowserWorkerContractTests(unittest.IsolatedAsyncioTestCase):
                 scope_id=str(task["id"]),
             )
 
-        fake_telegram_bot = types.ModuleType("telegram.bot")
-        fake_telegram_bot.current_task_ctx = contextvars.ContextVar("current_task_ctx")
-        fake_telegram_bot._build_runtime_prelude = lambda *args, **kwargs: "runtime"
-        fake_telegram_bot._join_context_blocks = lambda *parts: "\n".join(parts)
-        fake_telegram_bot._merge_runtime_context_into_last_user = lambda messages, context: messages
-
         with (
-            patch.dict("sys.modules", {"telegram.bot": fake_telegram_bot}),
+            patch("llm.runtime_context.build_runtime_prelude", return_value="runtime"),
             patch("agents.get_agent", return_value=_FakeSpec()),
             patch("tool_gateway.inference.resolve_agent_inference_policy", return_value=_FakePolicy()),
             patch("self_runtime.tools.build_task_context_tools", return_value=([], {})),

@@ -30,6 +30,10 @@ DEEPSEEK_MODEL_MAP = {
 
 KIMI_MODEL_MAP = {"kimi_k3": "kimi-k3"}
 
+# Providers that run through the shared chat_with_tools dispatch. Agent-only
+# executors ("moon" local Qwen, "codex" CLI) are routed separately.
+CHAT_PROVIDERS = ("claude", "openai", "deepseek", "kimi", "local")
+
 # Stable model-selection contract for application code and proxy clients.
 # These IDs are pinned by the providers; update this catalog at each release.
 CURRENT_TEXT_MODELS = {

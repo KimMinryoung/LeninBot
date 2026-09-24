@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from aiogram import Bot
 from aiogram.types import BufferedInputFile
 from db import query as _query, execute as _execute, query_one as _query_one
+from task_store import load_task_metadata
 
 from shared import KST
 from prompt_context import (
@@ -195,14 +196,6 @@ def _extract_summary(report: str, max_len: int = 300) -> str:
     return report[:max_len]
 
 
-def _classify_priority(content: str, report: str) -> str:
-    """Classify task result priority from report urgency keywords."""
-    report_lower = report[:2000].lower()
-    if any(k in report_lower for k in ("urgent", "critical", "긴급", "위기", "경고", "즉시")):
-        return "high"
-    return "normal"
-
-
 def _append_task_scratchpad(task_id: int, note: str) -> None:
     """Append a checkpoint note to telegram_tasks.scratchpad."""
     rows = _query("SELECT scratchpad FROM telegram_tasks WHERE id = %s", (task_id,))
@@ -213,14 +206,7 @@ def _append_task_scratchpad(task_id: int, note: str) -> None:
     _execute("UPDATE telegram_tasks SET scratchpad = %s WHERE id = %s", (new_pad, task_id))
 
 
-def _load_task_metadata(task: dict | None) -> dict:
-    metadata = (task or {}).get("metadata")
-    if isinstance(metadata, str):
-        try:
-            metadata = json.loads(metadata)
-        except Exception:
-            metadata = None
-    return metadata if isinstance(metadata, dict) else {}
+_load_task_metadata = load_task_metadata
 
 
 def _truncate_context_text(text: str, max_chars: int) -> str:
@@ -2162,17 +2148,6 @@ async def checkpoint_task_on_shutdown(task_id: int) -> bool:
     except Exception as e:
         logger.error("Failed to checkpoint task %s on shutdown: %s", task_id, e)
         return False
-
-
-# ── Broadcast ────────────────────────────────────────────────────────
-
-async def broadcast(bot: Bot, text: str, allowed_user_ids: set[int]):
-    """Send a message to all allowed users. For system event notifications."""
-    for uid in allowed_user_ids:
-        try:
-            await bot.send_message(chat_id=uid, text=text)
-        except Exception as e:
-            logger.warning("Broadcast to %s failed: %s", uid, e)
 
 
 # ── System Monitor ───────────────────────────────────────────────────

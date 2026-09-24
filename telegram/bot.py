@@ -50,6 +50,7 @@ from runtime_tools.allowlists import build_orchestrator_toolset
 from runtime_tools.registry import TOOLS, TOOL_HANDLERS
 from llm.claude_loop import chat_with_tools, dedupe_tools_by_name
 from llm.provider_failover import run_with_provider_failover
+from llm.provider_registry import CHAT_PROVIDERS
 from telegram.bot_api10 import TelegramBotApi10Client, TelegramBotApiError
 from telegram.tasks import (
     process_task, system_monitor,
@@ -57,17 +58,17 @@ from telegram.tasks import (
     recover_processing_tasks_on_startup,
     checkpoint_task_on_shutdown, persist_task_restart_state,
     _delegate_to_browser_worker, check_browser_worker_alive,
+    _load_task_metadata,
 )
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 
 _runtime_state: dict = {"active_task_ids": set()}
-DEEPSEEK_CONTEXT_LIMIT = int(os.getenv("DEEPSEEK_CONTEXT_LIMIT", "1000000"))
 
-# Per-coroutine task context — allows concurrent tasks to know their own task_id
-import contextvars
-current_task_ctx: contextvars.ContextVar[dict | None] = contextvars.ContextVar("current_task_ctx", default=None)
+# Per-coroutine task context — allows concurrent tasks to know their own task_id.
+# Defined in llm.runtime_context so non-bot processes can share the same object.
+from llm.runtime_context import current_task_ctx
 
 # Suppress TelegramConflictError spam during deploy (old/new instance overlap)
 class _ConflictFilter(logging.Filter):
@@ -367,30 +368,6 @@ async def _handle_guest_update(update, bot: Bot):
 _log_event = log_event
 
 
-def _append_email_audit_entry(message_id: int, event: str, actor: str, metadata: dict | None = None) -> None:
-    metadata_json = json.dumps(metadata or {}, ensure_ascii=False)
-    _execute(
-        """
-        UPDATE email_messages
-        SET audit_log = COALESCE(audit_log, '[]'::jsonb) || jsonb_build_array(
-            jsonb_build_object(
-                'at', NOW(),
-                'event', %s,
-                'actor', %s,
-                'metadata', %s::jsonb
-            )
-        ),
-        updated_at = NOW()
-        WHERE id = %s
-        """,
-        (event[:50], actor[:100], metadata_json, message_id),
-    )
-    _execute(
-        "INSERT INTO email_bridge_events (message_id, event_type, detail, metadata) VALUES (%s, %s, %s, %s::jsonb)",
-        (message_id, event[:50], None, metadata_json),
-    )
-
-
 # ── Light LLM — llm/call_registry 경유 (config/llm_call_sites.json 관리) ──
 from llm.call_registry import generate as _registry_generate
 
@@ -404,84 +381,13 @@ async def _light_generate(feature: str, prompt: str) -> str | None:
     return await _registry_generate(feature, prompt)
 
 
-def _current_datetime_str() -> str:
-    return datetime.now(KST).strftime("%Y-%m-%d %H:%M KST")
-
-
-def _format_current_model_context(kind: str = "chat", provider: str = "claude") -> str:
-    """Format runtime-selected model info for prompt/context injection.
-
-    Leads with the human-readable product name ("Claude Opus 5", "GPT-5.6 Sol")
-    so self-identification works cleanly; the raw API id and tier stay available
-    as secondary metadata. `provider` controls BOTH the surface form (XML for
-    Claude, Markdown elsewhere) AND which tier map the model is resolved from —
-    so an agent pinned to Claude while config.provider="openai" still surfaces
-    the real Claude model it's running on, not the chat-side GPT.
-    """
-    sel = get_current_model_selection(kind, provider_override=provider)
-    name = sel["display_name"]
-    model_id = sel["model_id"]
-    tier = sel["tier"]
-    if provider == "claude":
-        return (
-            f"<current-model tier=\"{tier}\" id=\"{model_id}\">{name}</current-model>"
-        )
-    return f"- **Current Model**: {name} (id: `{model_id}`, tier: {tier})"
-
-
-def _build_runtime_prelude(provider: str = "claude", kind: str = "chat") -> str:
-    """Render the volatile runtime header (time + active model).
-
-    Goes at the top of extra context so the system prompt itself stays
-    byte-identical across turns (prompt-cache friendly). Returned without any
-    leading/trailing whitespace — separator insertion is the caller's job
-    (`_join_context_blocks`).
-    """
-    current_time = _current_datetime_str()
-    current_model = _format_current_model_context(kind, provider)
-    if provider == "claude":
-        return (
-            f"<runtime>\n<current-time>{current_time}</current-time>\n"
-            f"{current_model}\n</runtime>"
-        )
-    return (
-        f"### Runtime\n"
-        f"- **Current Time**: {current_time}\n"
-        f"{current_model}"
-    )
-
-
-def _join_context_blocks(*blocks: str) -> str:
-    """Concatenate non-empty context blocks with a blank-line separator.
-
-    Every block (XML tag group or Markdown section) gets bounded by an actual
-    blank line in the output, which both CommonMark/GFM parsers and LLM
-    attention treat as a real section break. Empty or whitespace-only blocks
-    are skipped, so callers can unconditionally pass optional context slots.
-    """
-    cleaned = [b.strip() for b in blocks if b and b.strip()]
-    return "\n\n".join(cleaned)
-
-
-def _merge_runtime_context_into_last_user(
-    messages: list[dict], runtime_context: str
-) -> list[dict]:
-    """Attach per-turn runtime metadata beside the trailing user request.
-
-    Placing volatile context (time, mission, alerts, …) immediately before the
-    current user query — rather than at the start of the message array — keeps
-    the history prefix byte-stable across turns so prompt caching (Claude
-    ephemeral / OpenAI automatic) keeps hitting. Returns a new list; the caller's
-    list and its inner dicts are left untouched.
-    """
-    if not runtime_context or not runtime_context.strip():
-        return list(messages)
-
-    from llm.execution_context import attach_context, context_record
-    return attach_context(messages, [context_record(
-        "runtime_state", "telegram_runtime", runtime_context.strip(),
-        temporal_scope="current turn",
-    )])
+from llm.runtime_context import (
+    build_runtime_prelude as _build_runtime_prelude,
+    current_datetime_str as _current_datetime_str,
+    format_current_model_context as _format_current_model_context,
+    join_context_blocks as _join_context_blocks,
+    merge_runtime_context_into_last_user as _merge_runtime_context_into_last_user,
+)
 
 
 # ── System Alerts (injected into system prompt) ─────────────────────
@@ -1319,6 +1225,40 @@ def _is_allowed(user_id: int) -> bool:
     return user_id in ALLOWED_USER_IDS
 
 
+def _owner_run_context(
+    interface: str, agent_name: str | None, *, request_id=None, user_id=None,
+    task_id=None, session_id=None, parent_request_id=None, scope_type=None,
+    scope_id=None,
+):
+    """Build the security-gateway run context for an owner-trusted Telegram call.
+
+    Task-bound calls default to the ``telegram_task`` scope keyed by task id
+    when the caller did not name a scope explicitly.
+    """
+    from tool_gateway.security import new_run_context
+    ctx_kwargs = {
+        "interface": interface,
+        "agent_name": agent_name,
+        "is_owner": True,
+        "request_id": request_id,
+    }
+    if user_id is not None:
+        ctx_kwargs["user_id"] = str(user_id)
+    if task_id is not None:
+        ctx_kwargs["task_id"] = str(task_id)
+    if session_id is not None:
+        ctx_kwargs["session_id"] = session_id
+    if parent_request_id is not None:
+        ctx_kwargs["parent_request_id"] = parent_request_id
+    if scope_type is not None:
+        ctx_kwargs["scope_type"] = scope_type
+    elif task_id is not None:
+        ctx_kwargs["scope_type"] = "telegram_task"
+    if scope_id is not None or task_id is not None:
+        ctx_kwargs["scope_id"] = str(scope_id if scope_id is not None else task_id)
+    return new_run_context(**ctx_kwargs)
+
+
 # ── Thin wrapper: _chat_with_tools (injects module-level dependencies) ──
 
 async def _chat_with_tools(
@@ -1478,34 +1418,20 @@ async def _chat_with_tools(
     # so calls here are trusted. Orchestrator vs delegated-agent is distinguished
     # for audit attribution; caller_scope restores the parent on exit so a nested
     # run_agent sub-call doesn't leak its agent identity back to the orchestrator.
-    from tool_gateway.security import caller_scope, new_run_context
+    from tool_gateway.security import caller_scope
     _interface = (
         "autonomous" if _runtime_kind == "autonomous"
         else ("telegram" if is_orchestrator else "agent")
     )
-    _ctx_kwargs = {
-        "interface": _interface,
-        "agent_name": None if is_orchestrator and _interface == "telegram" else _agent_name,
-        "is_owner": True,
-        "request_id": request_id,
-    }
-    if user_id is not None or _task_user_id is not None:
-        _ctx_kwargs["user_id"] = str(user_id if user_id is not None else _task_user_id)
-    if task_id is not None:
-        _ctx_kwargs["task_id"] = str(task_id)
-    if session_id is not None:
-        _ctx_kwargs["session_id"] = session_id
-    if parent_request_id is not None:
-        _ctx_kwargs["parent_request_id"] = parent_request_id
-    if scope_type is not None:
-        _ctx_kwargs["scope_type"] = scope_type
-    elif task_id is not None:
-        _ctx_kwargs["scope_type"] = "telegram_task"
-    if scope_id is not None:
-        _ctx_kwargs["scope_id"] = str(scope_id)
-    elif task_id is not None:
-        _ctx_kwargs["scope_id"] = str(task_id)
-    _gw_ctx = new_run_context(**_ctx_kwargs)
+    _gw_ctx = _owner_run_context(
+        _interface,
+        None if is_orchestrator and _interface == "telegram" else _agent_name,
+        request_id=request_id,
+        user_id=user_id if user_id is not None else _task_user_id,
+        task_id=task_id, session_id=session_id,
+        parent_request_id=parent_request_id,
+        scope_type=scope_type, scope_id=scope_id,
+    )
 
     # Kwargs shared verbatim by every loop call below — the per-provider
     # branches add only client/model and provider-specific extras.
@@ -1754,26 +1680,13 @@ def _make_moon_chat_fn(spec):
         agent_name=None, runtime_kind=None, user_id=None, session_id=None,
         request_id=None, parent_request_id=None, scope_type=None, scope_id=None,
     ):
-        from tool_gateway.security import caller_scope, new_run_context
-        ctx_kwargs = {
-            "interface": "agent", "agent_name": agent_name or spec.name,
-            "is_owner": True, "request_id": request_id,
-        }
-        if user_id is not None:
-            ctx_kwargs["user_id"] = str(user_id)
-        if task_id is not None:
-            ctx_kwargs["task_id"] = str(task_id)
-        if session_id is not None:
-            ctx_kwargs["session_id"] = session_id
-        if parent_request_id is not None:
-            ctx_kwargs["parent_request_id"] = parent_request_id
-        if scope_type is not None:
-            ctx_kwargs["scope_type"] = scope_type
-        elif task_id is not None:
-            ctx_kwargs["scope_type"] = "telegram_task"
-        if scope_id is not None or task_id is not None:
-            ctx_kwargs["scope_id"] = str(scope_id if scope_id is not None else task_id)
-        ctx = new_run_context(**ctx_kwargs)
+        from tool_gateway.security import caller_scope
+        ctx = _owner_run_context(
+            "agent", agent_name or spec.name,
+            request_id=request_id, user_id=user_id, task_id=task_id,
+            session_id=session_id, parent_request_id=parent_request_id,
+            scope_type=scope_type, scope_id=scope_id,
+        )
         with caller_scope(ctx):
             return await _moon_loop(
                 messages,
@@ -1812,26 +1725,13 @@ def _make_codex_chat_fn(spec):
         agent_name=None, runtime_kind=None, user_id=None, session_id=None,
         request_id=None, parent_request_id=None, scope_type=None, scope_id=None,
     ):
-        from tool_gateway.security import caller_scope, new_run_context
-        ctx_kwargs = {
-            "interface": "agent", "agent_name": agent_name or spec.name,
-            "is_owner": True, "request_id": request_id,
-        }
-        if user_id is not None:
-            ctx_kwargs["user_id"] = str(user_id)
-        if task_id is not None:
-            ctx_kwargs["task_id"] = str(task_id)
-        if session_id is not None:
-            ctx_kwargs["session_id"] = session_id
-        if parent_request_id is not None:
-            ctx_kwargs["parent_request_id"] = parent_request_id
-        if scope_type is not None:
-            ctx_kwargs["scope_type"] = scope_type
-        elif task_id is not None:
-            ctx_kwargs["scope_type"] = "telegram_task"
-        if scope_id is not None or task_id is not None:
-            ctx_kwargs["scope_id"] = str(scope_id if scope_id is not None else task_id)
-        ctx = new_run_context(**ctx_kwargs)
+        from tool_gateway.security import caller_scope
+        ctx = _owner_run_context(
+            "agent", agent_name or spec.name,
+            request_id=request_id, user_id=user_id, task_id=task_id,
+            session_id=session_id, parent_request_id=parent_request_id,
+            scope_type=scope_type, scope_id=scope_id,
+        )
         with caller_scope(ctx):
             return await _codex_loop(
                 messages,
@@ -2049,6 +1949,396 @@ def _make_guarded_diary_save_handler(_bot: Bot, task: dict):
     return _guarded_save_diary
 
 
+# ── Orchestrator callback: interpret task results for the user ──
+async def _orchestrator_report_task(b: Bot, task: dict, result: dict, chat_id: int):
+    """Trigger an orchestrator turn to interpret task results, communicate to user, and redelegate if needed."""
+    task_id = task["id"]
+    agent_type = task.get("agent_type") or "analyst"
+    status = result.get("status", "unknown")
+    was_interrupted = result.get("was_interrupted", False)
+    mission_id = task.get("mission_id")
+
+    # Check if this was the last active task in the mission
+    mission_close_hint = ""
+    if mission_id and status in ("done", "failed"):
+        try:
+            remaining = await asyncio.to_thread(
+                _query_one,
+                "SELECT COUNT(*) AS cnt FROM telegram_tasks "
+                "WHERE mission_id = %s AND id != %s AND status IN ('pending', 'processing', 'queued')",
+                (mission_id, task_id),
+            )
+            if remaining and remaining["cnt"] == 0:
+                mission_row = await asyncio.to_thread(
+                    _query_one,
+                    "SELECT id, title FROM telegram_missions WHERE id = %s AND status = 'active'",
+                    (mission_id,),
+                )
+                if mission_row:
+                    mission_close_hint = (
+                        f"\n\n📋 Mission #{mission_row['id']} \"{mission_row['title']}\" has no remaining active tasks. "
+                        f"If the user's original goal has been addressed, call `mission(action=\"close\")` to close it."
+                    )
+        except Exception:
+            pass
+
+    try:
+        # Load tool_log from DB — contains the actual work done (tool calls + results)
+        if (status == "done" and not was_interrupted
+                and (result.get("verification") or {}).get("status") != "failed"):
+            from mail_runtime import store as mail_store
+            from mail_runtime.delivery import deliver as deliver_mail_briefing
+            mail_items = await asyncio.to_thread(mail_store.briefing_items, task_id, chat_id)
+            if mail_items:
+                try:
+                    await deliver_mail_briefing(b, task_id, chat_id, mail_items,
+                                               _persist_assistant_turn_after_send)
+                    await asyncio.to_thread(_save_system_event, chat_id, "task_report",
+                                            f"task #{task_id} mail briefing delivery checked")
+                except Exception:
+                    logger.exception("Mail briefing delivery failed for task #%d; unsent items remain unbriefed", task_id)
+                return
+        tool_log = ""
+        try:
+            row = await asyncio.to_thread(
+                _query_one,
+                "SELECT tool_log FROM telegram_tasks WHERE id = %s", (task_id,),
+            )
+            tool_log = (row or {}).get("tool_log", "") or ""
+        except Exception:
+            pass
+
+        # Build context for the orchestrator
+        if status == "done":
+            report = result.get("report", "")
+            interrupted_note = ""
+            if was_interrupted:
+                interrupted_note = (
+                    "\n\n⚠️ This agent was interrupted due to budget/turn limit. "
+                    "Check the agent's response for any incomplete work."
+                )
+
+            # If report is thin but tool_log has substance, include tool_log
+            tool_log_section = ""
+            if tool_log and (len(report) < 200 or was_interrupted):
+                tool_log_section = f"\n\nAgent work log (tool call history):\n{_truncate_for_prompt(tool_log, 5000)}"
+
+            # Independent verification verdict (Critic). A shadow-mode FAIL
+            # is advisory: the orchestrator relays the caveat, nothing was
+            # auto-retried.
+            verification = result.get("verification") or {}
+            verification_section = ""
+            if verification.get("status") == "failed":
+                retry = verification.get("retry") or {}
+                if retry.get("status") == "redelegated":
+                    retry_note = f" An automatic retry was delegated as task #{retry.get('task_id')}."
+                elif retry.get("status") == "restart_initiated":
+                    retry_note = f" {retry.get('message', 'Service restart initiated.')}"
+                elif verification.get("mode") == "shadow":
+                    retry_note = " (shadow mode — no automatic retry was taken)"
+                else:
+                    retry_note = f" No retry: {retry.get('message', 'retry unavailable')}."
+                verification_section = (
+                    f"\n\n⚠️ Independent verification FAILED.{retry_note}\n"
+                    f"Verifier findings:\n{_truncate_for_prompt(verification.get('details', ''), 800)}\n"
+                    f"Report goal completion separately from execution quality. Blocked or unverified work is not complete; relay the remaining requirements and retry conditions."
+                )
+
+            prompt = (
+                f"[TASK REPORT] Task #{task_id} [{agent_type}] execution ended{' (interrupted)' if was_interrupted else ''}; goal completion is not implied\n\n"
+                f"Original request:\n{_truncate_for_prompt(task.get('content', ''), 1000)}\n\n"
+                f"Agent's report (claims, not independent verification):\n{report_for_callback(task_id, report)}"
+                f"{tool_log_section}"
+                f"{verification_section}"
+                f"{interrupted_note}\n\n"
+                f"## Your role\n"
+                f"1. Relay the results to the user concisely, covering only key points. Do not use markdown formatting.\n"
+                f"   {RESULT_RELAY_GUIDANCE}\n"
+                f"2. Re-delegation judgment: Only delegate follow-up work when ALL of these conditions are met:\n"
+                f"   - The agent could not finish due to budget/turn limits\n"
+                f"   - Additional work can yield meaningful improvement\n"
+                f"   - The cause is NOT external factors (permission denied, blocked, CAPTCHA, API error, etc.)\n"
+                f"   If re-delegation is unnecessary, just relay the results."
+                f"{mission_close_hint}"
+            )
+        else:
+            error = result.get("error", "unknown error")
+            prompt = (
+                f"[TASK REPORT] Task #{task_id} [{agent_type}] failed\n\n"
+                f"Original request:\n{_truncate_for_prompt(task.get('content', ''), 500)}\n\n"
+                f"Error: {error}\n\n"
+                f"Inform the user of the failure and its cause concisely. "
+                f"Do not re-delegate if the issue would not be resolved by retrying."
+                f"{mission_close_hint}"
+            )
+
+        # Load recent chat history for context
+        history = await asyncio.to_thread(_load_context_with_summaries, chat_id)
+        from llm.execution_context import RUNTIME_EVENTS_KEY
+        history.append({
+            "role": "user",
+            "content": (
+                "Relay the runtime-supplied task outcome to the user concisely, without markdown. "
+                "Distinguish recorded task status from the agent's claims and goal completion. "
+                + RESULT_RELAY_GUIDANCE + " "
+                + "Only delegate follow-up when the agent was interrupted by budget/turn limits, "
+                "further work can improve the result, and the cause is not an external blocker "
+                "such as permissions, CAPTCHA or API failure. Otherwise relay the outcome."
+                + mission_close_hint
+            ),
+            RUNTIME_EVENTS_KEY: [{
+                "source": "telegram_task_callback",
+                "task_id": task_id,
+                "agent": agent_type,
+                "recorded_status": status,
+                "callback_context": prompt,
+            }],
+        })
+
+        # Run orchestrator — budget enough for response + optional redelegate call
+        from runtime_tools.registry import build_mission_handler
+        reply = await _chat_with_tools(
+            history,
+            budget_usd=0.15,
+            max_rounds=5,
+            extra_handlers={"mission": build_mission_handler(chat_id)},
+            user_id=str(chat_id),
+            session_id=f"telegram:{chat_id}",
+            scope_type="telegram_task_callback",
+            scope_id=str(task_id),
+        )
+
+        for chunk in _split_message(reply):
+            await b.send_message(chat_id=chat_id, text=chunk)
+        asyncio.create_task(_persist_assistant_turn_after_send(chat_id, reply))
+        await asyncio.to_thread(_save_system_event, chat_id, "task_report", f"task #{task_id} [{agent_type}] {status}")
+
+    except Exception as e:
+        logger.warning("Orchestrator callback failed for task #%d: %s", task_id, e)
+        # Fallback: send simple summary directly
+        try:
+            if status == "done":
+                fallback = f"Task #{task_id} [{agent_type}] completed: {result.get('summary', '')[:500]}"
+            else:
+                fallback = f"Task #{task_id} [{agent_type}] failed: {result.get('error', '')[:300]}"
+            await b.send_message(chat_id=chat_id, text=fallback)
+        except Exception:
+            pass
+
+
+# Build process_task closure with module-level dependencies
+async def _process_task_wrapper(b: Bot, task: dict):
+    # Set per-coroutine context so tools can identify the running task
+    current_task_ctx.set({"task_id": task["id"], "agent_type": task.get("agent_type")})
+
+    from self_runtime.tools import build_task_context_tools
+    from runtime_tools.registry import TOOLS as BASE_TOOLS, TOOL_HANDLERS as BASE_HANDLERS
+    from runtime_tools.registry import build_mission_handler
+
+    # ── Agent-aware task execution ──────────────────────────────
+    agent_type = task.get("agent_type") or "analyst"
+
+    # ── Browser task delegation to external worker process ──
+    if agent_type == "browser":
+        worker_result = await _delegate_to_browser_worker(task)
+        if worker_result is not None:
+            # Worker handled it — trigger orchestrator callback from main process
+            task_id = task["id"]
+            user_id = task["user_id"]
+            status = worker_result.get("status", "done")
+            summary = worker_result.get("result_summary", "")
+
+            icon = "✅" if status == "done" else "❌"
+            _add_system_alert(f"{icon} Task #{task_id} {status} (browser worker): {summary[:200]}")
+
+            # Read full result from DB for orchestrator callback
+            row = _query_one("SELECT result FROM telegram_tasks WHERE id = %s", (task_id,))
+            full_report = (row or {}).get("result", summary)
+            orch_result = {
+                "status": status,
+                "task_id": task_id,
+                "summary": summary,
+                "report": full_report,
+                "is_subtask": False,
+                "was_interrupted": False,
+            }
+            if worker_result.get("error"):
+                orch_result["error"] = worker_result["error"]
+            target_uid = user_id if user_id != 0 else OWNER_USER_ID
+            if target_uid:
+                await _orchestrator_report_task(b, task, orch_result, target_uid)
+            return  # Done — worker handled everything
+        # else: worker unreachable, fall through to in-process execution
+        logger.info("Browser worker unavailable; executing task #%d in-process", task["id"])
+
+    from agents import get_agent
+    try:
+        spec = get_agent(agent_type)
+    except (ValueError, ImportError):
+        spec = get_agent("analyst")
+
+    # Filter base tools to agent's allowed set
+    agent_tools, agent_handlers = spec.filter_tools(BASE_TOOLS, BASE_HANDLERS)
+
+    # Add task-context tools (save_finding), except for Stasova whose
+    # publication-security tool surface is deliberately minimal.
+    if agent_type != "stasova":
+        ctx_tools, ctx_handlers = build_task_context_tools(
+            task["id"], task["user_id"], task.get("depth", 0),
+            mission_id=task.get("mission_id"),
+        )
+        agent_tools.extend(ctx_tools)
+        agent_handlers.update(ctx_handlers)
+
+    # Bind mission handler without re-adding schema.
+    # MISSION_TOOL is already in BASE_TOOLS via telegram_tools.TOOLS append.
+    # Re-appending here duplicates the tool name and breaks API validation.
+    if "mission" in {t.get("name") for t in agent_tools}:
+        agent_handlers["mission"] = build_mission_handler(task["user_id"])
+
+    # Final safety net against future registry composition mistakes.
+    agent_tools = dedupe_tools_by_name(agent_tools)
+
+    # Render agent-specific system prompt in the format native to the
+    # provider that will actually run this agent (local/openai → Markdown,
+    # claude → XML). spec.effective_provider falls back to config when
+    # the agent has no pinned provider. Prompt is fully static post-refactor
+    # — current time, current model, and alerts are injected as runtime
+    # context by _chat_with_tools, not baked into the system prompt.
+    task_provider = _get_task_provider()
+    from tool_gateway.inference import resolve_agent_inference_policy
+    inference_policy = resolve_agent_inference_policy(spec)
+    _agent_provider = spec.effective_provider(task_provider)
+    system_prompt = spec.render_prompt(provider=_agent_provider)
+
+    # Inject runtime environment info for programmer (needs venv, packages, services)
+    if agent_type == "programmer":
+        system_prompt += "\n" + _build_env_context()
+
+    # Send progress to the task's user (or all users if self-generated)
+    target_chat_id = task["user_id"] if task["user_id"] != 0 else OWNER_USER_ID
+    progress_cb = _make_progress_callback(target_chat_id) if target_chat_id else None
+
+    # ── Provider dispatch: chat_fn varies per provider; model_fn unified ──
+    # Helpers (_make_*_chat_fn, _get_model_for_agent) live at module level
+    # so this stays a thin routing block. provider=None follows
+    # task_provider, which may differ from the Telegram chat provider.
+    if spec.provider == "moon":
+        chosen_chat_fn = _make_moon_chat_fn(spec)
+    elif spec.provider == "codex":
+        chosen_chat_fn = _make_codex_chat_fn(spec)
+    elif spec.provider in CHAT_PROVIDERS:
+        chosen_chat_fn = _make_provider_chat_fn(spec.provider)
+    elif task_provider in CHAT_PROVIDERS:
+        chosen_chat_fn = _make_provider_chat_fn(task_provider)
+    else:
+        chosen_chat_fn = _chat_with_tools
+
+    async def chosen_model_fn():
+        if spec.provider == "moon":
+            fallback_provider = getattr(chosen_chat_fn, "_fallback_provider", None)
+            if fallback_provider:
+                if fallback_provider == "local":
+                    from llm.client import _resolve_backend
+                    return _resolve_backend()["model"]
+                profile = await resolve_runtime_profile("task", provider_override=fallback_provider)
+                return profile.model_id
+        return await _get_model_for_agent(spec)
+
+    if agent_type == "diary" and "save_diary" in agent_handlers:
+        agent_handlers = dict(agent_handlers)
+        agent_handlers["save_diary"] = _make_guarded_diary_save_handler(b, task)
+    if agent_type == "hub_curator" and "publish_hub_curation" in agent_handlers:
+        from telegram.curate import make_guarded_publish_handler
+
+        agent_handlers = dict(agent_handlers)
+        agent_handlers["publish_hub_curation"] = make_guarded_publish_handler(
+            agent_handlers["publish_hub_curation"], task
+        )
+
+    # ── Post-hoc verification (Critic) routing ──────────────────
+    # The verifier runs on the low tier of a standard provider so the
+    # critique stays cheap. Codex/moon executors are verified by the task
+    # provider — an independent judge for handed-off work.
+    verification_mode = get_task_verification_mode()
+    verify_chat_fn = None
+    verify_model_fn = None
+    if verification_mode in ("shadow", "enforce"):
+        if spec.provider in CHAT_PROVIDERS:
+            verify_provider = spec.provider
+        elif task_provider in CHAT_PROVIDERS:
+            verify_provider = task_provider
+        else:
+            verify_provider = "claude"
+        verify_chat_fn = _make_provider_chat_fn(verify_provider)
+
+        async def verify_model_fn(_provider=verify_provider):
+            profile = await resolve_runtime_profile(
+                "task", provider_override=_provider, tier_override="low",
+            )
+            return profile.model_id
+
+    def _on_task_complete(task_id: int, status: str, summary: str, **kw):
+        icon = "✅" if status == "done" else "❌"
+        verdict_note = ""
+        if kw.get("verification_status") == "failed":
+            verdict_note = " ⚠️ verification FAILED"
+        _add_system_alert(f"{icon} Task #{task_id} {status}: {summary[:200]}{verdict_note}")
+
+    result = await process_task(
+        b, task,
+        chat_with_tools_fn=chosen_chat_fn,
+        get_model_fn=chosen_model_fn,
+        task_system_prompt=system_prompt,
+        max_tokens_task=inference_policy.max_output_tokens,
+        max_input_tokens_task=inference_policy.max_input_tokens,
+        max_output_continuations=inference_policy.max_output_continuations,
+        thinking_policy=inference_policy.thinking_policy,
+        thinking_budget_tokens=inference_policy.thinking_budget_tokens,
+        allowed_user_ids=ALLOWED_USER_IDS,
+        log_event_fn=_log_event,
+        extra_tools=agent_tools,
+        extra_handlers=agent_handlers,
+        budget_usd=inference_policy.budget_usd,
+        finalization_tools=list(spec.finalization_tools),
+        terminal_tools=list(spec.terminal_tools),
+        on_progress=progress_cb,
+        on_complete=_on_task_complete,
+        context_provider=_agent_provider,
+        verification_mode=verification_mode,
+        verify_chat_fn=verify_chat_fn,
+        verify_model_fn=verify_model_fn,
+    )
+    # Flush remaining progress buffer
+    if progress_cb and hasattr(progress_cb, "flush"):
+        await progress_cb.flush()
+
+    # ── Orchestrator callback: report result to user via orchestrator ──
+    result = result or {}
+    is_subtask = result.get("is_subtask", False)
+    if agent_type == "hub_curator" and result.get("status") in ("done", "failed"):
+        # /curate outcome is judged by the hub_curations row, not by the
+        # agent's text, and needs no LLM turn to relay.
+        from telegram.curate import report_curation_outcome
+
+        target_uid = task["user_id"] if task["user_id"] != 0 else OWNER_USER_ID
+        if target_uid:
+            await report_curation_outcome(
+                b, task, result, chat_id=target_uid, save_system_event=_save_system_event
+            )
+    elif not is_subtask and result.get("status") in ("done", "failed"):
+        # Skip the LLM-driven callback for self-delivering scheduled tasks
+        # (e.g. diary): spec opts out AND the task came from the cron
+        # scheduler. User-delegated calls to the same agent still get the
+        # callback so the user hears back.
+        task_origin = _load_task_metadata(task).get("origin")
+        skip_callback = spec.skip_orchestrator_report and task_origin == "schedule"
+        if not skip_callback:
+            target_uid = task["user_id"] if task["user_id"] != 0 else OWNER_USER_ID
+            if target_uid:
+                await _orchestrator_report_task(b, task, result, target_uid)
+
+
 async def bot_main():
     """Start the Telegram bot. Callable from api.py lifespan or standalone."""
     if not TELEGRAM_BOT_TOKEN:
@@ -2130,407 +2420,6 @@ async def bot_main():
 
     # Detect fresh deploy — inject context so the bot knows it was just updated
     await check_deploy_meta(bot, add_alert_fn=_add_system_alert)
-
-    # ── Orchestrator callback: interpret task results for the user ──
-    async def _orchestrator_report_task(b: Bot, task: dict, result: dict, chat_id: int):
-        """Trigger an orchestrator turn to interpret task results, communicate to user, and redelegate if needed."""
-        task_id = task["id"]
-        agent_type = task.get("agent_type") or "analyst"
-        status = result.get("status", "unknown")
-        was_interrupted = result.get("was_interrupted", False)
-        mission_id = task.get("mission_id")
-
-        # Check if this was the last active task in the mission
-        mission_close_hint = ""
-        if mission_id and status in ("done", "failed"):
-            try:
-                remaining = await asyncio.to_thread(
-                    _query_one,
-                    "SELECT COUNT(*) AS cnt FROM telegram_tasks "
-                    "WHERE mission_id = %s AND id != %s AND status IN ('pending', 'processing', 'queued')",
-                    (mission_id, task_id),
-                )
-                if remaining and remaining["cnt"] == 0:
-                    mission_row = await asyncio.to_thread(
-                        _query_one,
-                        "SELECT id, title FROM telegram_missions WHERE id = %s AND status = 'active'",
-                        (mission_id,),
-                    )
-                    if mission_row:
-                        mission_close_hint = (
-                            f"\n\n📋 Mission #{mission_row['id']} \"{mission_row['title']}\" has no remaining active tasks. "
-                            f"If the user's original goal has been addressed, call `mission(action=\"close\")` to close it."
-                        )
-            except Exception:
-                pass
-
-        try:
-            # Load tool_log from DB — contains the actual work done (tool calls + results)
-            if (status == "done" and not was_interrupted
-                    and (result.get("verification") or {}).get("status") != "failed"):
-                from mail_runtime import store as mail_store
-                from mail_runtime.delivery import deliver as deliver_mail_briefing
-                mail_items = await asyncio.to_thread(mail_store.briefing_items, task_id, chat_id)
-                if mail_items:
-                    try:
-                        await deliver_mail_briefing(b, task_id, chat_id, mail_items,
-                                                   _persist_assistant_turn_after_send)
-                        await asyncio.to_thread(_save_system_event, chat_id, "task_report",
-                                                f"task #{task_id} mail briefing delivery checked")
-                    except Exception:
-                        logger.exception("Mail briefing delivery failed for task #%d; unsent items remain unbriefed", task_id)
-                    return
-            tool_log = ""
-            try:
-                row = await asyncio.to_thread(
-                    _query_one,
-                    "SELECT tool_log FROM telegram_tasks WHERE id = %s", (task_id,),
-                )
-                tool_log = (row or {}).get("tool_log", "") or ""
-            except Exception:
-                pass
-
-            # Build context for the orchestrator
-            if status == "done":
-                report = result.get("report", "")
-                interrupted_note = ""
-                if was_interrupted:
-                    interrupted_note = (
-                        "\n\n⚠️ This agent was interrupted due to budget/turn limit. "
-                        "Check the agent's response for any incomplete work."
-                    )
-
-                # If report is thin but tool_log has substance, include tool_log
-                tool_log_section = ""
-                if tool_log and (len(report) < 200 or was_interrupted):
-                    tool_log_section = f"\n\nAgent work log (tool call history):\n{_truncate_for_prompt(tool_log, 5000)}"
-
-                # Independent verification verdict (Critic). A shadow-mode FAIL
-                # is advisory: the orchestrator relays the caveat, nothing was
-                # auto-retried.
-                verification = result.get("verification") or {}
-                verification_section = ""
-                if verification.get("status") == "failed":
-                    retry = verification.get("retry") or {}
-                    if retry.get("status") == "redelegated":
-                        retry_note = f" An automatic retry was delegated as task #{retry.get('task_id')}."
-                    elif retry.get("status") == "restart_initiated":
-                        retry_note = f" {retry.get('message', 'Service restart initiated.')}"
-                    elif verification.get("mode") == "shadow":
-                        retry_note = " (shadow mode — no automatic retry was taken)"
-                    else:
-                        retry_note = f" No retry: {retry.get('message', 'retry unavailable')}."
-                    verification_section = (
-                        f"\n\n⚠️ Independent verification FAILED.{retry_note}\n"
-                        f"Verifier findings:\n{_truncate_for_prompt(verification.get('details', ''), 800)}\n"
-                        f"Report goal completion separately from execution quality. Blocked or unverified work is not complete; relay the remaining requirements and retry conditions."
-                    )
-
-                prompt = (
-                    f"[TASK REPORT] Task #{task_id} [{agent_type}] execution ended{' (interrupted)' if was_interrupted else ''}; goal completion is not implied\n\n"
-                    f"Original request:\n{_truncate_for_prompt(task.get('content', ''), 1000)}\n\n"
-                    f"Agent's report (claims, not independent verification):\n{report_for_callback(task_id, report)}"
-                    f"{tool_log_section}"
-                    f"{verification_section}"
-                    f"{interrupted_note}\n\n"
-                    f"## Your role\n"
-                    f"1. Relay the results to the user concisely, covering only key points. Do not use markdown formatting.\n"
-                    f"   {RESULT_RELAY_GUIDANCE}\n"
-                    f"2. Re-delegation judgment: Only delegate follow-up work when ALL of these conditions are met:\n"
-                    f"   - The agent could not finish due to budget/turn limits\n"
-                    f"   - Additional work can yield meaningful improvement\n"
-                    f"   - The cause is NOT external factors (permission denied, blocked, CAPTCHA, API error, etc.)\n"
-                    f"   If re-delegation is unnecessary, just relay the results."
-                    f"{mission_close_hint}"
-                )
-            else:
-                error = result.get("error", "unknown error")
-                prompt = (
-                    f"[TASK REPORT] Task #{task_id} [{agent_type}] failed\n\n"
-                    f"Original request:\n{_truncate_for_prompt(task.get('content', ''), 500)}\n\n"
-                    f"Error: {error}\n\n"
-                    f"Inform the user of the failure and its cause concisely. "
-                    f"Do not re-delegate if the issue would not be resolved by retrying."
-                    f"{mission_close_hint}"
-                )
-
-            # Load recent chat history for context
-            history = await asyncio.to_thread(_load_context_with_summaries, chat_id)
-            from llm.execution_context import RUNTIME_EVENTS_KEY
-            history.append({
-                "role": "user",
-                "content": (
-                    "Relay the runtime-supplied task outcome to the user concisely, without markdown. "
-                    "Distinguish recorded task status from the agent's claims and goal completion. "
-                    + RESULT_RELAY_GUIDANCE + " "
-                    + "Only delegate follow-up when the agent was interrupted by budget/turn limits, "
-                    "further work can improve the result, and the cause is not an external blocker "
-                    "such as permissions, CAPTCHA or API failure. Otherwise relay the outcome."
-                    + mission_close_hint
-                ),
-                RUNTIME_EVENTS_KEY: [{
-                    "source": "telegram_task_callback",
-                    "task_id": task_id,
-                    "agent": agent_type,
-                    "recorded_status": status,
-                    "callback_context": prompt,
-                }],
-            })
-
-            # Run orchestrator — budget enough for response + optional redelegate call
-            from runtime_tools.registry import build_mission_handler
-            reply = await _chat_with_tools(
-                history,
-                budget_usd=0.15,
-                max_rounds=5,
-                extra_handlers={"mission": build_mission_handler(chat_id)},
-                user_id=str(chat_id),
-                session_id=f"telegram:{chat_id}",
-                scope_type="telegram_task_callback",
-                scope_id=str(task_id),
-            )
-
-            for chunk in _split_message(reply):
-                await b.send_message(chat_id=chat_id, text=chunk)
-            asyncio.create_task(_persist_assistant_turn_after_send(chat_id, reply))
-            await asyncio.to_thread(_save_system_event, chat_id, "task_report", f"task #{task_id} [{agent_type}] {status}")
-
-        except Exception as e:
-            logger.warning("Orchestrator callback failed for task #%d: %s", task_id, e)
-            # Fallback: send simple summary directly
-            try:
-                if status == "done":
-                    fallback = f"Task #{task_id} [{agent_type}] completed: {result.get('summary', '')[:500]}"
-                else:
-                    fallback = f"Task #{task_id} [{agent_type}] failed: {result.get('error', '')[:300]}"
-                await b.send_message(chat_id=chat_id, text=fallback)
-            except Exception:
-                pass
-
-    # Build process_task closure with module-level dependencies
-    async def _process_task_wrapper(b: Bot, task: dict):
-        # Set per-coroutine context so tools can identify the running task
-        current_task_ctx.set({"task_id": task["id"], "agent_type": task.get("agent_type")})
-
-        from self_runtime.tools import build_task_context_tools
-        from runtime_tools.registry import TOOLS as BASE_TOOLS, TOOL_HANDLERS as BASE_HANDLERS
-        from runtime_tools.registry import build_mission_handler
-
-        # ── Agent-aware task execution ──────────────────────────────
-        agent_type = task.get("agent_type") or "analyst"
-
-        # ── Browser task delegation to external worker process ──
-        if agent_type == "browser":
-            worker_result = await _delegate_to_browser_worker(task)
-            if worker_result is not None:
-                # Worker handled it — trigger orchestrator callback from main process
-                task_id = task["id"]
-                user_id = task["user_id"]
-                status = worker_result.get("status", "done")
-                summary = worker_result.get("result_summary", "")
-
-                icon = "✅" if status == "done" else "❌"
-                _add_system_alert(f"{icon} Task #{task_id} {status} (browser worker): {summary[:200]}")
-
-                # Read full result from DB for orchestrator callback
-                row = _query_one("SELECT result FROM telegram_tasks WHERE id = %s", (task_id,))
-                full_report = (row or {}).get("result", summary)
-                orch_result = {
-                    "status": status,
-                    "task_id": task_id,
-                    "summary": summary,
-                    "report": full_report,
-                    "is_subtask": False,
-                    "was_interrupted": False,
-                }
-                if worker_result.get("error"):
-                    orch_result["error"] = worker_result["error"]
-                target_uid = user_id if user_id != 0 else OWNER_USER_ID
-                if target_uid:
-                    await _orchestrator_report_task(b, task, orch_result, target_uid)
-                return  # Done — worker handled everything
-            # else: worker unreachable, fall through to in-process execution
-            logger.info("Browser worker unavailable; executing task #%d in-process", task["id"])
-
-        try:
-            from agents import get_agent
-            spec = get_agent(agent_type)
-        except (ValueError, ImportError):
-            from agents import get_agent
-            spec = get_agent("analyst")
-
-        # Filter base tools to agent's allowed set
-        agent_tools, agent_handlers = spec.filter_tools(BASE_TOOLS, BASE_HANDLERS)
-
-        # Add task-context tools (save_finding), except for Stasova whose
-        # publication-security tool surface is deliberately minimal.
-        if agent_type != "stasova":
-            ctx_tools, ctx_handlers = build_task_context_tools(
-                task["id"], task["user_id"], task.get("depth", 0),
-                mission_id=task.get("mission_id"),
-            )
-            agent_tools.extend(ctx_tools)
-            agent_handlers.update(ctx_handlers)
-
-        # Bind mission handler without re-adding schema.
-        # MISSION_TOOL is already in BASE_TOOLS via telegram_tools.TOOLS append.
-        # Re-appending here duplicates the tool name and breaks API validation.
-        if "mission" in {t.get("name") for t in agent_tools}:
-            agent_handlers["mission"] = build_mission_handler(task["user_id"])
-
-        # Final safety net against future registry composition mistakes.
-        agent_tools = dedupe_tools_by_name(agent_tools)
-
-        # Render agent-specific system prompt in the format native to the
-        # provider that will actually run this agent (local/openai → Markdown,
-        # claude → XML). spec.effective_provider falls back to config when
-        # the agent has no pinned provider. Prompt is fully static post-refactor
-        # — current time, current model, and alerts are injected as runtime
-        # context by _chat_with_tools, not baked into the system prompt.
-        task_provider = _get_task_provider()
-        from tool_gateway.inference import resolve_agent_inference_policy
-        inference_policy = resolve_agent_inference_policy(spec)
-        _agent_provider = spec.effective_provider(task_provider)
-        system_prompt = spec.render_prompt(provider=_agent_provider)
-
-        # Inject runtime environment info for programmer (needs venv, packages, services)
-        if agent_type == "programmer":
-            system_prompt += "\n" + _build_env_context()
-
-        # Send progress to the task's user (or all users if self-generated)
-        target_chat_id = task["user_id"] if task["user_id"] != 0 else OWNER_USER_ID
-        progress_cb = _make_progress_callback(target_chat_id) if target_chat_id else None
-
-        # ── Provider dispatch: chat_fn varies per provider; model_fn unified ──
-        # Helpers (_make_*_chat_fn, _get_model_for_agent) live at module level
-        # so this stays a thin routing block. provider=None follows
-        # task_provider, which may differ from the Telegram chat provider.
-        if spec.provider == "moon":
-            chosen_chat_fn = _make_moon_chat_fn(spec)
-            fallback_provider = getattr(chosen_chat_fn, "_fallback_provider", None)
-            chosen_max_tokens = inference_policy.max_output_tokens
-        elif spec.provider == "codex":
-            chosen_chat_fn = _make_codex_chat_fn(spec)
-            chosen_max_tokens = inference_policy.max_output_tokens
-        elif spec.provider in ("claude", "openai", "deepseek", "kimi", "local"):
-            chosen_chat_fn = _make_provider_chat_fn(spec.provider)
-            chosen_max_tokens = inference_policy.max_output_tokens
-        elif task_provider in ("claude", "openai", "deepseek", "kimi", "local"):
-            chosen_chat_fn = _make_provider_chat_fn(task_provider)
-            chosen_max_tokens = inference_policy.max_output_tokens
-        else:
-            chosen_chat_fn = _chat_with_tools
-            chosen_max_tokens = inference_policy.max_output_tokens
-
-        async def chosen_model_fn():
-            if spec.provider == "moon":
-                fallback_provider = getattr(chosen_chat_fn, "_fallback_provider", None)
-                if fallback_provider:
-                    if fallback_provider == "local":
-                        from llm.client import _resolve_backend
-                        return _resolve_backend()["model"]
-                    profile = await resolve_runtime_profile("task", provider_override=fallback_provider)
-                    return profile.model_id
-            return await _get_model_for_agent(spec)
-
-        if agent_type == "diary" and "save_diary" in agent_handlers:
-            agent_handlers = dict(agent_handlers)
-            agent_handlers["save_diary"] = _make_guarded_diary_save_handler(b, task)
-        if agent_type == "hub_curator" and "publish_hub_curation" in agent_handlers:
-            from telegram.curate import make_guarded_publish_handler
-
-            agent_handlers = dict(agent_handlers)
-            agent_handlers["publish_hub_curation"] = make_guarded_publish_handler(
-                agent_handlers["publish_hub_curation"], task
-            )
-
-        # ── Post-hoc verification (Critic) routing ──────────────────
-        # The verifier runs on the low tier of a standard provider so the
-        # critique stays cheap. Codex/moon executors are verified by the task
-        # provider — an independent judge for handed-off work.
-        verification_mode = get_task_verification_mode()
-        verify_chat_fn = None
-        verify_model_fn = None
-        if verification_mode in ("shadow", "enforce"):
-            if spec.provider in ("claude", "openai", "deepseek", "kimi", "local"):
-                verify_provider = spec.provider
-            elif task_provider in ("claude", "openai", "deepseek", "kimi", "local"):
-                verify_provider = task_provider
-            else:
-                verify_provider = "claude"
-            verify_chat_fn = _make_provider_chat_fn(verify_provider)
-
-            async def verify_model_fn(_provider=verify_provider):
-                profile = await resolve_runtime_profile(
-                    "task", provider_override=_provider, tier_override="low",
-                )
-                return profile.model_id
-
-        def _on_task_complete(task_id: int, status: str, summary: str, **kw):
-            icon = "✅" if status == "done" else "❌"
-            verdict_note = ""
-            if kw.get("verification_status") == "failed":
-                verdict_note = " ⚠️ verification FAILED"
-            _add_system_alert(f"{icon} Task #{task_id} {status}: {summary[:200]}{verdict_note}")
-
-        result = await process_task(
-            b, task,
-            chat_with_tools_fn=chosen_chat_fn,
-            get_model_fn=chosen_model_fn,
-            task_system_prompt=system_prompt,
-            max_tokens_task=chosen_max_tokens,
-            max_input_tokens_task=inference_policy.max_input_tokens,
-            max_output_continuations=inference_policy.max_output_continuations,
-            thinking_policy=inference_policy.thinking_policy,
-            thinking_budget_tokens=inference_policy.thinking_budget_tokens,
-            allowed_user_ids=ALLOWED_USER_IDS,
-            log_event_fn=_log_event,
-            extra_tools=agent_tools,
-            extra_handlers=agent_handlers,
-            budget_usd=inference_policy.budget_usd,
-            finalization_tools=list(spec.finalization_tools),
-            terminal_tools=list(spec.terminal_tools),
-            on_progress=progress_cb,
-            on_complete=_on_task_complete,
-            context_provider=_agent_provider,
-            verification_mode=verification_mode,
-            verify_chat_fn=verify_chat_fn,
-            verify_model_fn=verify_model_fn,
-        )
-        # Flush remaining progress buffer
-        if progress_cb and hasattr(progress_cb, "flush"):
-            await progress_cb.flush()
-
-        # ── Orchestrator callback: report result to user via orchestrator ──
-        result = result or {}
-        is_subtask = result.get("is_subtask", False)
-        if agent_type == "hub_curator" and result.get("status") in ("done", "failed"):
-            # /curate outcome is judged by the hub_curations row, not by the
-            # agent's text, and needs no LLM turn to relay.
-            from telegram.curate import report_curation_outcome
-
-            target_uid = task["user_id"] if task["user_id"] != 0 else OWNER_USER_ID
-            if target_uid:
-                await report_curation_outcome(
-                    b, task, result, chat_id=target_uid, save_system_event=_save_system_event
-                )
-        elif not is_subtask and result.get("status") in ("done", "failed"):
-            # Skip the LLM-driven callback for self-delivering scheduled tasks
-            # (e.g. diary): spec opts out AND the task came from the cron
-            # scheduler. User-delegated calls to the same agent still get the
-            # callback so the user hears back.
-            task_meta = task.get("metadata") or {}
-            if isinstance(task_meta, str):
-                try:
-                    task_meta = json.loads(task_meta)
-                except Exception:
-                    task_meta = {}
-            task_origin = task_meta.get("origin") if isinstance(task_meta, dict) else None
-            skip_callback = spec.skip_orchestrator_report and task_origin == "schedule"
-            if not skip_callback:
-                target_uid = task["user_id"] if task["user_id"] != 0 else OWNER_USER_ID
-                if target_uid:
-                    await _orchestrator_report_task(b, task, result, target_uid)
 
     # Start background workers (keep handles for graceful cancellation)
     _bg_tasks = [

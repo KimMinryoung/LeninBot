@@ -266,7 +266,8 @@ class AgentSpec:
         """
         if self.provider in ("moon", "codex"):
             return "local"
-        if self.provider in ("claude", "openai", "deepseek", "kimi", "local"):
+        from llm.provider_registry import CHAT_PROVIDERS
+        if self.provider in CHAT_PROVIDERS:
             return self.provider
         return config_provider or "claude"
 

@@ -5,6 +5,18 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
+def load_task_metadata(task: dict | None) -> dict:
+    """Return a task row's ``metadata`` as a dict (JSON text or JSONB)."""
+    metadata = (task or {}).get("metadata")
+    if isinstance(metadata, str):
+        try:
+            metadata = json.loads(metadata)
+        except Exception:
+            metadata = None
+    return metadata if isinstance(metadata, dict) else {}
+
+
 def create_task_in_db(
     content: str,
     user_id: int = 0,
