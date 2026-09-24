@@ -1312,7 +1312,8 @@ def _record_enrich_outcome(cycle: _RunCycle, stage: dict, result: str, enrich_tr
         call_person_service({"command": "enrichment", "id": candidate["id"], "topic": stage["topic"],
             "status": no_edit_box.get("status", "sources_unavailable"), "reason": no_edit_reason,
             "sources": no_edit_box.get("sources", []), "expectedRevision": stage["baseline"]["revision"],
-            "changedBy": "commulingo-maintainer"})
+            # The lane that ran, so a gap worker's note is not filed as the maintainer's.
+            "changedBy": os.environ["COMMULINGO_SUGGESTED_BY"]})
         save_state(state)
         return {
             "status": no_edit_box.get("status", "sources_unavailable"),
