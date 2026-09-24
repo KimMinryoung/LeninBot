@@ -221,6 +221,8 @@ blocked -> pending  (synthesis task after all subtasks terminal;
 
 Every task row is created through `telegram.task_store.create_task_in_db` (priority validation, parent mission/agent/metadata inheritance, depth-5 chain limit), including `/task`, `/curate`, `[CONTINUE_TASK:]` promotion and scheduled tasks. The one exception is the restart-recovery handoff child in `recover_processing_tasks_on_startup`: it copies the parent's scratchpad and restart columns and must be created even past the depth limit, so it inserts directly.
 
+`schedule_worker` checks enabled cron schedules every minute in KST. A restart keeps each schedule's `last_run_at`; a missed fire within two hours is caught up, while older occurrences are skipped until the next cron fire. Each scheduled task records `origin=schedule`, `schedule_id`, and `scheduled_for` in metadata, and the worker checks that occurrence before creating a task so a crash between task insertion and `last_run_at` update does not create duplicates. The worker updates `last_run_at` only after task creation or finding that exact occurrence already present.
+
 `telegram/tasks.py` polls with `FOR UPDATE SKIP LOCKED`, uses a bounded semaphore, and runs two unblock passes each loop: synthesis tasks when all sibling subtasks are terminal, and dependency-DAG subtasks (`_unblock_dependency_tasks_sync`) when every task ID in their `metadata.depends_on_task_ids` is terminal (`done`/`failed`/`handed_off`; missing rows count as terminal). A watchdog fails any dependency-blocked task older than 48h so a broken plan can never deadlock its synthesis.
 
 ### Delegation

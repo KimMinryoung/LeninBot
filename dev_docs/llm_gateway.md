@@ -73,9 +73,11 @@ record_llm_call(surface=..., caller=..., model=..., tokens_in=..., tokens_out=..
 `data/audit_spool/`에 저장되고 워커가 다시 전송한다. 프록시의 DynamicUser는
 `StateDirectory=leninbot-audit-spool`을 쓰며 환경변수
 `LENINBOT_AUDIT_SPOOL_DIR=/var/lib/leninbot-audit-spool`로 경로를 지정한다.
-설치된 unit에 이 설정이 아직 없으면 쓰기 불가 경로를 감지해 서비스 전용
-`PrivateTmp`로 폴백한다. 이 임시 폴백은 unit 재시작 후 보존을 보장하지 않으므로
-unit 원본을 `/etc/systemd/system/`에 설치하고 daemon-reload·재시작해야 한다.
+2026-09-24 unit 원본을 `/etc/systemd/system/`에 설치하고 daemon-reload·재시작했다.
+`systemctl show`에서 `StateDirectory=leninbot-audit-spool`, 모드 `0700`을 확인했고
+`/health`는 `audit_sink: ok (role)`이다. 다른 호스트에서 unit 설정이 빠졌다면
+쓰기 불가 경로를 감지해 서비스 전용 `PrivateTmp`로 폴백하지만, 이 경로는 unit
+재시작 후 보존을 보장하지 않는다.
 `venv/bin/python scripts/audit_spool_status.py`로 현재 계정의 미전송 행 수를 확인한다.
 실제 유실은 spool 쓰기 실패 로그로 구분한다. sink 수락 직후 프로세스가 종료되면
 재전송된 행이 중복될 수 있다.

@@ -8,12 +8,12 @@ import json
 import asyncio
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from aiogram import Bot
 from aiogram.types import BufferedInputFile
 from db import query as _query, execute as _execute, query_one as _query_one
-from telegram.task_store import load_task_metadata
+from telegram.task_store import create_task_in_db, load_task_metadata
 
 from shared import KST
 from llm.prompt_context import (
@@ -2626,46 +2626,43 @@ async def task_worker(bot: Bot, *, process_task_fn, runtime_state: dict | None =
 
 # ── Schedule Worker ──────────────────────────────────────────────────
 
+_SCHEDULE_CATCHUP_WINDOW = timedelta(hours=2)
+
+
+def _schedule_due_fire(sched: dict, now_kst: datetime) -> datetime | None:
+    """Return a recent unprocessed cron occurrence, if any."""
+    from croniter import croniter
+
+    prev_fire = croniter(sched["cron_expr"], now_kst).get_prev(datetime)
+    if now_kst - prev_fire > _SCHEDULE_CATCHUP_WINDOW:
+        return None
+    last_run = sched.get("last_run_at")
+    if last_run is not None and prev_fire <= last_run:
+        return None
+    created = sched.get("created_at")
+    if last_run is None and created is not None and prev_fire <= created:
+        return None
+    return prev_fire
+
 async def schedule_worker(bot: Bot, *, allowed_user_ids: set[int]):
     """Check cron schedules every 60s, create tasks when due."""
-    from croniter import croniter
     from shared import KST
 
     logger.info("Schedule worker started")
     await asyncio.sleep(10)
 
-    # On startup, reset last_run_at to prevent stale schedules from firing en masse
-    try:
-        from shared import KST as _kst
-        now = datetime.now(_kst)
-        await asyncio.to_thread(
-            _execute,
-            "UPDATE telegram_schedules SET last_run_at = %s WHERE enabled = TRUE AND (last_run_at IS NULL OR last_run_at < %s)",
-            (now, now),
-        )
-        logger.info("Schedule worker: reset stale last_run_at to now on startup")
-    except Exception as e:
-        logger.warning("Schedule worker: failed to reset last_run_at: %s", e)
-
     while True:
         try:
             schedules = await asyncio.to_thread(
                 _query,
-                "SELECT id, user_id, content, cron_expr, last_run_at, agent_type "
+                "SELECT id, user_id, content, cron_expr, last_run_at, agent_type, created_at "
                 "FROM telegram_schedules WHERE enabled = TRUE",
             )
             now_kst = datetime.now(KST)
             for sched in schedules:
                 try:
-                    cron = croniter(sched["cron_expr"], now_kst)
-                    prev_fire = cron.get_prev(datetime)
-                    last_run = sched["last_run_at"]
-                    # First run: only fire if prev_fire is after created_at (not immediately on registration)
-                    if last_run is None:
-                        created = sched.get("created_at")
-                        if created and prev_fire <= created:
-                            continue
-                    elif prev_fire <= last_run:
+                    prev_fire = _schedule_due_fire(sched, now_kst)
+                    if prev_fire is None:
                         continue
 
                     # Determine agent_type: DB column first, then [agent] prefix fallback
@@ -2677,16 +2674,30 @@ async def schedule_worker(bot: Bot, *, allowed_user_ids: set[int]):
                             from agents import agent_names
                             if tag in agent_names():
                                 sched_agent = tag
+                    occurrence = {"origin": "schedule", "schedule_id": sched["id"],
+                                  "scheduled_for": prev_fire.isoformat()}
+                    existing = await asyncio.to_thread(
+                        _query_one,
+                        "SELECT id FROM telegram_tasks WHERE metadata @> %s::jsonb LIMIT 1",
+                        (json.dumps(occurrence),),
+                    )
+                    if existing:
+                        await asyncio.to_thread(
+                            _execute,
+                            "UPDATE telegram_schedules SET last_run_at = %s WHERE id = %s",
+                            (prev_fire, sched["id"]),
+                        )
+                        continue
                     created = await asyncio.to_thread(
                         create_task_in_db, sched_content, sched["user_id"], agent_type=sched_agent,
-                        metadata={"origin": "schedule", "schedule_id": sched["id"]},
+                        metadata=occurrence,
                     )
                     if created.get("status") != "ok":
                         raise RuntimeError(created.get("error") or "task insert failed")
                     await asyncio.to_thread(
                         _execute,
                         "UPDATE telegram_schedules SET last_run_at = %s WHERE id = %s",
-                        (now_kst, sched["id"]),
+                        (prev_fire, sched["id"]),
                     )
                     logger.info("Schedule #%d fired → task created: %.50s", sched["id"], sched["content"])
                     try:
