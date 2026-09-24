@@ -17,6 +17,8 @@ import os
 import re
 import sys
 import time
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -1339,23 +1341,29 @@ async def _call_curator_stage(
     raise RunFailure(f"{stage} ended without its terminal result: {last_error or last_result[:500]}", summary)
 
 
-async def run_once(*, mode: str, candidate_id: str, config: dict) -> dict:
-    if not config["enabled"]:
-        return {"status": "disabled"}
+@dataclass
+class _RunCycle:
+    """What the phases of one run_once call share, in the order they fill it."""
+    config: dict
+    state: dict
+    chosen_mode: str
+    before: int
+    spec: object
+    policy: object
+    read_tools: list
+    read_handlers: dict
+    stage_tools: Callable[[frozenset[str]], tuple[list, dict]]
+    report_model: str
+    candidate: dict | None = None
+    discovery: dict | None = None
+    fallback_error: str | None = None
+    tracker: dict = field(default_factory=lambda: {"total_cost": 0.0, "rounds_used": 0})
+    write_outcomes: list = field(default_factory=list)
+    job_budget: object = None
 
-    from runtime_tools.commulingo_people import direct_apply_enabled
-    from tool_gateway.inference import resolve_agent_inference_policy
 
-    # The shared service can stage a reviewed edit even in direct mode.
-    direct_apply_enabled()
-
-    state = load_state()
-    requested_mode = mode if mode != "auto" else None
-    chosen_mode = choose_mode(config, requested_mode, state)
-    before = completed_run_count()
-
-    spec = get_agent("commulingo_curator")
-    policy = resolve_agent_inference_policy(spec)
+def _curator_stage_surface(spec) -> tuple[list, dict, Callable[[frozenset[str]], tuple[list, dict]]]:
+    """The curator's read tools plus a per-stage selector for its write tools."""
     tools, handlers = spec.filter_tools(TOOLS, TOOL_HANDLERS)
     expected = set(spec.tools)
     available = {str(t.get("name") or "") for t in tools} & set(handlers)
@@ -1378,205 +1386,278 @@ async def run_once(*, mode: str, candidate_id: str, config: dict) -> dict:
         }
         return selected_tools, selected_handlers
 
-    report_model = resolve_agent_tool_loop(spec, policy).model
-    ctx = new_run_context(
-        interface="autonomous", agent_name=spec.name, is_owner=True,
-        scope_type="maintenance_job", scope_id="commulingo_people_maintainer",
-    )
+    return read_tools, read_handlers, stage_tools
 
-    candidate = None
-    discovery = None
-    fallback_error = None
-    tracker = {"total_cost": 0.0, "rounds_used": 0}
-    write_outcomes = []
+
+async def _run_new_person_path(cycle: _RunCycle):
+    """Discovery then creation. On a failure before any write, fall back to enrich.
+
+    Returns the creation result, or None when the run fell back.
+    """
     from scripts.commulingo_run import RunBudget
     from scripts.commulingo_research_memory import STORE_PATH
-    job_budget = None
-    with caller_scope(ctx):
-        if chosen_mode == "new":
-            # Seeded from disk and merged back below whether or not the stage
-            # succeeds, so a duplicate proved in this run is not re-proposed in
-            # the next one. The box is built outside the try for that reason.
-            candidate_box: dict = {"rejected": list(state.get("rejected_candidates") or [])}
-            job_budget = RunBudget(policy, STORE_PATH, "new-person", "discovery")
-            try:
-                discovery_tools = [*read_tools, COMMULINGO_CANDIDATE_SELECT_TOOL]
-                discovery_handlers = {
-                    **build_bounded_discovery_handlers(read_handlers, candidate_box),
-                    "commulingo_candidate_select": build_candidate_select_handler(candidate_box),
-                }
-                discovery_result, discovery_tracker, candidate = await _call_curator_stage(
-                    task=build_discovery_task(
-                        config["new_person_focus"], candidate_box["rejected"],
-                        roster_groups_for_focus(config),
-                    ), spec=spec,
-                    tools=discovery_tools, handlers=discovery_handlers, policy=policy,
-                    stage="new-person discovery", expect_edit=False, run_budget=job_budget,
-                    finalization_tools=["commulingo_candidate_select"],
-                    terminal_tools=["commulingo_candidate_select"], candidate_box=candidate_box,
-                )
-                discovery = {"candidate": candidate, "result": discovery_result}
-                tracker["total_cost"] = discovery_tracker["total_cost"]
-                tracker["rounds_used"] = discovery_tracker["rounds_used"]
-                create_tools, create_handlers = stage_tools(frozenset({"commulingo_person_create"}))
-                result, create_tracker, _ = await _call_curator_stage(
-                    task=build_new_person_task(candidate), spec=spec,
-                    tools=create_tools, handlers=create_handlers, policy=policy,
-                    stage="new-person creation", expect_edit=True, run_budget=job_budget,
-                    research_key=f"commulingo_person:{candidate['id']}:create",
-                    finalization_tools=["commulingo_person_create"],
-                    terminal_tools=["commulingo_person_create"],
-                )
-                write_outcomes = create_tracker.get("writes", [])
-                tracker["run_id"] = create_tracker["run_id"]
-                tracker["total_cost"] = create_tracker["total_cost"]
-                tracker["rounds_used"] = create_tracker["rounds_used"]
-                state["new_cooldown_remaining"] = 0
-            except Exception as exc:
-                if getattr(exc, "summary", {}).get("writes") or getattr(exc, "summary", {}).get("status") in {"error","budget_deferred"}:
-                    raise
-                if job_budget:
-                    job_budget.remaining()
-                fallback_error = str(exc)
-                logger.error("new-person path failed; falling back to enrich: %s", exc)
-                state["new_cooldown_remaining"] = int(config["new_person_cooldown_runs"])
-                state["rejected_candidates"] = candidate_box["rejected"][-REJECTED_MEMORY:]
-                save_state(state)
-                chosen_mode = "enrich_fallback"
-            else:
-                state["rejected_candidates"] = candidate_box["rejected"][-REJECTED_MEMORY:]
+    config, state, tracker = cycle.config, cycle.state, cycle.tracker
+    result = None
+    # Seeded from disk and merged back below whether or not the stage
+    # succeeds, so a duplicate proved in this run is not re-proposed in
+    # the next one. The box is built outside the try for that reason.
+    candidate_box: dict = {"rejected": list(state.get("rejected_candidates") or [])}
+    cycle.job_budget = RunBudget(cycle.policy, STORE_PATH, "new-person", "discovery")
+    try:
+        discovery_tools = [*cycle.read_tools, COMMULINGO_CANDIDATE_SELECT_TOOL]
+        discovery_handlers = {
+            **build_bounded_discovery_handlers(cycle.read_handlers, candidate_box),
+            "commulingo_candidate_select": build_candidate_select_handler(candidate_box),
+        }
+        discovery_result, discovery_tracker, cycle.candidate = await _call_curator_stage(
+            task=build_discovery_task(
+                config["new_person_focus"], candidate_box["rejected"],
+                roster_groups_for_focus(config),
+            ), spec=cycle.spec,
+            tools=discovery_tools, handlers=discovery_handlers, policy=cycle.policy,
+            stage="new-person discovery", expect_edit=False, run_budget=cycle.job_budget,
+            finalization_tools=["commulingo_candidate_select"],
+            terminal_tools=["commulingo_candidate_select"], candidate_box=candidate_box,
+        )
+        cycle.discovery = {"candidate": cycle.candidate, "result": discovery_result}
+        tracker["total_cost"] = discovery_tracker["total_cost"]
+        tracker["rounds_used"] = discovery_tracker["rounds_used"]
+        create_tools, create_handlers = cycle.stage_tools(frozenset({"commulingo_person_create"}))
+        result, create_tracker, _ = await _call_curator_stage(
+            task=build_new_person_task(cycle.candidate), spec=cycle.spec,
+            tools=create_tools, handlers=create_handlers, policy=cycle.policy,
+            stage="new-person creation", expect_edit=True, run_budget=cycle.job_budget,
+            research_key=f"commulingo_person:{cycle.candidate['id']}:create",
+            finalization_tools=["commulingo_person_create"],
+            terminal_tools=["commulingo_person_create"],
+        )
+        cycle.write_outcomes = create_tracker.get("writes", [])
+        tracker["run_id"] = create_tracker["run_id"]
+        tracker["total_cost"] = create_tracker["total_cost"]
+        tracker["rounds_used"] = create_tracker["rounds_used"]
+        state["new_cooldown_remaining"] = 0
+    except Exception as exc:
+        if getattr(exc, "summary", {}).get("writes") or getattr(exc, "summary", {}).get("status") in {"error","budget_deferred"}:
+            raise
+        if cycle.job_budget:
+            cycle.job_budget.remaining()
+        cycle.fallback_error = str(exc)
+        logger.error("new-person path failed; falling back to enrich: %s", exc)
+        state["new_cooldown_remaining"] = int(config["new_person_cooldown_runs"])
+        state["rejected_candidates"] = candidate_box["rejected"][-REJECTED_MEMORY:]
+        save_state(state)
+        cycle.chosen_mode = "enrich_fallback"
+    else:
+        state["rejected_candidates"] = candidate_box["rejected"][-REJECTED_MEMORY:]
+    return result
 
-        if chosen_mode in {"enrich", "enrich_fallback"}:
-            # Age the failure cooldowns by one run, then step over whoever is
-            # still serving one. A forced --candidate overrides the cooldown:
-            # it is the operator saying to try this card now.
-            for entry in state["failed_candidates"]:
-                entry["runs_left"] -= 1
-            state["failed_candidates"] = [
-                e for e in state["failed_candidates"] if e["runs_left"] > 0
-            ]
-            cooling = [] if candidate_id else [e["id"] for e in state["failed_candidates"]]
-            if cooling:
-                logger.info("skipping %d card(s) on enrich-failure cooldown: %s",
-                            len(cooling), ", ".join(cooling))
-            candidate = select_claimable_person(config, candidate_id, exclude_ids=cooling)
-            if candidate is None:
-                # Every person was already touched within the cooldown window, or the
-                # few that were not are held by the other lane right now. Idling until
-                # candidates age back in is the correct, zero-cost outcome.
-                save_state(state)
-                return {
-                    "status": "skipped",
-                    "reason": (
-                        f"no claimable candidate outside the cooldown "
-                        f"({config['incomplete_recent_days']}d incomplete / {config['recent_days']}d complete)"
-                    ),
-                    "mode": chosen_mode,
-                    "fallback_error": fallback_error,
-                }
-            task = build_task("enrich", candidate) + (
-                "\nUse the supplied snapshot for expectedRevision. Every factual write needs evidence entries: "
-                "field, claim, source exactly matching a citation, and locator (page or section). "
-                "Mark disputes explicitly. A pending review is a successful terminal; do not retry it. "
-                "Use no_edit complete/not_applicable/sources_unavailable only after research. "
-                "Section count is a ceiling, never a completion target."
-            )
-            enrich_tools, enrich_handlers = stage_tools(PEOPLE_ENRICH_WRITE_TOOLS)
-            no_edit_box: dict = {}
-            from runtime_tools.commulingo_person_service import call_person_service
-            baseline = call_person_service({"command": "read", "id": candidate["id"]})
-            baseline["id"] = candidate["id"]
-            from provenance.runtime import _wrap_external
-            task += "\nCURRENT SNAPSHOT (already read by runner; no repeat get_person needed):\n" + _wrap_external(json.dumps(baseline, ensure_ascii=False, default=str), "commulingo_current_person")
-            topic = candidate.get("topic") or {1: "basics", 2: "nationality", 4: "moment", 5: "events", 6: "sections", 7: "bio", 8: "bio"}.get(enrich_step(candidate), "bio")
-            task += f"\nCommissioned topic: {topic}. Complete only this topic."
-            enrich_tools = [*enrich_tools, COMMULINGO_NO_EDIT_TOOL]
-            enrich_handlers = {
-                **enrich_handlers,
-                "commulingo_no_edit": build_no_edit_handler(no_edit_box),
-            }
-            enrich_terminals = sorted(PEOPLE_ENRICH_WRITE_TOOLS) + ["commulingo_no_edit"]
-            try:
-                result, enrich_tracker, _ = await _call_curator_stage(
-                    task=task, spec=spec,
-                    tools=enrich_tools, handlers=enrich_handlers,
-                    policy=policy, stage=chosen_mode, expect_edit=True, run_budget=job_budget,
-                    research_key=f"commulingo_person:{candidate['id']}:{topic}:{baseline['revision']}",
-                    baseline=baseline,
-                    finalization_tools=enrich_terminals,
-                    terminal_tools=enrich_terminals,
-                    no_edit_box=no_edit_box,
-                )
-            except Exception as exc:
-                if getattr(exc,'summary',{}).get('status')=='budget_deferred':
-                    raise
-                # All attempts are spent and nothing was written. Record the
-                # cooldown before the unit dies on the traceback — otherwise the
-                # run leaves no trace at all and the next hour picks this same
-                # unresearchable card and spends the same rounds on it.
-                cooldown = int(config["enrich_failure_cooldown_runs"])
-                if cooldown > 0 and completed_run_count() == before:
-                    state["failed_candidates"] = (
-                        [e for e in state["failed_candidates"] if e["id"] != candidate["id"]]
-                        + [{"id": candidate["id"], "runs_left": cooldown}]
-                    )[-FAILED_MEMORY:]
-                    save_state(state)
-                    logger.warning("%s is on enrich-failure cooldown for %d run(s)",
-                                   candidate["id"], cooldown)
-                raise
-            write_outcomes = enrich_tracker.get("writes", [])
-            tracker["run_id"] = enrich_tracker["run_id"]
-            tracker["total_cost"] = enrich_tracker["total_cost"]
-            tracker["rounds_used"] = enrich_tracker["rounds_used"]
-            if chosen_mode == "enrich" and state.get("new_cooldown_remaining", 0) > 0:
-                state["new_cooldown_remaining"] -= 1
-            no_edit_reason = no_edit_box.get("reason")
-            if no_edit_reason:
-                call_person_service({"command": "enrichment", "id": candidate["id"], "topic": topic,
-                    "status": no_edit_box.get("status", "sources_unavailable"), "reason": no_edit_reason,
-                    "sources": no_edit_box.get("sources", []), "expectedRevision": baseline["revision"],
-                    "changedBy": "commulingo-maintainer"})
-                save_state(state)
-                return {
-                    "status": no_edit_box.get("status", "sources_unavailable"),
-                    "run_id": tracker.get("run_id"),
-                    "mode": chosen_mode,
-                    "candidate": candidate.get("id"),
-                    "model": report_model,
-                    "reason": no_edit_reason,
-                    "cost_usd": round(float(tracker.get("total_cost") or 0.0), 4),
-                    "rounds": int(tracker.get("rounds_used") or 0),
-                    "discovery": discovery,
-                    "fallback_error": fallback_error,
-                    "cooldown_remaining": state.get("new_cooldown_remaining", 0),
-                    "result": result,
-                }
 
+def _select_enrich_candidate(cycle: _RunCycle, candidate_id: str) -> dict | None:
+    """Pick the enrich card, or return the skip report when none is claimable."""
+    config, state = cycle.config, cycle.state
+    # Age the failure cooldowns by one run, then step over whoever is
+    # still serving one. A forced --candidate overrides the cooldown:
+    # it is the operator saying to try this card now.
+    for entry in state["failed_candidates"]:
+        entry["runs_left"] -= 1
+    state["failed_candidates"] = [
+        e for e in state["failed_candidates"] if e["runs_left"] > 0
+    ]
+    cooling = [] if candidate_id else [e["id"] for e in state["failed_candidates"]]
+    if cooling:
+        logger.info("skipping %d card(s) on enrich-failure cooldown: %s",
+                    len(cooling), ", ".join(cooling))
+    cycle.candidate = select_claimable_person(config, candidate_id, exclude_ids=cooling)
+    if cycle.candidate is None:
+        # Every person was already touched within the cooldown window, or the
+        # few that were not are held by the other lane right now. Idling until
+        # candidates age back in is the correct, zero-cost outcome.
+        save_state(state)
+        return {
+            "status": "skipped",
+            "reason": (
+                f"no claimable candidate outside the cooldown "
+                f"({config['incomplete_recent_days']}d incomplete / {config['recent_days']}d complete)"
+            ),
+            "mode": cycle.chosen_mode,
+            "fallback_error": cycle.fallback_error,
+        }
+    return None
+
+
+def _prepare_enrich_stage(cycle: _RunCycle) -> dict:
+    """Task, tools and snapshot for the commissioned enrich topic."""
+    candidate = cycle.candidate
+    task = build_task("enrich", candidate) + (
+        "\nUse the supplied snapshot for expectedRevision. Every factual write needs evidence entries: "
+        "field, claim, source exactly matching a citation, and locator (page or section). "
+        "Mark disputes explicitly. A pending review is a successful terminal; do not retry it. "
+        "Use no_edit complete/not_applicable/sources_unavailable only after research. "
+        "Section count is a ceiling, never a completion target."
+    )
+    enrich_tools, enrich_handlers = cycle.stage_tools(PEOPLE_ENRICH_WRITE_TOOLS)
+    no_edit_box: dict = {}
+    from runtime_tools.commulingo_person_service import call_person_service
+    baseline = call_person_service({"command": "read", "id": candidate["id"]})
+    baseline["id"] = candidate["id"]
+    from provenance.runtime import _wrap_external
+    task += "\nCURRENT SNAPSHOT (already read by runner; no repeat get_person needed):\n" + _wrap_external(json.dumps(baseline, ensure_ascii=False, default=str), "commulingo_current_person")
+    topic = candidate.get("topic") or {1: "basics", 2: "nationality", 4: "moment", 5: "events", 6: "sections", 7: "bio", 8: "bio"}.get(enrich_step(candidate), "bio")
+    task += f"\nCommissioned topic: {topic}. Complete only this topic."
+    enrich_tools = [*enrich_tools, COMMULINGO_NO_EDIT_TOOL]
+    enrich_handlers = {
+        **enrich_handlers,
+        "commulingo_no_edit": build_no_edit_handler(no_edit_box),
+    }
+    enrich_terminals = sorted(PEOPLE_ENRICH_WRITE_TOOLS) + ["commulingo_no_edit"]
+    return {"task": task, "tools": enrich_tools, "handlers": enrich_handlers,
+            "no_edit_box": no_edit_box, "baseline": baseline, "topic": topic,
+            "terminals": enrich_terminals}
+
+
+async def _call_enrich_stage(cycle: _RunCycle, stage: dict) -> tuple[str, dict]:
+    """Run the enrich stage; a run that writes nothing puts the card on cooldown."""
+    candidate, state = cycle.candidate, cycle.state
+    try:
+        result, enrich_tracker, _ = await _call_curator_stage(
+            task=stage["task"], spec=cycle.spec,
+            tools=stage["tools"], handlers=stage["handlers"],
+            policy=cycle.policy, stage=cycle.chosen_mode, expect_edit=True, run_budget=cycle.job_budget,
+            research_key=f"commulingo_person:{candidate['id']}:{stage['topic']}:{stage['baseline']['revision']}",
+            baseline=stage["baseline"],
+            finalization_tools=stage["terminals"],
+            terminal_tools=stage["terminals"],
+            no_edit_box=stage["no_edit_box"],
+        )
+    except Exception as exc:
+        if getattr(exc,'summary',{}).get('status')=='budget_deferred':
+            raise
+        # All attempts are spent and nothing was written. Record the
+        # cooldown before the unit dies on the traceback — otherwise the
+        # run leaves no trace at all and the next hour picks this same
+        # unresearchable card and spends the same rounds on it.
+        cooldown = int(cycle.config["enrich_failure_cooldown_runs"])
+        if cooldown > 0 and completed_run_count() == cycle.before:
+            state["failed_candidates"] = (
+                [e for e in state["failed_candidates"] if e["id"] != candidate["id"]]
+                + [{"id": candidate["id"], "runs_left": cooldown}]
+            )[-FAILED_MEMORY:]
+            save_state(state)
+            logger.warning("%s is on enrich-failure cooldown for %d run(s)",
+                           candidate["id"], cooldown)
+        raise
+    return result, enrich_tracker
+
+
+def _record_enrich_outcome(cycle: _RunCycle, stage: dict, result: str, enrich_tracker: dict) -> dict | None:
+    """Fold the enrich stage into the run; a declared no-edit ends the run here."""
+    candidate, state, tracker = cycle.candidate, cycle.state, cycle.tracker
+    no_edit_box = stage["no_edit_box"]
+    cycle.write_outcomes = enrich_tracker.get("writes", [])
+    tracker["run_id"] = enrich_tracker["run_id"]
+    tracker["total_cost"] = enrich_tracker["total_cost"]
+    tracker["rounds_used"] = enrich_tracker["rounds_used"]
+    if cycle.chosen_mode == "enrich" and state.get("new_cooldown_remaining", 0) > 0:
+        state["new_cooldown_remaining"] -= 1
+    no_edit_reason = no_edit_box.get("reason")
+    if no_edit_reason:
+        from runtime_tools.commulingo_person_service import call_person_service
+        call_person_service({"command": "enrichment", "id": candidate["id"], "topic": stage["topic"],
+            "status": no_edit_box.get("status", "sources_unavailable"), "reason": no_edit_reason,
+            "sources": no_edit_box.get("sources", []), "expectedRevision": stage["baseline"]["revision"],
+            "changedBy": "commulingo-maintainer"})
+        save_state(state)
+        return {
+            "status": no_edit_box.get("status", "sources_unavailable"),
+            "run_id": tracker.get("run_id"),
+            "mode": cycle.chosen_mode,
+            "candidate": candidate.get("id"),
+            "model": cycle.report_model,
+            "reason": no_edit_reason,
+            "cost_usd": round(float(tracker.get("total_cost") or 0.0), 4),
+            "rounds": int(tracker.get("rounds_used") or 0),
+            "discovery": cycle.discovery,
+            "fallback_error": cycle.fallback_error,
+            "cooldown_remaining": state.get("new_cooldown_remaining", 0),
+            "result": result,
+        }
+    return None
+
+
+def _finish_run(cycle: _RunCycle, result: str) -> dict:
+    """Report a pending review, or confirm the applied edit was recorded."""
+    state, tracker, candidate = cycle.state, cycle.tracker, cycle.candidate
     if str(result).startswith("OK — pending:"):
         save_state(state)
-        return {"status": "pending_review", "run_id": tracker.get("run_id"), "mode": chosen_mode,
-                "candidate": candidate and candidate.get("id"), "model": report_model,
+        return {"status": "pending_review", "run_id": tracker.get("run_id"), "mode": cycle.chosen_mode,
+                "candidate": candidate and candidate.get("id"), "model": cycle.report_model,
                 "cost_usd": round(float(tracker.get("total_cost") or 0), 4),
                 "rounds": int(tracker.get("rounds_used") or 0), "result": result}
     from scripts.commulingo_run import submitted_edit
     save_state(state)
-    edit = submitted_edit(write_outcomes, db_query_one)
+    edit = submitted_edit(cycle.write_outcomes, db_query_one)
     if not edit or edit.get("status") != "approved":
         raise RuntimeError("applied edit was not recorded as approved")
     return {
         "status": "applied",
         "run_id": tracker.get("run_id"),
-        "mode": chosen_mode,
+        "mode": cycle.chosen_mode,
         "candidate": candidate and candidate.get("id"),
-        "model": report_model,
+        "model": cycle.report_model,
         "cost_usd": round(float(tracker.get("total_cost") or 0.0), 4),
         "rounds": int(tracker.get("rounds_used") or 0),
         "edit": edit,
-        "discovery": discovery,
-        "fallback_error": fallback_error,
+        "discovery": cycle.discovery,
+        "fallback_error": cycle.fallback_error,
         "cooldown_remaining": state.get("new_cooldown_remaining", 0),
         "result": result,
     }
+
+
+async def run_once(*, mode: str, candidate_id: str, config: dict) -> dict:
+    if not config["enabled"]:
+        return {"status": "disabled"}
+
+    from runtime_tools.commulingo_people import direct_apply_enabled
+    from tool_gateway.inference import resolve_agent_inference_policy
+
+    # The shared service can stage a reviewed edit even in direct mode.
+    direct_apply_enabled()
+
+    state = load_state()
+    requested_mode = mode if mode != "auto" else None
+    chosen_mode = choose_mode(config, requested_mode, state)
+    before = completed_run_count()
+
+    spec = get_agent("commulingo_curator")
+    policy = resolve_agent_inference_policy(spec)
+    read_tools, read_handlers, stage_tools = _curator_stage_surface(spec)
+    report_model = resolve_agent_tool_loop(spec, policy).model
+    ctx = new_run_context(
+        interface="autonomous", agent_name=spec.name, is_owner=True,
+        scope_type="maintenance_job", scope_id="commulingo_people_maintainer",
+    )
+    cycle = _RunCycle(
+        config=config, state=state, chosen_mode=chosen_mode, before=before,
+        spec=spec, policy=policy, read_tools=read_tools, read_handlers=read_handlers,
+        stage_tools=stage_tools, report_model=report_model,
+    )
+
+    with caller_scope(ctx):
+        if cycle.chosen_mode == "new":
+            result = await _run_new_person_path(cycle)
+
+        if cycle.chosen_mode in {"enrich", "enrich_fallback"}:
+            skipped = _select_enrich_candidate(cycle, candidate_id)
+            if skipped is not None:
+                return skipped
+            stage = _prepare_enrich_stage(cycle)
+            result, enrich_tracker = await _call_enrich_stage(cycle, stage)
+            no_edit_report = _record_enrich_outcome(cycle, stage, result, enrich_tracker)
+            if no_edit_report is not None:
+                return no_edit_report
+
+    return _finish_run(cycle, result)
 
 
 def parse_args() -> argparse.Namespace:
