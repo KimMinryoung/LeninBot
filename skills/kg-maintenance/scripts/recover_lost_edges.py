@@ -26,8 +26,11 @@ import json
 import os
 from datetime import datetime
 
+from pathlib import Path
+
 from dotenv import load_dotenv
-load_dotenv("/home/grass/leninbot/.env")
+_ROOT = Path(__file__).resolve().parents[3]  # skills/kg-maintenance/scripts -> checkout
+load_dotenv(_ROOT / ".env")
 
 from neo4j import GraphDatabase
 

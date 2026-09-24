@@ -2,7 +2,7 @@
 """
 metrics_collector.py — psutil 기반 자원 스냅샷을 월별 JSON 파일에 누적 저장.
 
-저장 경로: /home/grass/leninbot/data/metrics/YYYY-MM.json
+저장 경로: <checkout>/data/metrics/YYYY-MM.json
 사용법:
     python3 scripts/metrics_collector.py          # 1회 수집 후 저장
     python3 scripts/metrics_collector.py --dry-run # 수집만 하고 저장 안 함 (테스트용)
@@ -18,7 +18,7 @@ from pathlib import Path
 import psutil
 
 # ─── 설정 ─────────────────────────────────────────────────────
-DATA_DIR = Path("/home/grass/leninbot/data/metrics")
+DATA_DIR = Path(__file__).resolve().parents[1] / "data" / "metrics"
 
 
 # ─── 수집 함수들 ───────────────────────────────────────────────

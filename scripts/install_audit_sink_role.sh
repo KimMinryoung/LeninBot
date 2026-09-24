@@ -12,7 +12,7 @@
 #      daemon-reload, restart the proxy, print /health
 # See dev_docs/llm_gateway.md "감사 싱크".
 set -euo pipefail
-ROOT=/home/grass/leninbot
+ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 ROLE=${AUDIT_DB_USER:-leninbot_audit}
 CRED=/etc/credstore.encrypted/audit_db_password.cred
 UNIT=leninbot-llm-proxy.service
@@ -53,4 +53,4 @@ systemctl restart "$UNIT"
 sleep 4
 echo "[4/4] proxy restarted:"
 curl -s -m 5 http://127.0.0.1:8110/health; echo
-echo 'expect "audit_sink":"ok (role)". Then: git -C /home/grass/leninbot add systemd/ && git commit'
+echo "expect \"audit_sink\":\"ok (role)\". Then: git -C $ROOT add systemd/ && git commit"

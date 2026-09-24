@@ -9,7 +9,7 @@
 
 set -euo pipefail
 
-SRC=/home/grass/leninbot/scripts/systemd
+SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/scripts/systemd
 DST=/etc/systemd/system
 
 for unit in leninbot-stale-secrets.service leninbot-stale-secrets.timer; do

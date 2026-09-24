@@ -14,7 +14,7 @@
 
 set -euo pipefail
 
-PROJECT_ROOT=/home/grass/leninbot
+PROJECT_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 DROPIN_SRC_DIR="${PROJECT_ROOT}/scripts/dropins"
 MIGRATE_SCRIPT="${PROJECT_ROOT}/scripts/migrate_secrets_to_credstore.py"
 

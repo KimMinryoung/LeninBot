@@ -20,9 +20,12 @@ import time
 
 import sys
 
+from pathlib import Path
+
 from dotenv import load_dotenv
-load_dotenv("/home/grass/leninbot/.env")
-sys.path.insert(0, "/home/grass/leninbot")
+_ROOT = Path(__file__).resolve().parents[3]  # skills/kg-maintenance/scripts -> checkout
+load_dotenv(_ROOT / ".env")
+sys.path.insert(0, str(_ROOT))
 
 from neo4j import GraphDatabase
 

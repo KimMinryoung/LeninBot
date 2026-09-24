@@ -9,10 +9,11 @@
 #
 # Usage: commulingo_swarm_until.sh <deadline-epoch> <log-tag> <script> [args...]
 set -uo pipefail
-cd /home/grass/leninbot
+ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+cd "$ROOT"
 DEADLINE=$1; TAG=$2; shift 2
-S=/home/grass/leninbot/logs/commulingo-swarm
-STOP=/home/grass/leninbot/data/commulingo-swarm.stop
+S="$ROOT/logs/commulingo-swarm"
+STOP="$ROOT/data/commulingo-swarm.stop"
 runs=0
 while [ "$(date +%s)" -lt "$DEADLINE" ]; do
     [ -f "$STOP" ] && { echo "[$TAG] stop file after $runs run(s) $(date -Is)" >> "$S/$TAG.log"; exit 0; }

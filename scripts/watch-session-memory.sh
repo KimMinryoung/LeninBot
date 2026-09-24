@@ -23,7 +23,7 @@
 
 set -uo pipefail
 
-LOG="/home/grass/leninbot/logs/session-memory.tsv"
+LOG="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/logs/session-memory.tsv"
 
 slices() {
   find /sys/fs/cgroup/user.slice -maxdepth 1 -type d -name 'user-*.slice' 2>/dev/null | sort

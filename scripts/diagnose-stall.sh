@@ -30,7 +30,7 @@ fi
 
 # 결과를 파일로도 남긴다. 모바일에서 긴 출력을 복사하지 않아도 되고,
 # root가 아닌 쪽(에이전트 포함)이 읽을 수 있도록 소유자를 호출자로 돌려준다.
-OUT_DIR="/home/grass/leninbot/logs"
+OUT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/logs"
 OUT="${OUT_DIR}/stall-diagnosis.txt"
 mkdir -p "$OUT_DIR"
 
