@@ -197,7 +197,7 @@ _TEXT_BODY_PATHS = {
     "deepseek": re.compile(r"(?:^|/)(?:chat/completions|v1/messages)$"),
 }
 _GEMINI_GENERATE_PATH = re.compile(
-    r"(?P<prefix>(?:^|/)models/)(?P<model>.+?)(?P<suffix>:(?:generateContent|streamGenerateContent))$"
+    r"(?P<prefix>(?:^|/)models/)(?P<model>.+?)(?P<suffix>:(?:generateContent|streamGenerateContent|batchGenerateContent))$"
 )
 
 

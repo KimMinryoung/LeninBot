@@ -762,6 +762,13 @@ class TestLatestTierRouting(unittest.TestCase):
         self.assertEqual(path, "v1beta/models/gemini-3.8-flash:generateContent")
         self.assertEqual(original, "gemini-3.7-flash")
 
+        path, rewritten, original, error = normalize_text_model_request(
+            "gemini", "v1beta/models/gemini-3.7-flash:batchGenerateContent", b'{}',
+        )
+        self.assertIsNone(error)
+        self.assertEqual(path, "v1beta/models/gemini-3.8-flash:batchGenerateContent")
+        self.assertEqual(original, "gemini-3.7-flash")
+
     def test_unknown_text_model_and_incompatible_gpt_tools_fail_closed(self):
         from llm_proxy.app import normalize_text_model_request
 

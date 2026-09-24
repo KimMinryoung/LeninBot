@@ -1,6 +1,6 @@
 # Translation Pipeline
 
-확인 기준: 2026-09-07 코드와 같은 날 수행한 운영 DB 마이그레이션 검증.
+확인 기준: 2026-09-24 사료 Batch 경로 코드와 2026-09-07 운영 DB 마이그레이션 검증. Batch 실호출은 미검증.
 
 사료 번역과 사이트 영어 번역은 `translation_runtime/`의 실행 함수를 공유하고, 언어·형식별 프롬프트와 검증·조립은 각 어댑터가 맡는다. 이 문서는 현재 구현·운영 경계를 설명한다. 과거 모델 비교와 배치 산출물은 `output/archival_translations/compare-*.md` 등에 있으며, 현재 설정은 `config/llm_call_sites.json`이 기준이다.
 
@@ -67,6 +67,21 @@ venv/bin/python scripts/translate_archival_documents.py --spec <spec-id> --reass
 - `--compare 'provider/model,provider/model'`은 같은 청크를 비교한다. `+think`, `+effort=high` 변형과 `--compare-chunk-ids 2,3`을 지원한다. 번호는 현재 청킹의 0 기반 인덱스이므로 재현 가능한 평가는 아래 고정 평가셋을 사용한다.
 - 키 주입은 LLM 프록시가 맡는다. 사료 번역을 위해 provider 실키를 CLI에 전달하거나 DB 자격증명을 마운트할 필요는 없다.
 - `api_routes/archival_translation.py`는 `/admin/archival-translation/specs`, `/plan`, `/run`을 소유한다. admin 인증, 요청 필드와 NDJSON 이벤트는 [API Reference](api_reference.md#archival-translation)를 따른다.
+
+### 사료 Gemini Batch API (수동 비동기 경로)
+
+`scripts/archival_translation_batch.py`는 Gemini로 설정된 사료 스펙의 미번역 청크를 inline Batch API에 제출하고, 나중에 결과를 회수한다. 기본 동기 `run`이나 정기 번역 타이머를 바꾸지 않는다. 현재 DeepSeek인 ZH 스펙은 지원하지 않는다. `submit` 전에 일반 사료 CLI의 `--plan`으로 범위와 비용을 확인한다.
+
+```bash
+venv/bin/python scripts/archival_translation_batch.py submit --spec <spec-id>
+venv/bin/python scripts/archival_translation_batch.py status --spec <spec-id>
+venv/bin/python scripts/archival_translation_batch.py collect --spec <spec-id>
+venv/bin/python scripts/translate_archival_documents.py --spec <spec-id>
+```
+
+제출은 기존 청크 키·원문 해시·검수 TM·캐시를 사용하며 19 MB 안전 상한을 둔다. 초대형 단일 블록은 동기 분할 경로로 돌린다. `output/archival_translations/<spec-id>.batch.json`에 job 이름과 청크별 key를 원자적으로 보관해 중복 제출을 막는다. 요청 결과가 불확실하면 display name으로 공급자 목록을 조회해 복구하며, 찾지 못하면 새 작업을 자동 생성하지 않는다. `status`는 공급자 상태만 읽는다. `collect`는 응답 key·현재 원문·프롬프트·모델·청크 옵션을 대조하고 기존 파서·검증기를 통과한 결과만 정상 JSONL 캐시에 저장한다. 실패하거나 형식이 틀린 청크는 기존 동기 `run`으로 교정·조립한다. 이전 배치가 종료되고 결과를 회수한 뒤에도 남은 청크를 다시 Batch로 보내려면 `submit --new-batch`를 명시한다.
+
+Batch 생성은 비멱등이고 완료 목표는 최대 24시간이다. Gemini 공식 가격은 해당 모델의 일반 요청 대비 50%이며, 캐시 적중분은 일반 캐시 요율이다. 회수 시 보고된 토큰으로 이 비율의 추정 비용을 감사한다. 현재 경로는 작은 inline 배치만 지원하고 파일 기반 대형 배치는 지원하지 않는다. 이 경로의 실제 유료 제출·회수는 아직 수행하지 않았으며 SDK/공급자 연결과 비용 원장은 첫 운영 건에서 확인해야 한다. [Gemini Batch API 공식 문서](https://ai.google.dev/gemini-api/docs/batch-api).
 
 ### 사이트 실행과 타이머
 
@@ -192,7 +207,7 @@ venv/bin/python scripts/smoke_archival_translation.py
 
 현재 전체 오프라인 단위 테스트 **555개**가 통과했다. 번역 스모크 2종과 연구 Markdown 84개의 구조 회귀 검사도 통과했다. PostgreSQL 임시 테이블에서는 최신성 백필·원문 변경 감지·마이그레이션 재실행·NULL 무효화 보존을 검증했다. 고정 평가셋과 단위 테스트는 외부 API·운영 DB 없이 실행하고, 사료 스모크만 저본·frontend 체크아웃이 필요하다.
 
-남은 항목은 실제 모델 후보의 원문 대조 평가와 FR 사례 확장, 청크 크기·맥락 A/B 측정, 초대형 단일 Markdown 행·항목·문단의 추가 분할, 기타 DB 행의 청킹이다. Batch API는 미구현이다. 모델 선택·추가 비용 최적화는 실측과 의미 품질 평가 후 결정한다.
+남은 항목은 실제 모델 후보의 원문 대조 평가와 FR 사례 확장, 청크 크기·맥락 A/B 측정, 초대형 단일 Markdown 행·항목·문단의 추가 분할, 기타 DB 행의 청킹이다. Gemini 사료 Batch의 파일 입력·자동 재검증/교정과 다른 번역 레인의 Batch 적용도 남아 있다. 모델 선택·추가 비용 최적화는 실측과 의미 품질 평가 후 결정한다.
 
 ## 7. 2026-09-07 검토 기록: 의도와 주의점
 

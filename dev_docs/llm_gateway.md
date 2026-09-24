@@ -11,7 +11,7 @@ LLM 버전으로, 같은 패턴을 따른다: 단일 관문 + 이중 싱크 감�
 - **강제 절반** — `llm_proxy/` (`leninbot-llm-proxy.service`, 127.0.0.1:8110):
   **키 주입·텍스트 모델 정규화 프록시**. 프로바이더 API 키는 이 서비스의 systemd
   credential에만 있고, 다른 서비스의 클라이언트는 placeholder 키(`via-llm-proxy`) +
-  프록시 base_url로 구성된다. 텍스트 생성 요청의 모델 선택만 `tier:high|medium|low`(Claude/OpenAI는 `frontier`도 지원) 또는 등록된 이전 ID에서 현행 ID로 정규화한다. 알 수 없는 텍스트 모델은 400으로 거절한다. 그 밖의 본문과 응답 스트림은 바이트 그대로 중계하며(`aiter_raw`), 인증 헤더만 교체한다. 키 제거는 완료됐다(아래
+  프록시 base_url로 구성된다. 텍스트 생성 요청의 모델 선택만 `tier:high|medium|low`(Claude/OpenAI는 `frontier`도 지원) 또는 등록된 이전 ID에서 현행 ID로 정규화한다. Gemini `batchGenerateContent` 제출도 같은 모델 정규화·정책 검사에 포함한다. 알 수 없는 텍스트 모델은 400으로 거절한다. 그 밖의 본문과 응답 스트림은 바이트 그대로 중계하며(`aiter_raw`), 인증 헤더만 교체한다. 키 제거는 완료됐다(아래
   "Enforcement — 키 제거 완료") — 키 없는 코드는 프로바이더를 직접 호출할 수 없다.
 
 ## Seam이 되는 지점
