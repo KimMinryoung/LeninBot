@@ -12,7 +12,7 @@ import uuid
 
 if os.getenv('COMMULINGO_FRONTEND_CONTAINER')!='commulingo-python-rpc' or os.getenv('COMMULINGO_REVIEW_TEST_PORT')!='55439':
     raise unittest.SkipTest('isolated review DB/RPC required')
-sys.path.insert(0,'/home/grass/leninbot')
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 ROOT=Path(os.environ.get('COMMULINGO_REVIEW_SOURCE',Path(__file__).resolve().parents[1]))
 import runtime_tools
 runtime_tools.__path__.insert(0,str(ROOT/'runtime_tools'))

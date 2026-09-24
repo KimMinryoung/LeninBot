@@ -33,13 +33,13 @@ import json
 import logging
 import os
 import re
-from pathlib import Path
 from datetime import date, datetime
 from decimal import Decimal
 
 from psycopg2.extras import RealDictCursor, execute_values
 
 from db import query as db_query, query_one as db_query_one, get_conn
+from ops.paths import COMMULINGO_DATA_DIR, commulingo_data_file
 from tool_gateway.results import ToolFailure
 from runtime_tools.commulingo_person_service import call_person_service
 
@@ -2951,8 +2951,8 @@ FIELD_LIMITS: dict[str, tuple[int, int]] = {
 
 # The same contract is imported by the JS storage validator. No duplicated
 # person ceilings in prompts/tool schemas and the persistence boundary.
-_EDITORIAL_CONTRACT = json.loads(Path(os.environ.get("COMMULINGO_PERSON_CONTRACT",
-    "/home/grass/frontend/data/commulingo/person-editorial-contract.json")).read_text())
+_EDITORIAL_CONTRACT = json.loads(commulingo_data_file(
+    "person-editorial-contract.json", "COMMULINGO_PERSON_CONTRACT").read_text())
 for _field in ("epithet", "bio", "moment", "fate_label"):
     FIELD_LIMITS[_field] = tuple(_EDITORIAL_CONTRACT["limits"][_field])
 FIELD_LIMITS["section_body"] = tuple(_EDITORIAL_CONTRACT["limits"]["body"])
@@ -3128,8 +3128,8 @@ _NATIONALITY_SCHEMA = {
     "required": ["code", "label"],
 }
 
-_NATIONALITY_POLICY = json.loads(Path(os.environ.get("COMMULINGO_NATIONALITY_POLICY",
-    "/home/grass/frontend/data/commulingo/nationality-policy.json")).read_text())
+_NATIONALITY_POLICY = json.loads(commulingo_data_file(
+    "nationality-policy.json", "COMMULINGO_NATIONALITY_POLICY").read_text())
 _NATIONAL_ORIGIN_CODES = _NATIONALITY_CODES - set(_NATIONALITY_POLICY["citizenshipOnlyCodes"])
 
 _NATIONAL_ORIGIN_SCHEMA = {
@@ -3271,7 +3271,7 @@ _COMMULINGO_FIELD_SCHEMA = {
         # was 41 rejected person_create calls, and min/maxProperties stops those
         # before the call is spent. null (to clear the role) still validates
         # because the property constraints only apply to the object form.
-        "activities": json.loads(Path(os.environ.get("COMMULINGO_ACTIVITY_SCHEMA", "/home/grass/frontend/data/commulingo/activity-schema.json")).read_text()),
+        "activities": json.loads(commulingo_data_file("activity-schema.json", "COMMULINGO_ACTIVITY_SCHEMA").read_text()),
         "role": {
             "type": ["object", "null"], "additionalProperties": False,
             "minProperties": 1, "maxProperties": 1,
@@ -4157,10 +4157,7 @@ def _label_variants(label: str) -> list[str]:
     return forms
 
 
-_DOC_MANIFEST = os.path.join(
-    os.getenv("FRONTEND_DIR", "/home/grass/frontend"),
-    "data", "commulingo", "docs", "manifest.json",
-)
+_DOC_MANIFEST = str(COMMULINGO_DATA_DIR / "docs" / "manifest.json")
 # Document names are dressed in title marks that the same title wears
 # inconsistently: the manifest lists 「대전환의 해」 and 대전환의 해 as separate
 # aliases of one entry, and a curator writing a gap picks whichever its sentence

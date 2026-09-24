@@ -19,7 +19,7 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-DEBRIEFS_DIR = Path("/home/grass/leninbot/output/debriefs")
+DEBRIEFS_DIR = Path(__file__).resolve().parents[2] / "output" / "debriefs"
 
 from agents.razvedchik.persona import build_prompt, DEBRIEF_SCOUT, DEBRIEF_COMMANDER
 

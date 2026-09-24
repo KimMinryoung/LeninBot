@@ -5,7 +5,6 @@ which is populated by `register_handlers()` at startup.
 """
 
 import os
-import sys
 import json
 import asyncio
 import logging
@@ -1232,7 +1231,8 @@ async def cmd_restart(message: Message):
         pass
 
     status_msg = await message.answer(f"🔄 서비스 재시작 요청 확인 중... ({target})")
-    cmd = ["/home/grass/leninbot/venv/bin/python", "scripts/safe_restart.py", target]
+    from ops.paths import PROJECT_ROOT, VENV_PYTHON
+    cmd = [str(VENV_PYTHON), "scripts/safe_restart.py", target]
     if force:
         cmd.append("--force")
     try:
@@ -1240,7 +1240,7 @@ async def cmd_restart(message: Message):
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
-            cwd="/home/grass/leninbot",
+            cwd=str(PROJECT_ROOT),
             start_new_session=True,
         )
         stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=45)
@@ -1846,7 +1846,8 @@ async def cmd_modify(message: Message):
     filepath, reason, new_content = [p.strip() for p in parts]
 
     # 경로 보안: leninbot 디렉토리 밖 거부
-    base = "/home/grass/leninbot"
+    from ops.paths import PROJECT_ROOT
+    base = str(PROJECT_ROOT)
     abs_path = _os.path.realpath(_os.path.join(base, filepath))
     if not (abs_path == base or abs_path.startswith(base + "/")):
         await message.answer("❌ 허용된 디렉토리 밖의 파일은 수정할 수 없어.")
@@ -1919,7 +1920,6 @@ async def cb_modify_approve(callback: CallbackQuery):
     await callback.message.edit_text("⚙️ 패치 적용 중…")
     await callback.answer()
 
-    sys.path.insert(0, "/home/grass/leninbot")
     from self_modification_core import self_modify_with_safety
     try:
         result = await asyncio.to_thread(

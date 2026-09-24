@@ -4,11 +4,13 @@ import json
 from pathlib import Path
 import unittest
 
+from ops.paths import commulingo_data_file
+
 ROOT = Path(__file__).resolve().parents[1]
 source = ROOT / "runtime_tools/commulingo_people.py"
 module = ast.parse(source.read_text())
-namespace = {"_EDITORIAL_CONTRACT": json.loads(Path(
-    "/home/grass/frontend/data/commulingo/person-editorial-contract.json").read_text())}
+namespace = {"_EDITORIAL_CONTRACT": json.loads(commulingo_data_file(
+    "person-editorial-contract.json", "COMMULINGO_PERSON_CONTRACT").read_text())}
 exec(compile(ast.Module(body=[node for node in module.body
     if isinstance(node, ast.FunctionDef) and node.name == "_person_evidence_errors"],
     type_ignores=[]), str(source), "exec"), namespace)

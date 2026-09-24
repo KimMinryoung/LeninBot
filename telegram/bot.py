@@ -525,7 +525,8 @@ def _build_env_context() -> str:
     lines.append(f"OS: {platform.platform()}")
 
     # Python / venv
-    venv = "/home/grass/leninbot/venv"
+    from ops.paths import PROJECT_ROOT
+    venv = str(PROJECT_ROOT / "venv")
     lines.append(f"Python venv: {venv}/bin/python")
     lines.append("Always use this venv for package installation. No global installs (--break-system-packages).")
 

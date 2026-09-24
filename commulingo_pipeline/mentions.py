@@ -14,9 +14,11 @@ import os
 from collections import Counter
 from pathlib import Path
 
+from ops.paths import FRONTEND_DIR
+
 logger = logging.getLogger(__name__)
 
-DEFAULT_PATH = '/home/grass/frontend/data/cache/report-renders.json'
+DEFAULT_PATH = str(FRONTEND_DIR / 'data' / 'cache' / 'report-renders.json')
 
 
 def report_mentions_by_term(path=None):

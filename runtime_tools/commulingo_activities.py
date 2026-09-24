@@ -6,11 +6,11 @@ function and affiliation in the same activity; unsure affiliation stays null.
 """
 from __future__ import annotations
 import json
-import os
-from pathlib import Path
 
-CATALOG_PATH = Path(os.environ.get('COMMULINGO_ACTIVITY_CATALOG', '/home/grass/frontend/data/commulingo/activity-catalog.json'))
-SCHEMA_PATH = Path(os.environ.get('COMMULINGO_ACTIVITY_SCHEMA', '/home/grass/frontend/data/commulingo/activity-schema.json'))
+from ops.paths import commulingo_data_file
+
+CATALOG_PATH = commulingo_data_file('activity-catalog.json', 'COMMULINGO_ACTIVITY_CATALOG')
+SCHEMA_PATH = commulingo_data_file('activity-schema.json', 'COMMULINGO_ACTIVITY_SCHEMA')
 
 def load_catalog():
     return json.loads(CATALOG_PATH.read_text())
