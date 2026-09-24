@@ -456,121 +456,148 @@ async def _exec_web_read_self(
         post_id = id
     limit = max(1, min(int(limit or 8), 20))
 
-    if content_type == "model_config":
-        return await _format_public_model_config()
+    reader = _WEB_READ_SELF_READERS.get(content_type, _web_read_self_overview)
+    return await reader(
+        content_type=content_type,
+        limit=limit,
+        keyword=keyword,
+        id=id,
+        post_id=post_id,
+        slug=slug,
+        max_chars=max_chars,
+        offset=offset,
+    )
 
-    if content_type in _WEB_PUBLIC_READ_TYPES:
-        handler = TOOL_HANDLERS.get("read_self")
-        if not handler:
-            return "Public self-reading is unavailable right now."
-        return await handler(
-            content_type=content_type,
-            limit=limit,
-            keyword=keyword,
-            id=id,
-            post_id=post_id,
-            slug=slug,
-            status="public" if content_type == "research_document" else None,
-            max_chars=max_chars,
-            offset=offset,
+
+async def _web_read_self_model_config(**_) -> str:
+    return await _format_public_model_config()
+
+
+async def _web_read_self_public_type(
+    *,
+    content_type: str,
+    limit: int,
+    keyword: str | None,
+    id: int | None,
+    post_id: int | None,
+    slug: str | None,
+    max_chars: int | None,
+    offset: int | None,
+    **_,
+) -> str:
+    handler = TOOL_HANDLERS.get("read_self")
+    if not handler:
+        return "Public self-reading is unavailable right now."
+    return await handler(
+        content_type=content_type,
+        limit=limit,
+        keyword=keyword,
+        id=id,
+        post_id=post_id,
+        slug=slug,
+        status="public" if content_type == "research_document" else None,
+        max_chars=max_chars,
+        offset=offset,
+    )
+
+
+async def _web_read_self_autonomous_project(*, limit: int, id: int | None, **_) -> str:
+    try:
+        from bot_config import is_autonomous_active
+        loop_active = await asyncio.to_thread(is_autonomous_active)
+    except Exception:
+        loop_active = True
+    project_filter = "AND id = %s" if id is not None else ""
+    params = (int(id), limit) if id is not None else (limit,)
+    rows = await asyncio.to_thread(
+        db_query,
+        f"""
+        SELECT id, title, topic, goal, plan, state, turn_count, last_run_at, updated_at
+          FROM autonomous_projects
+         WHERE state IN ('researching', 'planning', 'paused')
+           {project_filter}
+         ORDER BY
+           CASE state WHEN 'researching' THEN 0 WHEN 'planning' THEN 1 ELSE 2 END,
+           COALESCE(last_run_at, updated_at) DESC NULLS LAST,
+           id DESC
+         LIMIT %s
+        """,
+        params,
+    )
+    if not rows:
+        if id is not None:
+            return f"No active public autonomous project summary is available for id={id}."
+        return "No active public autonomous project summary is available right now."
+    loop_text = (
+        "enabled; scheduled ticks can advance due projects"
+        if loop_active
+        else "paused by config; scheduled timer wakes skip project execution"
+    )
+    lines = [
+        "Autonomous project status, public summary only:",
+        f"Autonomous loop: {loop_text}.",
+        "Private notes, raw task reports, and operator conversations are not exposed here.",
+    ]
+    for row in rows:
+        project_id = row.get("id")
+        goal = _public_excerpt(row.get("goal"), 360)
+        plan = row.get("plan") or {}
+        plan_goals = plan.get("goals") if isinstance(plan, dict) else []
+        plan_steps = plan.get("steps") if isinstance(plan, dict) else []
+        lines.append(
+            f"- #{project_id} {row.get('title') or row.get('topic')}: "
+            f"state={row.get('state')}, turns={row.get('turn_count') or 0}, "
+            f"last_run={row.get('last_run_at') or '?'}\n"
+            f"  topic: {row.get('topic') or ''}\n"
+            f"  goal: {goal}"
         )
-
-    if content_type == "autonomous_project":
-        try:
-            from bot_config import is_autonomous_active
-            loop_active = await asyncio.to_thread(is_autonomous_active)
-        except Exception:
-            loop_active = True
-        project_filter = "AND id = %s" if id is not None else ""
-        params = (int(id), limit) if id is not None else (limit,)
-        rows = await asyncio.to_thread(
+        if plan_goals:
+            active_goals = [
+                str(item)
+                for item in plan_goals
+                if item and "DONE" not in str(item).upper()
+            ][:4]
+            if active_goals:
+                lines.append("  current objectives:")
+                for item in active_goals:
+                    lines.append(f"    - {_public_excerpt(item, 220)}")
+        if plan_steps:
+            next_steps = [
+                str(item)
+                for item in plan_steps
+                if item and "[DONE]" not in str(item).upper()
+            ][:3]
+            if next_steps:
+                lines.append("  next steps:")
+                for item in next_steps:
+                    lines.append(f"    - {_public_excerpt(item, 220)}")
+        events = await asyncio.to_thread(
             db_query,
-            f"""
-            SELECT id, title, topic, goal, plan, state, turn_count, last_run_at, updated_at
-              FROM autonomous_projects
-             WHERE state IN ('researching', 'planning', 'paused')
-               {project_filter}
-             ORDER BY
-               CASE state WHEN 'researching' THEN 0 WHEN 'planning' THEN 1 ELSE 2 END,
-               COALESCE(last_run_at, updated_at) DESC NULLS LAST,
-               id DESC
-             LIMIT %s
+            """
+            SELECT event_type, content, created_at
+              FROM autonomous_project_events
+             WHERE project_id = %s
+               AND event_type IN (
+                   'tick_end', 'plan_revised', 'state_transition',
+                   'project_created', 'publication_created'
+               )
+             ORDER BY created_at DESC, id DESC
+             LIMIT 4
             """,
-            params,
+            (project_id,),
         )
-        if not rows:
-            if id is not None:
-                return f"No active public autonomous project summary is available for id={id}."
-            return "No active public autonomous project summary is available right now."
-        loop_text = (
-            "enabled; scheduled ticks can advance due projects"
-            if loop_active
-            else "paused by config; scheduled timer wakes skip project execution"
-        )
-        lines = [
-            "Autonomous project status, public summary only:",
-            f"Autonomous loop: {loop_text}.",
-            "Private notes, raw task reports, and operator conversations are not exposed here.",
-        ]
-        for row in rows:
-            project_id = row.get("id")
-            goal = _public_excerpt(row.get("goal"), 360)
-            plan = row.get("plan") or {}
-            plan_goals = plan.get("goals") if isinstance(plan, dict) else []
-            plan_steps = plan.get("steps") if isinstance(plan, dict) else []
-            lines.append(
-                f"- #{project_id} {row.get('title') or row.get('topic')}: "
-                f"state={row.get('state')}, turns={row.get('turn_count') or 0}, "
-                f"last_run={row.get('last_run_at') or '?'}\n"
-                f"  topic: {row.get('topic') or ''}\n"
-                f"  goal: {goal}"
-            )
-            if plan_goals:
-                active_goals = [
-                    str(item)
-                    for item in plan_goals
-                    if item and "DONE" not in str(item).upper()
-                ][:4]
-                if active_goals:
-                    lines.append("  current objectives:")
-                    for item in active_goals:
-                        lines.append(f"    - {_public_excerpt(item, 220)}")
-            if plan_steps:
-                next_steps = [
-                    str(item)
-                    for item in plan_steps
-                    if item and "[DONE]" not in str(item).upper()
-                ][:3]
-                if next_steps:
-                    lines.append("  next steps:")
-                    for item in next_steps:
-                        lines.append(f"    - {_public_excerpt(item, 220)}")
-            events = await asyncio.to_thread(
-                db_query,
-                """
-                SELECT event_type, content, created_at
-                  FROM autonomous_project_events
-                 WHERE project_id = %s
-                   AND event_type IN (
-                       'tick_end', 'plan_revised', 'state_transition',
-                       'project_created', 'publication_created'
-                   )
-                 ORDER BY created_at DESC, id DESC
-                 LIMIT 4
-                """,
-                (project_id,),
-            )
-            if events:
-                lines.append("  recent work:")
-                for ev in events:
-                    lines.append(
-                        f"    - {ev.get('created_at')}: {ev.get('event_type')} — "
-                        f"{_public_excerpt(ev.get('content'), 260)}"
-                    )
-        return "\n".join(lines)
+        if events:
+            lines.append("  recent work:")
+            for ev in events:
+                lines.append(
+                    f"    - {ev.get('created_at')}: {ev.get('event_type')} — "
+                    f"{_public_excerpt(ev.get('content'), 260)}"
+                )
+    return "\n".join(lines)
 
-    if content_type == "architecture":
-        return """Cyber-Lenin public architecture:
+
+async def _web_read_self_architecture(**_) -> str:
+    return """Cyber-Lenin public architecture:
 - Public web chat: cyber-lenin.com/chat, using a restricted retrieval toolset.
 - Telegram command center: private operator interface and multi-agent orchestration.
 - Specialist agents: analyst, scout, programmer, visualizer, browser, diplomat, diary.
@@ -581,62 +608,66 @@ async def _exec_web_read_self(
 
 Redaction boundary: public web chat can discuss structure and public outputs, but not private chat logs, task report bodies, credentials, server logs, raw local paths, or operational traces."""
 
-    if content_type == "public_outputs":
-        rows = await asyncio.to_thread(
-            db_query,
-            """
-            SELECT slug, title, summary, updated_at
-              FROM research_documents
-             WHERE status = 'public'
-             ORDER BY updated_at DESC, id DESC
-             LIMIT %s
-            """,
-            (limit,),
-        )
-        page_rows = await asyncio.to_thread(
-            db_query,
-            """
-            SELECT slug, title, summary, updated_at
-              FROM static_pages
-             ORDER BY updated_at DESC, slug ASC
-             LIMIT %s
-            """,
-            (limit,),
-        )
-        counts = await asyncio.to_thread(
-            db_query,
-            """
-            SELECT
-              (SELECT count(*) FROM research_documents WHERE status = 'public') AS research_count,
-              (SELECT count(*) FROM static_pages) AS static_page_count
-            """
-        )
-        count = counts[0] if counts else {}
-        lines = [
-            "Public Cyber-Lenin outputs:",
-            f"- Research reports: {count.get('research_count', '?')}",
-            f"- Static pages: {count.get('static_page_count', '?')}",
-            "",
-            "Recent research reports:",
-        ]
-        for row in rows:
-            summary = (row.get("summary") or "").replace("\n", " ")[:180]
-            lines.append(
-                f"- {row.get('title') or row.get('slug')} "
-                f"(https://cyber-lenin.com/reports/research/{row.get('slug')})"
-                + (f"\n  {summary}" if summary else "")
-            )
-        lines.append("")
-        lines.append("Recent static pages:")
-        for row in page_rows:
-            summary = (row.get("summary") or "").replace("\n", " ")[:180]
-            lines.append(
-                f"- {row.get('title') or row.get('slug')} "
-                f"(https://cyber-lenin.com/p/{row.get('slug')})"
-                + (f"\n  {summary}" if summary else "")
-            )
-        return "\n".join(lines)
 
+async def _web_read_self_public_outputs(*, limit: int, **_) -> str:
+    rows = await asyncio.to_thread(
+        db_query,
+        """
+        SELECT slug, title, summary, updated_at
+          FROM research_documents
+         WHERE status = 'public'
+         ORDER BY updated_at DESC, id DESC
+         LIMIT %s
+        """,
+        (limit,),
+    )
+    page_rows = await asyncio.to_thread(
+        db_query,
+        """
+        SELECT slug, title, summary, updated_at
+          FROM static_pages
+         ORDER BY updated_at DESC, slug ASC
+         LIMIT %s
+        """,
+        (limit,),
+    )
+    counts = await asyncio.to_thread(
+        db_query,
+        """
+        SELECT
+          (SELECT count(*) FROM research_documents WHERE status = 'public') AS research_count,
+          (SELECT count(*) FROM static_pages) AS static_page_count
+        """
+    )
+    count = counts[0] if counts else {}
+    lines = [
+        "Public Cyber-Lenin outputs:",
+        f"- Research reports: {count.get('research_count', '?')}",
+        f"- Static pages: {count.get('static_page_count', '?')}",
+        "",
+        "Recent research reports:",
+    ]
+    for row in rows:
+        summary = (row.get("summary") or "").replace("\n", " ")[:180]
+        lines.append(
+            f"- {row.get('title') or row.get('slug')} "
+            f"(https://cyber-lenin.com/reports/research/{row.get('slug')})"
+            + (f"\n  {summary}" if summary else "")
+        )
+    lines.append("")
+    lines.append("Recent static pages:")
+    for row in page_rows:
+        summary = (row.get("summary") or "").replace("\n", " ")[:180]
+        lines.append(
+            f"- {row.get('title') or row.get('slug')} "
+            f"(https://cyber-lenin.com/p/{row.get('slug')})"
+            + (f"\n  {summary}" if summary else "")
+        )
+    return "\n".join(lines)
+
+
+async def _web_read_self_overview(**_) -> str:
+    """Default overview for unknown or omitted content types."""
     try:
         from bot_config import is_autonomous_active
         loop_active = await asyncio.to_thread(is_autonomous_active)
@@ -664,6 +695,16 @@ Redaction boundary: public web chat can discuss structure and public outputs, bu
         f"Autonomous loop: {'enabled' if loop_active else 'paused by config'}\n"
         "Source code: https://github.com/KimMinryoung/LeninBot"
     )
+
+
+# Normalized content_type → reader. Anything else falls back to the overview.
+_WEB_READ_SELF_READERS = {
+    "model_config": _web_read_self_model_config,
+    **{content_type: _web_read_self_public_type for content_type in _WEB_PUBLIC_READ_TYPES},
+    "autonomous_project": _web_read_self_autonomous_project,
+    "architecture": _web_read_self_architecture,
+    "public_outputs": _web_read_self_public_outputs,
+}
 
 
 async def _format_public_model_config() -> str:
