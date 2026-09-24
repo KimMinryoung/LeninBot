@@ -5,7 +5,7 @@ import re
 from urllib.parse import urlparse
 
 from services.chat_history_sanitize import clean_chat_history_text
-from prompt_context import uses_xml
+from llm.prompt_context import uses_xml
 from llm.execution_context import RUNTIME_EVENTS_KEY
 
 _HISTORY_USER_CHAR_LIMIT = 6000

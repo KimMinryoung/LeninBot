@@ -32,11 +32,11 @@ def staged_tasks():
 
 async def main():
     import db
-    import task_store
+    from telegram import task_store
     import self_runtime.tools as st
     import telegram.tasks as tasks
     import memory_store.experiential as exp
-    from prompt_context import format_dependency_results
+    from llm.prompt_context import format_dependency_results
 
     # ── Stub the world ───────────────────────────────────────────────
     created = []

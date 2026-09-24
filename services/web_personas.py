@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from identity.prompts import CORE_IDENTITY
-from prompt_context import uses_xml
+from llm.prompt_context import uses_xml
 from agents.base import load_political_line_body
 from tool_gateway.profiles import WEB_CYBER_LENIN_TOOLS, WEB_ROLEPLAY_TOOLS
 

@@ -52,7 +52,7 @@ async def broadcast_to_channel(title: str, summary: str, url: str, **_kw) -> str
     if result.ok and getattr(result, "message_ids", None):
         try:
             import re as _re
-            from publication_records import record_publication_broadcast_sync
+            from runtime_tools.publication_records import record_publication_broadcast_sync
 
             slug = str(_kw.get("slug") or "").strip()
             if not slug:

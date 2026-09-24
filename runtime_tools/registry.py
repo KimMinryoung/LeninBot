@@ -1131,7 +1131,7 @@ TOOLS.extend(X_TOOLS)
 TOOL_HANDLERS.update(X_TOOL_HANDLERS)
 
 # ── Site publishing tools (hub curations + static pages for cyber-lenin.com) ──
-from site_publishing import SITE_PUBLISHING_TOOLS, SITE_PUBLISHING_TOOL_HANDLERS
+from runtime_tools.site_publishing import SITE_PUBLISHING_TOOLS, SITE_PUBLISHING_TOOL_HANDLERS
 
 TOOLS.extend(SITE_PUBLISHING_TOOLS)
 TOOL_HANDLERS.update(SITE_PUBLISHING_TOOL_HANDLERS)

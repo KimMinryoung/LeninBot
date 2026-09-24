@@ -42,7 +42,7 @@ import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
-import audit_sink
+from ops import audit_sink
 from llm.gateway import evaluate_policy, record_llm_call
 from llm.provider_registry import current_text_model
 

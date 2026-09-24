@@ -1716,8 +1716,7 @@ async def _exec_read_static_pages(
     max_chars: int | None = None,
     offset: int | None = None,
 ) -> str:
-    import site_publishing
-
+    from runtime_tools import site_publishing
     if slug:
         data = await asyncio.to_thread(site_publishing.get_static_page, slug.strip().lower())
         if not data:
@@ -2381,7 +2380,7 @@ async def _exec_delegate(
     parent_task_id: int | None = None,
     verification: dict | None = None,
 ) -> str:
-    from task_store import create_task_in_db
+    from telegram.task_store import create_task_in_db
 
     agent = (agent or "").strip().lower()
     if agent not in _DELEGATABLE_AGENTS:
@@ -2460,7 +2459,7 @@ async def _exec_multi_delegate(
     priority: str = "normal",
 ) -> str:
     """Delegate multiple tasks in parallel with automatic synthesis."""
-    from task_store import create_task_in_db
+    from telegram.task_store import create_task_in_db
     from db import execute as db_execute
 
     if len(tasks) < 2:
@@ -2908,7 +2907,7 @@ def build_task_context_tools(task_id: int, user_id: int, depth: int = 0, mission
         if not mission_id:
             return "No mission linked to this task — message not posted."
         try:
-            from redis_state import post_to_board
+            from memory_store.redis_state import post_to_board
             agent_type_str = ""
             try:
                 from llm.runtime_context import current_task_ctx
@@ -2927,7 +2926,7 @@ def build_task_context_tools(task_id: int, user_id: int, depth: int = 0, mission
         if not mission_id:
             return "No mission linked to this task."
         try:
-            from redis_state import read_board
+            from memory_store.redis_state import read_board
             from datetime import datetime, timezone
             messages = read_board(mission_id)
             if not messages:

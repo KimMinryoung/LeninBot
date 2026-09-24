@@ -139,7 +139,7 @@ def create_mission(user_id: int, title: str, task_id: int | None = None) -> dict
         try:
             task_rows = _query("SELECT id FROM telegram_tasks WHERE mission_id = %s", (old_mission_id,))
             task_ids = [r["id"] for r in task_rows] if task_rows else []
-            from redis_state import cleanup_mission
+            from memory_store.redis_state import cleanup_mission
             cleanup_mission(old_mission_id, task_ids)
         except Exception:
             logger.debug("Redis cleanup failed for superseded mission #%d", old_mission_id, exc_info=True)
@@ -173,7 +173,7 @@ def close_mission(mission_id: int) -> str:
             (mission_id,),
         )
         task_ids = [r["id"] for r in task_rows] if task_rows else []
-        from redis_state import cleanup_mission
+        from memory_store.redis_state import cleanup_mission
         cleanup_mission(mission_id, task_ids)
     except Exception:
         pass  # best-effort cleanup

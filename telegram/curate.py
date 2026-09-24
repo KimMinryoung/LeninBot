@@ -28,7 +28,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from content_fetch.url_security import UnsafeUrlError
 from content_fetch.url_security import validate_public_http_url as _validate_public_http_url
 from db import execute as _execute, query as _query, query_one as _query_one
-from task_store import create_task_in_db, load_task_metadata as _load_task_metadata
+from telegram.task_store import create_task_in_db, load_task_metadata as _load_task_metadata
 from tool_gateway.results import ToolFailure
 
 logger = logging.getLogger(__name__)

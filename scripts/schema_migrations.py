@@ -38,7 +38,7 @@ def _roleplay_tables() -> None:
 
 
 def _research_documents() -> None:
-    from research_store import ensure_research_table
+    from runtime_tools.research_store import ensure_research_table
 
     ensure_research_table()
 
@@ -54,13 +54,13 @@ def _translation_freshness() -> None:
 
 
 def _publication_records() -> None:
-    from publication_records import ensure_publish_record_table
+    from runtime_tools.publication_records import ensure_publish_record_table
 
     ensure_publish_record_table()
 
 
 def _site_publishing() -> None:
-    from site_publishing import _ensure_hub_table, _ensure_static_page_table
+    from runtime_tools.site_publishing import _ensure_hub_table, _ensure_static_page_table
 
     _ensure_hub_table()
     _ensure_static_page_table()
@@ -135,7 +135,7 @@ def _llm_audit_log() -> None:
 
 
 def _audit_sink_role() -> None:
-    from audit_sink import ensure_audit_role
+    from ops.audit_sink import ensure_audit_role
 
     print(ensure_audit_role())
 

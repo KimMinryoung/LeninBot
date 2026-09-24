@@ -283,7 +283,7 @@ def verify_installed(name: str) -> bool:
     """skills_loader로 설치된 스킬이 정상 로드되는지 확인."""
     sys.path.insert(0, str(PROJECT_ROOT))
     try:
-        import skills_loader
+        from llm import skills_loader
         skills_loader._skills_loaded = False
         skills = skills_loader.load_skills()
         names = [s["name"] for s in skills]

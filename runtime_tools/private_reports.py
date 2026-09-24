@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from db import query as db_query, query_one as db_query_one
-import research_store
+from runtime_tools import research_store
 from tool_gateway.results import ToolFailure
 
 logger = logging.getLogger(__name__)
@@ -322,7 +322,7 @@ async def _exec_publish_private_report(
     if broadcast:
         try:
             from telegram.channel_broadcast import maybe_broadcast_autonomous_publication
-            from publication_records import record_publication_broadcast_sync
+            from runtime_tools.publication_records import record_publication_broadcast_sync
 
             br = await maybe_broadcast_autonomous_publication(
                 title=row["title"],

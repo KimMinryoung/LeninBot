@@ -13,10 +13,10 @@ from datetime import datetime, timezone
 from aiogram import Bot
 from aiogram.types import BufferedInputFile
 from db import query as _query, execute as _execute, query_one as _query_one
-from task_store import load_task_metadata
+from telegram.task_store import load_task_metadata
 
 from shared import KST
-from prompt_context import (
+from llm.prompt_context import (
     bounded_context_text,
     format_agent_execution_history,
     format_dependency_results,
@@ -1149,7 +1149,7 @@ async def _maybe_redelegate_after_verification_failure(bot: Bot, task: dict, ver
     restart_state = metadata.get(_RESTART_PHASE_KEY) if isinstance(metadata.get(_RESTART_PHASE_KEY), dict) else None
 
     if needs_telegram_restart:
-        from task_store import create_task_in_db
+        from telegram.task_store import create_task_in_db
         restart_state = {
             "restart_initiated": True, "restart_target_service": "telegram",
             "restart_completed": False, "post_restart_phase": "verification",
@@ -1213,7 +1213,7 @@ async def _maybe_redelegate_after_verification_failure(bot: Bot, task: dict, ver
     parent_result = (row or {}).get("result") or ""
     parent_summary = _extract_summary(parent_result, 800) if parent_result else ""
 
-    from task_store import create_task_in_db
+    from telegram.task_store import create_task_in_db
     retry_instruction = (
         f"[AUTO-RETRY after verification failure for task #{task_id}]\n"
         f"Original task:\n{original_content}\n\n"
@@ -1311,7 +1311,7 @@ def _build_task_context_content(
     history_ctx = ""
     if parent_task_id:
         try:
-            from redis_state import format_task_chain_for_context
+            from memory_store.redis_state import format_task_chain_for_context
             history_ctx = format_task_chain_for_context(parent_task_id, provider=context_provider)
         except Exception as e:
             logger.debug("Task chain context load failed: %s", e)
@@ -1352,7 +1352,7 @@ def _build_task_context_content(
     board_ctx = ""
     if mission_id:
         try:
-            from redis_state import format_board_for_context
+            from memory_store.redis_state import format_board_for_context
             board_ctx = format_board_for_context(mission_id, provider=context_provider)
         except Exception as e:
             logger.debug("Board context load failed: %s", e)
@@ -1492,14 +1492,14 @@ async def _persist_task_success(
 
     # Clean up Redis live state (PG now has the record)
     try:
-        from redis_state import unregister_active_task
+        from memory_store.redis_state import unregister_active_task
         unregister_active_task(task_id)
     except Exception:
         pass
 
     # Save task summary to Redis for chain context (7-day TTL)
     try:
-        from redis_state import save_task_summary
+        from memory_store.redis_state import save_task_summary
         save_task_summary(
             task_id,
             parent_task_id=task.get("parent_task_id"),
@@ -1628,7 +1628,7 @@ async def _handle_task_failure(
             logger.debug("on_complete callback failed for task %d", task_id)
     # Clean up Redis live state on failure
     try:
-        from redis_state import unregister_active_task
+        from memory_store.redis_state import unregister_active_task
         unregister_active_task(task_id)
     except Exception:
         pass
@@ -2102,7 +2102,7 @@ async def _hand_off_interrupted_task(
     # This feeds <task-chain> so the child sees every tool call
     # including the final restart_service call.
     try:
-        from redis_state import save_task_summary, get_task_progress, clear_task_progress
+        from memory_store.redis_state import save_task_summary, get_task_progress, clear_task_progress
         progress_log = ""
         entries = get_task_progress(task_id)
         if entries:
@@ -2296,7 +2296,7 @@ async def system_monitor(
         add_alert_fn("KG (Neo4j) unreachable — graph search/write unavailable")
 
     # 2. Initial Redis check
-    from redis_state import redis_available
+    from memory_store.redis_state import redis_available
     redis_is_up = await asyncio.to_thread(redis_available)
     if not redis_is_up:
         add_alert_fn("Redis unreachable — live task progress tracking unavailable")
@@ -2554,7 +2554,7 @@ async def task_worker(bot: Bot, *, process_task_fn, runtime_state: dict | None =
                 if runtime_state is not None:
                     runtime_state.get("active_task_ids", set()).discard(task_id)
                 try:
-                    from redis_state import unregister_active_task
+                    from memory_store.redis_state import unregister_active_task
                     unregister_active_task(task_id)
                 except Exception:
                     pass
@@ -2602,7 +2602,7 @@ async def task_worker(bot: Bot, *, process_task_fn, runtime_state: dict | None =
                 if runtime_state is not None:
                     runtime_state.get("active_task_ids", set()).add(task_id)
                 try:
-                    from redis_state import register_active_task
+                    from memory_store.redis_state import register_active_task
                     register_active_task(task_id, task.get("agent_type", ""), task.get("user_id", 0))
                 except Exception:
                     pass

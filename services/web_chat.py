@@ -22,7 +22,7 @@ from shared import KST
 from bot_config import (
     _claude, _openai_client, _deepseek_anthropic_client, _kimi_client,
 )
-from prompt_context import uses_xml
+from llm.prompt_context import uses_xml
 from llm.runtime_profile import RuntimeProfile, resolve_runtime_profile
 from runtime_tools.registry import TOOLS, TOOL_HANDLERS
 from self_runtime.tools import READ_SELF_ALIASES
@@ -1251,7 +1251,7 @@ async def handle_web_chat(
         web_request_id, session_id, provider, profile.model_id,
     )
     try:
-        from redis_state import register_active_web_chat
+        from memory_store.redis_state import register_active_web_chat
         register_active_web_chat(web_request_id, session_id=session_id, fingerprint=fingerprint)
     except Exception:
         pass
@@ -1321,7 +1321,7 @@ async def handle_web_chat(
             }))
         finally:
             try:
-                from redis_state import unregister_active_web_chat
+                from memory_store.redis_state import unregister_active_web_chat
                 unregister_active_web_chat(web_request_id)
             except Exception:
                 pass

@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from prompt_context import (
+from llm.prompt_context import (
     format_agent_execution_history,
     format_agent_board,
     format_mission_context,
@@ -67,7 +67,7 @@ def _assert_prompt_context() -> None:
 
     # Since d0f9039 synthesis sees each subtask's status and verification plus
     # guidance that a done status is not goal completion.
-    from prompt_context import _SYNTHESIS_GUIDANCE
+    from llm.prompt_context import _SYNTHESIS_GUIDANCE
 
     subtasks = [{
         "id": 11, "agent_type": "scout", "content": "Find facts", "result": "Facts",

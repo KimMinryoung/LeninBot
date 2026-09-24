@@ -178,7 +178,7 @@ class SearchTests(unittest.TestCase):
         self.assertIsNone(out.result_metadata['empty'])
 
     def test_audit_metadata_round_trip_and_old_unknown(self):
-        import audit_sink
+        from ops import audit_sink
         row = {'tool_name': 'knowledge_graph_search', 'decision': 'allow',
                'result_metadata': {'path': 'semantic', 'result_count': 0, 'empty': True, 'fallback': False}}
         normalized = audit_sink.normalize_row('tool', row)

@@ -50,7 +50,7 @@ def main() -> int:
         _INDEXES,
         redact_args,
     )
-    from audit_sink import _insert_sql
+    from ops.audit_sink import _insert_sql
     audit_insert = _insert_sql("tool")
 
     print("== registry: every tool has a risk class ==")
@@ -166,7 +166,7 @@ def main() -> int:
     _force_mode(policy.ENFORCE)
 
     print("== rate limiting (enforce) ==")
-    from redis_state import redis_available
+    from memory_store.redis_state import redis_available
 
     _force_mode(policy.ENFORCE)
     # Read the configured 'pay' cap so the test tracks policy, not a literal.

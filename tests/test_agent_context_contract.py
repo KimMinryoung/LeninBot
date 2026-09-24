@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 import telegram.tasks as tasks
-from prompt_context import format_subtask_results
+from llm.prompt_context import format_subtask_results
 
 
 class TaskContextTests(unittest.TestCase):
@@ -19,7 +19,7 @@ class TaskContextTests(unittest.TestCase):
         self.stack.enter_context(patch.dict(sys.modules, {
             "memory_store.experiential": SimpleNamespace(recall_experiences_block=self.recall),
             "kg_runtime.recall": SimpleNamespace(entity_gated_kg_block=self.kg),
-            "redis_state": SimpleNamespace(
+            "memory_store.redis_state": SimpleNamespace(
                 format_board_for_context=lambda *a, **kw: "",
                 format_task_chain_for_context=lambda *a, **kw: "parent evidence",
             ),

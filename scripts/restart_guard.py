@@ -36,7 +36,7 @@ def _db_active_tasks() -> list[dict]:
 
 def _redis_active_tasks() -> list[dict]:
     try:
-        from redis_state import get_all_active_tasks
+        from memory_store.redis_state import get_all_active_tasks
 
         return get_all_active_tasks()
     except Exception as e:
@@ -45,7 +45,7 @@ def _redis_active_tasks() -> list[dict]:
 
 def _redis_active_web_chats() -> list[dict]:
     try:
-        from redis_state import get_active_web_chats
+        from memory_store.redis_state import get_active_web_chats
 
         return get_active_web_chats()
     except Exception as e:

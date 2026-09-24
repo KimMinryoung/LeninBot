@@ -243,7 +243,7 @@ def _format_match_snippets(text: str, spans: list[tuple[int, int]], *, context_c
 def _invalidate_cache_sync(kind: str, post_id: int) -> dict[str, Any]:
     """Blocking cache cleanup. Returns {ok, deleted, reason?}. Redis-down is
     soft-failure: we report it back to the agent instead of raising."""
-    from redis_state import get_redis
+    from memory_store.redis_state import get_redis
 
     cfg = _KIND_CONFIG[kind]
     if not cfg.get("entry_key") and not cfg.get("index_keys"):
@@ -324,7 +324,7 @@ def _cloudflare_purge_paths(kind: str, target: int | str) -> list[str]:
 
 
 def _validate_static_page_updates(provided: dict[str, Any]) -> str | None:
-    from site_publishing import _validate_inner_html
+    from runtime_tools.site_publishing import _validate_inner_html
 
     if provided.get("title") is not None and not str(provided["title"]).strip():
         return "Error: title must not be empty for kind='static_page'."
@@ -344,7 +344,7 @@ def _validate_static_page_updates(provided: dict[str, Any]) -> str | None:
 
 
 def _ensure_static_page_storage_sync() -> None:
-    from site_publishing import _ensure_static_page_table
+    from runtime_tools.site_publishing import _ensure_static_page_table
 
     _ensure_static_page_table()
 

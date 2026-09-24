@@ -23,7 +23,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from secrets_loader import get_secret
-from site_publishing import STATIC_PAGES_DIR, _SLUG_RE, _validate_inner_html
+from runtime_tools.site_publishing import STATIC_PAGES_DIR, _SLUG_RE, _validate_inner_html
 
 TRANSLATION_DIR = ROOT / "output" / "static_page_translations"
 DEEPL_MAX_REQUEST_BYTES = 120_000

@@ -35,7 +35,7 @@ class RetryTests(unittest.IsolatedAsyncioTestCase):
             self.created.append(row)
             return {"status": "ok", "task_id": task_id}
 
-        self.create = self.enterContext(patch("task_store.create_task_in_db", side_effect=create))
+        self.create = self.enterContext(patch("telegram.task_store.create_task_in_db", side_effect=create))
         self.restart = self.enterContext(patch("runtime_tools.registry._exec_restart_service", new_callable=AsyncMock,
                                               return_value="✅ leninbot-telegram: restarted"))
         self.persist_restart = self.enterContext(patch.object(tasks, "persist_task_restart_state"))
@@ -145,8 +145,8 @@ class RetryTests(unittest.IsolatedAsyncioTestCase):
                                                "restart_target_service": "telegram"}})
         row.update(created_at=datetime.now(timezone.utc), depth=1, scratchpad="")
         query = Mock(side_effect=[[row], [{"id": 2}]])
-        with patch.object(tasks, "_query", query), patch("redis_state.get_task_progress", return_value=[]), \
-                patch("redis_state.save_task_summary"), patch("redis_state.clear_task_progress"):
+        with patch.object(tasks, "_query", query), patch("memory_store.redis_state.get_task_progress", return_value=[]), \
+                patch("memory_store.redis_state.save_task_summary"), patch("memory_store.redis_state.clear_task_progress"):
             result = await tasks.recover_processing_tasks_on_startup()
         self.assertEqual(result["handed_off"], 1)
         self.assertIn("metadata", query.call_args_list[0].args[0])
@@ -161,8 +161,8 @@ class RetryTests(unittest.IsolatedAsyncioTestCase):
                                                "restart_target_service": "api"}})
         row.update(created_at=datetime.now(timezone.utc), depth=1, scratchpad="")
         query = Mock(side_effect=[[row], [{"id": 2}]])
-        with patch.object(tasks, "_query", query), patch("redis_state.get_task_progress", return_value=[]), \
-                patch("redis_state.save_task_summary"), patch("redis_state.clear_task_progress"):
+        with patch.object(tasks, "_query", query), patch("memory_store.redis_state.get_task_progress", return_value=[]), \
+                patch("memory_store.redis_state.save_task_summary"), patch("memory_store.redis_state.clear_task_progress"):
             await tasks.recover_processing_tasks_on_startup()
         saved = json.loads(query.call_args_list[1].args[1][7])
         self.assertFalse(saved["restart_state"]["restart_completed"])

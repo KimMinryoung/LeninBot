@@ -283,7 +283,7 @@ class Provenance(unittest.TestCase):
             self.assertFalse((output / source.name).exists())
 
     def test_source_upsert_invalidates_stale_translation(self):
-        import research_store
+        from runtime_tools import research_store
         with patch.object(research_store, 'ensure_research_table'), patch.object(research_store, 'get_document', return_value={}), \
              patch.object(research_store, 'db_query_one', return_value={}) as query:
             research_store.upsert_document(filename='a.md', title='A', markdown='new')

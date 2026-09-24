@@ -89,7 +89,7 @@ def _window_consume_atomic(
 ) -> RateWindowResult:
     """Atomically evict, count, decide, and consume one sliding-window slot."""
     try:
-        from redis_state import get_redis
+        from memory_store.redis_state import get_redis
 
         r = get_redis()
         if r is None:

@@ -17,7 +17,7 @@ from pathlib import Path
 from identity.prompts import CORE_IDENTITY, EXTERNAL_SOURCE_RULE
 from shared import KST
 from agents.base import CHAT_AUDIENCE_BLOCK, load_political_line_body
-from skills_loader import build_skills_prompt
+from llm.skills_loader import build_skills_prompt
 from db import query as _query, execute as _execute, query_one as _query_one, get_conn as _get_conn
 from psycopg2.extras import RealDictCursor
 
@@ -2555,7 +2555,7 @@ async def bot_main():
             # Merge in-memory and Redis active task sets for comprehensive checkpoint
             active_ids = set(_runtime_state.get("active_task_ids", set()))
             try:
-                from redis_state import get_active_task_ids
+                from memory_store.redis_state import get_active_task_ids
                 active_ids |= get_active_task_ids()
             except Exception:
                 pass

@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-import research_store
+from runtime_tools import research_store
 from translation_runtime import TranslationProviderError
 from translation_runtime.batch_state import BatchState
 from db import execute_returning_rowcount, query as db_query

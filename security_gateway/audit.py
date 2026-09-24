@@ -20,8 +20,7 @@ import logging
 import queue
 import re
 
-import audit_sink
-
+from ops import audit_sink
 logger = logging.getLogger("security_gateway.audit")
 
 _ARGS_SUMMARY_CAP = 2000

@@ -59,9 +59,9 @@ record_llm_call(surface=..., caller=..., model=..., tokens_in=..., tokens_out=..
 
 이전에는 행을 만든 모든 프로세스가 직접 INSERT 했다. 그래서 서비스마다 전권 DB
 비밀번호가 필요했고, 시크릿이 없는 애드혹 스크립트는 감사 행을 조용히 버렸다
-(2026-09-03 재임베딩 스크립트가 그 예). 이제 `audit_sink.py` 하나가 양쪽 장부
+(2026-09-03 재임베딩 스크립트가 그 예). 이제 `ops/audit_sink.py` 하나가 양쪽 장부
 (`llm_audit_log`, `tool_audit_log`)의 컬럼 화이트리스트·캡·INSERT를 갖고, 기록
-경로는 세 가지 모드로 갈린다 (`audit_sink.mode()`):
+경로는 세 가지 모드로 갈린다 (`ops.audit_sink.mode()`):
 
 | 모드 | 조건 | 동작 |
 |---|---|---|

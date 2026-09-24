@@ -36,7 +36,6 @@
 | `llm_call_registry.md` | 원샷 호출 등록과 실행 정책·핫리로드 |
 | `jev_system_one_adoption.md` | Jev 분류·인용 판정, 장애 정책, 라우팅·KG 적용 범위와 평가 한계 |
 | `mcp_gateway.md` | Codex/Claude Code 같은 개발용 MCP client에 노출하는 읽기 중심 gateway |
-| `refactoring_handoff.md` | 진단했으나 적용하지 않은 리팩터링 항목의 임시 인수인계 — 처리한 항목은 주제 문서로 흡수하고 삭제 |
 | `hot_reload_prompts.md` | 런타임 prompt overlay와 재시작 필요 경계 |
 | `roleplay_game_balance.md` | 역할극 회복 이벤트·활동 비용·반복 보상 제한·극단값 완화·질병 상태 |
 | `roleplay_jev.md` | 예조프 JEV 자동 분류·LLM 시간 추정·코드 수치 계산 |

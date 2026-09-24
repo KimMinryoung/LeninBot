@@ -178,7 +178,7 @@ def check_cancelled(task_id: int | None):
     if task_id is None:
         return
     try:
-        from redis_state import get_redis
+        from memory_store.redis_state import get_redis
         r = get_redis()
         if r.exists(f"task:{task_id}:cancel"):
             r.delete(f"task:{task_id}:cancel")
@@ -192,7 +192,7 @@ def check_cancelled(task_id: int | None):
 def request_cancel(task_id: int):
     """Set a cancel flag in Redis for a running task."""
     try:
-        from redis_state import get_redis
+        from memory_store.redis_state import get_redis
         r = get_redis()
         r.set(f"task:{task_id}:cancel", "1", ex=300)  # 5 min TTL
     except Exception:
@@ -206,7 +206,7 @@ def update_redis_state(task_id: int | None, round_num: int, total_cost: float):
     if task_id is None:
         return
     try:
-        from redis_state import set_task_state
+        from memory_store.redis_state import set_task_state
         set_task_state(task_id, round_num, total_cost, status="running")
     except Exception:
         pass
@@ -220,7 +220,7 @@ def save_redis_progress(
     if task_id is None:
         return
     try:
-        from redis_state import save_task_progress
+        from memory_store.redis_state import save_task_progress
         save_task_progress(task_id, round_num, tool_name, input_summary, result, is_error)
     except Exception:
         pass

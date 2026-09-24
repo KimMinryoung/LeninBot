@@ -53,8 +53,7 @@ import threading
 import time
 from pathlib import Path
 
-import audit_sink
-
+from ops import audit_sink
 logger = logging.getLogger("llm_gateway.audit")
 
 CONFIG_DIR = Path(__file__).resolve().parent.parent / "config"
@@ -316,8 +315,7 @@ def _today_spend() -> dict[str, float] | None:
         if _spend_cache is not None and now - _spend_cache_at < _SPEND_CACHE_TTL_SEC:
             return _spend_cache
     try:
-        import audit_sink
-
+        from ops import audit_sink
         if audit_sink.mode() == "proxy":
             spend = audit_sink.fetch_today_spend()
             if spend is None:
@@ -498,8 +496,7 @@ def _emit(row: dict, *, warn: bool = False) -> None:
         )
         if os.getenv("LENINBOT_LLM_AUDIT_DB", "1") == "0":
             return
-        import audit_sink
-
+        from ops import audit_sink
         if not audit_sink.is_service_process():
             # Ad-hoc scripts now reach the ledger through the proxy sink;
             # mark them so cost reports can separate them from services.

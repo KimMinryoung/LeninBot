@@ -40,7 +40,7 @@ from jobs.autonomous_publication_controls import (
     validate_autonomous_research_publication,
     was_staged_this_tick,
 )
-import research_store
+from runtime_tools import research_store
 from tool_gateway.results import ToolFailure
 from runtime_tools.research_review import review_research_document
 
@@ -477,7 +477,7 @@ def _cache_safe_key(filename: str) -> str:
 
 def _invalidate_cache_sync(filename: str) -> dict[str, Any]:
     """Drop the per-file and list caches in Redis. Returns {ok, deleted, reason?}."""
-    from redis_state import get_redis
+    from memory_store.redis_state import get_redis
 
     r = get_redis()
     if r is None:
@@ -882,7 +882,7 @@ async def _exec_research_document_publish_public(
                 broadcast_note = f"\nTelegram channel broadcast: sent ({br.sent_count})"
                 if getattr(br, "message_ids", None):
                     try:
-                        from publication_records import record_publication_broadcast_sync
+                        from runtime_tools.publication_records import record_publication_broadcast_sync
 
                         await asyncio.to_thread(
                             record_publication_broadcast_sync,
@@ -1194,7 +1194,7 @@ async def _exec_research_document_edit_public(
     )
     delete_note = ""
     try:
-        from publication_records import delete_broadcasts_for_slug
+        from runtime_tools.publication_records import delete_broadcasts_for_slug
 
         delete_result = await delete_broadcasts_for_slug(_public_slug(fname))
         delete_note = (

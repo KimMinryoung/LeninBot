@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from site_publishing import localize_static_page
+from runtime_tools.site_publishing import localize_static_page
 
 
 def main() -> int:

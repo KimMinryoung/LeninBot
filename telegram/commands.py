@@ -21,7 +21,7 @@ from aiogram.filters import Command
 
 from shared import KST
 from db import query as _query, execute as _execute, query_one as _query_one, get_conn as _get_conn
-from task_store import create_task_in_db
+from telegram.task_store import create_task_in_db
 from psycopg2.extras import RealDictCursor
 from services.replicate_image import (
     generate_image,

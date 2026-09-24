@@ -47,7 +47,7 @@ async def _check_detached_run_persists(*, regenerate: bool = False, detach: bool
     }))
     saved_feedback = patches.enter_context(patch("services.web_chat.save_web_chat_feedback"))
     updated = patches.enter_context(patch("services.web_chat._update_chat_answer", return_value=None if save_fails else 4242))
-    original_redis = sys.modules.get("redis_state")
+    original_redis = sys.modules.get("memory_store.redis_state")
     original_to_thread = asyncio.to_thread
     release_model = asyncio.Event()
     model_started = asyncio.Event()
@@ -98,7 +98,7 @@ async def _check_detached_run_persists(*, regenerate: bool = False, detach: bool
         web_chat.chat_with_tools = fake_chat
         web_chat._log_chat = fake_log
         web_chat._deepseek_anthropic_client = object()
-        sys.modules["redis_state"] = SimpleNamespace(
+        sys.modules["memory_store.redis_state"] = SimpleNamespace(
             register_active_web_chat=lambda *args, **kwargs: None,
             unregister_active_web_chat=lambda *args, **kwargs: None,
         )
@@ -158,9 +158,9 @@ async def _check_detached_run_persists(*, regenerate: bool = False, detach: bool
         for name, value in originals.items():
             setattr(web_chat, name, value)
         if original_redis is None:
-            sys.modules.pop("redis_state", None)
+            sys.modules.pop("memory_store.redis_state", None)
         else:
-            sys.modules["redis_state"] = original_redis
+            sys.modules["memory_store.redis_state"] = original_redis
 
 
 async def _check_vector_timeout() -> None:

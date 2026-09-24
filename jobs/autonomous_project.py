@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 from dotenv import load_dotenv
 
 from db import execute as db_execute, query as db_query, query_one as db_query_one
-from prompt_context import fenced_text, uses_xml
+from llm.prompt_context import fenced_text, uses_xml
 from shared import KST
 from jobs import practice_output as practice
 
@@ -1365,7 +1365,7 @@ async def _diagnose_staged_drafts_for_tick(project: dict, provider: str, chat_fn
     failure degrades to no injection — the tick itself must never break."""
     from bot_config import get_reflexion_autonomous_publish
     from llm.reflexion import diagnose, diagnosis_is_pass
-    from research_store import get_document
+    from runtime_tools.research_store import get_document
 
     if not get_reflexion_autonomous_publish():
         return None
