@@ -24,7 +24,10 @@ def _read(path: str) -> str:
 def test_deepseek_anthropic_client_is_configured() -> None:
     source = _read("bot_config.py")
     assert "DEEPSEEK_ANTHROPIC_BASE_URL" in source
-    assert "_deepseek_anthropic_client = anthropic.AsyncAnthropic" in source
+    # Wrapped in the audit layer since 2026-08-09 (a5323cd) so every importer
+    # of the shared client is metered.
+    assert "_deepseek_anthropic_client = AuditedAsyncAnthropic(" in source
+    assert 'caller="deepseek_anthropic_direct"' in source
     assert "https://api.deepseek.com/anthropic" in source
 
 
@@ -52,8 +55,10 @@ def test_a2a_deepseek_routes_to_anthropic_harness() -> None:
 
 def test_browser_worker_deepseek_routes_to_anthropic_harness() -> None:
     source = _read("browser/worker.py")
-    assert "DEEPSEEK_ANTHROPIC_BASE_URL" in source
-    assert "anthropic.AsyncAnthropic" in source
+    # Since 3e128f8 the worker borrows bot_config's audited client instead of
+    # building an anonymous anthropic.AsyncAnthropic of its own.
+    assert "from bot_config import _deepseek_anthropic_client as client" in source
+    assert "anthropic.AsyncAnthropic" not in source
     assert 'if provider == "deepseek":' in source
     assert 'resolve_inference_extra(call_policy, "deepseek")' in source
     assert "output_config=deepseek_params.get" in source
@@ -118,21 +123,28 @@ def test_thinking_blocks_are_replayed_not_coerced_to_text() -> None:
 
 
 def test_deepseek_pricing_uses_deepseek_rows() -> None:
-    pro = _pricing_for("deepseek-v4-pro")
-    flash = _pricing_for("deepseek-v4-flash")
-    assert pro["input"] == 0.435 / 1_000_000
-    assert pro["output"] == 0.87 / 1_000_000
-    assert pro["cache_read"] == 0.003625 / 1_000_000
-    assert flash["cache_read"] == 0.0028 / 1_000_000
+    # DeepSeek pricing is time-of-day tiered since 2026-08-16 (36cdb86) and
+    # V4.1 since 2026-09-10, so the flat V4 constants are gone; tier math is
+    # covered by tests/test_deepseek_pricing.py. Here: the agent loop resolves
+    # DeepSeek ids to the current DeepSeek row, not the Claude fallback.
+    from llm.provider_registry import deepseek_price_triple
 
+    for model in ("deepseek-v4-pro", "deepseek-v4-flash"):
+        miss, out, hit = deepseek_price_triple(model)
+        row = _pricing_for(model)
+        assert row["input"] == miss / 1_000_000, model
+        assert row["output"] == out / 1_000_000, model
+        assert row["cache_read"] == hit / 1_000_000, model
+        assert row != _pricing_for("claude-sonnet-5"), model
+
+    miss, out, _hit = deepseek_price_triple("deepseek-v4-pro")
     usage = SimpleNamespace(
         input_tokens=1_000_000,
         output_tokens=1_000_000,
         cache_creation_input_tokens=0,
         cache_read_input_tokens=0,
     )
-    assert round(_calculate_cost(usage, "deepseek-v4-pro"), 3) == 1.305
-
+    assert round(_calculate_cost(usage, "deepseek-v4-pro"), 6) == round(miss + out, 6)
 
 if __name__ == "__main__":
     test_deepseek_anthropic_client_is_configured()
