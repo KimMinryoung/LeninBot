@@ -1117,7 +1117,6 @@ from self_runtime.tools import SELF_TOOLS, SELF_TOOL_HANDLERS
 TOOLS.extend(SELF_TOOLS)
 TOOLS.append(MISSION_TOOL)
 TOOL_HANDLERS.update(SELF_TOOL_HANDLERS)
-TOOLS = dedupe_tool_registry(TOOLS)
 
 # ── Finance data tool (real-time market prices) ──────────────────────
 from runtime_tools.finance import FINANCE_TOOL, FINANCE_TOOL_HANDLER
@@ -1573,27 +1572,6 @@ TOOLS.extend(A2A_TOOLS)
 TOOL_HANDLERS.update(A2A_TOOL_HANDLERS)
 
 
-# ── Schema normalization ─────────────────────────────────────────────
-#
-# Runs last — after every module-level TOOLS.append/extend above — so every
-# registered tool acquires ``additionalProperties: false`` unless it
-# deliberately opts out. Effects per provider:
-#   * llama-server: constrains grammar-based tool-call decoding so Qwen
-#     can't emit parameter names outside the declared schema.
-#   * Anthropic: treats it as advisory (no behavioral change).
-#   * OpenAI: strict mode is enabled only when the schema is also
-#     "strict-safe" (see openai_tool_loop._convert_tool_anthropic_to_openai).
-
-def _normalize_tool_schemas_inplace(tools: list[dict]) -> None:
-    for t in tools:
-        schema = t.get("input_schema")
-        if not isinstance(schema, dict):
-            continue
-        if schema.get("type") == "object" and "additionalProperties" not in schema:
-            schema["additionalProperties"] = False
-
-
-_normalize_tool_schemas_inplace(TOOLS)
 
 
 from mail_runtime.inbox import PREPARE_MAIL_BRIEFING_TOOL, prepare_mail_briefing
@@ -1612,3 +1590,27 @@ TOOL_HANDLERS["roleplay_state"] = roleplay_state
 from runtime_tools.roleplay_memory import ROLEPLAY_PERSON_TOOL, roleplay_person
 TOOLS.append(ROLEPLAY_PERSON_TOOL)
 TOOL_HANDLERS["roleplay_person"] = roleplay_person
+
+
+# ── Schema normalization ─────────────────────────────────────────────
+#
+# Runs last — after every module-level TOOLS.append/extend above and after
+# the name dedupe — so every registered tool acquires
+# ``additionalProperties: false`` unless it deliberately opts out. Effects per provider:
+#   * llama-server: constrains grammar-based tool-call decoding so Qwen
+#     can't emit parameter names outside the declared schema.
+#   * Anthropic: treats it as advisory (no behavioral change).
+#   * OpenAI: strict mode is enabled only when the schema is also
+#     "strict-safe" (see openai_tool_loop._convert_tool_anthropic_to_openai).
+
+def _normalize_tool_schemas_inplace(tools: list[dict]) -> None:
+    for t in tools:
+        schema = t.get("input_schema")
+        if not isinstance(schema, dict):
+            continue
+        if schema.get("type") == "object" and "additionalProperties" not in schema:
+            schema["additionalProperties"] = False
+
+
+TOOLS = dedupe_tool_registry(TOOLS)
+_normalize_tool_schemas_inplace(TOOLS)
