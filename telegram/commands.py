@@ -2373,6 +2373,231 @@ def _format_tick_tool_log_header(event: dict) -> str:
     return _format_autonomous_event_time(event.get("created_at"))
 
 
+async def _project_show(message: Message, project_id: int, project: dict):
+    """/project <id> show|status: project detail with recent tick signals."""
+    note_count = await asyncio.to_thread(
+        _query_one,
+        "SELECT COUNT(*)::int AS n FROM autonomous_project_notes WHERE project_id = %s",
+        (project_id,),
+    ) or {"n": 0}
+    pub_count = await asyncio.to_thread(
+        _query_one,
+        """
+        SELECT COUNT(*)::int AS n
+          FROM autonomous_project_events
+         WHERE project_id = %s
+           AND event_type = 'publication_created'
+           AND created_at >= NOW() - INTERVAL '24 hours'
+        """,
+        (project_id,),
+    ) or {"n": 0}
+    recent_notes = await asyncio.to_thread(
+        _query,
+        """
+        SELECT turn, text, sources, created_at
+          FROM autonomous_project_notes
+         WHERE project_id = %s
+         ORDER BY created_at DESC, id DESC
+         LIMIT 3
+        """,
+        (project_id,),
+    )
+    pending_advisories = await asyncio.to_thread(
+        _query,
+        """
+        SELECT id, content, created_at
+          FROM autonomous_project_advisories
+         WHERE project_id = %s
+           AND consumed_at IS NULL
+         ORDER BY created_at ASC, id ASC
+         LIMIT 5
+        """,
+        (project_id,),
+    )
+    last_staged_draft = await asyncio.to_thread(
+        _query_one,
+        """
+        SELECT ev.content, ev.meta, ev.created_at
+          FROM autonomous_project_events ev
+          JOIN research_documents rd
+            ON rd.id::text = ev.meta->>'research_document_id'
+            OR rd.filename = ev.meta->>'filename'
+            OR rd.slug = ev.meta->>'slug'
+         WHERE ev.project_id = %s
+           AND ev.event_type = 'research_draft_staged'
+           AND rd.status = 'staged'
+         ORDER BY ev.created_at DESC, ev.id DESC
+         LIMIT 1
+        """,
+        (project_id,),
+    )
+    last_tick_error = await asyncio.to_thread(
+        _query_one,
+        """
+        SELECT content, meta, created_at
+          FROM autonomous_project_events
+         WHERE project_id = %s
+           AND event_type = 'tick_error'
+         ORDER BY created_at DESC, id DESC
+         LIMIT 1
+        """,
+        (project_id,),
+    )
+    last_no_action = await asyncio.to_thread(
+        _query_one,
+        """
+        SELECT content, meta, created_at
+          FROM autonomous_project_events
+         WHERE project_id = %s
+           AND event_type = 'tick_no_durable_action'
+         ORDER BY created_at DESC, id DESC
+         LIMIT 1
+        """,
+        (project_id,),
+    )
+    last_tick_log = await asyncio.to_thread(
+        _query_one,
+        """
+        SELECT content, meta, created_at
+          FROM autonomous_project_events
+         WHERE project_id = %s
+           AND event_type = 'tick_tool_log'
+         ORDER BY created_at DESC, id DESC
+         LIMIT 1
+        """,
+        (project_id,),
+    )
+    last = project["last_run_at"].astimezone(KST).strftime("%m/%d %H:%M") if project["last_run_at"] else "never"
+    lines = [
+        f"자율 프로젝트 #{project_id}",
+        f"{project['title']}",
+        f"state={project['state']} turn={project['turn_count']} last={last}",
+        f"publishing={pub_count['n']}/{project['max_publications_per_day']} per 24h, cooldown={project['cooldown_after_publish_minutes']}m",
+        f"topic: {project['topic']}",
+        "",
+        "goal:",
+        str(project["goal"])[:1200],
+        "",
+        f"pending_advice: {len(pending_advisories)}",
+    ]
+    for advisory in pending_advisories:
+        when = _format_autonomous_event_time(advisory.get("created_at"))
+        snip = str(advisory.get("content") or "")[:250]
+        lines.append(f"- #{advisory['id']} {when}: {snip}")
+    lines.extend(["", f"notes: {note_count['n']}"])
+    for note in recent_notes:
+        snip = str(note["text"] or "")[:250]
+        lines.append(f"- turn {note['turn']}: {snip}")
+    if last_staged_draft:
+        when = _format_autonomous_event_time(last_staged_draft.get("created_at"))
+        staged_meta = _coerce_event_meta(last_staged_draft.get("meta"))
+        staged_slug = staged_meta.get("slug") or str(staged_meta.get("filename") or "").removesuffix(".md")
+        lines.extend(["", f"last_staged_research_draft: {when}", str(last_staged_draft.get("content") or "")[:500]])
+        if staged_slug:
+            lines.append(f"read draft: read_self(content_type=\"research_document\", slug=\"{staged_slug}\", status=\"staged\")")
+    if last_tick_error:
+        when = _format_autonomous_event_time(last_tick_error.get("created_at"))
+        lines.extend(["", f"last_tick_error: {when}", str(last_tick_error.get("content") or "")[:500]])
+    if last_no_action:
+        when = _format_autonomous_event_time(last_no_action.get("created_at"))
+        lines.extend(["", f"last_tick_no_durable_action: {when}", str(last_no_action.get("content") or "")[:500]])
+    if last_tick_log:
+        header = _format_tick_tool_log_header(last_tick_log)
+        lines.extend(["", f"last_tick_tool_log: {header}", str(last_tick_log.get("content") or "")[:700]])
+    await message.answer("\n".join(lines))
+
+
+async def _project_set_goal(message: Message, project_id: int, project: dict, rest: str):
+    """/project <id> goal <new goal>."""
+    if not rest:
+        await message.answer("사용법: /project <id> goal <새 goal>")
+        return
+    before = project["goal"]
+    await asyncio.to_thread(
+        _execute,
+        "UPDATE autonomous_projects SET goal = %s, updated_at = NOW() WHERE id = %s",
+        (rest, project_id),
+    )
+    try:
+        from jobs.autonomous_project import _log_event
+        await asyncio.to_thread(
+            _log_event,
+            project_id,
+            "project_edited",
+            "fields changed: goal",
+            {"before": {"goal": before}, "after": {"goal": rest}, "via": "telegram"},
+        )
+    except Exception as e:
+        logger.warning("project goal edit event log failed: %s", e)
+    await message.answer(f"프로젝트 #{project_id} goal 수정 완료. 다음 tick부터 반영됩니다.")
+
+
+async def _project_set_publishing(message: Message, project_id: int, project: dict, rest: str):
+    """/project <id> publishing <max_per_day> <cooldown_minutes>."""
+    vals = rest.split()
+    if len(vals) != 2 or not all(v.isdigit() for v in vals):
+        await message.answer("사용법: /project <id> publishing <일일최대> <쿨다운분>\n0은 해당 제한 비활성화.")
+        return
+    max_per_day, cooldown = int(vals[0]), int(vals[1])
+    before = {
+        "max_publications_per_day": project["max_publications_per_day"],
+        "cooldown_after_publish_minutes": project["cooldown_after_publish_minutes"],
+    }
+    await asyncio.to_thread(
+        _execute,
+        """
+        UPDATE autonomous_projects
+           SET max_publications_per_day = %s,
+               cooldown_after_publish_minutes = %s,
+               updated_at = NOW()
+         WHERE id = %s
+        """,
+        (max_per_day, cooldown, project_id),
+    )
+    try:
+        from jobs.autonomous_project import _log_event
+        await asyncio.to_thread(
+            _log_event,
+            project_id,
+            "project_edited",
+            "fields changed: publication pacing",
+            {
+                "before": before,
+                "after": {
+                    "max_publications_per_day": max_per_day,
+                    "cooldown_after_publish_minutes": cooldown,
+                },
+                "via": "telegram",
+            },
+        )
+    except Exception as e:
+        logger.warning("project publishing edit event log failed: %s", e)
+    await message.answer(f"프로젝트 #{project_id} 발행 제한: 하루 {max_per_day}개, 발행 후 {cooldown}분 쿨다운")
+
+
+async def _project_set_state(message: Message, project_id: int, project: dict, action: str):
+    """/project <id> pause|resume|archive."""
+    target = {"pause": "paused", "resume": "researching", "archive": "archived"}[action]
+    before_state = project["state"]
+    await asyncio.to_thread(
+        _execute,
+        "UPDATE autonomous_projects SET state = %s, updated_at = NOW() WHERE id = %s",
+        (target, project_id),
+    )
+    try:
+        from jobs.autonomous_project import _log_event
+        await asyncio.to_thread(
+            _log_event,
+            project_id,
+            "state_transition",
+            f"{action} via Telegram",
+            {"from": before_state, "to": target, "via": "telegram"},
+        )
+    except Exception as e:
+        logger.warning("project state event log failed: %s", e)
+    await message.answer(f"프로젝트 #{project_id}: {before_state} → {target}")
+
+
 async def cmd_project(message: Message):
     """Manage one autonomous project from Telegram."""
     if not _ctx["is_allowed"](message.from_user.id):
@@ -2401,224 +2626,19 @@ async def cmd_project(message: Message):
         return
 
     if action in {"show", "status"}:
-        note_count = await asyncio.to_thread(
-            _query_one,
-            "SELECT COUNT(*)::int AS n FROM autonomous_project_notes WHERE project_id = %s",
-            (project_id,),
-        ) or {"n": 0}
-        pub_count = await asyncio.to_thread(
-            _query_one,
-            """
-            SELECT COUNT(*)::int AS n
-              FROM autonomous_project_events
-             WHERE project_id = %s
-               AND event_type = 'publication_created'
-               AND created_at >= NOW() - INTERVAL '24 hours'
-            """,
-            (project_id,),
-        ) or {"n": 0}
-        recent_notes = await asyncio.to_thread(
-            _query,
-            """
-            SELECT turn, text, sources, created_at
-              FROM autonomous_project_notes
-             WHERE project_id = %s
-             ORDER BY created_at DESC, id DESC
-             LIMIT 3
-            """,
-            (project_id,),
-        )
-        pending_advisories = await asyncio.to_thread(
-            _query,
-            """
-            SELECT id, content, created_at
-              FROM autonomous_project_advisories
-             WHERE project_id = %s
-               AND consumed_at IS NULL
-             ORDER BY created_at ASC, id ASC
-             LIMIT 5
-            """,
-            (project_id,),
-        )
-        last_staged_draft = await asyncio.to_thread(
-            _query_one,
-            """
-            SELECT ev.content, ev.meta, ev.created_at
-              FROM autonomous_project_events ev
-              JOIN research_documents rd
-                ON rd.id::text = ev.meta->>'research_document_id'
-                OR rd.filename = ev.meta->>'filename'
-                OR rd.slug = ev.meta->>'slug'
-             WHERE ev.project_id = %s
-               AND ev.event_type = 'research_draft_staged'
-               AND rd.status = 'staged'
-             ORDER BY ev.created_at DESC, ev.id DESC
-             LIMIT 1
-            """,
-            (project_id,),
-        )
-        last_tick_error = await asyncio.to_thread(
-            _query_one,
-            """
-            SELECT content, meta, created_at
-              FROM autonomous_project_events
-             WHERE project_id = %s
-               AND event_type = 'tick_error'
-             ORDER BY created_at DESC, id DESC
-             LIMIT 1
-            """,
-            (project_id,),
-        )
-        last_no_action = await asyncio.to_thread(
-            _query_one,
-            """
-            SELECT content, meta, created_at
-              FROM autonomous_project_events
-             WHERE project_id = %s
-               AND event_type = 'tick_no_durable_action'
-             ORDER BY created_at DESC, id DESC
-             LIMIT 1
-            """,
-            (project_id,),
-        )
-        last_tick_log = await asyncio.to_thread(
-            _query_one,
-            """
-            SELECT content, meta, created_at
-              FROM autonomous_project_events
-             WHERE project_id = %s
-               AND event_type = 'tick_tool_log'
-             ORDER BY created_at DESC, id DESC
-             LIMIT 1
-            """,
-            (project_id,),
-        )
-        last = project["last_run_at"].astimezone(KST).strftime("%m/%d %H:%M") if project["last_run_at"] else "never"
-        lines = [
-            f"자율 프로젝트 #{project_id}",
-            f"{project['title']}",
-            f"state={project['state']} turn={project['turn_count']} last={last}",
-            f"publishing={pub_count['n']}/{project['max_publications_per_day']} per 24h, cooldown={project['cooldown_after_publish_minutes']}m",
-            f"topic: {project['topic']}",
-            "",
-            "goal:",
-            str(project["goal"])[:1200],
-            "",
-            f"pending_advice: {len(pending_advisories)}",
-        ]
-        for advisory in pending_advisories:
-            when = _format_autonomous_event_time(advisory.get("created_at"))
-            snip = str(advisory.get("content") or "")[:250]
-            lines.append(f"- #{advisory['id']} {when}: {snip}")
-        lines.extend(["", f"notes: {note_count['n']}"])
-        for note in recent_notes:
-            snip = str(note["text"] or "")[:250]
-            lines.append(f"- turn {note['turn']}: {snip}")
-        if last_staged_draft:
-            when = _format_autonomous_event_time(last_staged_draft.get("created_at"))
-            staged_meta = _coerce_event_meta(last_staged_draft.get("meta"))
-            staged_slug = staged_meta.get("slug") or str(staged_meta.get("filename") or "").removesuffix(".md")
-            lines.extend(["", f"last_staged_research_draft: {when}", str(last_staged_draft.get("content") or "")[:500]])
-            if staged_slug:
-                lines.append(f"read draft: read_self(content_type=\"research_document\", slug=\"{staged_slug}\", status=\"staged\")")
-        if last_tick_error:
-            when = _format_autonomous_event_time(last_tick_error.get("created_at"))
-            lines.extend(["", f"last_tick_error: {when}", str(last_tick_error.get("content") or "")[:500]])
-        if last_no_action:
-            when = _format_autonomous_event_time(last_no_action.get("created_at"))
-            lines.extend(["", f"last_tick_no_durable_action: {when}", str(last_no_action.get("content") or "")[:500]])
-        if last_tick_log:
-            header = _format_tick_tool_log_header(last_tick_log)
-            lines.extend(["", f"last_tick_tool_log: {header}", str(last_tick_log.get("content") or "")[:700]])
-        await message.answer("\n".join(lines))
+        await _project_show(message, project_id, project)
         return
 
     if action == "goal":
-        if not rest:
-            await message.answer("사용법: /project <id> goal <새 goal>")
-            return
-        before = project["goal"]
-        await asyncio.to_thread(
-            _execute,
-            "UPDATE autonomous_projects SET goal = %s, updated_at = NOW() WHERE id = %s",
-            (rest, project_id),
-        )
-        try:
-            from jobs.autonomous_project import _log_event
-            await asyncio.to_thread(
-                _log_event,
-                project_id,
-                "project_edited",
-                "fields changed: goal",
-                {"before": {"goal": before}, "after": {"goal": rest}, "via": "telegram"},
-            )
-        except Exception as e:
-            logger.warning("project goal edit event log failed: %s", e)
-        await message.answer(f"프로젝트 #{project_id} goal 수정 완료. 다음 tick부터 반영됩니다.")
+        await _project_set_goal(message, project_id, project, rest)
         return
 
     if action in {"publishing", "publish"}:
-        vals = rest.split()
-        if len(vals) != 2 or not all(v.isdigit() for v in vals):
-            await message.answer("사용법: /project <id> publishing <일일최대> <쿨다운분>\n0은 해당 제한 비활성화.")
-            return
-        max_per_day, cooldown = int(vals[0]), int(vals[1])
-        before = {
-            "max_publications_per_day": project["max_publications_per_day"],
-            "cooldown_after_publish_minutes": project["cooldown_after_publish_minutes"],
-        }
-        await asyncio.to_thread(
-            _execute,
-            """
-            UPDATE autonomous_projects
-               SET max_publications_per_day = %s,
-                   cooldown_after_publish_minutes = %s,
-                   updated_at = NOW()
-             WHERE id = %s
-            """,
-            (max_per_day, cooldown, project_id),
-        )
-        try:
-            from jobs.autonomous_project import _log_event
-            await asyncio.to_thread(
-                _log_event,
-                project_id,
-                "project_edited",
-                "fields changed: publication pacing",
-                {
-                    "before": before,
-                    "after": {
-                        "max_publications_per_day": max_per_day,
-                        "cooldown_after_publish_minutes": cooldown,
-                    },
-                    "via": "telegram",
-                },
-            )
-        except Exception as e:
-            logger.warning("project publishing edit event log failed: %s", e)
-        await message.answer(f"프로젝트 #{project_id} 발행 제한: 하루 {max_per_day}개, 발행 후 {cooldown}분 쿨다운")
+        await _project_set_publishing(message, project_id, project, rest)
         return
 
     if action in {"pause", "resume", "archive"}:
-        target = {"pause": "paused", "resume": "researching", "archive": "archived"}[action]
-        before_state = project["state"]
-        await asyncio.to_thread(
-            _execute,
-            "UPDATE autonomous_projects SET state = %s, updated_at = NOW() WHERE id = %s",
-            (target, project_id),
-        )
-        try:
-            from jobs.autonomous_project import _log_event
-            await asyncio.to_thread(
-                _log_event,
-                project_id,
-                "state_transition",
-                f"{action} via Telegram",
-                {"from": before_state, "to": target, "via": "telegram"},
-            )
-        except Exception as e:
-            logger.warning("project state event log failed: %s", e)
-        await message.answer(f"프로젝트 #{project_id}: {before_state} → {target}")
+        await _project_set_state(message, project_id, project, action)
         return
 
     await message.answer(_project_usage())
