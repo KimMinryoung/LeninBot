@@ -3,10 +3,11 @@ from unittest import IsolatedAsyncioTestCase, TestCase
 from unittest.mock import AsyncMock, Mock, patch
 
 from commulingo_pipeline.draft_repair import DraftRepair
-from commulingo_pipeline.evidence import SourceHandles, snapshot, Passages, resolve_passages
+from commulingo_pipeline.editor import Editor
+from commulingo_pipeline.evidence import SourceHandles, snapshot, Passages, resolve_passages, compile_evidence
 from commulingo_pipeline.engine import Engine, Result, Usage
-from commulingo_pipeline.stages import Draft, validate
 from scripts.commulingo_write_session import draft_id
+from commulingo_test_support import EditorCase
 
 
 class EvidenceContracts(TestCase):
@@ -125,53 +126,28 @@ class BatchContracts(IsolatedAsyncioTestCase):
         self.assertEqual(args[5]['rounds_used'],2)
 
 
-class DraftContracts(IsolatedAsyncioTestCase):
-    def fixture(self):
-        source=snapshot('https://example.org/archive','A documented definition supported by this archive.')
-        store=Mock()
-        store.sources.return_value={source['id']:source}
-        claim={'field':'definition','claim':'Definition','source_id':source['id'],'start':0,'end':len(source['body'])}
-        job={'id':5,'kind':'term','action':'update','target':'fixture','topic':'definition'}
-        artifacts=[{'stage':'research','value':{'claims':[claim],'baseline':'original'}}]
-        return store,job,artifacts
-
+class EditorStorageContracts(EditorCase):
     async def test_storage_validation_is_repaired_in_same_call_and_keeps_revision(self):
-        store,job,artifacts=self.fixture()
-        rpc=Mock(side_effect=[ValueError('400: invalid period label'),{}])
+        from test_commulingo_editor import BODY, CURRENT, JOB, URL, candidate, repair_call, store_mock, submission
+        rpc=Mock(side_effect=[CURRENT,ValueError('400: invalid period label'),{}])
         async def model(**kw):
-            self.assertEqual(kw['read_tools']['commulingo_people']['input_schema']['properties']['action']['enum'],
-                ['get_person','get_term','get_office','get_event','get_sections'])
-            try:
-                await kw['handler']({'fields':{'definition':{'ko':['정의'],'en':['Definition']}}})
-            except ValueError as exc:
-                import re
-                current=re.search(r'draft_id=([a-f0-9]+)',str(exc))[1]
-            else:
-                self.fail('invalid storage draft accepted')
-            await kw['handler']({'draft_id':current,'repairs':[
-                {'op':'set','path':'/fields/definition/en/0','value':'Correct definition'}]})
+            await kw['read_wrap']('fetch_url',AsyncMock(return_value=f'<external source="web">\n{BODY}\n</external>'))(url=URL)
+            with self.assertRaisesRegex(ValueError,'invalid period label'):
+                await kw['handler'](submission(candidate()))
+            value=candidate()
+            value['fields']['body']['en']='A corrected documented historical context.'
+            await repair_call(kw,value)
         usage=Usage()
-        with patch('commulingo_pipeline.stages.model_call',side_effect=model), patch('commulingo_pipeline.stages.service.call',rpc):
-            result=await Draft(store)(job,artifacts,usage,.2)
-        self.assertEqual(result.next_stage,'validate')
-        self.assertEqual(result.value['fields']['expectedRevision'],'original')
-        self.assertEqual(result.value['fields']['definition']['en'],'Correct definition')
+        with patch('commulingo_pipeline.stages.model_call',side_effect=model) as call, \
+             patch('commulingo_pipeline.service.call',rpc):
+            result=await Editor(store_mock())(JOB,[],usage,.2)
+        call.assert_called_once()
+        self.assertEqual(result.next_stage,'review')
+        self.assertEqual(result.value['draft']['fields']['expectedRevision'],CURRENT['revision'])
+        self.assertEqual(result.value['draft']['fields']['body']['en'],'A corrected documented historical context.')
         self.assertEqual(usage.tracker['preflight_failures'],1)
         self.assertTrue(usage.tracker['preflight_passed'])
-        self.assertEqual(rpc.call_count,2)
-
-    async def test_missing_evidence_preserves_draft_and_routes_to_research(self):
-        store,job,artifacts=self.fixture()
-        async def model(**kw):
-            await kw['handler']({'fields':{'definition':{'ko':['정의'],'en':['Definition']}}})
-        with patch('commulingo_pipeline.stages.model_call',side_effect=model), patch('commulingo_pipeline.stages.service.call',side_effect=ValueError('400: evidence required for body')):
-            result=await Draft(store)(job,artifacts,Usage(),.2)
-        self.assertIn('rejected_draft',result.value)
-        self.assertNotIn('fields',result.value)
-        artifacts.append({'stage':'draft','value':result.value})
-        validated=await validate(job,artifacts,Usage(),.2)
-        self.assertEqual(validated.next_stage,'research')
-        self.assertTrue(validated.value['needs_research'])
+        self.assertEqual([c.args[0]['command'] for c in rpc.call_args_list],['read','validate','validate'])
 
 
 class BudgetDrainRegression(IsolatedAsyncioTestCase):
@@ -184,54 +160,10 @@ class BudgetDrainRegression(IsolatedAsyncioTestCase):
         await engine.run_batch(draft_only=False)
         self.assertIsNone(engine.run_one.await_args_list[2].kwargs['job_id'])
 
-    async def test_large_saved_research_reaches_draft_without_research_retry(self):
-        store,job,artifacts=DraftContracts().fixture()
-        artifacts[0]['value']['claims'] *= 63
-        async def model(**kw):
-            await kw['handler']({'fields':{'definition':{'ko':['정의'],'en':['Definition']}}})
-        with patch('commulingo_pipeline.stages.model_call',side_effect=model) as call, patch('commulingo_pipeline.stages.service.call',return_value={}):
-            result=await Draft(store)(job,artifacts,Usage(),.2)
-        call.assert_called_once()
-        self.assertEqual(result.next_stage,'validate')
-        self.assertEqual(len(result.value['fields']['evidence']),63)
+    def test_large_claim_sets_compile_without_a_cap(self):
+        source=snapshot('https://example.org/archive','A documented definition supported by this archive.')
+        claim={'field':'definition','claim':'Definition','source_id':source['id'],'start':0,'end':len(source['body'])}
+        evidence=compile_evidence([claim]*63,{source['id']:source},{'definition'})
+        self.assertEqual(len(evidence),63)
+        self.assertEqual({e['excerpt'] for e in evidence},{source['body']})
 
-
-import os
-import unittest
-
-@unittest.skipUnless(os.getenv('COMMULINGO_FRONTEND_CONTAINER')=='commulingo-python-rpc'
-    and os.getenv('COMMULINGO_PIPELINE_TEST_PORT')=='55439','isolated pipeline DB/RPC required')
-class StorageDraftContracts(IsolatedAsyncioTestCase):
-    async def test_real_rpc_repairs_fk_in_same_call_and_never_publishes(self):
-        import psycopg2
-        import uuid
-        import re
-        from commulingo_pipeline import service
-        target='efficiency-'+uuid.uuid4().hex[:10]
-        with psycopg2.connect(host='127.0.0.1',port=55439,user='postgres',dbname='commulingo_integrity_test') as conn:
-            with conn.cursor() as cur:
-                cur.execute("INSERT INTO commulingo_term_categories(id,label_ko,label_en) VALUES ('theory','이론','Theory') ON CONFLICT DO NOTHING")
-        source=snapshot('https://example.org/efficiency','This archive documents the definition and its historical period.')
-        claims=[{'field':field,'claim':'Documented '+field,'source_id':source['id'],'start':0,'end':len(source['body'])}
-                for field in ('definition','period')]
-        store=Mock()
-        store.sources.return_value={source['id']:source}
-        fields={'term':{'ko':'검증 용어 '+target,'en':'Test concept '+target},
-            'definition':{'ko':['문헌에 근거한 개념이다.'],'en':['A concept supported by the document.']},
-            'period':{'ko':'역사적 개념','en':'Historical concept'},'category':'theory',
-            'aliases':{'ko':[],'en':[]},'people':['missing-person-'+target]}
-        async def model(**kw):
-            with self.assertRaises(ValueError) as rejected:
-                await kw['handler']({'fields':fields})
-            current=re.search(r'draft_id=([a-f0-9]+)',str(rejected.exception))[1]
-            await kw['handler']({'draft_id':current,'repairs':[{'op':'remove','path':'/fields/people'}]})
-        with patch('commulingo_pipeline.stages.model_call',side_effect=model):
-            result=await Draft(store)({'id':99,'target':target,'kind':'term','action':'create','topic':'basics'},
-                [{'stage':'research','value':{'claims':claims,'baseline':''}}],Usage(),.2)
-        self.assertEqual(result.next_stage,'validate')
-        self.assertNotIn('people',result.value['fields'])
-        self.assertIsNone(service.call({'command':'read','target':'term','id':target}))
-        with psycopg2.connect(host='127.0.0.1',port=55439,user='postgres',dbname='commulingo_integrity_test') as conn:
-            with conn.cursor() as cur:
-                cur.execute('SELECT count(*) FROM commulingo_agent_suggestions WHERE target_id=%s',(target,))
-                self.assertEqual(cur.fetchone()[0],0)

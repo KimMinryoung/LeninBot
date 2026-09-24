@@ -168,25 +168,29 @@ def stages(store):
             'validate':validate, 'review':Review(store), 'submit':publish}
 
 
-def routed_stages(store, legacy, preferred):
-    """A durable job never falls back to two-RPC publication on a later tick."""
-    if preferred not in {'legacy','editor'}:
+def routed_stages(store, preferred='editor'):
+    """Editor stages behind a guard that pins jobs predating the workflow field.
+
+    The legacy two-RPC stages were removed on 2026-09-24 once no unfinished
+    job used them, so a job pinned to anything else fails loudly instead of
+    falling back to them.
+    """
+    if preferred != 'editor':
         raise ValueError('unknown editorial workflow')
     editor = stages(store)
     routed = {}
     async def select(job, stage):
-        selected = (job.get('payload') or {}).get('workflow', preferred)
-        if selected not in {'legacy','editor'}:
-            raise ValueError('unknown job workflow')
-        if (selected=='editor' and not (job.get('payload') or {}).get('workflow')
-                and stage not in {'research','draft','discover'}):
-            selected = 'legacy'
-        if selected=='editor' and not (job.get('payload') or {}).get('workflow'):
+        selected = (job.get('payload') or {}).get('workflow')
+        if selected not in (None, 'editor'):
+            raise ValueError(f'job workflow {selected!r} is no longer supported')
+        if selected is None:
+            if stage not in {'research','draft','discover'}:
+                raise ValueError('job without a workflow reached a post-draft stage')
             await asyncio.to_thread(store.pin_editor_workflow,job)
             job['payload'] = {**job.get('payload',{}),'workflow':'editor'}
-        return (editor if selected=='editor' else legacy)[stage]
+        return editor[stage]
 
-    for name in legacy:
+    for name in editor:
         async def execute(job, artifacts, usage, budget, stage=name):
             selected = await select(job, stage)
             return await selected(job,artifacts,usage,budget)
@@ -195,6 +199,6 @@ def routed_stages(store, legacy, preferred):
             check = getattr(selected, 'prepare', None)
             return await check(job, artifacts, usage) if check else None
         execute.prepare = prepare
-        execute.uses_llm = getattr(legacy[name], 'uses_llm', False)
+        execute.uses_llm = getattr(editor[name], 'uses_llm', False)
         routed[name] = execute
     return routed

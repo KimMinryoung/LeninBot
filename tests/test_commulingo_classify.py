@@ -286,18 +286,6 @@ class ClassifyCodesTests(unittest.TestCase):
 
 
 class ReviewRiskTests(unittest.TestCase):
-    def test_low_confidence_classification_becomes_a_review_risk(self):
-        from commulingo_pipeline.stages import classification_risks
-        artifacts = [{'stage':'research','value':{},'metrics':{}},
-                     {'stage':'draft','value':{},'metrics':{'classification':{'group':0.95,'role':0.41,'low_confidence':True,
-                                                                             'codes':{'citizenship':0.99,'fate':0.55},'codes_low_confidence':['fate']}}}]
-        risks = classification_risks(artifacts)
-        self.assertEqual(len(risks), 2)
-        self.assertIn('role 0.41', risks[0])
-        self.assertIn('fate 0.55', risks[1])
-        self.assertEqual(classification_risks([{'stage':'draft','value':{},'metrics':{'classification':{'group':0.9,'role':0.9,'low_confidence':False}}}]), [])
-        self.assertEqual(classification_risks([]), [])
-
     def test_unsure_group_role_still_lands_and_is_left_to_the_reviewer(self):
         unsure = {'groupId': 'thaw', 'role': {'category': 'scholar'}, 'confidence': {'group': 0.5, 'role': 0.4}, 'low_confidence': True}
         filled = cc.fill_classification({**FIELDS, 'groupId': 'stale', 'role': {'category': 'stale'}}, unsure)

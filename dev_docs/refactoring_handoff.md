@@ -6,16 +6,12 @@
 
 ## A. 결정이 필요한 항목
 
-### A4. CommuLingo 파이프라인의 legacy stage 삭제
+### A7. legacy stage 삭제로 드러난 editor의 빠진 동작
 
-- **삭제 조건은 충족됐다.** 2026-09-24 운영 DB 기준으로 끝나지 않은 작업(`ready` 1145건, `deferred` 2건)은 모두 `payload.workflow='editor'`다. `payload.workflow`가 비었거나 `legacy`인 작업은 모두 `cancelled`/`complete`다. 새 작업은 `research`/`discover` 단계에서 시작하고, 첫 실행 때 `routed_stages`가 `editor`로 고정한다.
-- **보류한 이유:** `stages.Research`, `stages.Draft`, `stages.Review`, legacy `validate`/`submit`를 지우면, 이 클래스들을 직접 부르는 테스트 26개가 같이 사라진다. 대상은 `tests/test_commulingo_pipeline.py`의 `EngineTests` 대부분, `tests/test_commulingo_pipeline_efficiency.py`, `tests/test_commulingo_editor_db.py`의 legacy 경로, 그리고 `routed_stages(store, legacy, ...)` 형태를 쓰는 테스트 3개다. 이 중 일부는 editor 경로도 쓰는 헬퍼를 legacy 클래스를 통해서만 검사한다. 예를 들어 `drop_unchanged_term_facts`, `prose_problem`, paginated fetch 라벨, research cache 나이 보존이 그렇다. 그래서 먼저 정해야 한다: 그 검사를 editor 테스트로 옮길지, legacy 테스트와 함께 버릴지.
-- **준비된 변경:**
-  - legacy 클래스를 삭제한다.
-  - `routed_stages(store, preferred='editor')`는 editor 단계만 쓴다. `workflow`가 없는 작업이 `research`/`draft`/`discover`가 아닌 단계에 오면 `ValueError`를 낸다. 알 수 없는 workflow도 `ValueError`다.
-  - `config.py`의 기본값을 `editor`로 바꾸고, `editor` 외의 값은 거부한다.
-  - `cli.py`의 `--workflow` 선택지를 `editor` 하나로 줄인다.
-  - 삭제한 뒤에는 모듈 안에서 쓰이지 않는 헬퍼가 남는다: `MAX_UNCHANGED_REVIEW_REVISIONS`, `DRAFT_ROUNDS`, `carried_claims`, `ClassificationUnavailable`, `prior_reviews`, 그리고 테스트만 쓰는 `sentence_schema`, `TARGETED_RESEARCH_ROUNDS`, `classification_risks`. 하나씩 확인하고 지운다.
+2026-09-24에 legacy stage(`stages.Research/Draft/Review`, legacy `validate`/`submit`)를 지우고 테스트를 editor 경로로 옮기는 과정에서 두 가지가 드러났다. 둘 다 2026-09-20 editor 전환 때부터 운영에 없던 동작이고, 자세한 내용은 `commulingo_pipeline.md`에 있다.
+
+- **검토 판정 노트:** legacy `Review`는 escalate/reject로 끝나면 사전 항목에 `note` RPC로 사유를 남겼다. editor는 판정을 작업의 review artifact에만 남긴다. editor의 `reject`는 `escalated`로 끝나고, legacy는 `complete`로 끝났다. 다음 작성자에게 사유를 보여 줄지 정한다.
+- **이미 수동 처리된 원본을 교정하는 작업:** legacy `submit`은 원본 상태를 먼저 확인하고 조용히 끝냈다. editor는 `replacesSuggestionId`를 발행 RPC 하나에 담아 보낸다. frontend 서비스가 트랜잭션 안에서 거부하므로 원본은 바뀌지 않지만, 작업은 오류로 재시도·escalate 경로를 탄다. 조용히 완료할지 정한다.
 
 ### C4. `self_modification_core.py`
 
@@ -61,7 +57,7 @@ B 목록의 대형 함수 10개 가운데 9개를 분할했다. 모두 로직을
 
 ## E. 테스트 기준선 (2026-09-24, 운영 서버)
 
-- `scripts/run_unit_tests.sh`: 1233개 OK, skip 24. 운영 서버에는 CommuLingo fixture가 있어 전부 로드된다.
+- `scripts/run_unit_tests.sh`: 1223개 OK, skip 23 (legacy stage 테스트 정리 후). 운영 서버에는 CommuLingo fixture가 있어 전부 로드된다.
 - 에이전트 worktree가 저장소 안 `.claude/worktrees/`에 있는 동안에는 `test_llm_gateway_conformance`가 그 사본의 SDK 생성 코드를 잡아 실패한다. worktree를 지우면 통과한다.
 - 리팩터링 전부터 실패하던 스모크(원인 미조사):
   - `smoke_commulingo_person_nationality_backfill`: audit coverage 실패

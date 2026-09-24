@@ -80,7 +80,7 @@ class EditorDatabaseTests(unittest.IsolatedAsyncioTestCase):
             self.store.save_editor_checkpoint(job,{'draft':'stale result'})
         self.assertEqual(self.store.detail(self.job_id)['artifacts'][0]['value']['draft']['fields']['body']['ko'],'보존')
 
-    async def test_author_review_atomic_publish_and_legacy_tick_resume(self):
+    async def test_author_review_atomic_publish_and_later_tick_resume(self):
         self.job_id = self.store.enqueue(kind='term',action='update',target=self.target,topic='history',
                                          reason='Commissioned glossary explanation: history')
         source = 'https://example.org/editor-fixture'
@@ -105,11 +105,11 @@ class EditorDatabaseTests(unittest.IsolatedAsyncioTestCase):
              patch('runtime_tools.registry.TOOL_HANDLERS',reads), \
              patch('commulingo_pipeline.stages.model_call',side_effect=model), \
              patch('commulingo_pipeline.config.load',return_value={'phase':'live'}):
-            first = await Engine(self.store,stages(self.store,workflow='editor'),cap=1000).run_one(job_id=self.job_id,draft_only=False)
+            first = await Engine(self.store,stages(self.store),cap=1000).run_one(job_id=self.job_id,draft_only=False)
             self.assertEqual(first.get('stage'),'review',first)
             self.assertEqual(self.store.detail(self.job_id)['job']['payload']['workflow'],'editor')
-            # A later timer still configured legacy must honor this job's pinned workflow.
-            remaining = await Engine(self.store,stages(self.store,workflow='legacy'),cap=1000).run_batch(job_id=self.job_id,draft_only=False,limit=2)
+            # A later tick builds fresh stages and resumes the pinned job after review.
+            remaining = await Engine(self.store,stages(self.store),cap=1000).run_batch(job_id=self.job_id,draft_only=False,limit=2)
         self.assertEqual([r['stage'] for r in remaining],['submit','complete'],remaining)
         self.assertEqual(self.store.detail(self.job_id)['job']['status'],'complete')
         current = self.rpc({'command':'read','target':'term','id':self.target})
