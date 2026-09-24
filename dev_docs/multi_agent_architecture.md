@@ -219,6 +219,8 @@ blocked -> pending  (synthesis task after all subtasks terminal;
                      DAG subtask after its depends_on tasks terminal)
 ```
 
+Every task row is created through `task_store.create_task_in_db` (priority validation, parent mission/agent/metadata inheritance, depth-5 chain limit), including `/task`, `/curate`, `[CONTINUE_TASK:]` promotion and scheduled tasks. The one exception is the restart-recovery handoff child in `recover_processing_tasks_on_startup`: it copies the parent's scratchpad and restart columns and must be created even past the depth limit, so it inserts directly.
+
 `telegram/tasks.py` polls with `FOR UPDATE SKIP LOCKED`, uses a bounded semaphore, and runs two unblock passes each loop: synthesis tasks when all sibling subtasks are terminal, and dependency-DAG subtasks (`_unblock_dependency_tasks_sync`) when every task ID in their `metadata.depends_on_task_ids` is terminal (`done`/`failed`/`handed_off`; missing rows count as terminal). A watchdog fails any dependency-blocked task older than 48h so a broken plan can never deadlock its synthesis.
 
 ### Delegation
