@@ -173,7 +173,7 @@ class EfficiencyTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(RuntimeError): submitted_edit([{'result':'OK — approved: Logged as edit #12.','target':'other'}],query)
 
     async def test_stage_exception_keeps_previous_attempt_cost(self):
-        from scripts import commulingo_people_maintainer as maintainer
+        from runtime_tools import commulingo_lane as lane
         calls=[]
         async def chat(messages, **kwargs):
             calls.append(kwargs)
@@ -186,10 +186,10 @@ class EfficiencyTests(unittest.IsolatedAsyncioTestCase):
         policy=SimpleNamespace(max_rounds=10,budget_usd=.1,max_output_continuations=1,
             max_output_tokens=1000,max_input_tokens=10000)
         binding=SimpleNamespace(chat=chat,client=None,model='fake',render_provider='test',reasoning={})
-        with patch.object(maintainer,'resolve_agent_tool_loop',return_value=binding), \
+        with patch.object(lane,'resolve_agent_tool_loop',return_value=binding), \
              patch('scripts.commulingo_research_memory.STORE_PATH',self.path):
             with self.assertRaises(RunFailure) as failed:
-                await maintainer._call_curator_stage(task='test',spec=SimpleNamespace(name='test',render_prompt=lambda **kw:'test'),
+                await lane._call_curator_stage(task='test',spec=SimpleNamespace(name='test',render_prompt=lambda **kw:'test'),
                     tools=[],handlers={},policy=policy,stage='test',expect_edit=True,
                     finalization_tools=[],terminal_tools=[])
         self.assertAlmostEqual(failed.exception.summary['cost_usd'],.07)

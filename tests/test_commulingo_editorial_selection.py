@@ -6,13 +6,16 @@ import unittest
 from unittest.mock import patch
 
 ROOT = Path(os.environ.get('COMMULINGO_TEST_SOURCE', Path(__file__).resolve().parents[1]))
-source = ROOT / 'scripts/commulingo_people_maintainer.py'
-module = ast.parse(source.read_text())
-selected = [n for n in module.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
-            and n.name in {'select_sparse_person', 'enrich_step', 'build_no_edit_handler', '_call_curator_stage'}]
 queries = []
 namespace = {'db_query': lambda sql, params: queries.append((sql, params)) or [], 'json': __import__('json'), 'MAX_SECTIONS': 12}
-exec(compile(ast.Module(body=selected, type_ignores=[]), str(source), 'exec'), namespace)
+for source, names in (
+    (ROOT / 'runtime_tools/commulingo_people_lane.py', {'select_sparse_person', 'enrich_step'}),
+    (ROOT / 'runtime_tools/commulingo_lane.py', {'build_no_edit_handler', '_call_curator_stage'}),
+):
+    module = ast.parse(source.read_text())
+    selected = [n for n in module.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name in names]
+    assert {n.name for n in selected} == names, source
+    exec(compile(ast.Module(body=selected, type_ignores=[]), str(source), 'exec'), namespace)
 
 class EditorialSelection(unittest.IsolatedAsyncioTestCase):
     def setUp(self):

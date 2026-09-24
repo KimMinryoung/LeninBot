@@ -92,7 +92,7 @@ _PERSON_PATCH_KEYS = frozenset({
 })
 
 # Flag codes the frontend has vendored SVGs for (data/commulingo/flag-icons.js).
-# scripts/commulingo_people_maintainer.py derives its prompt NATIONALITY_CODES from this set.
+# runtime_tools/commulingo_people_lane.py derives its prompt NATIONALITY_CODES from this set.
 # Codes map to country flags, not an exhaustive ethnicity taxonomy. Use sourced
 # national background; never assign Russia or a neighbouring state by default.
 # Preserve documented ethnic and mixed backgrounds in bilingual labels.

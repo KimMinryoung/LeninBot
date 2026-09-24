@@ -70,7 +70,8 @@ def _worker_tag() -> str:
 SUGGESTED_BY = f"commulingo-gap-worker-{_worker_tag()}"
 os.environ["COMMULINGO_SUGGESTED_BY"] = SUGGESTED_BY
 
-from scripts import commulingo_people_maintainer as maintainer  # noqa: E402
+from runtime_tools import commulingo_lane as lane  # noqa: E402
+from runtime_tools import commulingo_people_lane as people_lane  # noqa: E402
 from scripts import commulingo_gap_event_links as event_links  # noqa: E402
 from agents import get_agent  # noqa: E402
 from bot_config import _resolve_deepseek_model  # noqa: E402
@@ -85,9 +86,9 @@ LOCK_PATH = Path(f"/tmp/leninbot-{SUGGESTED_BY}.lock")
 _SLUG_STRIP = re.compile(r"[^a-z0-9]+")
 
 
-# The maintainer reads this lane's COMMULINGO_SUGGESTED_BY (set above), so its
-# counter already counts this lane's approved edits.
-completed_run_count = maintainer.completed_run_count
+# The lane counter reads this lane's COMMULINGO_SUGGESTED_BY (set above), so it
+# already counts this lane's approved edits.
+completed_run_count = lane.completed_run_count
 
 
 # Match staged cards too: a pending create deliberately has no dictionary row.
@@ -299,7 +300,7 @@ First run search_people on both names and on plausible transliteration variants.
 person already has a card, do NOT create a second one: finish with a single
 commulingo_no_edit call naming that card's id. Otherwise research and create one complete
 bilingual card in a single commulingo_person_create call.
-""" + maintainer.CARD_STYLE_GUIDANCE
+""" + people_lane.CARD_STYLE_GUIDANCE
 
 
 def build_term_task(gap: dict) -> str:
@@ -350,7 +351,7 @@ contemporary. Keep citations top-level.
 
 
 async def run_once(kind: str = "", events: list[str] | None = None) -> dict:
-    config = maintainer.load_config()
+    config = lane.load_config()
     if not config.get("enabled"):
         return {"status": "skipped", "reason": "maintainer disabled"}
 
@@ -387,7 +388,7 @@ async def run_once(kind: str = "", events: list[str] | None = None) -> dict:
         # them were sitting like that on 2026-08-09 with their sections already
         # written.
         try:
-            result = await maintainer.run_once(
+            result = await people_lane.run_once(
                 mode="enrich", candidate_id=gap["target_id"], config=config
             )
         except Exception as exc:
@@ -430,24 +431,24 @@ async def run_once(kind: str = "", events: list[str] | None = None) -> dict:
     policy = resolve_agent_inference_policy(spec)
     tools, handlers = spec.filter_tools(TOOLS, TOOL_HANDLERS)
     handlers = dict(handlers)
-    for name in maintainer.NARROW_WRITE_TOOLS & handlers.keys():
-        handlers[name] = maintainer.build_retrying_write_handler(handlers[name])
+    for name in lane.NARROW_WRITE_TOOLS & handlers.keys():
+        handlers[name] = lane.build_retrying_write_handler(handlers[name])
 
     write_name = "commulingo_person_create" if gap["kind"] == "person" else "commulingo_term_create"
-    stage_tools = [t for t in tools if t.get("name") not in maintainer.NARROW_WRITE_TOOLS
+    stage_tools = [t for t in tools if t.get("name") not in lane.NARROW_WRITE_TOOLS
                    or t.get("name") == write_name]
     stage_handlers = {name: handler for name, handler in handlers.items()
-                      if name not in maintainer.NARROW_WRITE_TOOLS or name == write_name}
+                      if name not in lane.NARROW_WRITE_TOOLS or name == write_name}
     # "The entry already exists" and "this is not a glossary term" are correct,
     # complete outcomes, but the stage treats a run with no write as a failure and
     # retries it three times. commulingo_no_edit is its typed way of saying the
     # commissioned write should not happen, so wire it rather than leaving the
     # verdict in free text the stage cannot see.
     no_edit_box: dict = {}
-    stage_tools = [*stage_tools, maintainer.COMMULINGO_NO_EDIT_TOOL]
+    stage_tools = [*stage_tools, lane.COMMULINGO_NO_EDIT_TOOL]
     stage_handlers = {
         **stage_handlers,
-        "commulingo_no_edit": maintainer.build_no_edit_handler(no_edit_box),
+        "commulingo_no_edit": lane.build_no_edit_handler(no_edit_box),
     }
     task = build_person_task(gap) if gap["kind"] == "person" else build_term_task(gap)
 
@@ -458,7 +459,7 @@ async def run_once(kind: str = "", events: list[str] | None = None) -> dict:
     )
     try:
         with caller_scope(ctx):
-            result, tracker, _ = await maintainer._call_curator_stage(
+            result, tracker, _ = await lane._call_curator_stage(
                 task=task, spec=spec,
                 tools=stage_tools, handlers=stage_handlers, policy=policy,
                 stage=f"gap-{gap['kind']}", expect_edit=True,

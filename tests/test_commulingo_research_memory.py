@@ -123,7 +123,7 @@ class ResearchMemoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(argument_rejection_observer.get())
 
     async def test_real_stage_retry_keeps_evidence_and_rejected_draft(self):
-        from scripts import commulingo_people_maintainer as maintainer
+        from runtime_tools import commulingo_lane as lane
 
         state = {"attempt": 0, "writes": 0}
         research = AsyncMock(return_value="verified source body")
@@ -158,10 +158,10 @@ class ResearchMemoryTests(unittest.IsolatedAsyncioTestCase):
         policy = SimpleNamespace(max_output_continuations=1, max_rounds=16, max_output_tokens=4096,
                                  max_input_tokens=160000, budget_usd=0.35)
         spec = SimpleNamespace(name="commulingo_curator", render_prompt=lambda **kwargs: "system")
-        with patch.object(maintainer, "resolve_agent_tool_loop", return_value=binding), \
-             patch.object(maintainer, "completed_run_count", side_effect=lambda: state["writes"]), \
+        with patch.object(lane, "resolve_agent_tool_loop", return_value=binding), \
+             patch.object(lane, "completed_run_count", side_effect=lambda: state["writes"]), \
              patch("scripts.commulingo_research_memory.STORE_PATH", self.path):
-            result, _, _ = await maintainer._call_curator_stage(
+            result, _, _ = await lane._call_curator_stage(
                 task="repair person", spec=spec, tools=[],
                 handlers={"fetch_url": research, "commulingo_person_create": write},
                 policy=policy, stage="test", expect_edit=True,

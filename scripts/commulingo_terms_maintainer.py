@@ -27,7 +27,7 @@ if str(PROJECT_ROOT) not in sys.path:
 SUGGESTED_BY = "commulingo-maintainer-terms"
 os.environ["COMMULINGO_SUGGESTED_BY"] = SUGGESTED_BY
 
-from scripts import commulingo_people_maintainer as maintainer  # noqa: E402
+from runtime_tools import commulingo_lane as lane  # noqa: E402
 from agents import get_agent  # noqa: E402
 from bot_config import resolve_agent_tool_loop  # noqa: E402
 from db import query as db_query, query_one as db_query_one  # noqa: E402
@@ -51,8 +51,8 @@ DENSE_KO = DENSE_SENTENCE_CHARS[0]
 DEFINITION_KO = FIELD_LIMITS["definition"][0]
 
 
-# The maintainer reads this lane's COMMULINGO_SUGGESTED_BY (set above).
-completed_run_count = maintainer.completed_run_count
+# The lane counter reads this lane's COMMULINGO_SUGGESTED_BY (set above).
+completed_run_count = lane.completed_run_count
 
 
 def registered_aliases() -> list[str]:
@@ -206,7 +206,7 @@ EDITORIAL POLICY FOR GLOSSARY TERMS (MANDATORY):
 
 
 async def run_once() -> dict:
-    config = maintainer.load_config()
+    config = lane.load_config()
     if not config.get("enabled") or not config.get("term_lane_enabled"):
         return {"status": "skipped", "reason": "term_lane_enabled=false"}
 
@@ -223,14 +223,14 @@ async def run_once() -> dict:
     write_name = "commulingo_term_create"
     tools = [
         tool for tool in tools
-        if tool.get("name") not in maintainer.NARROW_WRITE_TOOLS
+        if tool.get("name") not in lane.NARROW_WRITE_TOOLS
         or tool.get("name") == write_name
     ]
     handlers = {
         name: handler for name, handler in handlers.items()
-        if name not in maintainer.NARROW_WRITE_TOOLS or name == write_name
+        if name not in lane.NARROW_WRITE_TOOLS or name == write_name
     }
-    handlers[write_name] = maintainer.build_retrying_write_handler(handlers[write_name])
+    handlers[write_name] = lane.build_retrying_write_handler(handlers[write_name])
     binding = resolve_agent_tool_loop(spec, policy)
 
     label, material = pick_material(before)
@@ -241,15 +241,15 @@ async def run_once() -> dict:
     ) + EDITORIAL_POLICY
 
     no_edit_box = {}
-    tools = [*tools, maintainer.COMMULINGO_NO_EDIT_TOOL]
-    handlers["commulingo_no_edit"] = maintainer.build_no_edit_handler(no_edit_box)
+    tools = [*tools, lane.COMMULINGO_NO_EDIT_TOOL]
+    handlers["commulingo_no_edit"] = lane.build_no_edit_handler(no_edit_box)
     task += "\nIf no suitable term remains, call commulingo_no_edit with reason/status/sources. Free-text NO_CANDIDATE alone does not finish the job."
     ctx = new_run_context(interface="autonomous", agent_name=spec.name, is_owner=True,
         scope_type="maintenance_job", scope_id="commulingo_terms_maintainer")
     from scripts.commulingo_run import RunFailure, submitted_edit
     try:
         with caller_scope(ctx):
-            result, tracker, _ = await maintainer._call_curator_stage(
+            result, tracker, _ = await lane._call_curator_stage(
                 task=task, spec=spec, tools=tools, handlers=handlers, policy=policy,
                 stage="terms", expect_edit=True,
                 research_key=f"terms:{label}:{material}", no_edit_box=no_edit_box,
