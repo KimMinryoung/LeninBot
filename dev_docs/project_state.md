@@ -64,10 +64,7 @@ systemd timers
         |-- research-document-translation.timer -> scripts/run_translation_batch.py -> research/DB translation scripts
         |-- leninbot-email-poller.timer -> scripts/email_poll_once.py
         |-- leninbot-commulingo-pipeline.timer -> scripts/commulingo_pipeline.py tick (durable people/term stages)
-        |-- leninbot-commulingo-maintainer.timer -> scripts/commulingo_people_maintainer.py (legacy, inactive)
-        |-- leninbot-commulingo-new.timer -> scripts/commulingo_people_parallel.py --mode new
-        |-- leninbot-commulingo-enrich.timer -> scripts/commulingo_people_parallel.py --mode enrich
-        |-- leninbot-commulingo-terms.timer -> scripts/commulingo_terms_maintainer.py
+        |-- (no timer) leninbot-commulingo-{maintainer,new,enrich,terms,gap}.service -> manual-start legacy lanes
 
 developer MCP clients
         |
@@ -112,10 +109,11 @@ Nginx·프런트엔드의 역방향 HTTP 프록시와 내부 서비스 게이트
 | `leninbot-kg-report.service` | `scripts/kg_weekly_report.py --notify` | Mon 09:30 KST — KG 건강 리포트 (성장·중복·동기화 지연·검색 사용량) |
 | `leninbot-commulingo-review.service` | `scripts/commulingo_person_reviewer.py` | 독립 timer는 비활성. pipeline이 공통 검토 함수를 사용하며 `/commulingo_review`는 수동 조회·처리용 |
 | `leninbot-commulingo-pipeline.service` | `scripts/commulingo_pipeline.py tick` | 대상별 보강 묶음과 최대 12단계 연속 실행; live 반영(건수 제한 없음)·일일 공용 예산은 `config/commulingo_pipeline.json` |
-| `leninbot-commulingo-maintainer.service` | `scripts/commulingo_people_maintainer.py` | one sourced CommuLingo edit or pending review; shared frontend persistence, topic completion/revisit state and gateway-owned inference policy |
-| `leninbot-commulingo-new.service` | `scripts/commulingo_people_parallel.py --mode new` | independent new-person discovery/create lane |
-| `leninbot-commulingo-enrich.service` | `scripts/commulingo_people_parallel.py --mode enrich` | independent existing-person enrichment lane |
-| `leninbot-commulingo-terms.service` | `scripts/commulingo_terms_maintainer.py` | independent glossary-term creation lane |
+| `leninbot-commulingo-maintainer.service` | `scripts/commulingo_people_maintainer.py` | 수동 실행 전용(timer 없음). one sourced CommuLingo edit or pending review. 2026-09-20 daily batch 폐지 뒤 pipeline이 정기 편집을 맡는다 |
+| `leninbot-commulingo-new.service` | `scripts/commulingo_people_parallel.py --mode new` | 수동 실행 전용(timer 없음). new-person discovery/create lane |
+| `leninbot-commulingo-enrich.service` | `scripts/commulingo_people_parallel.py --mode enrich` | 수동 실행 전용(timer 없음). existing-person enrichment lane |
+| `leninbot-commulingo-terms.service` | `scripts/commulingo_terms_maintainer.py` | 수동 실행 전용(timer 없음). glossary-term creation lane |
+| `leninbot-commulingo-gap.service` | `scripts/commulingo_gap_worker.py` | 수동 실행 전용(timer 없음). curation gap queue lane |
 
 Dependency direction is simple: `leninbot-llm-proxy.service` waits for network-online and a credential-complete `/health`, then every LLM-consuming unit starts after it; Neo4j/Redis and embedding also start before Telegram/API; browser starts after Telegram. API can optionally run Telegram in-process only when `RUN_TELEGRAM_IN_API=true`, but production uses the dedicated Telegram unit.
 
@@ -164,7 +162,7 @@ Current default chunking for new corpus ingestion is language-specific in `corpu
 |---|---|
 | Identity and prompt rendering | `identity/prompts.py`, `identity/agent_prompts/*.md`, `llm/prompt_renderer.py`, `agents/base.py` |
 | LLM provider config | `bot_config.py`, `llm/agent_loop.py` (shared loop engine), `llm/claude_loop.py`, `llm/openai_tool_loop.py`, `llm/client.py` |
-| Personal fiction workspace | `writer/` package (store/documents/models/prompts/tools/runs/stream; `creative_writer.py` compat shim), `frontend/writer.html`, `/writer/*` routes in `api_routes/writer.py`, `services/novel_writer_api.py` |
+| Personal fiction workspace | `writer/` package (store/documents/models/prompts/tools/runs/stream), `frontend/writer.html`, `/writer/*` routes in `api_routes/writer.py`, `services/novel_writer_api.py` |
 | Agents | `agents/*.py`, `config/agent_runtime.json`, `api_routes/task_reports.py` |
 | Tools | `runtime_tools/*`, `self_runtime/tools.py`, `crypto_wallet/*` |
 | KG facade | `kg_runtime/search.py`, `kg_runtime/writes.py`, `kg_runtime/admin.py`, `kg_runtime/service_runtime.py` |

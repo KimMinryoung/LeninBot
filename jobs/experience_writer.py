@@ -10,12 +10,12 @@ lessons/mistakes/insights that make the agent smarter over time.
 
 import json
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 from db import query as db_query, execute as db_execute
 from memory_store.queries import fetch_chat_logs
 
-KST = timezone(timedelta(hours=9))
+from shared import KST
 
 logger = logging.getLogger("experience_writer")
 
@@ -315,7 +315,7 @@ def _store_entries(entries: list[dict], period_start: str, period_end: str) -> i
 def _run_pending_curation_ingest() -> None:
     """Run the curation corpus ingest that shares this daily timer."""
     try:
-        from scripts.ingest_pending_curations import run as _ingest_curations
+        from corpus.curation_ingest import run as _ingest_curations
         _ingest_curations()
     except Exception as e:
         logger.warning("[경험] curation ingest step failed: %s", e)

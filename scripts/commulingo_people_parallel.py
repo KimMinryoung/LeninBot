@@ -37,32 +37,6 @@ from scripts import commulingo_people_maintainer as maintainer  # noqa: E402
 # wrapper is back to what its docstring says it is — locking and provenance.
 
 
-def completed_run_count() -> int:
-    row = maintainer.db_query_one(
-        """SELECT COUNT(*)::int AS n
-             FROM commulingo_agent_suggestions
-            WHERE suggested_by = %(suggested_by)s
-              AND status = 'approved'""",
-        {"suggested_by": SUGGESTED_BY},
-    )
-    return int((row or {}).get("n") or 0)
-
-
-def latest_lane_edit() -> dict | None:
-    return maintainer.db_query_one(
-        """SELECT id, target_type, target_id, action, status, confidence, created_at
-             FROM commulingo_agent_suggestions
-            WHERE suggested_by = %(suggested_by)s
-            ORDER BY id DESC LIMIT 1""",
-        {"suggested_by": SUGGESTED_BY},
-    )
-
-
-maintainer.LOCK_PATH = Path(f"/tmp/leninbot-{SUGGESTED_BY}.lock")
-maintainer.completed_run_count = completed_run_count
-maintainer.latest_maintainer_edit = latest_lane_edit
-
-
 if __name__ == "__main__":
     # Focus policy: the new-person lane stands down when new_lane_enabled is
     # false, so its timer keeps firing cheaply while every real maintenance

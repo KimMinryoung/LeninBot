@@ -20,23 +20,16 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import re
-import subprocess
 from typing import Any
 
 from db import execute_returning_rowcount as db_exec, get_conn, query_one as db_query_one
 from psycopg2.extras import RealDictCursor
-from ops import paths as _paths
 from tool_gateway.results import ToolFailure
 
 logger = logging.getLogger(__name__)
 
-FRONTEND_DIR = str(_paths.FRONTEND_DIR)
-CF_PURGE_SCRIPT = os.getenv(
-    "CF_PURGE_SCRIPT",
-    os.path.join(FRONTEND_DIR, "scripts", "cloudflare-purge.js"),
-)
+from runtime_tools.cloudflare_purge import FRONTEND_DIR, purge_paths
 
 
 # Per kind: table, which fields the tool may write, which cache keys to purge.
@@ -357,57 +350,8 @@ def _ensure_static_page_storage_sync() -> None:
 
 
 def _purge_cloudflare_sync(kind: str, target: int | str) -> dict[str, Any]:
-    """Purge Cloudflare URLs through the frontend script.
-
-    Failure is reported to the caller but never raises: the database update and
-    Redis invalidation are still the source-of-truth changes.
-    """
-    paths = list(dict.fromkeys(_cloudflare_purge_paths(kind, target)))
-    if not paths:
-        return {"ok": True, "purged": 0, "urls": []}
-    if not os.path.isfile(CF_PURGE_SCRIPT):
-        return {
-            "ok": False,
-            "purged": 0,
-            "urls": paths,
-            "reason": f"script_missing: {CF_PURGE_SCRIPT}",
-        }
-
-    try:
-        proc = subprocess.run(
-            ["node", CF_PURGE_SCRIPT, *paths],
-            cwd=FRONTEND_DIR,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=30,
-            check=False,
-        )
-    except Exception as e:
-        logger.warning("Cloudflare purge failed before execution (%s:%s): %s", kind, target, e)
-        return {
-            "ok": False,
-            "purged": 0,
-            "urls": paths,
-            "reason": f"{type(e).__name__}: {e}",
-        }
-
-    output = "\n".join(part.strip() for part in (proc.stdout, proc.stderr) if part.strip())
-    if proc.returncode != 0:
-        logger.warning(
-            "Cloudflare purge failed (%s:%s, exit=%s): %s",
-            kind,
-            target,
-            proc.returncode,
-            output,
-        )
-        return {
-            "ok": False,
-            "purged": 0,
-            "urls": paths,
-            "reason": output or f"exit_{proc.returncode}",
-        }
-    return {"ok": True, "purged": len(paths), "urls": paths, "output": output}
+    """Purge Cloudflare URLs for one post; never raises (see cloudflare_purge)."""
+    return purge_paths(_cloudflare_purge_paths(kind, target), f"{kind}:{target}")
 
 
 def _format_invalidation_note(

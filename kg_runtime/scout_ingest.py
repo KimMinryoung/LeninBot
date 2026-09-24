@@ -1,12 +1,12 @@
 """Scout-report-to-KG ingestion heuristic."""
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 
 from kg_runtime.writes import add_kg_episode
 
 logger = logging.getLogger(__name__)
-KST = timezone(timedelta(hours=9))
+from shared import KST
 
 # KG group ids the classifier may choose from (self_runtime/tools.py enum과 동일).
 KG_GROUP_IDS = (

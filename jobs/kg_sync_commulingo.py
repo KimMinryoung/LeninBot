@@ -33,6 +33,7 @@ import unicodedata
 from datetime import datetime
 
 from db import query as db_query
+from kg_runtime.doc_extract import josa
 
 logger = logging.getLogger(__name__)
 
@@ -180,19 +181,6 @@ def people_group_side(g: dict) -> dict:
         "summary": _truncate(((period + ". ") if period else "") + _clean(g.get("blurb_ko") or g.get("blurb_en"))),
         "name_ko": _clean(g.get("title_ko")) or None, "name_en": _clean(g.get("title_en")) or None,
     }
-
-
-def josa(word: str, pair: str) -> str:
-    """Korean particle by final consonant: josa("레닌", "은/는") -> "은"."""
-    with_batchim, without = pair.split("/")
-    if not word:
-        return without
-    ch = word[-1]
-    if "가" <= ch <= "힣":
-        return with_batchim if (ord(ch) - 0xAC00) % 28 else without
-    if ch.isdigit():
-        return with_batchim if ch in "01367" else without
-    return with_batchim if ch.lower() in "lmnr" else without
 
 
 def term_category_side(c: dict) -> dict:

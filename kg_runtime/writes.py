@@ -2,12 +2,12 @@
 
 import asyncio
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from kg_runtime.service_runtime import get_kg_service, reset_kg_service, run_kg_task
 
 logger = logging.getLogger(__name__)
-KST = timezone(timedelta(hours=9))
+from shared import KST
 
 def add_kg_episode(
     content: str,

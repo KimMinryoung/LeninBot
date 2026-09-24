@@ -19,7 +19,7 @@ def main():
     efficiency.add_argument('--since',default='today',help='UTC today or -Nh')
     plan = commands.add_parser('plan')
     plan.add_argument('--apply',action='store_true')
-    plan.add_argument('--workflow',choices=['legacy','editor'])
+    plan.add_argument('--workflow',choices=['editor'])
     consolidate = commands.add_parser('consolidate',help='bundle untouched enrichment jobs')
     consolidate.add_argument('--apply',action='store_true')
     cleanup = commands.add_parser('cleanup', help='preview retirement of untouched automatic jobs')
@@ -41,11 +41,11 @@ def main():
     run.add_argument('--job-id',type=int,help='resume only this job, with normal lease and safety checks')
     run.add_argument('--review', action='store_true',
                      help='include independent review while keeping publication disabled')
-    run.add_argument('--workflow',choices=['legacy','editor'])
+    run.add_argument('--workflow',choices=['editor'])
     tick = commands.add_parser('tick')
     tick.add_argument('--limit',type=int,default=12)
     tick.add_argument('--max-seconds',type=int,default=1800)
-    tick.add_argument('--workflow',choices=['legacy','editor'])
+    tick.add_argument('--workflow',choices=['editor'])
     args = parser.parse_args()
     store = Store()
     if args.command == 'list':

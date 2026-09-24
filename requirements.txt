@@ -17,6 +17,7 @@ langchain-google-genai
 langchain-huggingface
 sentence-transformers
 langchain-tavily
+tavily-python  # web_gateway calls the Tavily client directly
 langgraph
 
 # Knowledge Graph (Graphiti + Neo4j)

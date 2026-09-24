@@ -95,22 +95,19 @@ class PreflightTests(HermeticAsyncCase):
 
     async def test_routed_no_edit_completes_even_when_budget_exhausted(self):
         store = self.store()
-        legacy = AsyncMock()
-        legacy.uses_llm = True
-        stages = workflow.routed_stages(store, {'research':legacy}, 'editor')
-        with patch('commulingo_pipeline.service.call',return_value=CURRENT) as read:
+        stages = workflow.routed_stages(store)
+        with patch('commulingo_pipeline.service.call',return_value=CURRENT) as read, \
+             patch('commulingo_pipeline.stages.model_call') as model:
             result = await Engine(store, stages).run_one()
         self.assertEqual(result['stage'],'judge')
         read.assert_called_once()
         store.reserve.assert_not_called()
-        legacy.assert_not_awaited()
+        model.assert_not_called()
         self.assertTrue(store.finish_attempt.call_args.args[-1]['preflight_no_model'])
 
     async def test_explicit_request_still_needs_budget(self):
         store = self.store({**JOB, 'payload':{'workflow':'editor','gap_id':7}})
-        legacy = AsyncMock()
-        legacy.uses_llm = True
-        stages = workflow.routed_stages(store, {'research':legacy}, 'editor')
+        stages = workflow.routed_stages(store)
         with patch('commulingo_pipeline.service.call',return_value=CURRENT):
             result = await Engine(store, stages).run_one()
         self.assertEqual(result['status'],'budget_deferred')

@@ -6,7 +6,8 @@
 
 ## 운영 경로와 승인 범위
 
-운영 설정은 `workflow=editor`, `phase=live`다. 코드의 workflow 미지정 기본값인 `legacy`와 구분한다.
+운영 설정은 `workflow=editor`, `phase=live`다. workflow는 `editor`만 허용하며 미지정 기본값도 `editor`다.
+옛 두 RPC 방식의 legacy 단계(`Research`·`Draft`·`Review`·`validate`·`submit`)는 2026-09-24에 제거했다.
 `leninbot-commulingo-pipeline.timer`가 배치를 실행하고, 별도 `leninbot-commulingo-review.timer`는 비활성화되어 있다.
 독립 검토는 editor 안에서 수행한다. 사건 작성·인물-사건 연결의 기존 batch는
 2026-09-20 운영자 결정으로 폐기했으며 pipeline으로 이관하지 않았다.
@@ -134,7 +135,7 @@ Editor 입력은 세 층으로 나눈다. 시스템 문맥은 공통 편집·문
 `work_status`는 현재 조사 허용 상태와 다음 행동의 단일 진입점이다. 초기 입력에서 과제 범위,
 오류와 부족한 근거를 중복 전달하지 않으며 도구 응답은 독립적으로 읽을 수 있게 범위를 포함한다.
 전체 제출·부분 수정의 호출 방법은 해당 도구 설명이 맡고, `work_status`는 다음 수정 행동과
-별도 무편집 종료 도구를 안내한다. legacy 단계의 discovery·전체 결과 종료 지시는
+별도 무편집 종료 도구를 안내한다. 제거된 legacy 단계가 쓰던 discovery·전체 결과 종료 지시는
 Editor 시스템 문맥에 넣지 않는다. curator 기본 프롬프트 역시 누적하지 않고 교체한다.
 저장 schema, 근거 검증, 독립 검토와 승인 조건은 프롬프트 축약과 별개로 코드에서 유지한다.
 공통 WRITING_RULES를 적용하고 문장 분량은 상한의 80%를 여유 목표로 제시한다.
@@ -159,6 +160,8 @@ Editor 시스템 문맥에 넣지 않는다. curator 기본 프롬프트 역시 
 검토자는 원문을 직접 가져와 핵심 변경 사실과 위험 항목을 확인한다.
 `required_corrections`는 사실 오류의 필드 위치와 이유를 담으며 `optional_suggestions`와 구분한다.
 선택 제안만으로 revise할 수 없고 내용·근거가 그대로인 거절안은 유료 재검토 전에 보류한다.
+reject와 escalate는 모두 escalated로 끝나며 판정은 작업의 review artifact에만 남는다.
+legacy Review가 하던 항목 메모 기록은 editor로 옮기지 않았다.
 Jev는 주장과 인용, 검토 finding과 인용의 지지 관계를 판정한다. 최종 서술과 사실 검토는
 작성자·독립 검토자가 담당한다. 인용 게이트 장애 정책은 분류 장애 정책과 다르다.
 
@@ -170,6 +173,7 @@ Jev는 주장과 인용, 검토 finding과 인용의 지지 관계를 판정한�
 
 기존 pending 제안의 revise는 원 제안과 근거를 보존하는 수정 작업으로 이어진다.
 수정안이 승인되기 전에는 원 제안을 대체하지 않으며 수동 처리된 원 제안을 덮어쓰지 않는다.
+원 제안이 이미 수동 처리됐으면 frontend `publish`가 트랜잭션 안에서 거부하고, 단계는 오류로 끝나 재시도 한도를 따른다.
 
 ## 대기열·예산·복구
 
@@ -199,11 +203,14 @@ venv/bin/python scripts/commulingo_pipeline.py run --workflow editor --job-id 12
 DB 접근·credential·쓰기 가드는 [MCP gateway](mcp_gateway.md)와 [시크릿 관리](secret_management.md)를 따른다.
 모듈 import와 조회는 DDL을 실행하지 않는다. 스키마 변경은 명시적 migration으로 적용한다.
 
-## Legacy 호환과 배포 경계
+## workflow 고정과 배포 경계
 
-작업에 고정된 `payload.workflow=editor`는 이후 실행자의 기본 설정보다 우선하며 파생 등록 작업도 계승한다.
-기존 미지정 작업은 research/draft/discover 경계에서 전환하고 validate/review/submit/judge 중인 작업은
-기존 묶음을 완료하여 저장·검토 영수증을 보존한다. 기존 작성 스크립트와 handler는 이 호환 경로를 위해 남는다.
+`routed_stages`는 editor 단계만 실행한다. `payload.workflow`가 없는 작업은 research/draft/discover 단계에서
+처음 실행될 때 `editor`로 고정되며 파생 등록 작업도 이를 계승한다. `payload.workflow`가 없는 작업이
+validate/review/submit/judge 단계에 있거나 `editor` 외의 값으로 고정돼 있으면 `ValueError`로 멈춘다.
+옛 두 RPC 단계로 되돌아가는 경로는 없다. 제거 시점(2026-09-24) 운영 DB의 미완료 작업은 모두 `editor`로 고정돼 있었다.
+`validate` 단계는 editor 흐름에서 거치지 않는다. 그 단계에 남은 초안이 있으면 저장 검증만 다시 하고,
+실패는 editor로, revision 충돌은 조사로 돌려보낸다. `--workflow` 선택지는 `editor` 하나다.
 
 frontend 변경 자산은 `deploy/commulingo-editor-frontend.patch`다. 실제 저장은 기존 Admin 함수가 소유한다.
 운영 frontend/data는 호스트 마운트이므로 파일 변경 자체가 운영 반영이다.

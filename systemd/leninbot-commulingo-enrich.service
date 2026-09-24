@@ -1,9 +1,8 @@
 [Unit]
 Description=LeninBot CommuLingo existing-person enricher
 Wants=network-online.target leninbot-llm-proxy.service
-# Ordering only: when the daily batch queues all four lanes, they run one at a
-# time in new -> enrich -> terms -> maintainer order. No effect when started alone.
-# Second in the batch, after the gap queue and before the event lane.
+# Manual-start lane: no timer since the daily batch was retired (2026-09-20).
+# The After= ordering below only matters if several lanes are queued together.
 After=network-online.target leninbot-commulingo-gap.service leninbot-commulingo-new.service leninbot-llm-proxy.service
 
 [Service]

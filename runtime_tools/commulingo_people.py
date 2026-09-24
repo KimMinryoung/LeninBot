@@ -92,7 +92,7 @@ _PERSON_PATCH_KEYS = frozenset({
 })
 
 # Flag codes the frontend has vendored SVGs for (data/commulingo/flag-icons.js).
-# Must stay in sync with NATIONALITY_CODES in scripts/commulingo_people_maintainer.py.
+# scripts/commulingo_people_maintainer.py derives its prompt NATIONALITY_CODES from this set.
 # Codes map to country flags, not an exhaustive ethnicity taxonomy. Use sourced
 # national background; never assign Russia or a neighbouring state by default.
 # Preserve documented ethnic and mixed backgrounds in bilingual labels.
@@ -1660,6 +1660,738 @@ def _reader_call(action: str) -> str:
     return f"commulingo_people(action='{action}')"
 
 
+def _validate_person(cur, action: str, target_id: str, patch: dict) -> str | None:
+    for key in ("id", "group", "groupId", "cyrillic", "cyrillicPatronymic", "years"):
+        if key in patch and patch[key] is not None and not isinstance(patch[key], str):
+            return (
+                f"Error: {key} must be a plain string, not an object or list. "
+                "Only bilingual public text fields use {ko, en}."
+            )
+    stored = {}
+    if action != "create":
+        cur.execute(
+            "SELECT cyrillic, citizenship_code, origin_code FROM commulingo_people WHERE id = %s",
+            (target_id,),
+        )
+        stored = dict(cur.fetchone() or {})
+    cyrillic = str(
+        patch.get("cyrillic") if "cyrillic" in patch else stored.get("cyrillic") or ""
+    ).strip()
+    patronymic_state = _merge_patronymic_patch(
+        patch,
+        _stored_patronymic_state(cur, target_id) if action != "create" else {},
+    )
+    patronymic_error = _patronymic_problem(patronymic_state, cyrillic)
+    if patronymic_error:
+        return f"Error: {patronymic_error}."
+    cyrillic_patronymic = patronymic_state["native"]
+    # The native-name line must use the person's own script. Check it against
+    # the citizenship the record will HAVE after this patch, so correcting a
+    # wrong citizenship and the name together is accepted.
+    nationality_codes: list[tuple[str, str]] = []
+    for key, public, column in (
+        ("citizenship", "citizenship", "citizenship_code"),
+        ("origin", "nationalOrigin", "origin_code"),
+    ):
+        if isinstance(patch.get(key), dict):
+            nationality_codes.append((public, str(patch[key].get("code") or "").strip()))
+        elif key not in patch:
+            nationality_codes.append((public, str(stored.get(column) or "")))
+    for field, value in (("cyrillic", cyrillic), ("cyrillicPatronymic", cyrillic_patronymic)):
+        problem = _check_native_script(value, nationality_codes, field)
+        if problem:
+            return problem
+    # Same rule for the ko/en side: the name must never embed the patronymic.
+    # The frontend composes given + patronymic + family on render, so an
+    # embedded one doubles (오토 율리예비치 율리예비치 시미트 — the bug that
+    # led to structured name parts, frontend migration 060). Checked against
+    # the state the record will HAVE after this patch.
+    name_touched = any(k in patch for k in ("name", "givenName", "familyName"))
+    if name_touched or "patronymic" in patch:
+        stored_name = {}
+        if action != "create":
+            cur.execute(
+                """SELECT p.given_name_ko, p.given_name_en, p.family_name_ko, p.family_name_en,
+                          pa.patronymic_ko, pa.patronymic_en
+                   FROM commulingo_people p
+                   LEFT JOIN commulingo_person_patronymics pa ON pa.person_id = p.id
+                   WHERE p.id = %s""",
+                (target_id,),
+            )
+            stored_name = dict(cur.fetchone() or {})
+        for lang in ("ko", "en"):
+            _, _, full = _patch_name_parts(patch, lang, stored_name)
+            pat = patronymic_state[lang]
+            if not pat or not full:
+                continue
+            tokens = full.split()
+            embedded = (pat.lower() in [t.lower() for t in tokens]) if lang == "en" else (pat in tokens)
+            if embedded:
+                return (
+                    f"Error: the {lang} name embeds the patronymic '{pat}'. name / "
+                    "givenName+familyName carry given name + surname ONLY — the "
+                    "patronymic goes only in patronymic {ko,en} and renders between "
+                    "them automatically. A Western middle name is part of givenName, "
+                    "not a patronymic."
+                )
+    for key in _LOCALIZED_PERSON_KEYS:
+        if key in patch and patch[key] is not None and not isinstance(patch[key], dict):
+            return (
+                f"Error: {key} must be an object {{\"ko\": \"...\", \"en\": \"...\"}} — "
+                "a plain string is rejected because the site is bilingual and the "
+                "other language would be silently lost."
+            )
+    # `moment` had no limit at all, which is how 308-character moments reached the
+    # card. These ceilings exist to refuse an overflowing field, not to be written
+    # toward — length is prescribed to the curator as a sentence count.
+    for key, (ko_max, en_max), overflow in (
+        ("epithet", FIELD_LIMITS["epithet"], "Keep career chronology in career rows."),
+        ("bio", FIELD_LIMITS["bio"], "Keep career chronology in career rows."),
+        ("moment", FIELD_LIMITS["moment"], f"A moment is {sentence_prescription('moment')} — "
+                                           "pick a sharper scene instead of explaining this one."),
+    ):
+        value = patch.get(key)
+        if not isinstance(value, dict):
+            continue
+        ko_len = len(value.get("ko") or "")
+        en_len = len(value.get("en") or "")
+        if ko_len > ko_max or en_len > en_max:
+            return (
+                f"Error: {key} is too long (ko {ko_len}/{ko_max}, en {en_len}/{en_max} "
+                f"characters). Cut the stated overflow; do not redraft from scratch. "
+                f"{overflow}"
+            )
+    for key in ("citizenship", "origin"):
+        if key not in patch or patch[key] is None:
+            continue
+        node = patch[key]
+        if not isinstance(node, dict):
+            return (
+                f"Error: {key} must be {{\"code\": \"soviet\", "
+                f"\"label\": {{\"ko\": \"소련\", \"en\": \"Soviet Union\"}}}} or {{}} to clear."
+            )
+        code = str(node.get("code") or "").strip()
+        if code and code not in _NATIONALITY_CODES:
+            return (
+                f"Error: {key}.code '{code}' has no flag icon on the site. "
+                f"Use one of: {', '.join(sorted(_NATIONALITY_CODES))}. "
+                f"For create, choose a reviewed supported classification; the field cannot be omitted."
+            )
+    if "aliases" in patch and patch["aliases"] is not None:
+        aliases = patch["aliases"]
+        if (not isinstance(aliases, dict)
+                or not set(aliases) <= {"ko", "en"}
+                or not all(isinstance(v, list) for v in aliases.values())):
+            return (
+                "Error: aliases must be {\"ko\": [\"수슬로프\"], \"en\": [\"Suslov\"]} — "
+                "lists per language of the exact strings used in book text."
+            )
+    if "career" in patch and patch["career"] is not None:
+        if not isinstance(patch["career"], list):
+            return "Error: career must be a list of {y, r} entries."
+        for i, entry in enumerate(patch["career"]):
+            if (not isinstance(entry, dict)
+                    or not (entry.get("y") or entry.get("period"))
+                    or not isinstance(entry.get("r") or entry.get("role"), dict)):
+                return (
+                    f"Error: career[{i}] must be {{\"y\": \"1922–1953\", "
+                    "\"r\": {\"ko\": \"...\", \"en\": \"...\"}}} — other shapes would "
+                    "be stored as empty rows."
+                )
+    if "fate" in patch and patch["fate"] is not None:
+        fate = patch["fate"]
+        if not isinstance(fate, dict):
+            return "Error: fate must be {kind, label: {ko, en}} or null."
+        if fate.get("label") is not None and not isinstance(fate["label"], dict):
+            return "Error: fate.label must be {\"ko\": \"처형\", \"en\": \"Executed\"}."
+        label = fate.get("label") or {}
+        fl_ko, fl_en = FIELD_LIMITS["fate_label"]
+        if (len(label.get("ko") or "") > fl_ko
+                or len(label.get("en") or "") > fl_en):
+            return (
+                f"Error: fate.label is too long (ko {len(label.get('ko') or '')}/{fl_ko}, "
+                f"en {len(label.get('en') or '')}/{fl_en} characters). Write the cause of death only, WITHOUT "
+                "the death year (it renders from `years`): 처형/Executed, 자연사/"
+                "Natural causes, a specific illness (심장마비/Heart attack), place "
+                "with ' · ' (암살 · 멕시코). A deposed/exile fate keeps its event "
+                "year (실각 1964). Move burial and other detail to bio or sections."
+            )
+    if action == "create":
+        nationality_problem = _person_create_nationality_problem(patch)
+        if nationality_problem:
+            return (
+                f"Error: {nationality_problem}. Both citizenship and nationalOrigin "
+                "are mandatory; nationalOrigin may equal citizenship but must not be blank."
+            )
+        if patch.get("id") and patch["id"] != target_id:
+            return f"Error: patch.id '{patch['id']}' conflicts with target_id '{target_id}' — they must match (or omit patch.id)."
+        if not _ID_RE.match(target_id):
+            return "Error: target_id must be a lowercase kebab-case slug (e.g. 'ordzhonikidze')."
+        cur.execute("SELECT 1 FROM commulingo_people WHERE id = %s", (target_id,))
+        if cur.fetchone():
+            return (
+                f"Error: person '{target_id}' already exists — edit it with "
+                f"{_write_tool_call('person', 'update')}(person_id='{target_id}', ...)."
+            )
+        duplicate = _existing_person_match(cur, target_id, patch)
+        if duplicate:
+            return (
+                f"Error: '{duplicate['id']}' ({duplicate['name_ko']}) is already "
+                f"{duplicate['why']} — this is the same person under a different "
+                f"slug. Call {_write_tool_call('person', 'update')}(person_id="
+                f"'{duplicate['id']}', ...) on that id, putting any alternate "
+                "spelling in the 'aliases' field of the same patch. If they are "
+                "genuinely two different people, give the new card an English name "
+                "and slug that do not collide with the existing one."
+            )
+        group = patch.get("groupId") or patch.get("group") or ""
+        cur.execute("SELECT 1 FROM commulingo_people_groups WHERE id = %s", (group,))
+        if not cur.fetchone():
+            return f"Error: unknown group '{group}'. Check commulingo_people(action='list_groups')."
+        for lang in ("ko", "en"):
+            _, _, full = _patch_name_parts(patch, lang)
+            if not full:
+                return (
+                    "Error: person create requires a name per language — either "
+                    "name {ko,en} or givenName/familyName {ko,en} (single-token "
+                    "East Asian names go wholly in familyName)."
+                )
+        for key in ("bio", "epithet"):
+            value = patch.get(key) or {}
+            if not (isinstance(value, dict) and value.get("ko") and value.get("en")):
+                return f"Error: patch.{key}.ko and patch.{key}.en are required for person create."
+        if not patch.get("career"):
+            return "Error: at least one bilingual career entry is required for person create."
+        role = patch.get("role")
+        if not isinstance(role, dict) or not (
+            role.get("officeId") or role.get("category") or role.get("categoryId") or role.get("icon")
+        ):
+            return (
+                "Error: a primary role with officeId, category, or categoryId "
+                "is required for person create."
+            )
+    else:
+        cur.execute("SELECT 1 FROM commulingo_people WHERE id = %s", (target_id,))
+        if not cur.fetchone():
+            return (
+                f"Error: person '{target_id}' not found. Find the id with "
+                f"{_reader_call('search_people')}."
+            )
+        if action == "update" and ("group" in patch or "groupId" in patch):
+            group = patch.get("groupId") or patch.get("group") or ""
+            cur.execute("SELECT 1 FROM commulingo_people_groups WHERE id = %s", (group,))
+            if not cur.fetchone():
+                return f"Error: unknown group '{group}'."
+    fate = patch.get("fate")
+    if isinstance(fate, dict) and fate.get("kind") and fate["kind"] not in _FATE_KINDS:
+        return f"Error: fate.kind must be one of {', '.join(_FATE_KINDS)}."
+    if "role" in patch and patch["role"] is not None:
+        role = patch["role"]
+        if not isinstance(role, dict):
+            return "Error: role must be {officeId} or {category}, or null to clear."
+        office_id = role.get("officeId") or ""
+        category = role.get("category") or role.get("categoryId") or ""
+        if office_id and category:
+            return "Error: role takes exactly one of officeId or category, not both."
+        if not office_id and not category and not (patch.get("activities") and role.get("icon")):
+            return (
+                "Error: role needs officeId or category (icon/label render from "
+                "them — see commulingo_people action='list_categories' / 'list_offices')."
+            )
+        if office_id:
+            cur.execute("SELECT 1 FROM commulingo_offices WHERE id = %s", (office_id,))
+            if not cur.fetchone():
+                return f"Error: role.officeId '{office_id}' does not exist."
+        else:
+            cur.execute("SELECT 1 FROM commulingo_role_categories WHERE id = %s", (category,))
+            if not cur.fetchone():
+                cur.execute("SELECT id FROM commulingo_role_categories ORDER BY sort_order")
+                valid = ", ".join(r["id"] for r in cur.fetchall())
+                return f"Error: unknown role category '{category}'. Valid: {valid}."
+    return None
+
+
+def _validate_person_section(cur, action: str, target_id: str, patch: dict) -> str | None:
+    cur.execute("SELECT 1 FROM commulingo_people WHERE id = %s", (target_id,))
+    if not cur.fetchone():
+        return f"Error: person '{target_id}' not found (person_section targets a person id)."
+    slug = patch.get("slug") or ""
+    if not _SLUG_RE.match(slug):
+        return "Error: patch.slug is required — a short kebab-case id like 'early-life' or 'purge-role'."
+    for key in ("heading", "body"):
+        if key in patch and patch[key] is not None and not isinstance(patch[key], dict):
+            return f"Error: {key} must be an object {{\"ko\": \"...\", \"en\": \"...\"}}."
+    # body was the one long-form field with no ceiling on either side of the
+    # call — not in the tool schema, not here. The tool schema now carries a
+    # maxLength; this mirrors it for the writer paths that reach _validate
+    # without going through the schema, exactly as bio/epithet/moment do.
+    body_patch = patch.get("body")
+    if isinstance(body_patch, dict):
+        ko_max, en_max = FIELD_LIMITS["section_body"]
+        ko_len = len(body_patch.get("ko") or "")
+        en_len = len(body_patch.get("en") or "")
+        if ko_len > ko_max or en_len > en_max:
+            return (
+                f"Error: section body is too long (ko {ko_len}/{ko_max}, en "
+                f"{en_len}/{en_max} characters). The target is "
+                f"{SECTION_BODY_TARGET[0]}-{SECTION_BODY_TARGET[1]} Korean characters; "
+                f"a body this size is two topics — file the second one as its own "
+                f"section instead of trimming this one to fit."
+            )
+    cur.execute(
+        "SELECT 1 FROM commulingo_person_sections WHERE person_id = %s AND slug = %s",
+        (target_id, slug),
+    )
+    exists = bool(cur.fetchone())
+    if action == "create":
+        if exists:
+            return (
+                f"Error: section '{slug}' already exists for '{target_id}'. Use action "
+                f"'update' on that slug, or pick a genuinely different topic. Do NOT "
+                f"retry this create under a modified slug — that files the same topic "
+                f"twice."
+            )
+        # Slug uniqueness alone let the same topic in twice under two slugs when both
+        # lanes enriched one person at once: 예이젠시테인 got 몽타주 이론 as
+        # montage-theory and montage-theory-collision 65 seconds apart. Headings are
+        # the topic, so they are what a duplicate has to be caught on.
+        heading = patch.get("heading") or {}
+        key_ko, key_en = _dedup_key(heading.get("ko")), _dedup_key(heading.get("en"))
+        if key_ko or key_en:
+            cur.execute(
+                "SELECT slug, heading_ko, heading_en FROM commulingo_person_sections "
+                "WHERE person_id = %s", (target_id,)
+            )
+            for row in cur.fetchall():
+                if (key_ko and _dedup_key(row["heading_ko"]) == key_ko) or (
+                    key_en and _dedup_key(row["heading_en"]) == key_en
+                ):
+                    return (
+                        f"Error: section '{row['slug']}' already covers this topic for "
+                        f"'{target_id}' (heading '{row['heading_ko']}'). Rewrite it with "
+                        f"{_write_tool_call('person_section', 'update')} on slug "
+                        f"'{row['slug']}', or choose a different topic."
+                    )
+        body = patch.get("body") or {}
+        if not (body.get("ko") or body.get("en")):
+            return "Error: body.ko or body.en (markdown) is required for section create."
+    elif not exists:
+        return (
+            f"Error: section '{slug}' not found for '{target_id}'. "
+            f"{_reader_call('get_sections')} lists the existing slugs."
+        )
+    return None
+
+
+def _validate_history_event_person(cur, action: str, target_id: str, patch: dict) -> str | None:
+    if action == "delete":
+        return "Error: history_event_person deletion is not available to the unattended curator."
+    cur.execute("SELECT 1 FROM commulingo_history_events WHERE id = %s", (target_id,))
+    if not cur.fetchone():
+        return (
+            f"Error: history event {target_id} not found. Find the id with "
+            f"{_reader_call('list_events')}."
+        )
+    person_id = str(patch.get("personId") or "").strip()
+    if not person_id:
+        return "Error: history_event_person patch.personId is required."
+    cur.execute("SELECT 1 FROM commulingo_people WHERE id = %s", (person_id,))
+    if not cur.fetchone():
+        return (
+            f"Error: person {person_id} not found. Find the id with "
+            f"{_reader_call('search_people')}."
+        )
+    kind = str(patch.get("relationKind") or "").strip()
+    if kind not in _HISTORY_RELATION_KINDS:
+        return f"Error: relationKind must be one of {', '.join(_HISTORY_RELATION_KINDS)}."
+    for key in ("relation", "note"):
+        value = patch.get(key)
+        if not isinstance(value, dict) or not value.get("ko") or not value.get("en"):
+            return f"Error: {key}.ko and {key}.en are required."
+    note = patch["note"]
+    nt_ko, nt_en = FIELD_LIMITS["event_note"]
+    if len(note.get("ko") or "") > nt_ko or len(note.get("en") or "") > nt_en:
+        return (
+            f"Error: note is too long (ko {len(note.get('ko') or '')}/{nt_ko}, "
+            f"en {len(note.get('en') or '')}/{nt_en} characters). The note is a "
+            "one-or-two-sentence caption under the person on the event page — "
+            "move depth to a person_section."
+        )
+    # Every other target treats a non-int sortOrder as "append"; this one used
+    # to reject null outright, so the same patch shape passed for a person and
+    # failed for an event link.
+    if patch.get("sortOrder") is not None and not isinstance(patch["sortOrder"], int):
+        return "Error: sortOrder must be an integer, or null to append."
+    return None
+
+
+def _validate_history_event(cur, action: str, target_id: str, patch: dict) -> str | None:
+    if action != "update":
+        return (
+            "Error: history events are created and retired by hand. The curator may "
+            "only update one that already exists."
+        )
+    cur.execute(
+        "SELECT COALESCE(summary_ko, '') = '' AS skeleton "
+        "FROM commulingo_history_events WHERE id = %s",
+        (target_id,),
+    )
+    event_row = cur.fetchone()
+    if not event_row:
+        return (
+            f"Error: history event '{target_id}' not found. Find the id with "
+            f"{_reader_call('list_events')}."
+        )
+    if event_row["skeleton"]:
+        # A row with no summary is a hand-seeded skeleton: its first write is
+        # the whole card, in one call. A partial fill would publish the page
+        # (the store keys visibility on summary) with the rest still blank —
+        # the empty sources box ships to readers.
+        missing = [
+            key for key in ("question", "summary", "outcome", "timeline", "sources")
+            if not patch.get(key)
+        ]
+        if missing:
+            return (
+                "Error: this event is a skeleton, so its first write must carry the "
+                f"whole card. Missing: {', '.join(missing)}. Resend ONE call with "
+                "question, summary, outcome, timeline and sources together — sources "
+                "is the works you actually used, the same ones as your citations."
+            )
+    for key in _LOCALIZED_EVENT_KEYS:
+        value = patch.get(key)
+        if key not in patch or value is None:
+            continue
+        if not isinstance(value, dict):
+            return (
+                f"Error: {key} must be an object {{\"ko\": \"...\", \"en\": \"...\"}} — "
+                "a plain string would silently blank the other language."
+            )
+        ko_max, en_max = FIELD_LIMITS[f"event_{key}"]
+        ko_len, en_len = len(value.get("ko") or ""), len(value.get("en") or "")
+        if ko_len > ko_max or en_len > en_max:
+            return (
+                f"Error: {key} is too long (ko {ko_len}/{ko_max}, en {en_len}/{en_max} "
+                f"characters). It is the card text that sits above the body — put the "
+                f"depth in a body section with "
+                f"{_write_tool_call('history_event_section', 'create')} instead."
+            )
+    timeline = patch.get("timeline")
+    if timeline is not None:
+        if not isinstance(timeline, list) or not timeline:
+            return "Error: timeline must be a non-empty list; omit it to leave it unchanged."
+        for index, item in enumerate(timeline):
+            if not isinstance(item, dict) or set(item) - {"date", "title", "body"}:
+                return (
+                    f"Error: timeline[{index}] must be exactly "
+                    '{"date": "1936.02", "title": {"ko","en"}, "body": {"ko","en"}}.'
+                )
+            if not str(item.get("date") or "").strip():
+                return (
+                    f"Error: timeline[{index}].date is required — '1936', '1936.02' or "
+                    "'1936.07.18' as the source supports."
+                )
+            for key in ("title", "body"):
+                part = item.get(key)
+                if not isinstance(part, dict) or not (part.get("ko") and part.get("en")):
+                    return f"Error: timeline[{index}].{key} needs both a ko and an en string."
+    sources = patch.get("sources")
+    if sources is not None and (
+        not isinstance(sources, list)
+        or not sources
+        or not all(isinstance(s, str) and s.strip() for s in sources)
+    ):
+        return (
+            "Error: sources must be a non-empty list of reference strings. Sending it "
+            "replaces the stored list whole, so include the entries already there."
+        )
+    return None
+
+
+def _validate_history_event_section(cur, action: str, target_id: str, patch: dict) -> str | None:
+    if action == "delete":
+        return "Error: event body sections are not deleted by the unattended curator."
+    cur.execute(
+        "SELECT body_ko, body_en FROM commulingo_history_events WHERE id = %s",
+        (target_id,),
+    )
+    row = cur.fetchone()
+    if not row:
+        return (
+            f"Error: history event '{target_id}' not found. Find the id with "
+            f"{_reader_call('list_events')}."
+        )
+    for key in ("heading", "body"):
+        value = patch.get(key)
+        if not isinstance(value, dict) or not (value.get("ko") and value.get("en")):
+            return (
+                f"Error: {key} must be an object with a non-empty ko and en — a section "
+                "written in one language only leaves the other page with a gap."
+            )
+    for lang in ("ko", "en"):
+        text = patch["body"].get(lang) or ""
+        # The save path renders '## {heading}\n\n{body}', so a heading line
+        # inside the body ships as a duplicated or smuggled extra section.
+        if re.search(r"(^|\n)\s*#{1,6} ", text):
+            return (
+                f"Error: body.{lang} contains a markdown heading line. The heading goes "
+                "in the heading field and one call is one section — remove the '## ' "
+                "line (do not repeat the heading inside the body, and do not pack a "
+                "second section into this call)."
+            )
+        if re.search(r"중략|이하 생략|원문이 길어|\|\|\|", text):
+            return (
+                f"Error: body.{lang} contains a truncation placeholder. The page ships "
+                "exactly what you send — write the section in full, ending it cleanly "
+                "within the length target instead of cutting it with a marker."
+            )
+    after = patch.get("after")
+    if after is not None and not isinstance(after, dict):
+        return (
+            'Error: after must be {"ko": "<an existing ## heading>", "en": "..."}, '
+            "or omitted to append the section at the end."
+        )
+    ko_max, en_max = FIELD_LIMITS["event_section_body"]
+    ko_len = len(patch["body"].get("ko") or "")
+    en_len = len(patch["body"].get("en") or "")
+    if ko_len > ko_max or en_len > en_max:
+        return (
+            f"Error: section body is too long (ko {ko_len}/{ko_max}, en {en_len}/{en_max} "
+            f"characters). The target is {EVENT_SECTION_TARGET[0]}-{EVENT_SECTION_TARGET[1]} "
+            f"Korean characters; a body this size is two sections — file the second one "
+            f"as its own section instead of trimming this one to fit."
+        )
+    ko_parts = _split_event_body(row["body_ko"])
+    en_parts = _split_event_body(row["body_en"])
+    ko_at = _find_event_section(ko_parts, patch["heading"]["ko"])
+    en_at = _find_event_section(en_parts, patch["heading"]["en"])
+    if action == "create":
+        if ko_at >= 0 or en_at >= 0:
+            existing = ko_parts[ko_at][0] if ko_at >= 0 else en_parts[en_at][0]
+            return (
+                f"Error: '{target_id}' already has a section '{existing}' on this topic. "
+                f"Rewrite it with {_write_tool_call('history_event_section', 'update')}, "
+                f"or write a genuinely different part of the story."
+            )
+        for lang, parts in (("ko", ko_parts), ("en", en_parts)):
+            anchor = ((after or {}).get(lang) or "").strip()
+            if anchor and _find_event_section(parts, anchor) < 0:
+                return (
+                    f"Error: after.{lang} '{anchor}' is not a heading of this event's "
+                    f"{lang} body. Omit 'after' to append at the end."
+                )
+        ko_cap, en_cap = EVENT_BODY_CEILING
+        ko_total = len(row["body_ko"]) + ko_len
+        en_total = len(row["body_en"]) + en_len
+        if ko_total > ko_cap or en_total > en_cap:
+            return (
+                f"Error: this section would take the body past the per-event ceiling "
+                f"(ko {ko_total}/{ko_cap}, en {en_total}/{en_cap}). The event is already a "
+                f"long article — deepen an existing section instead of adding another."
+            )
+    elif ko_at < 0 or en_at < 0:
+        missing = "ko" if ko_at < 0 else "en"
+        return (
+            f"Error: '{target_id}' has no '{patch['heading'][missing]}' section in its "
+            f"{missing} body. Use action 'create' to add it."
+        )
+    return None
+
+
+def _validate_term(cur, action: str, target_id: str, patch: dict) -> str | None:
+    for key in ("id", "original"):
+        if key in patch and patch[key] is not None and not isinstance(patch[key], str):
+            return f"Error: {key} must be a plain string."
+    for key in _LOCALIZED_TERM_KEYS:
+        if key in patch and patch[key] is not None and not isinstance(patch[key], dict):
+            return (
+                f"Error: {key} must be an object {{\"ko\": \"...\", \"en\": \"...\"}} — "
+                "a plain string would silently blank the other language."
+            )
+    if "category" in patch:
+        if patch["category"] not in _TERM_CATEGORIES:
+            return (
+                f"Error: category must be one of {_TERM_CATEGORY_HINT}. Without it "
+                "the entry shows up on the glossary under 'Uncategorized'."
+            )
+    elif action == "create":
+        return f"Error: category is required on create. One of {_TERM_CATEGORY_HINT}."
+    if action == "create" and not patch.get("period"):
+        return (
+            "Error: period is required on create, as "
+            "{\"ko\": \"1930–1960\", \"en\": \"1930–1960\"} or "
+            "{\"ko\": \"개념\", \"en\": \"Concept\"} when undated."
+        )
+    for key in ("startYear", "endYear"):
+        value = patch.get(key)
+        if key in patch and value is not None and not isinstance(value, int):
+            return f"Error: {key} must be an integer year or null."
+    start, end = patch.get("startYear"), patch.get("endYear")
+    if isinstance(start, int) and isinstance(end, int) and end < start:
+        return f"Error: endYear ({end}) is before startYear ({start})."
+    # A dated label with no startYear sorts to the end of the chronological
+    # view, which is why the years are asked for alongside the label.
+    period = patch.get("period")
+    if action == "create" and isinstance(period, dict) and start is None:
+        labels = f"{period.get('ko') or ''} {period.get('en') or ''}"
+        if _YEAR_RE.search(labels):
+            return (
+                f"Error: period '{labels.strip()}' names a year, so startYear is "
+                "required for chronological sorting. Use the decade or century start "
+                "for a label like 1980년대 (1980) or 19세기 (1800)."
+            )
+    definition = patch.get("definition")
+    if isinstance(definition, dict):
+        df_ko, df_en = FIELD_LIMITS["definition"]
+        if len(definition.get("ko") or "") > df_ko or len(definition.get("en") or "") > df_en:
+            return (
+                f"Error: definition is too long (ko {len(definition.get('ko') or '')}/{df_ko}, "
+                f"en {len(definition.get('en') or '')}/{df_en} characters). It is the card "
+                "paragraph — move depth to body (markdown)."
+            )
+    if "aliases" in patch and patch["aliases"] is not None:
+        aliases = patch["aliases"]
+        if (not isinstance(aliases, dict)
+                or not set(aliases) <= {"ko", "en"}
+                or not all(isinstance(v, list) for v in aliases.values())):
+            return (
+                "Error: aliases must be {\"ko\": [\"굴라크\"], \"en\": [\"Gulag\"]} — the exact "
+                "strings prose uses; they drive site-wide auto-linking."
+            )
+    if "parentId" in patch and patch["parentId"] is not None:
+        parent = str(patch["parentId"]).strip()
+        if not parent:
+            return "Error: parentId must be a term id, or null to detach the entry."
+        if parent == target_id:
+            return f"Error: parentId '{parent}' is the entry itself."
+        cur.execute("SELECT parent_id FROM commulingo_terms WHERE id = %s", (parent,))
+        parent_row = cur.fetchone()
+        if not parent_row:
+            return (
+                f"Error: parentId '{parent}' is not a registered term. Find it with "
+                f"{_reader_call('list_terms')}."
+            )
+        # One level only, matching the entry page: a child cannot be a parent.
+        if parent_row["parent_id"]:
+            return (
+                f"Error: term '{parent}' is itself nested under "
+                f"'{parent_row['parent_id']}', and the glossary nests one level only. "
+                f"Use '{parent_row['parent_id']}' as the parent, or leave this entry flat."
+            )
+        cur.execute("SELECT id FROM commulingo_terms WHERE parent_id = %s LIMIT 1", (target_id,))
+        child = cur.fetchone()
+        if child:
+            return (
+                f"Error: '{target_id}' already has '{child['id']}' nested under it, so it "
+                "cannot become a child itself (the glossary nests one level only)."
+            )
+    for key, table, reader in (("people", "commulingo_people", "search_people"),
+                               ("events", "commulingo_history_events", "list_events")):
+        if key not in patch or patch[key] is None:
+            continue
+        value = patch[key]
+        if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+            return f"Error: {key} must be a list of {table} ids."
+        for item in value:
+            cur.execute(f"SELECT 1 FROM {table} WHERE id = %s", (item,))
+            if not cur.fetchone():
+                return (
+                    f"Error: {key} id '{item}' not found. Find it with "
+                    f"{_reader_call(reader)}."
+                )
+    if action == "create":
+        if patch.get("id") and patch["id"] != target_id:
+            return f"Error: patch.id '{patch['id']}' conflicts with target_id '{target_id}'."
+        if not _ID_RE.match(target_id):
+            return "Error: target_id must be a lowercase kebab-case slug (e.g. 'nomenklatura')."
+        cur.execute("SELECT 1 FROM commulingo_terms WHERE id = %s", (target_id,))
+        if cur.fetchone():
+            return (
+                f"Error: term '{target_id}' already exists — edit it with "
+                f"{_write_tool_call('term', 'update')}(term_id='{target_id}', ...), "
+                f"sending only the fields that change. Read it first with "
+                f"{_reader_call('get_term')}."
+            )
+        term = patch.get("term") or {}
+        if not (isinstance(term, dict) and term.get("ko") and term.get("en")):
+            return "Error: patch.term.ko and patch.term.en are required for term create."
+        if not (isinstance(definition, dict) and definition.get("ko") and definition.get("en")):
+            return "Error: patch.definition.ko and patch.definition.en are required for term create."
+        # An alias or name colliding with an existing term means this is the
+        # same concept under a different slug.
+        candidates = {term.get("ko"), term.get("en")}
+        aliases = patch.get("aliases") or {}
+        for values in (aliases.get("ko") or [], aliases.get("en") or []):
+            candidates.update(v for v in values if isinstance(v, str))
+        candidates.discard(None)
+        for candidate in candidates:
+            cur.execute(
+                """SELECT t.id FROM commulingo_terms t
+                    WHERE lower(btrim(t.term_ko)) = lower(btrim(%(c)s))
+                       OR lower(btrim(t.term_en)) = lower(btrim(%(c)s))
+                   UNION
+                   SELECT a.term_id FROM commulingo_term_aliases a
+                    WHERE lower(btrim(a.alias)) = lower(btrim(%(c)s))""",
+                {"c": candidate},
+            )
+            row = cur.fetchone()
+            if row:
+                return (
+                    f"Error: '{candidate}' is already registered on term "
+                    f"'{row['id']}' — this is the same concept, so it is not a gap. "
+                    "Move to a different candidate (or answer NO_CANDIDATE if the "
+                    f"material has none). To revise that card instead, call "
+                    f"{_write_tool_call('term', 'update')}(term_id='{row['id']}', ...) "
+                    "if you hold that tool."
+                )
+    else:
+        cur.execute("SELECT 1 FROM commulingo_terms WHERE id = %s", (target_id,))
+        if not cur.fetchone():
+            return (
+                f"Error: term '{target_id}' not found. Find the id with "
+                f"{_reader_call('list_terms')}."
+            )
+    return None
+
+
+def _validate_office_row(cur, action: str, target_id: str, patch: dict) -> str | None:
+    for key in _LOCALIZED_OFFICE_ROW_KEYS:
+        if key in patch and patch[key] is not None and not isinstance(patch[key], dict):
+            return (
+                f"Error: {key} must be an object {{\"ko\": \"...\", \"en\": \"...\"}} — "
+                "a plain string would silently blank the other language."
+            )
+    if action == "create":
+        cur.execute("SELECT 1 FROM commulingo_offices WHERE id = %s", (target_id,))
+        if not cur.fetchone():
+            return f"Error: office '{target_id}' not found (office_row create targets an office id)."
+    else:
+        if not target_id.isdigit():
+            return (
+                f"Error: office row '{target_id}' not found (office_row update/delete "
+                "targets a numeric row id from get_office/get_person)."
+            )
+        cur.execute("SELECT 1 FROM commulingo_office_rows WHERE id = %s", (int(target_id),))
+        if not cur.fetchone():
+            return f"Error: office row '{target_id}' not found."
+    if patch.get("personId"):
+        cur.execute("SELECT 1 FROM commulingo_people WHERE id = %s", (patch["personId"],))
+        if not cur.fetchone():
+            return f"Error: personId '{patch['personId']}' does not exist."
+    return None
+
+
+_VALIDATORS_BY_TARGET = {
+    "person": _validate_person,
+    "person_section": _validate_person_section,
+    "history_event_person": _validate_history_event_person,
+    "history_event": _validate_history_event,
+    "history_event_section": _validate_history_event_section,
+    "term": _validate_term,
+    "office_row": _validate_office_row,
+}
+
+
 def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -> str | None:
     """Return an error string, or None when the edit is applicable."""
     if _contains_north_korea(patch):
@@ -1689,709 +2421,9 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
             f"Error: unknown patch key(s): {', '.join(sorted(unknown))}. "
             f"Allowed: {', '.join(sorted(allowed))}."
         )
-    if target_type == "person":
-        for key in ("id", "group", "groupId", "cyrillic", "cyrillicPatronymic", "years"):
-            if key in patch and patch[key] is not None and not isinstance(patch[key], str):
-                return (
-                    f"Error: {key} must be a plain string, not an object or list. "
-                    "Only bilingual public text fields use {ko, en}."
-                )
-        stored = {}
-        if action != "create":
-            cur.execute(
-                "SELECT cyrillic, citizenship_code, origin_code FROM commulingo_people WHERE id = %s",
-                (target_id,),
-            )
-            stored = dict(cur.fetchone() or {})
-        cyrillic = str(
-            patch.get("cyrillic") if "cyrillic" in patch else stored.get("cyrillic") or ""
-        ).strip()
-        patronymic_state = _merge_patronymic_patch(
-            patch,
-            _stored_patronymic_state(cur, target_id) if action != "create" else {},
-        )
-        patronymic_error = _patronymic_problem(patronymic_state, cyrillic)
-        if patronymic_error:
-            return f"Error: {patronymic_error}."
-        cyrillic_patronymic = patronymic_state["native"]
-        # The native-name line must use the person's own script. Check it against
-        # the citizenship the record will HAVE after this patch, so correcting a
-        # wrong citizenship and the name together is accepted.
-        nationality_codes: list[tuple[str, str]] = []
-        for key, public, column in (
-            ("citizenship", "citizenship", "citizenship_code"),
-            ("origin", "nationalOrigin", "origin_code"),
-        ):
-            if isinstance(patch.get(key), dict):
-                nationality_codes.append((public, str(patch[key].get("code") or "").strip()))
-            elif key not in patch:
-                nationality_codes.append((public, str(stored.get(column) or "")))
-        for field, value in (("cyrillic", cyrillic), ("cyrillicPatronymic", cyrillic_patronymic)):
-            problem = _check_native_script(value, nationality_codes, field)
-            if problem:
-                return problem
-        # Same rule for the ko/en side: the name must never embed the patronymic.
-        # The frontend composes given + patronymic + family on render, so an
-        # embedded one doubles (오토 율리예비치 율리예비치 시미트 — the bug that
-        # led to structured name parts, frontend migration 060). Checked against
-        # the state the record will HAVE after this patch.
-        name_touched = any(k in patch for k in ("name", "givenName", "familyName"))
-        if name_touched or "patronymic" in patch:
-            stored_name = {}
-            if action != "create":
-                cur.execute(
-                    """SELECT p.given_name_ko, p.given_name_en, p.family_name_ko, p.family_name_en,
-                              pa.patronymic_ko, pa.patronymic_en
-                       FROM commulingo_people p
-                       LEFT JOIN commulingo_person_patronymics pa ON pa.person_id = p.id
-                       WHERE p.id = %s""",
-                    (target_id,),
-                )
-                stored_name = dict(cur.fetchone() or {})
-            for lang in ("ko", "en"):
-                _, _, full = _patch_name_parts(patch, lang, stored_name)
-                pat = patronymic_state[lang]
-                if not pat or not full:
-                    continue
-                tokens = full.split()
-                embedded = (pat.lower() in [t.lower() for t in tokens]) if lang == "en" else (pat in tokens)
-                if embedded:
-                    return (
-                        f"Error: the {lang} name embeds the patronymic '{pat}'. name / "
-                        "givenName+familyName carry given name + surname ONLY — the "
-                        "patronymic goes only in patronymic {ko,en} and renders between "
-                        "them automatically. A Western middle name is part of givenName, "
-                        "not a patronymic."
-                    )
-        for key in _LOCALIZED_PERSON_KEYS:
-            if key in patch and patch[key] is not None and not isinstance(patch[key], dict):
-                return (
-                    f"Error: {key} must be an object {{\"ko\": \"...\", \"en\": \"...\"}} — "
-                    "a plain string is rejected because the site is bilingual and the "
-                    "other language would be silently lost."
-                )
-        # `moment` had no limit at all, which is how 308-character moments reached the
-        # card. These ceilings exist to refuse an overflowing field, not to be written
-        # toward — length is prescribed to the curator as a sentence count.
-        for key, (ko_max, en_max), overflow in (
-            ("epithet", FIELD_LIMITS["epithet"], "Keep career chronology in career rows."),
-            ("bio", FIELD_LIMITS["bio"], "Keep career chronology in career rows."),
-            ("moment", FIELD_LIMITS["moment"], f"A moment is {sentence_prescription('moment')} — "
-                                               "pick a sharper scene instead of explaining this one."),
-        ):
-            value = patch.get(key)
-            if not isinstance(value, dict):
-                continue
-            ko_len = len(value.get("ko") or "")
-            en_len = len(value.get("en") or "")
-            if ko_len > ko_max or en_len > en_max:
-                return (
-                    f"Error: {key} is too long (ko {ko_len}/{ko_max}, en {en_len}/{en_max} "
-                    f"characters). Cut the stated overflow; do not redraft from scratch. "
-                    f"{overflow}"
-                )
-        for key in ("citizenship", "origin"):
-            if key not in patch or patch[key] is None:
-                continue
-            node = patch[key]
-            if not isinstance(node, dict):
-                return (
-                    f"Error: {key} must be {{\"code\": \"soviet\", "
-                    f"\"label\": {{\"ko\": \"소련\", \"en\": \"Soviet Union\"}}}} or {{}} to clear."
-                )
-            code = str(node.get("code") or "").strip()
-            if code and code not in _NATIONALITY_CODES:
-                return (
-                    f"Error: {key}.code '{code}' has no flag icon on the site. "
-                    f"Use one of: {', '.join(sorted(_NATIONALITY_CODES))}. "
-                    f"For create, choose a reviewed supported classification; the field cannot be omitted."
-                )
-        if "aliases" in patch and patch["aliases"] is not None:
-            aliases = patch["aliases"]
-            if (not isinstance(aliases, dict)
-                    or not set(aliases) <= {"ko", "en"}
-                    or not all(isinstance(v, list) for v in aliases.values())):
-                return (
-                    "Error: aliases must be {\"ko\": [\"수슬로프\"], \"en\": [\"Suslov\"]} — "
-                    "lists per language of the exact strings used in book text."
-                )
-        if "career" in patch and patch["career"] is not None:
-            if not isinstance(patch["career"], list):
-                return "Error: career must be a list of {y, r} entries."
-            for i, entry in enumerate(patch["career"]):
-                if (not isinstance(entry, dict)
-                        or not (entry.get("y") or entry.get("period"))
-                        or not isinstance(entry.get("r") or entry.get("role"), dict)):
-                    return (
-                        f"Error: career[{i}] must be {{\"y\": \"1922–1953\", "
-                        "\"r\": {\"ko\": \"...\", \"en\": \"...\"}}} — other shapes would "
-                        "be stored as empty rows."
-                    )
-        if "fate" in patch and patch["fate"] is not None:
-            fate = patch["fate"]
-            if not isinstance(fate, dict):
-                return "Error: fate must be {kind, label: {ko, en}} or null."
-            if fate.get("label") is not None and not isinstance(fate["label"], dict):
-                return "Error: fate.label must be {\"ko\": \"처형\", \"en\": \"Executed\"}."
-            label = fate.get("label") or {}
-            fl_ko, fl_en = FIELD_LIMITS["fate_label"]
-            if (len(label.get("ko") or "") > fl_ko
-                    or len(label.get("en") or "") > fl_en):
-                return (
-                    f"Error: fate.label is too long (ko {len(label.get('ko') or '')}/{fl_ko}, "
-                    f"en {len(label.get('en') or '')}/{fl_en} characters). Write the cause of death only, WITHOUT "
-                    "the death year (it renders from `years`): 처형/Executed, 자연사/"
-                    "Natural causes, a specific illness (심장마비/Heart attack), place "
-                    "with ' · ' (암살 · 멕시코). A deposed/exile fate keeps its event "
-                    "year (실각 1964). Move burial and other detail to bio or sections."
-                )
-        if action == "create":
-            nationality_problem = _person_create_nationality_problem(patch)
-            if nationality_problem:
-                return (
-                    f"Error: {nationality_problem}. Both citizenship and nationalOrigin "
-                    "are mandatory; nationalOrigin may equal citizenship but must not be blank."
-                )
-            if patch.get("id") and patch["id"] != target_id:
-                return f"Error: patch.id '{patch['id']}' conflicts with target_id '{target_id}' — they must match (or omit patch.id)."
-            if not _ID_RE.match(target_id):
-                return "Error: target_id must be a lowercase kebab-case slug (e.g. 'ordzhonikidze')."
-            cur.execute("SELECT 1 FROM commulingo_people WHERE id = %s", (target_id,))
-            if cur.fetchone():
-                return (
-                    f"Error: person '{target_id}' already exists — edit it with "
-                    f"{_write_tool_call('person', 'update')}(person_id='{target_id}', ...)."
-                )
-            duplicate = _existing_person_match(cur, target_id, patch)
-            if duplicate:
-                return (
-                    f"Error: '{duplicate['id']}' ({duplicate['name_ko']}) is already "
-                    f"{duplicate['why']} — this is the same person under a different "
-                    f"slug. Call {_write_tool_call('person', 'update')}(person_id="
-                    f"'{duplicate['id']}', ...) on that id, putting any alternate "
-                    "spelling in the 'aliases' field of the same patch. If they are "
-                    "genuinely two different people, give the new card an English name "
-                    "and slug that do not collide with the existing one."
-                )
-            group = patch.get("groupId") or patch.get("group") or ""
-            cur.execute("SELECT 1 FROM commulingo_people_groups WHERE id = %s", (group,))
-            if not cur.fetchone():
-                return f"Error: unknown group '{group}'. Check commulingo_people(action='list_groups')."
-            for lang in ("ko", "en"):
-                _, _, full = _patch_name_parts(patch, lang)
-                if not full:
-                    return (
-                        "Error: person create requires a name per language — either "
-                        "name {ko,en} or givenName/familyName {ko,en} (single-token "
-                        "East Asian names go wholly in familyName)."
-                    )
-            for key in ("bio", "epithet"):
-                value = patch.get(key) or {}
-                if not (isinstance(value, dict) and value.get("ko") and value.get("en")):
-                    return f"Error: patch.{key}.ko and patch.{key}.en are required for person create."
-            if not patch.get("career"):
-                return "Error: at least one bilingual career entry is required for person create."
-            role = patch.get("role")
-            if not isinstance(role, dict) or not (
-                role.get("officeId") or role.get("category") or role.get("categoryId") or role.get("icon")
-            ):
-                return (
-                    "Error: a primary role with officeId, category, or categoryId "
-                    "is required for person create."
-                )
-        else:
-            cur.execute("SELECT 1 FROM commulingo_people WHERE id = %s", (target_id,))
-            if not cur.fetchone():
-                return (
-                    f"Error: person '{target_id}' not found. Find the id with "
-                    f"{_reader_call('search_people')}."
-                )
-            if action == "update" and ("group" in patch or "groupId" in patch):
-                group = patch.get("groupId") or patch.get("group") or ""
-                cur.execute("SELECT 1 FROM commulingo_people_groups WHERE id = %s", (group,))
-                if not cur.fetchone():
-                    return f"Error: unknown group '{group}'."
-        fate = patch.get("fate")
-        if isinstance(fate, dict) and fate.get("kind") and fate["kind"] not in _FATE_KINDS:
-            return f"Error: fate.kind must be one of {', '.join(_FATE_KINDS)}."
-        if "role" in patch and patch["role"] is not None:
-            role = patch["role"]
-            if not isinstance(role, dict):
-                return "Error: role must be {officeId} or {category}, or null to clear."
-            office_id = role.get("officeId") or ""
-            category = role.get("category") or role.get("categoryId") or ""
-            if office_id and category:
-                return "Error: role takes exactly one of officeId or category, not both."
-            if not office_id and not category and not (patch.get("activities") and role.get("icon")):
-                return (
-                    "Error: role needs officeId or category (icon/label render from "
-                    "them — see commulingo_people action='list_categories' / 'list_offices')."
-                )
-            if office_id:
-                cur.execute("SELECT 1 FROM commulingo_offices WHERE id = %s", (office_id,))
-                if not cur.fetchone():
-                    return f"Error: role.officeId '{office_id}' does not exist."
-            else:
-                cur.execute("SELECT 1 FROM commulingo_role_categories WHERE id = %s", (category,))
-                if not cur.fetchone():
-                    cur.execute("SELECT id FROM commulingo_role_categories ORDER BY sort_order")
-                    valid = ", ".join(r["id"] for r in cur.fetchall())
-                    return f"Error: unknown role category '{category}'. Valid: {valid}."
-    elif target_type == "person_section":
-        cur.execute("SELECT 1 FROM commulingo_people WHERE id = %s", (target_id,))
-        if not cur.fetchone():
-            return f"Error: person '{target_id}' not found (person_section targets a person id)."
-        slug = patch.get("slug") or ""
-        if not _SLUG_RE.match(slug):
-            return "Error: patch.slug is required — a short kebab-case id like 'early-life' or 'purge-role'."
-        for key in ("heading", "body"):
-            if key in patch and patch[key] is not None and not isinstance(patch[key], dict):
-                return f"Error: {key} must be an object {{\"ko\": \"...\", \"en\": \"...\"}}."
-        # body was the one long-form field with no ceiling on either side of the
-        # call — not in the tool schema, not here. The tool schema now carries a
-        # maxLength; this mirrors it for the writer paths that reach _validate
-        # without going through the schema, exactly as bio/epithet/moment do.
-        body_patch = patch.get("body")
-        if isinstance(body_patch, dict):
-            ko_max, en_max = FIELD_LIMITS["section_body"]
-            ko_len = len(body_patch.get("ko") or "")
-            en_len = len(body_patch.get("en") or "")
-            if ko_len > ko_max or en_len > en_max:
-                return (
-                    f"Error: section body is too long (ko {ko_len}/{ko_max}, en "
-                    f"{en_len}/{en_max} characters). The target is "
-                    f"{SECTION_BODY_TARGET[0]}-{SECTION_BODY_TARGET[1]} Korean characters; "
-                    f"a body this size is two topics — file the second one as its own "
-                    f"section instead of trimming this one to fit."
-                )
-        cur.execute(
-            "SELECT 1 FROM commulingo_person_sections WHERE person_id = %s AND slug = %s",
-            (target_id, slug),
-        )
-        exists = bool(cur.fetchone())
-        if action == "create":
-            if exists:
-                return (
-                    f"Error: section '{slug}' already exists for '{target_id}'. Use action "
-                    f"'update' on that slug, or pick a genuinely different topic. Do NOT "
-                    f"retry this create under a modified slug — that files the same topic "
-                    f"twice."
-                )
-            # Slug uniqueness alone let the same topic in twice under two slugs when both
-            # lanes enriched one person at once: 예이젠시테인 got 몽타주 이론 as
-            # montage-theory and montage-theory-collision 65 seconds apart. Headings are
-            # the topic, so they are what a duplicate has to be caught on.
-            heading = patch.get("heading") or {}
-            key_ko, key_en = _dedup_key(heading.get("ko")), _dedup_key(heading.get("en"))
-            if key_ko or key_en:
-                cur.execute(
-                    "SELECT slug, heading_ko, heading_en FROM commulingo_person_sections "
-                    "WHERE person_id = %s", (target_id,)
-                )
-                for row in cur.fetchall():
-                    if (key_ko and _dedup_key(row["heading_ko"]) == key_ko) or (
-                        key_en and _dedup_key(row["heading_en"]) == key_en
-                    ):
-                        return (
-                            f"Error: section '{row['slug']}' already covers this topic for "
-                            f"'{target_id}' (heading '{row['heading_ko']}'). Rewrite it with "
-                            f"{_write_tool_call('person_section', 'update')} on slug "
-                            f"'{row['slug']}', or choose a different topic."
-                        )
-            body = patch.get("body") or {}
-            if not (body.get("ko") or body.get("en")):
-                return "Error: body.ko or body.en (markdown) is required for section create."
-        elif not exists:
-            return (
-                f"Error: section '{slug}' not found for '{target_id}'. "
-                f"{_reader_call('get_sections')} lists the existing slugs."
-            )
-    elif target_type == "history_event_person":
-        if action == "delete":
-            return "Error: history_event_person deletion is not available to the unattended curator."
-        cur.execute("SELECT 1 FROM commulingo_history_events WHERE id = %s", (target_id,))
-        if not cur.fetchone():
-            return (
-                f"Error: history event {target_id} not found. Find the id with "
-                f"{_reader_call('list_events')}."
-            )
-        person_id = str(patch.get("personId") or "").strip()
-        if not person_id:
-            return "Error: history_event_person patch.personId is required."
-        cur.execute("SELECT 1 FROM commulingo_people WHERE id = %s", (person_id,))
-        if not cur.fetchone():
-            return (
-                f"Error: person {person_id} not found. Find the id with "
-                f"{_reader_call('search_people')}."
-            )
-        kind = str(patch.get("relationKind") or "").strip()
-        if kind not in _HISTORY_RELATION_KINDS:
-            return f"Error: relationKind must be one of {', '.join(_HISTORY_RELATION_KINDS)}."
-        for key in ("relation", "note"):
-            value = patch.get(key)
-            if not isinstance(value, dict) or not value.get("ko") or not value.get("en"):
-                return f"Error: {key}.ko and {key}.en are required."
-        note = patch["note"]
-        nt_ko, nt_en = FIELD_LIMITS["event_note"]
-        if len(note.get("ko") or "") > nt_ko or len(note.get("en") or "") > nt_en:
-            return (
-                f"Error: note is too long (ko {len(note.get('ko') or '')}/{nt_ko}, "
-                f"en {len(note.get('en') or '')}/{nt_en} characters). The note is a "
-                "one-or-two-sentence caption under the person on the event page — "
-                "move depth to a person_section."
-            )
-        # Every other target treats a non-int sortOrder as "append"; this one used
-        # to reject null outright, so the same patch shape passed for a person and
-        # failed for an event link.
-        if patch.get("sortOrder") is not None and not isinstance(patch["sortOrder"], int):
-            return "Error: sortOrder must be an integer, or null to append."
-    elif target_type == "history_event":
-        if action != "update":
-            return (
-                "Error: history events are created and retired by hand. The curator may "
-                "only update one that already exists."
-            )
-        cur.execute(
-            "SELECT COALESCE(summary_ko, '') = '' AS skeleton "
-            "FROM commulingo_history_events WHERE id = %s",
-            (target_id,),
-        )
-        event_row = cur.fetchone()
-        if not event_row:
-            return (
-                f"Error: history event '{target_id}' not found. Find the id with "
-                f"{_reader_call('list_events')}."
-            )
-        if event_row["skeleton"]:
-            # A row with no summary is a hand-seeded skeleton: its first write is
-            # the whole card, in one call. A partial fill would publish the page
-            # (the store keys visibility on summary) with the rest still blank —
-            # the empty sources box ships to readers.
-            missing = [
-                key for key in ("question", "summary", "outcome", "timeline", "sources")
-                if not patch.get(key)
-            ]
-            if missing:
-                return (
-                    "Error: this event is a skeleton, so its first write must carry the "
-                    f"whole card. Missing: {', '.join(missing)}. Resend ONE call with "
-                    "question, summary, outcome, timeline and sources together — sources "
-                    "is the works you actually used, the same ones as your citations."
-                )
-        for key in _LOCALIZED_EVENT_KEYS:
-            value = patch.get(key)
-            if key not in patch or value is None:
-                continue
-            if not isinstance(value, dict):
-                return (
-                    f"Error: {key} must be an object {{\"ko\": \"...\", \"en\": \"...\"}} — "
-                    "a plain string would silently blank the other language."
-                )
-            ko_max, en_max = FIELD_LIMITS[f"event_{key}"]
-            ko_len, en_len = len(value.get("ko") or ""), len(value.get("en") or "")
-            if ko_len > ko_max or en_len > en_max:
-                return (
-                    f"Error: {key} is too long (ko {ko_len}/{ko_max}, en {en_len}/{en_max} "
-                    f"characters). It is the card text that sits above the body — put the "
-                    f"depth in a body section with "
-                    f"{_write_tool_call('history_event_section', 'create')} instead."
-                )
-        timeline = patch.get("timeline")
-        if timeline is not None:
-            if not isinstance(timeline, list) or not timeline:
-                return "Error: timeline must be a non-empty list; omit it to leave it unchanged."
-            for index, item in enumerate(timeline):
-                if not isinstance(item, dict) or set(item) - {"date", "title", "body"}:
-                    return (
-                        f"Error: timeline[{index}] must be exactly "
-                        '{"date": "1936.02", "title": {"ko","en"}, "body": {"ko","en"}}.'
-                    )
-                if not str(item.get("date") or "").strip():
-                    return (
-                        f"Error: timeline[{index}].date is required — '1936', '1936.02' or "
-                        "'1936.07.18' as the source supports."
-                    )
-                for key in ("title", "body"):
-                    part = item.get(key)
-                    if not isinstance(part, dict) or not (part.get("ko") and part.get("en")):
-                        return f"Error: timeline[{index}].{key} needs both a ko and an en string."
-        sources = patch.get("sources")
-        if sources is not None and (
-            not isinstance(sources, list)
-            or not sources
-            or not all(isinstance(s, str) and s.strip() for s in sources)
-        ):
-            return (
-                "Error: sources must be a non-empty list of reference strings. Sending it "
-                "replaces the stored list whole, so include the entries already there."
-            )
-
-    elif target_type == "history_event_section":
-        if action == "delete":
-            return "Error: event body sections are not deleted by the unattended curator."
-        cur.execute(
-            "SELECT body_ko, body_en FROM commulingo_history_events WHERE id = %s",
-            (target_id,),
-        )
-        row = cur.fetchone()
-        if not row:
-            return (
-                f"Error: history event '{target_id}' not found. Find the id with "
-                f"{_reader_call('list_events')}."
-            )
-        for key in ("heading", "body"):
-            value = patch.get(key)
-            if not isinstance(value, dict) or not (value.get("ko") and value.get("en")):
-                return (
-                    f"Error: {key} must be an object with a non-empty ko and en — a section "
-                    "written in one language only leaves the other page with a gap."
-                )
-        for lang in ("ko", "en"):
-            text = patch["body"].get(lang) or ""
-            # The save path renders '## {heading}\n\n{body}', so a heading line
-            # inside the body ships as a duplicated or smuggled extra section.
-            if re.search(r"(^|\n)\s*#{1,6} ", text):
-                return (
-                    f"Error: body.{lang} contains a markdown heading line. The heading goes "
-                    "in the heading field and one call is one section — remove the '## ' "
-                    "line (do not repeat the heading inside the body, and do not pack a "
-                    "second section into this call)."
-                )
-            if re.search(r"중략|이하 생략|원문이 길어|\|\|\|", text):
-                return (
-                    f"Error: body.{lang} contains a truncation placeholder. The page ships "
-                    "exactly what you send — write the section in full, ending it cleanly "
-                    "within the length target instead of cutting it with a marker."
-                )
-        after = patch.get("after")
-        if after is not None and not isinstance(after, dict):
-            return (
-                'Error: after must be {"ko": "<an existing ## heading>", "en": "..."}, '
-                "or omitted to append the section at the end."
-            )
-        ko_max, en_max = FIELD_LIMITS["event_section_body"]
-        ko_len = len(patch["body"].get("ko") or "")
-        en_len = len(patch["body"].get("en") or "")
-        if ko_len > ko_max or en_len > en_max:
-            return (
-                f"Error: section body is too long (ko {ko_len}/{ko_max}, en {en_len}/{en_max} "
-                f"characters). The target is {EVENT_SECTION_TARGET[0]}-{EVENT_SECTION_TARGET[1]} "
-                f"Korean characters; a body this size is two sections — file the second one "
-                f"as its own section instead of trimming this one to fit."
-            )
-        ko_parts = _split_event_body(row["body_ko"])
-        en_parts = _split_event_body(row["body_en"])
-        ko_at = _find_event_section(ko_parts, patch["heading"]["ko"])
-        en_at = _find_event_section(en_parts, patch["heading"]["en"])
-        if action == "create":
-            if ko_at >= 0 or en_at >= 0:
-                existing = ko_parts[ko_at][0] if ko_at >= 0 else en_parts[en_at][0]
-                return (
-                    f"Error: '{target_id}' already has a section '{existing}' on this topic. "
-                    f"Rewrite it with {_write_tool_call('history_event_section', 'update')}, "
-                    f"or write a genuinely different part of the story."
-                )
-            for lang, parts in (("ko", ko_parts), ("en", en_parts)):
-                anchor = ((after or {}).get(lang) or "").strip()
-                if anchor and _find_event_section(parts, anchor) < 0:
-                    return (
-                        f"Error: after.{lang} '{anchor}' is not a heading of this event's "
-                        f"{lang} body. Omit 'after' to append at the end."
-                    )
-            ko_cap, en_cap = EVENT_BODY_CEILING
-            ko_total = len(row["body_ko"]) + ko_len
-            en_total = len(row["body_en"]) + en_len
-            if ko_total > ko_cap or en_total > en_cap:
-                return (
-                    f"Error: this section would take the body past the per-event ceiling "
-                    f"(ko {ko_total}/{ko_cap}, en {en_total}/{en_cap}). The event is already a "
-                    f"long article — deepen an existing section instead of adding another."
-                )
-        elif ko_at < 0 or en_at < 0:
-            missing = "ko" if ko_at < 0 else "en"
-            return (
-                f"Error: '{target_id}' has no '{patch['heading'][missing]}' section in its "
-                f"{missing} body. Use action 'create' to add it."
-            )
-
-    elif target_type == "term":
-        for key in ("id", "original"):
-            if key in patch and patch[key] is not None and not isinstance(patch[key], str):
-                return f"Error: {key} must be a plain string."
-        for key in _LOCALIZED_TERM_KEYS:
-            if key in patch and patch[key] is not None and not isinstance(patch[key], dict):
-                return (
-                    f"Error: {key} must be an object {{\"ko\": \"...\", \"en\": \"...\"}} — "
-                    "a plain string would silently blank the other language."
-                )
-        if "category" in patch:
-            if patch["category"] not in _TERM_CATEGORIES:
-                return (
-                    f"Error: category must be one of {_TERM_CATEGORY_HINT}. Without it "
-                    "the entry shows up on the glossary under 'Uncategorized'."
-                )
-        elif action == "create":
-            return f"Error: category is required on create. One of {_TERM_CATEGORY_HINT}."
-        if action == "create" and not patch.get("period"):
-            return (
-                "Error: period is required on create, as "
-                "{\"ko\": \"1930–1960\", \"en\": \"1930–1960\"} or "
-                "{\"ko\": \"개념\", \"en\": \"Concept\"} when undated."
-            )
-        for key in ("startYear", "endYear"):
-            value = patch.get(key)
-            if key in patch and value is not None and not isinstance(value, int):
-                return f"Error: {key} must be an integer year or null."
-        start, end = patch.get("startYear"), patch.get("endYear")
-        if isinstance(start, int) and isinstance(end, int) and end < start:
-            return f"Error: endYear ({end}) is before startYear ({start})."
-        # A dated label with no startYear sorts to the end of the chronological
-        # view, which is why the years are asked for alongside the label.
-        period = patch.get("period")
-        if action == "create" and isinstance(period, dict) and start is None:
-            labels = f"{period.get('ko') or ''} {period.get('en') or ''}"
-            if _YEAR_RE.search(labels):
-                return (
-                    f"Error: period '{labels.strip()}' names a year, so startYear is "
-                    "required for chronological sorting. Use the decade or century start "
-                    "for a label like 1980년대 (1980) or 19세기 (1800)."
-                )
-        definition = patch.get("definition")
-        if isinstance(definition, dict):
-            df_ko, df_en = FIELD_LIMITS["definition"]
-            if len(definition.get("ko") or "") > df_ko or len(definition.get("en") or "") > df_en:
-                return (
-                    f"Error: definition is too long (ko {len(definition.get('ko') or '')}/{df_ko}, "
-                    f"en {len(definition.get('en') or '')}/{df_en} characters). It is the card "
-                    "paragraph — move depth to body (markdown)."
-                )
-        if "aliases" in patch and patch["aliases"] is not None:
-            aliases = patch["aliases"]
-            if (not isinstance(aliases, dict)
-                    or not set(aliases) <= {"ko", "en"}
-                    or not all(isinstance(v, list) for v in aliases.values())):
-                return (
-                    "Error: aliases must be {\"ko\": [\"굴라크\"], \"en\": [\"Gulag\"]} — the exact "
-                    "strings prose uses; they drive site-wide auto-linking."
-                )
-        if "parentId" in patch and patch["parentId"] is not None:
-            parent = str(patch["parentId"]).strip()
-            if not parent:
-                return "Error: parentId must be a term id, or null to detach the entry."
-            if parent == target_id:
-                return f"Error: parentId '{parent}' is the entry itself."
-            cur.execute("SELECT parent_id FROM commulingo_terms WHERE id = %s", (parent,))
-            parent_row = cur.fetchone()
-            if not parent_row:
-                return (
-                    f"Error: parentId '{parent}' is not a registered term. Find it with "
-                    f"{_reader_call('list_terms')}."
-                )
-            # One level only, matching the entry page: a child cannot be a parent.
-            if parent_row["parent_id"]:
-                return (
-                    f"Error: term '{parent}' is itself nested under "
-                    f"'{parent_row['parent_id']}', and the glossary nests one level only. "
-                    f"Use '{parent_row['parent_id']}' as the parent, or leave this entry flat."
-                )
-            cur.execute("SELECT id FROM commulingo_terms WHERE parent_id = %s LIMIT 1", (target_id,))
-            child = cur.fetchone()
-            if child:
-                return (
-                    f"Error: '{target_id}' already has '{child['id']}' nested under it, so it "
-                    "cannot become a child itself (the glossary nests one level only)."
-                )
-        for key, table, reader in (("people", "commulingo_people", "search_people"),
-                                   ("events", "commulingo_history_events", "list_events")):
-            if key not in patch or patch[key] is None:
-                continue
-            value = patch[key]
-            if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
-                return f"Error: {key} must be a list of {table} ids."
-            for item in value:
-                cur.execute(f"SELECT 1 FROM {table} WHERE id = %s", (item,))
-                if not cur.fetchone():
-                    return (
-                        f"Error: {key} id '{item}' not found. Find it with "
-                        f"{_reader_call(reader)}."
-                    )
-        if action == "create":
-            if patch.get("id") and patch["id"] != target_id:
-                return f"Error: patch.id '{patch['id']}' conflicts with target_id '{target_id}'."
-            if not _ID_RE.match(target_id):
-                return "Error: target_id must be a lowercase kebab-case slug (e.g. 'nomenklatura')."
-            cur.execute("SELECT 1 FROM commulingo_terms WHERE id = %s", (target_id,))
-            if cur.fetchone():
-                return (
-                    f"Error: term '{target_id}' already exists — edit it with "
-                    f"{_write_tool_call('term', 'update')}(term_id='{target_id}', ...), "
-                    f"sending only the fields that change. Read it first with "
-                    f"{_reader_call('get_term')}."
-                )
-            term = patch.get("term") or {}
-            if not (isinstance(term, dict) and term.get("ko") and term.get("en")):
-                return "Error: patch.term.ko and patch.term.en are required for term create."
-            if not (isinstance(definition, dict) and definition.get("ko") and definition.get("en")):
-                return "Error: patch.definition.ko and patch.definition.en are required for term create."
-            # An alias or name colliding with an existing term means this is the
-            # same concept under a different slug.
-            candidates = {term.get("ko"), term.get("en")}
-            aliases = patch.get("aliases") or {}
-            for values in (aliases.get("ko") or [], aliases.get("en") or []):
-                candidates.update(v for v in values if isinstance(v, str))
-            candidates.discard(None)
-            for candidate in candidates:
-                cur.execute(
-                    """SELECT t.id FROM commulingo_terms t
-                        WHERE lower(btrim(t.term_ko)) = lower(btrim(%(c)s))
-                           OR lower(btrim(t.term_en)) = lower(btrim(%(c)s))
-                       UNION
-                       SELECT a.term_id FROM commulingo_term_aliases a
-                        WHERE lower(btrim(a.alias)) = lower(btrim(%(c)s))""",
-                    {"c": candidate},
-                )
-                row = cur.fetchone()
-                if row:
-                    return (
-                        f"Error: '{candidate}' is already registered on term "
-                        f"'{row['id']}' — this is the same concept, so it is not a gap. "
-                        "Move to a different candidate (or answer NO_CANDIDATE if the "
-                        f"material has none). To revise that card instead, call "
-                        f"{_write_tool_call('term', 'update')}(term_id='{row['id']}', ...) "
-                        "if you hold that tool."
-                    )
-        else:
-            cur.execute("SELECT 1 FROM commulingo_terms WHERE id = %s", (target_id,))
-            if not cur.fetchone():
-                return (
-                    f"Error: term '{target_id}' not found. Find the id with "
-                    f"{_reader_call('list_terms')}."
-                )
-    else:  # office_row
-        for key in _LOCALIZED_OFFICE_ROW_KEYS:
-            if key in patch and patch[key] is not None and not isinstance(patch[key], dict):
-                return (
-                    f"Error: {key} must be an object {{\"ko\": \"...\", \"en\": \"...\"}} — "
-                    "a plain string would silently blank the other language."
-                )
-        if action == "create":
-            cur.execute("SELECT 1 FROM commulingo_offices WHERE id = %s", (target_id,))
-            if not cur.fetchone():
-                return f"Error: office '{target_id}' not found (office_row create targets an office id)."
-        else:
-            if not target_id.isdigit():
-                return (
-                    f"Error: office row '{target_id}' not found (office_row update/delete "
-                    "targets a numeric row id from get_office/get_person)."
-                )
-            cur.execute("SELECT 1 FROM commulingo_office_rows WHERE id = %s", (int(target_id),))
-            if not cur.fetchone():
-                return f"Error: office row '{target_id}' not found."
-        if patch.get("personId"):
-            cur.execute("SELECT 1 FROM commulingo_people WHERE id = %s", (patch["personId"],))
-            if not cur.fetchone():
-                return f"Error: personId '{patch['personId']}' does not exist."
-    return None
+    # Every target type in _PATCH_KEYS_BY_TARGET has a validator; the lookup
+    # above already raised KeyError for anything else.
+    return _VALIDATORS_BY_TARGET[target_type](cur, action, target_id, patch)
 
 
 def _replace_term_aliases(cur, term_id: str, aliases: dict):

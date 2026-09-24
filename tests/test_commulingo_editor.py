@@ -543,20 +543,284 @@ class EditorTests(EditorCase):
         self.assertEqual(result.next_stage,'judge'); model.assert_not_called()
 
 
+CATALOGS = ([{'id':'bolshevik','title_ko':'볼셰비키','blurb_ko':'설명'}], [], [{'id':'bolshevik'}])
+PERSON_VERDICT = {'person':{'groupId':'bolshevik','role':{'category':'bolshevik'},
+                            'confidence':{'group':0.9,'role':0.8},'low_confidence':False},
+                  'codes':{'citizenship':{'code':'soviet','confidence':1.0,'low_confidence':False},
+                           'nationalOrigin':{'code':'russia','confidence':0.9,'low_confidence':False}}}
+PERSON_FIELDS = {'epithet':{'ko':'수식','en':'Epithet'},'bio':{'ko':'문장이다.','en':'A sentence.'},'career':[],
+                 'citizenship':{'label':{'ko':'소련','en':'Soviet'}},'nationalOrigin':{'label':{'ko':'러시아','en':'Russia'}},
+                 'familyName':{'ko':'성','en':'Family'}}
+
+
+def person_submission(fields):
+    return submission({'status':'ready','reason':'The original archive supports this new entry.','fields':fields,
+        'claims':[{'field':f,'claim':'The source documents this field.','passages':['P1']}
+                  for f in ('bio','citizenship','nationalOrigin')],
+        'issue_results':[{'id':'register','status':'resolved','reason':'Registered a supported bilingual entry.'}]})
+
+
+async def fetch_fixture(kwargs, text=BODY):
+    return await kwargs['read_wrap']('fetch_url',AsyncMock(
+        return_value=f'<external source="web">\n{text}\n</external>'))(url=URL)
+
+
+class EditorContractTests(EditorCase):
+    """Author-side contracts carried over from the removed two-RPC stages."""
+
+    async def test_author_schema_excludes_runner_fields_and_bounds_repair_lookups(self):
+        from jsonschema import Draft202012Validator
+        from tool_gateway.results import ToolRejection
+        async def model(**kwargs):
+            changes = kwargs['tool']['input_schema']['properties']['changes']
+            # The runner owns revision and evidence; a topic name is not a field.
+            self.assertFalse({'expectedRevision','evidence','sources'} & set(changes['properties']))
+            validator = Draft202012Validator(kwargs['tool']['input_schema'])
+            body = submission(candidate())
+            self.assertTrue(validator.is_valid(body))
+            topic = deepcopy(body); topic['changes']['history'] = topic['changes'].pop('body')
+            self.assertFalse(validator.is_valid(topic))
+            await fetch_fixture(kwargs)
+            value = candidate(); value['fields']['body']['en'] = 'A clause — another clause.'
+            with self.assertRaises(ValueError):
+                await kwargs['handler'](submission(value))
+            # Format repair: registry reads only, by ID, at most three.
+            call = AsyncMock(return_value='Registry entry')
+            lookup = kwargs['read_wrap']('commulingo_people',call)
+            with self.assertRaises(ToolRejection):
+                await lookup(action='list_terms')
+            with self.assertRaises(ToolRejection):
+                await kwargs['read_wrap']('web_search',call)(query='fixture')
+            for _ in range(3):
+                await lookup(action='get_term',term_id='fixture')
+            with self.assertRaises(ToolRejection):
+                await lookup(action='get_term',term_id='fixture')
+            self.assertEqual(call.await_count,3)
+            await repair_call(kwargs, candidate())
+        with patch('commulingo_pipeline.service.call',return_value=CURRENT), \
+             patch('commulingo_pipeline.stages.model_call',side_effect=model):
+            result = await Editor(store_mock())(JOB,[],Usage(),.2)
+        self.assertEqual(result.next_stage,'review')
+        self.assertEqual(result.value['draft']['fields']['expectedRevision'],CURRENT['revision'])
+        self.assertEqual(result.value['draft']['fields']['evidence'][0]['excerpt'],BODY)
+
+    async def test_probe_reasons_and_undisplayed_labels_are_rejected(self):
+        # Throwaway calls that passed the length floor closed jobs for 90 days (#42, #120).
+        probes = ('Probe only — not a real submission, checking the tool.',
+                  'Investigating commissioned topics before returning a final artifact.')
+        async def model(**kwargs):
+            await fetch_fixture(kwargs)
+            _, no_edit, _ = next(t for t in kwargs['local_tools'] if t[0]['name']=='commulingo_pipeline_no_edit')
+            for probe in probes:
+                with self.assertRaisesRegex(ValueError,'probe or progress note'):
+                    await kwargs['handler'](submission({**candidate(),'reason':probe}))
+                with self.assertRaisesRegex(ValueError,'substantively'):
+                    await no_edit(status='sources_unavailable',reason=probe,
+                        issues={'missing:body':{'status':'deferred','reason':'No reliable original could be retrieved.'}})
+            value = candidate(); value['claims'][0]['passages'] = ['P1','P999']
+            with self.assertRaisesRegex(ValueError,'passage labels not displayed: P999'):
+                await kwargs['handler'](submission(value))
+            await kwargs['handler'](submission(candidate()))
+        with patch('commulingo_pipeline.service.call',return_value=CURRENT), \
+             patch('commulingo_pipeline.stages.model_call',side_effect=model):
+            result = await Editor(store_mock())(JOB,[],Usage(),.2)
+        self.assertEqual(result.next_stage,'review')
+
+    async def test_echoed_term_years_never_reach_validation(self):
+        current = {**CURRENT,'startYear':2023,'endYear':None}
+        async def model(**kwargs):
+            await fetch_fixture(kwargs)
+            value = candidate()
+            value['fields'].update(startYear=2023,endYear=None)
+            value['issue_results'].append({'id':'requested','status':'resolved','reason':'Checked the historical context and dates.'})
+            await kwargs['handler'](submission(value))
+        with patch('commulingo_pipeline.service.call',return_value=current) as rpc, \
+             patch('commulingo_pipeline.stages.model_call',side_effect=model):
+            result = await Editor(store_mock())({**JOB,'reason':'Verify historical context and dates'},[],Usage(),.2)
+        self.assertEqual(result.next_stage,'review')
+        validate = next(c.args[0] for c in rpc.call_args_list if c.args[0]['command']=='validate')
+        self.assertEqual(set(validate['fields']),{'body','evidence','expectedRevision'})
+        self.assertEqual(set(result.value['draft']['fields']),{'body','evidence','expectedRevision'})
+
+    def test_person_schemas_carry_catalogs_and_store_rules(self):
+        from jsonschema import Draft202012Validator
+        from commulingo_pipeline.decisions import Decisions
+        from commulingo_pipeline.patches import schema_for
+        update = {**JOB,'kind':'person','action':'update','topic':'basics','target':'fixture'}
+        canonical = schema_for(update,None,CATALOGS)
+        self.assertEqual(canonical['properties']['groupId']['enum'],['bolshevik'])
+        self.assertEqual(canonical['properties']['role']['properties']['category']['enum'],['bolshevik'])
+        validator = Draft202012Validator(canonical)
+        for collection,edits in (('aliases','aliasEdits'),('career','careerEdits'),('scenes','sceneEdits')):
+            errors = list(validator.iter_errors({collection:[],edits:[]}))
+            self.assertTrue(any(e.validator=='not' for e in errors), collection)
+        with self.assertRaisesRegex(ValueError,'catalogs unavailable'):
+            schema_for(update,None,None)
+        create = {**update,'action':'create','target':'new-person'}
+        schema = Decisions(create,None,CATALOGS,Usage()).author_schema(schema_for(create,None,CATALOGS))
+        # The writer never classifies: no group/role, and the code keys are gone from the code objects.
+        self.assertFalse({'groupId','group','role','activities'} & set(schema['properties']))
+        self.assertNotIn('code',schema['properties']['citizenship']['properties'])
+        validator = Draft202012Validator(schema)
+        self.assertTrue(validator.is_valid({**PERSON_FIELDS,'years':'1895?–1940'}),
+                        list(validator.iter_errors({**PERSON_FIELDS,'years':'1895?–1940'})))
+        self.assertFalse(validator.is_valid({**PERSON_FIELDS,'groupId':'bolshevik','years':'1895–1940'}))
+        self.assertFalse(validator.is_valid({**PERSON_FIELDS,'years':'1900–현재'}))
+        self.assertFalse(validator.is_valid({**PERSON_FIELDS,'sortOrder':None}))
+        self.assertFalse(validator.is_valid({k:v for k,v in PERSON_FIELDS.items() if k!='familyName'}))
+
+    async def test_person_classification_follows_local_checks_and_is_memoised(self):
+        calls = []
+        def card(fields, catalogs=None, claims=None, decide=None):
+            calls.append(deepcopy(fields))
+            return deepcopy(PERSON_VERDICT)
+        job = {**JOB,'kind':'person','action':'create','topic':'basics','target':'new-person'}
+        async def model(**kwargs):
+            await fetch_fixture(kwargs)
+            dashed = {**PERSON_FIELDS,'epithet':{'ko':'수식 — 부제','en':'Epithet — sub'}}
+            with self.assertRaises(ValueError):   # prose bounce before any decision
+                await kwargs['handler'](person_submission(dashed))
+            self.assertEqual(calls,[])
+            await kwargs['handler'](person_submission(PERSON_FIELDS))
+        with patch('commulingo_pipeline.service.call',return_value=None), \
+             patch('runtime_tools.commulingo_classify.load_catalogs',return_value=CATALOGS), \
+             patch('runtime_tools.commulingo_classify.classify_person_card',side_effect=card), \
+             patch('commulingo_pipeline.stages.model_call',side_effect=model):
+            result = await Editor(store_mock())(job,[],Usage(),.2)
+        self.assertEqual(result.next_stage,'review')
+        self.assertEqual(len(calls),1)
+        fields = result.value['draft']['fields']
+        self.assertEqual((fields['groupId'],fields['role']),('bolshevik',{'category':'bolshevik'}))
+        self.assertEqual((fields['citizenship']['code'],fields['nationalOrigin']['code']),('soviet','russia'))
+        self.assertEqual(result.value['draft']['classification']['person']['groupId'],'bolshevik')
+        # The verdict is memoised on the classified inputs, not on the call.
+        from commulingo_pipeline.decisions import Decisions
+        page = snapshot(URL,BODY)
+        claims = [{'field':f,'claim':'x','source_id':page['id'],'start':0,'end':20} for f in ('bio','citizenship')]
+        decisions = Decisions(job,None,CATALOGS,Usage())
+        calls.clear()
+        with patch('runtime_tools.commulingo_classify.classify_person_card',side_effect=card):
+            await decisions.classify(deepcopy(PERSON_FIELDS),claims,{page['id']:page})
+            await decisions.classify(deepcopy(PERSON_FIELDS),claims,{page['id']:page})
+            self.assertEqual(len(calls),1)
+            await decisions.classify({**PERSON_FIELDS,'bio':{'ko':'다른 문장이다.','en':'Another sentence.'}},claims,{page['id']:page})
+            self.assertEqual(len(calls),2)
+
+    async def test_person_classifier_outage_keeps_draft_without_asking_the_writer(self):
+        store = store_mock()
+        job = {**JOB,'kind':'person','action':'create','topic':'basics','target':'new-person'}
+        async def model(**kwargs):
+            await fetch_fixture(kwargs)
+            await kwargs['handler'](person_submission(PERSON_FIELDS))
+        with patch('commulingo_pipeline.service.call',return_value=None) as rpc, \
+             patch('runtime_tools.commulingo_classify.load_catalogs',return_value=CATALOGS), \
+             patch('runtime_tools.commulingo_classify.classify_person_card',return_value=None), \
+             patch('commulingo_pipeline.stages.model_call',side_effect=model):
+            with self.assertRaisesRegex(RuntimeError,'classification unavailable'):
+                await Editor(store)(job,[],Usage(),.2)
+        self.assertEqual([c.args[0]['command'] for c in rpc.call_args_list],['read'])
+        saved = store.save_editor_checkpoint.call_args.args[1]['draft']['args']['fields']
+        self.assertEqual(saved['epithet'],PERSON_FIELDS['epithet'])
+        self.assertFalse({'groupId','role'} & set(saved))
+
+    async def test_existing_person_classification_is_not_reassigned(self):
+        from commulingo_pipeline.decisions import Decisions
+        from commulingo_pipeline.patches import schema_for
+        page = snapshot(URL,BODY)
+        sources = {page['id']:page}
+        job = {**JOB,'kind':'person','action':'update','topic':'basics','target':'stalin'}
+        current = {'revision':'v1','groupId':'bolshevik','role':{'officeId':'party-leadership','category':''}}
+        decisions = Decisions(job,current,CATALOGS,Usage())
+        self.assertFalse({'role','group','groupId'} & set(decisions.author_schema(schema_for(job,current,CATALOGS))['properties']))
+        fields = {'citizenship':{'label':{'ko':'소련','en':'Soviet'}}}
+        claim = [{'field':'citizenship','claim':'x','source_id':page['id'],'start':0,'end':20}]
+        with patch('runtime_tools.commulingo_classify.classify_person_codes',return_value={'citizenship':{'code':'soviet'}}), \
+             patch('runtime_tools.commulingo_classify.classify_person_card') as card:
+            out, _ = await decisions.classify(fields,claim,sources)
+        card.assert_not_called()
+        self.assertEqual(out,{'citizenship':{'label':{'ko':'소련','en':'Soviet'},'code':'soviet'}})
+        # A person without any classification receives one from the runner.
+        bare = Decisions({**job,'target':'new'},{'revision':'v1','role':{}},CATALOGS,Usage())
+        claim = [{'field':'bio','claim':'x','source_id':page['id'],'start':0,'end':20}]
+        with patch('runtime_tools.commulingo_classify.classify_person_card',return_value=deepcopy(PERSON_VERDICT)):
+            out, _ = await bare.classify({'bio':{'ko':'문장이다.','en':'A sentence.'}},claim,sources)
+        self.assertEqual((out['groupId'],out['role']),('bolshevik',{'category':'bolshevik'}))
+
+    async def test_section_is_one_topic_and_notes_stay_out_of_fields(self):
+        # Job 5432 (2026-09-19): the author's work plan went live as a section.
+        from commulingo_pipeline.stages import prose_problem
+        prose = {'ko':'1937년 7월 예조프는 레닌 훈장을 받았고 1941년 1월 24일 모든 훈장을 박탈당했다. '*4,
+                 'en':'In July 1937 Yezhov received the Order of Lenin; a decree of 24 January 1941 stripped him of all awards. '*4}
+        heading = {'ko':'숭배와 말소','en':'Cult and erasure'}
+        current = {'revision':'v1','name':{'ko':'니콜라이 예조프','en':'Nikolai Yezhov'},
+                   'sections':[{'slug':'fall-trial-no-rehabilitation'}]}
+        job = {**JOB,'id':5432,'kind':'person','topic':'enrichment','target':'yezhov',
+               'reason':'Add a documented section on the cult and its erasure.',
+               'payload':{'topics':['bio','sections'],'remaining_topics':['sections']}}
+        def value(fields, notes=None):
+            result = {'status':'ready','reason':'The decree and the award record document this section.',
+                      'fields':fields,'claims':[{'field':'body','claim':'The awards and their removal are documented.','passages':['P1']}],
+                      'issue_results':[{'id':'requested','status':'resolved','reason':'Added one documented section.'}]}
+            if notes:
+                result['notes'] = notes
+            return submission(result)
+        seen = {}
+        async def model(**kwargs):
+            seen['props'] = set(kwargs['tool']['input_schema']['properties']['changes']['properties'])
+            self.assertIn('one distinct documented phase',kwargs['prompt'])
+            await fetch_fixture(kwargs)
+            plan = {'slug':'yezhov','heading':{'ko':'구획 개정: 정정과 신설 구획 둘','en':'Sections revision: corrections and two new sections'},
+                    'body':{'ko':"과제 항목은 'sections'다. 1. 'fall-trial-no-rehabilitation' 구획 본문 교체: "+prose['ko'],
+                            'en':"The commissioned topic is 'sections'. 1. replace section body 'fall-trial-no-rehabilitation': "+prose['en']}}
+            with self.assertRaisesRegex(ValueError,'not the person'):
+                await kwargs['handler'](value(plan))
+            with self.assertRaisesRegex(ValueError,'person name'):
+                await kwargs['handler'](value({'slug':'cult','heading':{'ko':'니콜라이 예조프','en':'Cult'},'body':prose}))
+            await kwargs['handler'](value({'slug':'cult-and-erasure','heading':heading,'body':prose,'sortOrder':193707},
+                                          notes="also supported: correction of 'fall-trial-no-rehabilitation' dates"))
+        with patch('commulingo_pipeline.service.call',return_value=current) as rpc, \
+             patch('commulingo_pipeline.stages.model_call',side_effect=model):
+            result = await Editor(store_mock())(job,[],Usage(),.2)
+        self.assertEqual(seen['props'],{'slug','heading','body','sortOrder'})
+        draft = result.value['draft']
+        self.assertEqual((draft['target'],draft['action']),('person_section','create'))
+        self.assertEqual(draft['fields']['sortOrder'],193707)
+        self.assertIn('fall-trial',draft['notes'])
+        validate = [c.args[0] for c in rpc.call_args_list if c.args[0]['command']=='validate'][-1]
+        self.assertEqual(validate['target'],'person_section')
+        self.assertNotIn('notes',validate['fields'])
+        self.assertFalse(prose_problem(draft['fields']))
+
+
 class ReviewAndPublishTests(EditorCase):
-    async def test_workflow_switch_preserves_old_submit_receipts_and_pins_new_authoring(self):
+    async def test_routing_pins_unpinned_authoring_and_rejects_other_workflows(self):
         store = Mock()
-        legacy = {name:AsyncMock(return_value='legacy') for name in ('research','submit')}
-        editor = {name:AsyncMock(return_value='editor') for name in legacy}
+        editor = {name:AsyncMock(return_value=name) for name in ('discover','research','draft','submit')}
         with patch('commulingo_pipeline.workflow.stages',return_value=editor):
-            routed = workflow.routed_stages(store,legacy,'editor')
+            routed = workflow.routed_stages(store)
+        # A job predating the workflow field cannot resume after drafting:
+        # its draft came from the removed two-RPC stages.
         job = {**JOB,'payload':{}}
-        self.assertEqual(await routed['submit'](job,[],Usage(),.2),'legacy')
+        with self.assertRaisesRegex(ValueError,'post-draft stage'):
+            await routed['submit'](job,[],Usage(),.2)
         store.pin_editor_workflow.assert_not_called()
-        self.assertEqual(await routed['research'](job,[],Usage(),.2),'editor')
-        store.pin_editor_workflow.assert_called_once()
-        self.assertEqual(job['payload']['workflow'],'editor')
-        self.assertEqual(await routed['submit'](job,[],Usage(),.2),'editor')
+        editor['submit'].assert_not_awaited()
+        # Authoring stages pin it to the editor before running.
+        for stage in ('research','draft','discover'):
+            job = {**JOB,'payload':{}}
+            store.reset_mock()
+            self.assertEqual(await routed[stage](job,[],Usage(),.2),stage)
+            store.pin_editor_workflow.assert_called_once_with(job)
+            self.assertEqual(job['payload']['workflow'],'editor')
+        self.assertEqual(await routed['submit'](job,[],Usage(),.2),'submit')
+        store.reset_mock()
+        with self.assertRaisesRegex(ValueError,'no longer supported'):
+            await routed['research']({**JOB,'payload':{'workflow':'legacy'}},[],Usage(),.2)
+        with self.assertRaisesRegex(ValueError,'no longer supported'):
+            await routed['submit'].prepare({**JOB,'payload':{'workflow':'legacy'}},[],Usage())
+        store.pin_editor_workflow.assert_not_called()
+        with self.assertRaisesRegex(ValueError,'unknown editorial workflow'):
+            workflow.routed_stages(store,'legacy')
 
     def artifacts(self):
         fields = candidate()['fields']
@@ -579,7 +843,7 @@ class ReviewAndPublishTests(EditorCase):
                  for name in ('wiki_search','wiki_get','web_search','fetch_url','commulingo_people')}
         with patch('commulingo_pipeline.service.call',return_value=CURRENT), \
              patch('runtime_tools.registry.TOOL_HANDLERS',reads), \
-             patch('scripts.commulingo_person_reviewer.review_risks',return_value=[]), \
+             patch('runtime_tools.commulingo_review_handlers.review_risks',return_value=[]), \
              patch('commulingo_pipeline.stages.model_call',side_effect=model):
             result = await workflow.Review()(JOB,artifacts,Usage(),.2)
         self.assertEqual(result.next_stage,'submit')
@@ -613,3 +877,159 @@ class ReviewAndPublishTests(EditorCase):
             result = await workflow.publish(JOB,artifacts,Usage(),.2)
             rpc.assert_not_called()
             self.assertEqual(result.next_stage,'review')
+
+    def fake_review(self, decisions, prompts=None, proposals=None):
+        """Replace only the decision tool's validation; the stage's own routing runs."""
+        def handlers(reads, proposal, snapshots, box, gate=None, **kwargs):
+            if proposals is not None:
+                proposals.append(deepcopy(proposal))
+            async def decide(**value):
+                box.update(value)
+                return 'OK'
+            return {'commulingo_review_decision':decide}
+        async def model(**kwargs):
+            if prompts is not None:
+                prompts.append(kwargs['prompt'])
+            await kwargs['handler'](decisions.pop(0))
+        return handlers, model
+
+    def review_patches(self, handlers, model):
+        reads = {name:AsyncMock() for name in ('wiki_search','wiki_get','web_search','fetch_url','commulingo_people')}
+        return (patch('commulingo_pipeline.service.call',return_value=CURRENT),
+                patch('runtime_tools.registry.TOOL_HANDLERS',reads),
+                patch('runtime_tools.commulingo_review_handlers.review_risks',return_value=[]),
+                patch('runtime_tools.commulingo_review_handlers.make_handlers',side_effect=handlers),
+                patch('commulingo_pipeline.stages.model_call',side_effect=model))
+
+    async def run_review(self, job, artifacts, decision, prompts=None, proposals=None):
+        handlers, model = self.fake_review([decision], prompts, proposals)
+        a, b, c, d, e = self.review_patches(handlers, model)
+        with a, b, c, d, e:
+            return await workflow.Review()(job, artifacts, Usage(), .2)
+
+    def verdict(self, decision, corrections=()):
+        return {'decision':decision,'reason':'Verified against the original archive.','checks':[],
+                'resolved_risks':[],'required_corrections':list(corrections),'optional_suggestions':[]}
+
+    async def test_review_routes_each_decision_and_holds_only_an_unchanged_patch(self):
+        correction = [{'path':'/fields/body','reason':'The date contradicts the original.'}]
+        for decision, corrections, expected in [('revise',correction,('draft','ready')),
+                                                ('approve',[],('submit','ready')),
+                                                ('escalate',[],('complete','escalated')),
+                                                ('reject',[],('complete','escalated'))]:
+            with self.subTest(decision=decision):
+                result = await self.run_review(JOB,self.artifacts(),self.verdict(decision,corrections))
+                self.assertEqual((result.next_stage,result.status),expected)
+        # Lifetime counters from older jobs do not hold a corrected draft.
+        job = {**JOB,'payload':{'review_revisions':20}}
+        history = self.artifacts()
+        first = await self.run_review(job,history,self.verdict('revise',correction))
+        self.assertEqual(first.next_stage,'draft')
+        history.append({'stage':'review','value':first.value})
+        # The same patch comes back: held before a paid review.
+        with patch('commulingo_pipeline.service.call',return_value=CURRENT), \
+             patch('commulingo_pipeline.stages.model_call') as model:
+            stalled = await workflow.Review()(job,history,Usage(),.2)
+        model.assert_not_called()
+        self.assertEqual(stalled.status,'escalated')
+        corrected = deepcopy(history[0]['value']['draft'])
+        corrected['fields']['body']['en'] = 'A corrected documented historical context.'
+        history.append({'stage':'research','value':{'editor_version':2,'research':{'baseline':CURRENT['revision']},'draft':corrected}})
+        again = await self.run_review(job,history,self.verdict('revise',correction))
+        self.assertEqual(again.next_stage,'draft')
+        self.assertNotEqual(again.value['reviewed_patch_hash'],first.value['reviewed_patch_hash'])
+
+    async def test_rereview_receives_verdicts_of_the_current_bundle_only(self):
+        stale = {'stage':'review','value':{'decision':'revise','reason':'Earlier section verdict','checks':[]}}
+        boundary = {'stage':'submit','value':{'remaining_topics':['sections']}}
+        revise = {'stage':'review','value':{'decision':'revise','reason':'Fix the patronymic',
+                  'required_corrections':[{'path':'/fields/body','reason':'부칭 표기 오류'}],'checks':[]}}
+        corrected = deepcopy(self.artifacts()[0]['value']['draft'])
+        corrected['fields']['body']['ko'] = '수정한 역사적 맥락이다.'
+        artifacts = [stale, boundary, *self.artifacts(), revise,
+                     {'stage':'research','value':{'editor_version':2,'research':{'baseline':CURRENT['revision']},'draft':corrected}}]
+        prompts = []
+        result = await self.run_review(JOB,artifacts,self.verdict('approve'),prompts)
+        self.assertEqual(result.next_stage,'submit')
+        first = await self.run_review(JOB,artifacts[2:3],self.verdict('approve'),prompts)
+        self.assertEqual(first.next_stage,'submit')
+        self.assertIn('Fix the patronymic',prompts[0])
+        self.assertIn('부칭 표기 오류',prompts[0])
+        self.assertIn('changes_since_previous_patch',prompts[0])
+        self.assertNotIn('Earlier section verdict',prompts[0])  # previous bundle stays out
+        self.assertIn('"previous_reviews": []',prompts[1])
+
+    async def test_low_confidence_classification_becomes_a_review_risk(self):
+        artifacts = self.artifacts()
+        classification = {'person':{'groupId':'bolshevik','confidence':{'group':0.95,'role':0.41},'low_confidence':True}}
+        artifacts[0]['value']['draft']['classification'] = classification
+        prompts, proposals = [], []
+        await self.run_review(JOB,artifacts,self.verdict('approve'),prompts,proposals)
+        self.assertEqual(proposals[0]['classification'],classification)
+        self.assertTrue(any('Jev-assigned classification' in r and 'low_confidence' in r for r in proposals[0]['risks']))
+        self.assertIn('0.41',prompts[0])
+        proposals.clear()
+        await self.run_review(JOB,self.artifacts(),self.verdict('approve'),None,proposals)
+        self.assertNotIn('classification',proposals[0])
+        self.assertEqual(proposals[0]['risks'],[])
+
+    def approved(self, job=JOB, notes=''):
+        artifacts = self.artifacts()
+        artifacts[0]['value']['draft']['notes'] = notes
+        digest = patch_hash(write_request(job,latest(artifacts,'draft')))
+        artifacts.append({'stage':'review','value':{'decision':'approve','approved_patch_hash':digest,
+            'reason':'Independently verified.','checks':[{'citation':URL,'source':URL,'quote':BODY,'finding':'Verified.'}]}})
+        return artifacts, digest
+
+    async def test_publish_replay_is_identical_and_keeps_notes_out_of_fields(self):
+        artifacts, digest = self.approved(notes='examples still unsupported')
+        with patch('commulingo_pipeline.config.load',return_value={'phase':'live'}), \
+             patch('commulingo_pipeline.service.call',return_value={'status':'approved','suggestionId':12}) as rpc:
+            await workflow.publish(JOB,artifacts,Usage(),.2)
+            await workflow.publish(JOB,artifacts,Usage(),.2)
+        first, second = [c.args[0] for c in rpc.call_args_list]
+        self.assertEqual(first,second)
+        self.assertEqual(first['idempotencyKey'],f"pipeline:{JOB['id']}:publish:{digest}")
+        # The author's notes outlive the job: saved with the entry by the same receipt.
+        self.assertEqual(first['notes'],'examples still unsupported')
+        self.assertNotIn('notes',first['fields'])
+
+    async def test_correction_replaces_the_original_only_inside_approved_publication(self):
+        job = {**JOB,'topic':'review-repair:7','payload':{'workflow':'editor','replaces_suggestion_id':7}}
+        artifacts, digest = self.approved(job)
+        with patch('commulingo_pipeline.config.load',return_value={'phase':'live'}), \
+             patch('commulingo_pipeline.service.call',return_value={'status':'approved','suggestionId':8}) as rpc:
+            result = await workflow.publish(job,artifacts,Usage(),.2)
+            await workflow.publish(job,artifacts,Usage(),.2)
+        self.assertEqual(result.value['status'],'approved')
+        first, second = [c.args[0] for c in rpc.call_args_list]
+        self.assertEqual(first,second)
+        self.assertEqual((first['command'],first['replacesSuggestionId'],first['approvedPatchHash']),('publish',7,digest))
+        # A manually resolved original is refused by the service inside the same
+        # transaction; the stage surfaces it instead of reporting publication.
+        with patch('commulingo_pipeline.config.load',return_value={'phase':'live'}), \
+             patch('commulingo_pipeline.service.call',side_effect=ValueError(
+                 '400: original suggestion is no longer eligible for replacement')) as rpc:
+            with self.assertRaisesRegex(ValueError,'no longer eligible'):
+                await workflow.publish(job,artifacts,Usage(),.2)
+        rpc.assert_called_once()
+        # Without an approval bound to this patch nothing is written.
+        unapproved = artifacts[:-1]+[{'stage':'review','value':{'decision':'revise'}}]
+        with patch('commulingo_pipeline.config.load',return_value={'phase':'live'}), \
+             patch('commulingo_pipeline.service.call') as rpc:
+            result = await workflow.publish(job,unapproved,Usage(),.2)
+        rpc.assert_not_called()
+        self.assertEqual(result.next_stage,'review')
+
+    async def test_validate_resume_returns_failures_to_authoring(self):
+        artifacts = self.artifacts()
+        for outcome, expected in [({}, 'review'),
+                                  (ValueError('400: evidence required for body'), 'draft'),
+                                  (ValueError('400: definition too long'), 'draft'),
+                                  (ValueError('409: revision_conflict'), 'research')]:
+            with self.subTest(outcome=str(outcome)), \
+                 patch('commulingo_pipeline.service.call',side_effect=[outcome] if isinstance(outcome,Exception) else None,
+                       return_value=outcome) as rpc:
+                result = await workflow.validate(JOB,artifacts,Usage(),.2)
+            self.assertEqual(result.next_stage,expected)
+            self.assertEqual(rpc.call_args.args[0]['command'],'validate')

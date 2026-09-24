@@ -1640,6 +1640,157 @@ async def _handle_task_failure(
     }
 
 
+async def _verify_task_report(
+    bot: Bot,
+    task: dict,
+    final_report: str,
+    *,
+    verification_mode: str,
+    chat_with_tools_fn,
+    get_model_fn,
+    verify_chat_fn,
+    verify_model_fn,
+) -> tuple[dict | None, dict | None]:
+    """Run post-hoc verification for a persisted report.
+
+    Returns (verification, verification_retry); both None when mode is off.
+    """
+    task_id = task["id"]
+    # Post-hoc independent verification (Critic). Shadow records the
+    # verdict; enforce additionally redelegates on FAIL. Never lets a
+    # verifier error break an already-persisted successful task.
+    verification = None
+    verification_retry = None
+    if verification_mode in ("shadow", "enforce"):
+        try:
+            v_tools, v_handlers = _build_verifier_toolset(verification_mode)
+            verification = await _run_verification(
+                bot, task, final_report,
+                chat_with_tools_fn=verify_chat_fn or chat_with_tools_fn,
+                get_model_fn=verify_model_fn or get_model_fn,
+                extra_tools=v_tools,
+                extra_handlers=v_handlers,
+            )
+            logger.info(
+                "Task %d verification (%s mode): %s",
+                task_id, verification_mode, verification.get("status"),
+            )
+            if verification.get("status") == "failed" and verification.get("execution") == "error":
+                # Lesson write-back: similar future tasks recall this
+                # via the <past-experiences> block.
+                agent_label = str(task.get("agent_type") or "task")
+                await asyncio.to_thread(
+                    _record_failure_experience,
+                    f"[{agent_label}] Task failed independent verification. "
+                    f"Task: {str(task.get('content') or '')[:300]} | "
+                    f"Verifier: {_verifier_reason_head(verification.get('details') or '')}",
+                    "task_verification",
+                )
+            if verification_mode == "enforce" and verification.get("status") == "failed":
+                verification_retry = await _maybe_redelegate_after_verification_failure(
+                    bot, task, verification,
+                )
+        except Exception as e:
+            logger.warning(
+                "Verification for task %d errored (mode=%s): %s",
+                task_id, verification_mode, e,
+            )
+    return verification, verification_retry
+
+
+async def _send_visualizer_images(
+    bot: Bot,
+    task: dict,
+    report: str,
+    bt: dict,
+    *,
+    user_id: int,
+    is_self_generated: bool,
+    allowed_user_ids: set[int],
+) -> None:
+    """Send images a visualizer task generated as Telegram photos."""
+    task_id = task["id"]
+    try:
+        # Extract local_path from tool log or report
+        tool_log_text = str(bt.get("tool_work_details", ""))
+        paths = re.findall(r"local_path:\s*(/\S+\.png)", tool_log_text + "\n" + report)
+        for img_path in paths[:5]:  # max 5 images
+            if os.path.isfile(img_path):
+                with open(img_path, "rb") as f:
+                    photo = BufferedInputFile(f.read(), filename=os.path.basename(img_path))
+                target = user_id if not is_self_generated else next(iter(allowed_user_ids), 0)
+                if target:
+                    await bot.send_photo(chat_id=target, photo=photo, caption=f"🎨 [{task_id}] 생성 이미지")
+    except Exception as e:
+        logger.debug("Visualizer auto-send image failed: %s", e)
+
+
+async def _notify_task_done(
+    on_complete,
+    task: dict,
+    summary: str,
+    *,
+    verification: dict | None,
+    verification_retry: dict | None,
+) -> None:
+    """Report a completed task to the orchestrator's on_complete callback."""
+    task_id = task["id"]
+    try:
+        agent_label = f" [{task.get('agent_type', 'analyst')}]" if task.get("agent_type") else ""
+        cb_result = on_complete(
+            task_id, "done", f"{agent_label} {summary}",
+            verification_status=(verification or {}).get("status"),
+            verification_summary=str((verification or {}).get("details") or "")[:300],
+            retry_result=verification_retry,
+        )
+        if asyncio.iscoroutine(cb_result):
+            await cb_result
+    except Exception:
+        logger.debug("on_complete callback failed for task %d", task_id)
+
+
+def _is_rate_limit_error(e: Exception) -> bool:
+    err_str = str(e).lower()
+    return (
+        "rate_limit" in err_str or
+        "overloaded" in err_str or
+        "529" in err_str or
+        "429" in err_str or
+        "too many requests" in err_str
+    )
+
+
+async def _requeue_rate_limited_task(
+    task_id: int, attempt: int, max_retries: int, *, is_subtask: bool,
+) -> dict:
+    """Put a rate-limited task back to pending after the requeue delay."""
+    logger.warning(
+        "Task %d rate limited (attempt %d/%d), requeueing after %ds",
+        task_id,
+        attempt + 1,
+        max_retries,
+        _RATE_LIMIT_REQUEUE_DELAY_SECONDS,
+    )
+    await asyncio.to_thread(
+        _execute,
+        "UPDATE telegram_tasks SET status = 'pending', available_at = NOW() + (%s || ' seconds')::interval, "
+        "scratchpad = COALESCE(scratchpad, '') || %s "
+        "WHERE id = %s AND status = 'processing'",
+        (
+            str(_RATE_LIMIT_REQUEUE_DELAY_SECONDS),
+            f"\n[{datetime.now(KST).isoformat()}] Rate limited on attempt {attempt + 1}/{max_retries}; "
+            f"requeued by worker. Retry no earlier than about {_RATE_LIMIT_REQUEUE_DELAY_SECONDS}s.",
+            task_id,
+        ),
+    )
+    return {
+        "status": "requeued",
+        "task_id": task_id,
+        "summary": "rate limited; requeued",
+        "is_subtask": is_subtask,
+    }
+
+
 async def process_task(
     bot: Bot,
     task: dict,
@@ -1763,76 +1914,31 @@ async def process_task(
             summary = _extract_summary(final_report)
             was_interrupted = bt.get("was_interrupted", False)
 
-            # Post-hoc independent verification (Critic). Shadow records the
-            # verdict; enforce additionally redelegates on FAIL. Never lets a
-            # verifier error break an already-persisted successful task.
-            verification = None
-            verification_retry = None
-            if verification_mode in ("shadow", "enforce"):
-                try:
-                    v_tools, v_handlers = _build_verifier_toolset(verification_mode)
-                    verification = await _run_verification(
-                        bot, task, final_report,
-                        chat_with_tools_fn=verify_chat_fn or chat_with_tools_fn,
-                        get_model_fn=verify_model_fn or get_model_fn,
-                        extra_tools=v_tools,
-                        extra_handlers=v_handlers,
-                    )
-                    logger.info(
-                        "Task %d verification (%s mode): %s",
-                        task_id, verification_mode, verification.get("status"),
-                    )
-                    if verification.get("status") == "failed" and verification.get("execution") == "error":
-                        # Lesson write-back: similar future tasks recall this
-                        # via the <past-experiences> block.
-                        agent_label = str(task.get("agent_type") or "task")
-                        await asyncio.to_thread(
-                            _record_failure_experience,
-                            f"[{agent_label}] Task failed independent verification. "
-                            f"Task: {str(task.get('content') or '')[:300]} | "
-                            f"Verifier: {_verifier_reason_head(verification.get('details') or '')}",
-                            "task_verification",
-                        )
-                    if verification_mode == "enforce" and verification.get("status") == "failed":
-                        verification_retry = await _maybe_redelegate_after_verification_failure(
-                            bot, task, verification,
-                        )
-                except Exception as e:
-                    logger.warning(
-                        "Verification for task %d errored (mode=%s): %s",
-                        task_id, verification_mode, e,
-                    )
+            verification, verification_retry = await _verify_task_report(
+                bot, task, final_report,
+                verification_mode=verification_mode,
+                chat_with_tools_fn=chat_with_tools_fn,
+                get_model_fn=get_model_fn,
+                verify_chat_fn=verify_chat_fn,
+                verify_model_fn=verify_model_fn,
+            )
 
             # Visualizer: auto-send generated images as photos
             if task.get("agent_type") == "visualizer":
-                try:
-                    # Extract local_path from tool log or report
-                    tool_log_text = str(bt.get("tool_work_details", ""))
-                    paths = re.findall(r"local_path:\s*(/\S+\.png)", tool_log_text + "\n" + report)
-                    for img_path in paths[:5]:  # max 5 images
-                        if os.path.isfile(img_path):
-                            with open(img_path, "rb") as f:
-                                photo = BufferedInputFile(f.read(), filename=os.path.basename(img_path))
-                            target = user_id if not is_self_generated else next(iter(allowed_user_ids), 0)
-                            if target:
-                                await bot.send_photo(chat_id=target, photo=photo, caption=f"🎨 [{task_id}] 생성 이미지")
-                except Exception as e:
-                    logger.debug("Visualizer auto-send image failed: %s", e)
+                await _send_visualizer_images(
+                    bot, task, report, bt,
+                    user_id=user_id,
+                    is_self_generated=is_self_generated,
+                    allowed_user_ids=allowed_user_ids,
+                )
 
             # Notify via on_complete (system alert)
             if on_complete:
-                try:
-                    agent_label = f" [{task.get('agent_type', 'analyst')}]" if task.get("agent_type") else ""
-                    cb_result = on_complete(
-                        task_id, "done", f"{agent_label} {summary}",
-                        verification_status=(verification or {}).get("status"),
-                        verification_summary=str((verification or {}).get("details") or "")[:300],
-                        retry_result=verification_retry,
-                    )
-                    if asyncio.iscoroutine(cb_result):
-                        await cb_result
-                except Exception:
-                    logger.debug("on_complete callback failed for task %d", task_id)
+                await _notify_task_done(
+                    on_complete, task, summary,
+                    verification=verification,
+                    verification_retry=verification_retry,
+                )
 
             return {
                 "status": "done",
@@ -1854,41 +1960,10 @@ async def process_task(
             }
 
         except Exception as e:
-            err_str = str(e).lower()
-            is_rate_limit = (
-                "rate_limit" in err_str or
-                "overloaded" in err_str or
-                "529" in err_str or
-                "429" in err_str or
-                "too many requests" in err_str
-            )
-
-            if is_rate_limit and attempt < max_retries - 1:
-                logger.warning(
-                    "Task %d rate limited (attempt %d/%d), requeueing after %ds",
-                    task_id,
-                    attempt + 1,
-                    max_retries,
-                    _RATE_LIMIT_REQUEUE_DELAY_SECONDS,
+            if _is_rate_limit_error(e) and attempt < max_retries - 1:
+                return await _requeue_rate_limited_task(
+                    task_id, attempt, max_retries, is_subtask=is_subtask,
                 )
-                await asyncio.to_thread(
-                    _execute,
-                    "UPDATE telegram_tasks SET status = 'pending', available_at = NOW() + (%s || ' seconds')::interval, "
-                    "scratchpad = COALESCE(scratchpad, '') || %s "
-                    "WHERE id = %s AND status = 'processing'",
-                    (
-                        str(_RATE_LIMIT_REQUEUE_DELAY_SECONDS),
-                        f"\n[{datetime.now(KST).isoformat()}] Rate limited on attempt {attempt + 1}/{max_retries}; "
-                        f"requeued by worker. Retry no earlier than about {_RATE_LIMIT_REQUEUE_DELAY_SECONDS}s.",
-                        task_id,
-                    ),
-                )
-                return {
-                    "status": "requeued",
-                    "task_id": task_id,
-                    "summary": "rate limited; requeued",
-                    "is_subtask": is_subtask,
-                }
 
             return await _handle_task_failure(
                 task=task,
@@ -1899,6 +1974,155 @@ async def process_task(
                 log_event_fn=log_event_fn,
                 on_complete=on_complete,
             )
+
+
+def _startup_task_age_minutes(created_at, now_kst: datetime, stale_minutes: int) -> float:
+    """Age of an interrupted task; unparseable timestamps count as stale."""
+    age_minutes = 0.0
+    if created_at is not None:
+        try:
+            # Ensure both datetimes are timezone-aware for comparison
+            ca = created_at if created_at.tzinfo else created_at.replace(tzinfo=timezone.utc)
+            age_minutes = max(0.0, (now_kst - ca).total_seconds() / 60.0)
+        except Exception:
+            age_minutes = float(stale_minutes + 1)
+    return age_minutes
+
+
+async def _auto_close_startup_task(task_id: int, note: str) -> None:
+    """Close an interrupted task as failed instead of handing it off."""
+    await asyncio.to_thread(
+        _execute,
+        "UPDATE telegram_tasks SET status = 'failed', "
+        "result = COALESCE(result, '') || %s, completed_at = NOW() "
+        "WHERE id = %s",
+        (note, task_id),
+    )
+
+
+async def _hand_off_interrupted_task(
+    row: dict,
+    *,
+    task_id: int,
+    user_id: int,
+    content: str,
+    depth: int,
+    scratchpad: str,
+    handoff_count: int,
+    max_resume_attempts: int,
+) -> None:
+    """Continue an interrupted task in a new pending child and close the parent."""
+    ts = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+    handoff_note = (
+        f"{_STARTUP_HANDOFF_MARKER}\n"
+        f"- from_task_id: {task_id}\n"
+        f"- at: {ts}\n"
+        f"- reason: service restarted while task was processing\n"
+        f"- handoff_attempt: {handoff_count + 1}/{max_resume_attempts}"
+    )
+    child_scratchpad = f"{scratchpad}\n\n{handoff_note}".strip() if scratchpad else handoff_note
+    if len(child_scratchpad) > _SCRATCHPAD_MAX_CHARS:
+        child_scratchpad = child_scratchpad[-_SCRATCHPAD_MAX_CHARS:]
+
+    task_mission_id = row.get("mission_id")
+    task_agent_type = row.get("agent_type")
+
+    # Parent's execution progress is now saved to Redis task_result
+    # (via save_task_summary above) and will be injected as <task-chain>
+    # when the child runs process_task. No need to inline it here.
+    child_content = content
+    if _RESTART_COMPLETED_MARKER not in child_content:
+        child_content = f"{_RESTART_COMPLETED_MARKER}\n{child_content}"
+
+    restart_ctx = _restart_resume_context(row)
+    restart_state = restart_ctx["state"] if restart_ctx["initiated"] else None
+
+    metadata = dict(_load_task_metadata(row))
+    if restart_state:
+        # This startup proves only the Telegram process restarted.
+        # Preserve pending API/browser restart claims as unconfirmed.
+        if restart_state.get("restart_target_service") == "telegram":
+            restart_state = {**restart_state, "restart_completed": True,
+                             "resumed_after_restart": True, "post_restart_phase": "verification"}
+        metadata[_RESTART_PHASE_KEY] = restart_state
+    metadata_json = json.dumps(metadata) if metadata else None
+
+    # Direct insert, not create_task_in_db: the handoff child carries the
+    # parent's scratchpad and must be created even past the depth-5 chain
+    # limit, or a restart would strand the work.
+    child_rows = await asyncio.to_thread(
+        _query,
+        "INSERT INTO telegram_tasks (user_id, content, status, parent_task_id, scratchpad, depth, mission_id, agent_type, metadata, "
+        "restart_initiated, restart_target_service, restart_completed, post_restart_phase, restart_attempt_count, restart_requested_at, resumed_after_restart, restart_reentry_block_reason) "
+        "VALUES (%s, %s, 'pending', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+        (
+            user_id,
+            child_content,
+            task_id,
+            child_scratchpad,
+            depth + 1,
+            task_mission_id,
+            task_agent_type,
+            metadata_json,
+            bool((restart_state or {}).get("restart_initiated")),
+            (restart_state or {}).get("restart_target_service"),
+            bool((restart_state or {}).get("restart_completed")),
+            (restart_state or {}).get("post_restart_phase"),
+            int((restart_state or {}).get("restart_attempt_count") or 0),
+            (restart_state or {}).get("restart_requested_at"),
+            bool((restart_state or {}).get("resumed_after_restart")),
+            (restart_state or {}).get("restart_reentry_block_reason"),
+        ),
+    )
+    child_id = child_rows[0]["id"] if child_rows else None
+
+    # Record handoff to mission timeline
+    if task_mission_id:
+        try:
+            from telegram.mission import add_mission_event
+            add_mission_event(
+                task_mission_id, "system", "decision",
+                f"Service restart already completed: task #{task_id} → child #{child_id} (handoff {handoff_count+1}/{max_resume_attempts}); child must only perform post-restart verification"
+            )
+        except Exception:
+            pass
+
+    await asyncio.to_thread(
+        _execute,
+        "UPDATE telegram_tasks SET status = 'handed_off', "
+        "result = COALESCE(result, '') || %s, completed_at = NOW() "
+        "WHERE id = %s",
+        (
+            f"\n[AUTO-HANDOFF] interrupted by restart; continued in child task #{child_id}.",
+            task_id,
+        ),
+    )
+
+    # Save parent's progress to task_result summary BEFORE clearing.
+    # This feeds <task-chain> so the child sees every tool call
+    # including the final restart_service call.
+    try:
+        from redis_state import save_task_summary, get_task_progress, clear_task_progress
+        progress_log = ""
+        entries = get_task_progress(task_id)
+        if entries:
+            progress_log = "\n".join(
+                f"[{e.get('round','?')}] {e.get('tool','?')}({e.get('input','')}) → {e.get('result','')}"
+                for e in entries
+            )[:2000]
+        save_task_summary(
+            task_id,
+            parent_task_id=row.get("parent_task_id"),
+            agent_type=task_agent_type or "",
+            content_excerpt=content[:500],
+            result_excerpt=f"[INTERRUPTED] handed off to child #{child_id}",
+            tool_log_excerpt=progress_log,
+        )
+        # Now safe to clear progress (preserved in task_result)
+        if child_id:
+            clear_task_progress(task_id)
+    except Exception:
+        pass
 
 
 async def recover_processing_tasks_on_startup(
@@ -1949,149 +2173,35 @@ async def recover_processing_tasks_on_startup(
             scratchpad = str(row.get("scratchpad") or "")
             handoff_count = scratchpad.count(_STARTUP_HANDOFF_MARKER)
 
-            age_minutes = 0.0
-            if created_at is not None:
-                try:
-                    # Ensure both datetimes are timezone-aware for comparison
-                    ca = created_at if created_at.tzinfo else created_at.replace(tzinfo=timezone.utc)
-                    age_minutes = max(0.0, (now_kst - ca).total_seconds() / 60.0)
-                except Exception:
-                    age_minutes = float(stale_minutes + 1)
+            age_minutes = _startup_task_age_minutes(created_at, now_kst, stale_minutes)
 
             if age_minutes >= stale_minutes:
-                await asyncio.to_thread(
-                    _execute,
-                    "UPDATE telegram_tasks SET status = 'failed', "
-                    "result = COALESCE(result, '') || %s, completed_at = NOW() "
-                    "WHERE id = %s",
-                    ("\n[AUTO-CLOSED] stale processing task after restart; not resumed automatically.", task_id),
+                await _auto_close_startup_task(
+                    task_id,
+                    "\n[AUTO-CLOSED] stale processing task after restart; not resumed automatically.",
                 )
                 closed_stale += 1
                 continue
 
             if handoff_count >= max_resume_attempts or depth >= _MAX_TASK_CHAIN_DEPTH:
-                await asyncio.to_thread(
-                    _execute,
-                    "UPDATE telegram_tasks SET status = 'failed', "
-                    "result = COALESCE(result, '') || %s, completed_at = NOW() "
-                    "WHERE id = %s",
-                    (
-                        f"\n[AUTO-CLOSED] processing task repeatedly interrupted across restarts "
-                        f"(handoff_count={handoff_count}, limit={max_resume_attempts}, depth={depth}).",
-                        task_id,
-                    ),
+                await _auto_close_startup_task(
+                    task_id,
+                    f"\n[AUTO-CLOSED] processing task repeatedly interrupted across restarts "
+                    f"(handoff_count={handoff_count}, limit={max_resume_attempts}, depth={depth}).",
                 )
                 closed_repeated += 1
                 continue
 
-            ts = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
-            handoff_note = (
-                f"{_STARTUP_HANDOFF_MARKER}\n"
-                f"- from_task_id: {task_id}\n"
-                f"- at: {ts}\n"
-                f"- reason: service restarted while task was processing\n"
-                f"- handoff_attempt: {handoff_count + 1}/{max_resume_attempts}"
+            await _hand_off_interrupted_task(
+                row,
+                task_id=task_id,
+                user_id=user_id,
+                content=content,
+                depth=depth,
+                scratchpad=scratchpad,
+                handoff_count=handoff_count,
+                max_resume_attempts=max_resume_attempts,
             )
-            child_scratchpad = f"{scratchpad}\n\n{handoff_note}".strip() if scratchpad else handoff_note
-            if len(child_scratchpad) > _SCRATCHPAD_MAX_CHARS:
-                child_scratchpad = child_scratchpad[-_SCRATCHPAD_MAX_CHARS:]
-
-            task_mission_id = row.get("mission_id")
-            task_agent_type = row.get("agent_type")
-
-            # Parent's execution progress is now saved to Redis task_result
-            # (via save_task_summary above) and will be injected as <task-chain>
-            # when the child runs process_task. No need to inline it here.
-            child_content = content
-            if _RESTART_COMPLETED_MARKER not in child_content:
-                child_content = f"{_RESTART_COMPLETED_MARKER}\n{child_content}"
-
-            restart_ctx = _restart_resume_context(row)
-            restart_state = restart_ctx["state"] if restart_ctx["initiated"] else None
-
-            metadata = dict(_load_task_metadata(row))
-            if restart_state:
-                # This startup proves only the Telegram process restarted.
-                # Preserve pending API/browser restart claims as unconfirmed.
-                if restart_state.get("restart_target_service") == "telegram":
-                    restart_state = {**restart_state, "restart_completed": True,
-                                     "resumed_after_restart": True, "post_restart_phase": "verification"}
-                metadata[_RESTART_PHASE_KEY] = restart_state
-            metadata_json = json.dumps(metadata) if metadata else None
-
-            child_rows = await asyncio.to_thread(
-                _query,
-                "INSERT INTO telegram_tasks (user_id, content, status, parent_task_id, scratchpad, depth, mission_id, agent_type, metadata, "
-                "restart_initiated, restart_target_service, restart_completed, post_restart_phase, restart_attempt_count, restart_requested_at, resumed_after_restart, restart_reentry_block_reason) "
-                "VALUES (%s, %s, 'pending', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
-                (
-                    user_id,
-                    child_content,
-                    task_id,
-                    child_scratchpad,
-                    depth + 1,
-                    task_mission_id,
-                    task_agent_type,
-                    metadata_json,
-                    bool((restart_state or {}).get("restart_initiated")),
-                    (restart_state or {}).get("restart_target_service"),
-                    bool((restart_state or {}).get("restart_completed")),
-                    (restart_state or {}).get("post_restart_phase"),
-                    int((restart_state or {}).get("restart_attempt_count") or 0),
-                    (restart_state or {}).get("restart_requested_at"),
-                    bool((restart_state or {}).get("resumed_after_restart")),
-                    (restart_state or {}).get("restart_reentry_block_reason"),
-                ),
-            )
-            child_id = child_rows[0]["id"] if child_rows else None
-
-            # Record handoff to mission timeline
-            if task_mission_id:
-                try:
-                    from telegram.mission import add_mission_event
-                    add_mission_event(
-                        task_mission_id, "system", "decision",
-                        f"Service restart already completed: task #{task_id} → child #{child_id} (handoff {handoff_count+1}/{max_resume_attempts}); child must only perform post-restart verification"
-                    )
-                except Exception:
-                    pass
-
-            await asyncio.to_thread(
-                _execute,
-                "UPDATE telegram_tasks SET status = 'handed_off', "
-                "result = COALESCE(result, '') || %s, completed_at = NOW() "
-                "WHERE id = %s",
-                (
-                    f"\n[AUTO-HANDOFF] interrupted by restart; continued in child task #{child_id}.",
-                    task_id,
-                ),
-            )
-
-            # Save parent's progress to task_result summary BEFORE clearing.
-            # This feeds <task-chain> so the child sees every tool call
-            # including the final restart_service call.
-            try:
-                from redis_state import save_task_summary, get_task_progress, clear_task_progress
-                progress_log = ""
-                entries = get_task_progress(task_id)
-                if entries:
-                    progress_log = "\n".join(
-                        f"[{e.get('round','?')}] {e.get('tool','?')}({e.get('input','')}) → {e.get('result','')}"
-                        for e in entries
-                    )[:2000]
-                save_task_summary(
-                    task_id,
-                    parent_task_id=row.get("parent_task_id"),
-                    agent_type=task_agent_type or "",
-                    content_excerpt=content[:500],
-                    result_excerpt=f"[INTERRUPTED] handed off to child #{child_id}",
-                    tool_log_excerpt=progress_log,
-                )
-                # Now safe to clear progress (preserved in task_result)
-                if child_id:
-                    clear_task_progress(task_id)
-            except Exception:
-                pass
 
             handed_off += 1
 
@@ -2558,11 +2668,12 @@ async def schedule_worker(bot: Bot, *, allowed_user_ids: set[int]):
                             from agents import agent_names
                             if tag in agent_names():
                                 sched_agent = tag
-                    await asyncio.to_thread(
-                        _execute,
-                        "INSERT INTO telegram_tasks (user_id, content, agent_type, metadata) VALUES (%s, %s, %s, %s::jsonb)",
-                        (sched["user_id"], sched_content, sched_agent, json.dumps({"origin": "schedule", "schedule_id": sched["id"]})),
+                    created = await asyncio.to_thread(
+                        create_task_in_db, sched_content, sched["user_id"], agent_type=sched_agent,
+                        metadata={"origin": "schedule", "schedule_id": sched["id"]},
                     )
+                    if created.get("status") != "ok":
+                        raise RuntimeError(created.get("error") or "task insert failed")
                     await asyncio.to_thread(
                         _execute,
                         "UPDATE telegram_schedules SET last_run_at = %s WHERE id = %s",

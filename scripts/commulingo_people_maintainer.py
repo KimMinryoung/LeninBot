@@ -26,6 +26,10 @@ if str(PROJECT_ROOT) not in sys.path:
 # Distinguish unattended writes in revisions/suggestion provenance. This must be set before
 # runtime_tools.registry imports runtime_tools.commulingo_people.
 os.environ.setdefault("COMMULINGO_SUGGESTED_BY", "commulingo-maintainer")
+# The lane this process writes as. The new/enrich/terms/gap wrappers set the
+# variable before importing this module, so counters and the lock follow their
+# lane without rebinding module globals.
+SUGGESTED_BY = os.environ["COMMULINGO_SUGGESTED_BY"]
 
 from agents import get_agent
 from bot_config import resolve_agent_tool_loop
@@ -43,7 +47,7 @@ from tool_gateway.security import caller_scope, new_run_context
 logger = logging.getLogger("commulingo_people_maintainer")
 
 CONFIG_PATH = PROJECT_ROOT / "config" / "commulingo_maintainer.json"
-LOCK_PATH = Path("/tmp/leninbot-commulingo-maintainer.lock")
+LOCK_PATH = Path(f"/tmp/leninbot-{SUGGESTED_BY}.lock")
 STATE_PATH = PROJECT_ROOT / "data" / "commulingo_maintainer_state.json"
 
 
@@ -189,8 +193,11 @@ def completed_run_count() -> int:
     row = db_query_one(
         """SELECT COUNT(*)::int AS n
              FROM commulingo_agent_suggestions
-            WHERE suggested_by = 'commulingo-maintainer'
-              AND status = 'approved'"""
+            WHERE suggested_by = %(s)s
+              AND status = 'approved'""",
+        # Read at call time so the count follows the lane even if this module
+        # was imported before a wrapper set the variable.
+        {"s": os.environ["COMMULINGO_SUGGESTED_BY"]},
     )
     return int((row or {}).get("n") or 0)
 
@@ -1255,18 +1262,9 @@ def build_retrying_write_handler(handler):
     return _validated_write
 
 
-def latest_maintainer_edit() -> dict | None:
-    return db_query_one(
-        """SELECT id, target_type, target_id, action, status, confidence, created_at
-             FROM commulingo_agent_suggestions
-            WHERE suggested_by = 'commulingo-maintainer'
-            ORDER BY id DESC LIMIT 1"""
-    )
-
-
 async def _call_curator_stage(
     *, task: str, spec, tools: list, handlers: dict,
-    policy, stage: str, expect_edit: bool, before_count: int,
+    policy, stage: str, expect_edit: bool,
     finalization_tools: list[str], terminal_tools: list[str],
     candidate_box: dict | None = None, no_edit_box: dict | None = None,
     research_key: str | None = None, baseline: dict | None = None, run_budget=None,
@@ -1413,7 +1411,7 @@ async def run_once(*, mode: str, candidate_id: str, config: dict) -> dict:
                         roster_groups_for_focus(config),
                     ), spec=spec,
                     tools=discovery_tools, handlers=discovery_handlers, policy=policy,
-                    stage="new-person discovery", expect_edit=False, before_count=before, run_budget=job_budget,
+                    stage="new-person discovery", expect_edit=False, run_budget=job_budget,
                     finalization_tools=["commulingo_candidate_select"],
                     terminal_tools=["commulingo_candidate_select"], candidate_box=candidate_box,
                 )
@@ -1424,7 +1422,7 @@ async def run_once(*, mode: str, candidate_id: str, config: dict) -> dict:
                 result, create_tracker, _ = await _call_curator_stage(
                     task=build_new_person_task(candidate), spec=spec,
                     tools=create_tools, handlers=create_handlers, policy=policy,
-                    stage="new-person creation", expect_edit=True, before_count=before, run_budget=job_budget,
+                    stage="new-person creation", expect_edit=True, run_budget=job_budget,
                     research_key=f"commulingo_person:{candidate['id']}:create",
                     finalization_tools=["commulingo_person_create"],
                     terminal_tools=["commulingo_person_create"],
@@ -1502,7 +1500,7 @@ async def run_once(*, mode: str, candidate_id: str, config: dict) -> dict:
                 result, enrich_tracker, _ = await _call_curator_stage(
                     task=task, spec=spec,
                     tools=enrich_tools, handlers=enrich_handlers,
-                    policy=policy, stage=chosen_mode, expect_edit=True, before_count=before, run_budget=job_budget,
+                    policy=policy, stage=chosen_mode, expect_edit=True, run_budget=job_budget,
                     research_key=f"commulingo_person:{candidate['id']}:{topic}:{baseline['revision']}",
                     baseline=baseline,
                     finalization_tools=enrich_terminals,

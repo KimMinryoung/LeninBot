@@ -1,10 +1,10 @@
 """PostgreSQL memory and task report query helpers."""
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
-KST = timezone(timedelta(hours=9))
+from shared import KST
 
 def fetch_diaries(
     limit: int = 5,

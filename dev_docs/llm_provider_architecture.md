@@ -41,6 +41,13 @@ DeepSeek
   bot_config._deepseek_anthropic_client
   -> llm.claude_loop.chat_with_tools(client=...)
   -> DeepSeek Anthropic-compatible Messages API
+  failover (Telegram chat/task, telegram.bot._chat_with_tools):
+    llm.provider_failover.run_with_provider_failover
+    -> on a transient provider error only, rerun the turn with
+       bot_config._openai_client + OpenAI medium tier (Terra)
+       via llm.openai_tool_loop.chat_with_tools(provider_label="openai:failover")
+    -> no failover when the OpenAI client is missing; config, budget and
+       tool errors are re-raised instead of spending twice
 
 DeepSeek web chat / browser automation
   bot_config._deepseek_anthropic_client
@@ -53,7 +60,7 @@ DeepSeek roleplay bot (leninbot-roleplay.service)
   -> DeepSeek Anthropic-compatible Messages API
 
 Personal fiction writer (/writer)
-  creative_writer._client()
+  writer.models._client()
   -> llm.claude_loop.chat_with_tools(client=..., model="claude-fable-5-1", writer tools)
   -> Anthropic Messages API or provider-compatible Messages endpoint (gateway frontier tier)
 
@@ -68,7 +75,7 @@ Telegram chat, background tasks, A2A (`leninbot-a2a-api.service`), public web ch
 
 The roleplay bot (`leninbot-roleplay.service`, `telegram/roleplay_bot.py`) is a separate runtime, not the Cyber-Lenin orchestrator, and does not read `config.json`'s `provider`/`chat_model` keys. It pins the DeepSeek provider/model while routing through the proxy: `_deepseek_anthropic_client` + `llm.claude_loop.chat_with_tools`, model `deepseek-flash` (via `_resolve_deepseek_model("deepseek_flash")`), with thinking **enabled** (`output_config.effort=high`). Thinking is on for answer quality; because it goes through `claude_loop`, the reasoning stays in replay-only `thinking` blocks and never appears in the user-facing reply — which is why the roleplay bot uses the Anthropic-compatible path rather than the OpenAI-compatible loop (the latter prepends reasoning to the reply). The bot ignores the global `DEEPSEEK_THINKING_MODE` env and sets its thinking inline.
 
-The personal fiction writer (`/writer`, `api_routes/writer.py`, `services/novel_writer_api.py`, `creative_writer.py`) is separate from normal provider selection but not from gateway enforcement. Its role-level inference envelopes are centralized in `writer.config.WRITER_CALL_POLICIES` (input/output ceilings, rounds, output continuations, thinking policy); the heavy `main` and `revision` roles import the shared 160k/32k gateway defaults, while `diagnosis`, `line_edit`, and `research` retain smaller explicit role limits; input overflow uses durable summaries plus chapter-boundary anchor replay rather than silent truncation. It uses the shared `llm.claude_loop.chat_with_tools` path with `model="claude-fable-5-1"` by default and can route explicitly selected DeepSeek or Kimi K3 writer models through their Anthropic-compatible clients. The Claude writer client uses the proxy's shared `anthropic` route and `ANTHROPIC_API_KEY`. Kimi Writer uses the proxy's Moonshot Anthropic-compatible route, model `kimi-k3`, and K3's default thinking. The dedicated process is `novel-writer-api.service` and starts after the proxy is ready.
+The personal fiction writer (`/writer`, `api_routes/writer.py`, `services/novel_writer_api.py`, `writer/`) is separate from normal provider selection but not from gateway enforcement. Its role-level inference envelopes are centralized in `writer.config.WRITER_CALL_POLICIES` (input/output ceilings, rounds, output continuations, thinking policy); the heavy `main` and `revision` roles import the shared 160k/32k gateway defaults, while `diagnosis`, `line_edit`, and `research` retain smaller explicit role limits; input overflow uses durable summaries plus chapter-boundary anchor replay rather than silent truncation. It uses the shared `llm.claude_loop.chat_with_tools` path with `model="claude-fable-5-1"` by default and can route explicitly selected DeepSeek or Kimi K3 writer models through their Anthropic-compatible clients. The Claude writer client uses the proxy's shared `anthropic` route and `ANTHROPIC_API_KEY`. Kimi Writer uses the proxy's Moonshot Anthropic-compatible route, model `kimi-k3`, and K3's default thinking. The dedicated process is `novel-writer-api.service` and starts after the proxy is ready.
 
 코드의 `local` 선택지는 호환 경로로 남아 있다. 현재 운영 대상으로 사용하지 않는다(2026-09-07 사용자 확인).
 

@@ -11,7 +11,6 @@ Package layout mirrors the repo's other subsystems:
 - runs       — in-process registry of live background runs
 - stream     — SSE generation runs and reattachable streams
 
-creative_writer.py is a compatibility shim re-exporting this API.
 """
 
 from writer.documents import (

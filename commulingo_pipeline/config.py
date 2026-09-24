@@ -7,9 +7,9 @@ PATH = Path(__file__).resolve().parents[1] / 'config/commulingo_pipeline.json'
 
 def load():
     value = json.loads(PATH.read_text())
-    value.setdefault('workflow','legacy')
-    if value['workflow'] not in {'legacy','editor'}:
-        raise ValueError('workflow must be legacy or editor')
+    value.setdefault('workflow','editor')
+    if value['workflow'] != 'editor':
+        raise ValueError('workflow must be editor (the legacy stages were removed)')
     if value['phase'] not in {'draft','canary','live'}:
         raise ValueError('invalid pipeline phase')
     for name in ('daily_cap_usd','stage_budget_usd'):

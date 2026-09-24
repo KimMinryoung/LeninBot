@@ -38,6 +38,7 @@ from jobs.autonomous_publication_controls import (
     validate_autonomous_static_page,
 )
 from telegram.channel_broadcast import maybe_broadcast_autonomous_publication
+from runtime_tools.comic_composer import build_page_payload
 
 logger = logging.getLogger(__name__)
 
@@ -803,10 +804,6 @@ async def _exec_publish_comic(
     panels: list[dict],
     summary: str | None = None,
 ) -> str:
-    # Lazy import to avoid a circular dependency: comic_composer imports
-    # _exec_publish_static_page from this module for its own --publish CLI path.
-    from scripts.comic_composer import build_page_payload
-
     slug = (slug or "").strip().lower()
     title = (title or "").strip()
     summary_in = (summary or "").strip() or title

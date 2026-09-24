@@ -88,14 +88,11 @@ async def resolve_runtime_profile(
         _CLAUDE_MAX_TOKENS_TASK,
         _KIMI_MIN_OUTPUT_TOKENS,
         _WEBCHAT_MAX_TOKENS,
-        _TIER_MAP,
         _config,
         _display_name_for_model_id,
         _get_model_by_alias,
         _resolved_models,
-        _resolve_deepseek_model,
-        _resolve_kimi_model,
-        _resolve_openai_model,
+        _resolve_provider_model,
         _resolve_tier,
     )
 
@@ -116,15 +113,11 @@ async def resolve_runtime_profile(
     elif provider == "local":
         from llm.client import _resolve_backend
         model_id = _resolve_backend()["model"]
-    elif provider == "openai" or alias in _TIER_MAP.get("openai", {}).values():
-        model_id = _resolve_openai_model(alias)
-    elif provider == "deepseek" or alias in _TIER_MAP.get("deepseek", {}).values():
-        model_id = _resolve_deepseek_model(alias)
-    elif provider == "kimi" or alias in _TIER_MAP.get("kimi", {}).values():
-        model_id = _resolve_kimi_model(alias)
     else:
-        model_id = await _get_model_by_alias(alias)
-        resolved = alias in _resolved_models
+        model_id = _resolve_provider_model(provider, alias)
+        if model_id is None:
+            model_id = await _get_model_by_alias(alias)
+            resolved = alias in _resolved_models
 
     if kind == "chat":
         default_rounds = int(_config.get("max_rounds_chat", 50))
