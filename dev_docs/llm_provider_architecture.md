@@ -41,6 +41,13 @@ DeepSeek
   bot_config._deepseek_anthropic_client
   -> llm.claude_loop.chat_with_tools(client=...)
   -> DeepSeek Anthropic-compatible Messages API
+  failover (Telegram chat/task, telegram.bot._chat_with_tools):
+    llm.provider_failover.run_with_provider_failover
+    -> on a transient provider error only, rerun the turn with
+       bot_config._openai_client + OpenAI medium tier (Terra)
+       via llm.openai_tool_loop.chat_with_tools(provider_label="openai:failover")
+    -> no failover when the OpenAI client is missing; config, budget and
+       tool errors are re-raised instead of spending twice
 
 DeepSeek web chat / browser automation
   bot_config._deepseek_anthropic_client

@@ -1,8 +1,8 @@
 [Unit]
 Description=LeninBot CommuLingo people curator (one direct edit)
 Wants=network-online.target leninbot-llm-proxy.service
-# Ordering only: when the daily batch queues all four lanes, they run one at a
-# time in new -> enrich -> terms -> maintainer order. No effect when started alone.
+# Manual-start lane: no timer since the daily batch was retired (2026-09-20).
+# The After= ordering below only matters if several lanes are queued together.
 After=network-online.target leninbot-commulingo-terms.service leninbot-llm-proxy.service
 
 [Service]
