@@ -85,30 +85,9 @@ LOCK_PATH = Path(f"/tmp/leninbot-{SUGGESTED_BY}.lock")
 _SLUG_STRIP = re.compile(r"[^a-z0-9]+")
 
 
-def completed_run_count() -> int:
-    row = db_query_one(
-        """SELECT COUNT(*)::int AS n
-             FROM commulingo_agent_suggestions
-            WHERE suggested_by = %(s)s AND status = 'approved'""",
-        {"s": SUGGESTED_BY},
-    )
-    return int((row or {}).get("n") or 0)
-
-
-# The maintainer's own counter is hardcoded to the 'commulingo-maintainer' lane,
-# and _call_curator_stage uses it to decide whether the commissioned write landed.
-# Reused unchanged from here it compares this lane's count against that lane's and
-# reads the difference as an unexplained edit. Rebinding it is how
-# commulingo_people_parallel.py solves the same problem for its two lanes.
-maintainer.completed_run_count = completed_run_count
-maintainer.latest_maintainer_edit = lambda: db_query_one(
-    """SELECT id, target_type, target_id, action, status, confidence, created_at
-         FROM commulingo_agent_suggestions
-        WHERE suggested_by = %(s)s
-        ORDER BY id DESC LIMIT 1""",
-    {"s": SUGGESTED_BY},
-)
-maintainer.LOCK_PATH = LOCK_PATH
+# The maintainer reads this lane's COMMULINGO_SUGGESTED_BY (set above), so its
+# counter already counts this lane's approved edits.
+completed_run_count = maintainer.completed_run_count
 
 
 # Match staged cards too: a pending create deliberately has no dictionary row.
@@ -482,7 +461,7 @@ async def run_once(kind: str = "", events: list[str] | None = None) -> dict:
             result, tracker, _ = await maintainer._call_curator_stage(
                 task=task, spec=spec,
                 tools=stage_tools, handlers=stage_handlers, policy=policy,
-                stage=f"gap-{gap['kind']}", expect_edit=True, before_count=before,
+                stage=f"gap-{gap['kind']}", expect_edit=True,
                 research_key=f"commulingo_gap:{gap['id']}:{gap['kind']}",
                 finalization_tools=[write_name, "commulingo_no_edit"],
                 terminal_tools=[write_name, "commulingo_no_edit"],

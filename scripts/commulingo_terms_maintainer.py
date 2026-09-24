@@ -51,24 +51,8 @@ DENSE_KO = DENSE_SENTENCE_CHARS[0]
 DEFINITION_KO = FIELD_LIMITS["definition"][0]
 
 
-def completed_run_count() -> int:
-    row = db_query_one(
-        """SELECT COUNT(*)::int AS n
-             FROM commulingo_agent_suggestions
-            WHERE suggested_by = %(s)s AND status = 'approved'""",
-        {"s": SUGGESTED_BY},
-    )
-    return int((row or {}).get("n") or 0)
-
-
-def latest_lane_edit() -> dict | None:
-    return db_query_one(
-        """SELECT id, target_type, target_id, action, status, confidence, created_at
-             FROM commulingo_agent_suggestions
-            WHERE suggested_by = %(s)s
-            ORDER BY id DESC LIMIT 1""",
-        {"s": SUGGESTED_BY},
-    )
+# The maintainer reads this lane's COMMULINGO_SUGGESTED_BY (set above).
+completed_run_count = maintainer.completed_run_count
 
 
 def registered_aliases() -> list[str]:
@@ -267,7 +251,7 @@ async def run_once() -> dict:
         with caller_scope(ctx):
             result, tracker, _ = await maintainer._call_curator_stage(
                 task=task, spec=spec, tools=tools, handlers=handlers, policy=policy,
-                stage="terms", expect_edit=True, before_count=before,
+                stage="terms", expect_edit=True,
                 research_key=f"terms:{label}:{material}", no_edit_box=no_edit_box,
                 finalization_tools=[write_name, "commulingo_no_edit"],
                 terminal_tools=[write_name, "commulingo_no_edit"],

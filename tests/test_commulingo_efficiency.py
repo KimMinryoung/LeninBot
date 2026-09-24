@@ -190,7 +190,7 @@ class EfficiencyTests(unittest.IsolatedAsyncioTestCase):
              patch('scripts.commulingo_research_memory.STORE_PATH',self.path):
             with self.assertRaises(RunFailure) as failed:
                 await maintainer._call_curator_stage(task='test',spec=SimpleNamespace(name='test',render_prompt=lambda **kw:'test'),
-                    tools=[],handlers={},policy=policy,stage='test',expect_edit=True,before_count=0,
+                    tools=[],handlers={},policy=policy,stage='test',expect_edit=True,
                     finalization_tools=[],terminal_tools=[])
         self.assertAlmostEqual(failed.exception.summary['cost_usd'],.07)
         self.assertEqual(failed.exception.summary['rounds_used'],7)

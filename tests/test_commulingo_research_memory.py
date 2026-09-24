@@ -164,7 +164,7 @@ class ResearchMemoryTests(unittest.IsolatedAsyncioTestCase):
             result, _, _ = await maintainer._call_curator_stage(
                 task="repair person", spec=spec, tools=[],
                 handlers={"fetch_url": research, "commulingo_person_create": write},
-                policy=policy, stage="test", expect_edit=True, before_count=0,
+                policy=policy, stage="test", expect_edit=True,
                 finalization_tools=["commulingo_person_create"], terminal_tools=["commulingo_person_create"],
             )
         self.assertEqual(result, "saved")

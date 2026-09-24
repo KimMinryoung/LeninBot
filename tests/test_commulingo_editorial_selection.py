@@ -49,7 +49,7 @@ class EditorialSelection(unittest.IsolatedAsyncioTestCase):
         policy = SimpleNamespace(max_output_continuations=0, max_rounds=1, max_output_tokens=100, max_input_tokens=100, budget_usd=0)
         result, _, _ = await namespace['_call_curator_stage'](task='test',
             spec=SimpleNamespace(name='test', render_prompt=lambda **kw: ''), tools=[], handlers={'write': pending},
-            policy=policy, stage='enrich', expect_edit=True, before_count=10, finalization_tools=['write'], terminal_tools=['write'])
+            policy=policy, stage='enrich', expect_edit=True, finalization_tools=['write'], terminal_tools=['write'])
         self.assertTrue(result.startswith('OK — pending:'))
     async def test_completion_is_explicit_and_validated(self):
         box = {}
