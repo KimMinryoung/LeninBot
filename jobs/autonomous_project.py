@@ -1864,41 +1864,34 @@ async def _run_one_tick(project: dict) -> dict:
                 cur.execute("SELECT pg_advisory_unlock(734004, %s)", (project["id"],))
 
 
-async def _execute_one_tick(project: dict, *, production: dict | None = None) -> dict:
-    """Run a single agent wake on the given project. Returns a result dict."""
-    from agents import get_agent
+def _compose_tick_tools(spec, project_id: int) -> tuple[list[dict], dict]:
+    """Spec-filtered base tools plus the project-scoped custom tools."""
     from llm.claude_loop import dedupe_tools_by_name
-    from bot_config import _get_autonomous_provider
-    from llm.runtime_profile import resolve_runtime_profile
     import runtime_tools.registry as tt_module
-    from telegram.channel_broadcast import current_autonomous_project_id
-    from tool_gateway.security import new_request_id
-
-    spec = get_agent("autonomous_project")
-    configured_provider = _get_autonomous_provider()
-    provider = spec.effective_provider(configured_provider)
 
     # Compose tool set: spec-filtered base tools + project-scoped custom tools.
     base_tools = tt_module.TOOLS
     base_handlers = tt_module.TOOL_HANDLERS
     agent_tools, agent_handlers = spec.filter_tools(base_tools, base_handlers)
 
-    project_tools, project_handlers = _build_project_tools(project["id"])
+    project_tools, project_handlers = _build_project_tools(project_id)
     agent_tools.extend(project_tools)
     agent_handlers.update(project_handlers)
     agent_tools = dedupe_tools_by_name(agent_tools)
+    return agent_tools, agent_handlers
 
-    # Fully static spec prompt — cacheable. Current time is injected as runtime
-    # context into the user message below so the system prompt never drifts.
-    system_prompt = spec.render_prompt(provider=provider)
 
-    # Fetch pending operator advisories. They are marked consumed only after
-    # the tick saves durable project work. If the tick raises or completes as a
-    # no-op, advisories remain pending so operator direction is not lost.
-    pending_advisories = _fetch_pending_advisories(project["id"])
-
-    from telegram.bot import _chat_with_tools
-    tick_request_id = production["attempts"][-1]["request_id"] if production else new_request_id()
+def _attach_tick_mode_tools(
+    agent_tools: list[dict],
+    agent_handlers: dict,
+    project: dict,
+    provider: str,
+    chat_fn,
+    tick_request_id: str,
+    production: dict | None,
+) -> tuple[list[dict], dict]:
+    """Add the production-output tools (guarded) or the deep-dive sub-agent."""
+    from llm.claude_loop import dedupe_tools_by_name
 
     # Deep-dive sub-agent needs the chat closure, so it is registered here
     # rather than in _build_project_tools.
@@ -1911,12 +1904,25 @@ async def _execute_one_tick(project: dict, *, production: dict | None = None) ->
         agent_handlers = practice.guard_handlers(agent_handlers, production)
     else:
         dd_schemas, dd_handlers = _build_deep_dive_tool(
-            project["id"], provider, _chat_with_tools, tick_request_id,
+            project["id"], provider, chat_fn, tick_request_id,
         )
         agent_tools.extend(dd_schemas)
         agent_handlers.update(dd_handlers)
         agent_tools = dedupe_tools_by_name(agent_tools)
+    return agent_tools, agent_handlers
 
+
+async def _prepare_tick_prompt(
+    project: dict,
+    spec,
+    provider: str,
+    pending_advisories: list[dict],
+    chat_fn,
+    tick_request_id: str,
+    production: dict | None,
+) -> tuple[str, str | None, str | None]:
+    """Build the tick's user content. Returns (user_content, tick_objective,
+    editorial_diagnosis)."""
     # Reflexion pre-publish gate: staged drafts get an independent editorial
     # diagnosis injected into this tick's prompt (cached per draft version, so
     # unchanged drafts cost nothing on later ticks). Failure degrades to no
@@ -1925,7 +1931,7 @@ async def _execute_one_tick(project: dict, *, production: dict | None = None) ->
     try:
         if not production:
             editorial_diagnosis = await _diagnose_staged_drafts_for_tick(
-                project, provider, _chat_with_tools,
+                project, provider, chat_fn,
             )
     except Exception as e:
         logger.warning("editorial diagnosis skipped for project %s: %s", project["id"], e)
@@ -1943,10 +1949,24 @@ async def _execute_one_tick(project: dict, *, production: dict | None = None) ->
     # chosen step. Logged as tick_objective; the post-tick critic judges
     # against it.
     tick_objective = practice.objective(production) if production else await _plan_tick_objective(
-        project, user_content, provider, _chat_with_tools, tick_request_id,
+        project, user_content, provider, chat_fn, tick_request_id,
     )
     if tick_objective:
         user_content = f"{user_content}\n\n{_format_tick_objective_block(tick_objective, provider)}"
+    return user_content, tick_objective, editorial_diagnosis
+
+
+async def _resolve_tick_profile(
+    project: dict,
+    spec,
+    provider: str,
+    system_prompt: str,
+    tick_objective: str | None,
+    production: dict | None,
+):
+    """Resolve the autonomous runtime profile. Returns (profile, system_prompt);
+    production ticks get tighter limits and the runtime policy appended."""
+    from llm.runtime_profile import resolve_runtime_profile
 
     # Autonomous uses its own model tier, independent from chat/task settings.
     profile = await resolve_runtime_profile(
@@ -1966,24 +1986,21 @@ async def _execute_one_tick(project: dict, *, production: dict | None = None) ->
                           + "\n" + practice.GUIDANCE)
         _log_event(project["id"], "tick_objective", tick_objective,
                    {"output_id": production["output_id"], "source": "runtime_policy"})
-    model_for_log = profile.model_id or "unknown"
-    budget_tracker: dict = {}
+    return profile, system_prompt
 
-    # Use tz-aware UTC so Postgres compares against TIMESTAMPTZ unambiguously
-    # regardless of the DB session's timezone setting.
-    tick_started_at_utc = datetime.now(timezone.utc).isoformat()
-    _log_event(
-        project["id"], "tick_start",
-        f"turn #{(project.get('turn_count') or 0) + 1}, state={project['state']}",
-        {"provider": provider, "model": model_for_log,
-         "max_rounds": profile.max_rounds if production else spec.max_rounds,
-         "budget_usd": profile.budget_usd if production else spec.budget_usd},
-    )
 
+def _build_tick_messages(
+    project: dict,
+    user_content: str,
+    pending_advisories: list[dict],
+    editorial_diagnosis: str | None,
+    tick_started_at_utc: str,
+) -> list[dict]:
+    """Wrap the tick instruction with attributed context records."""
     from llm.execution_context import attach_context, context_record
     # Keep authority in the assignment/advisory records. Research notes, old
     # traces and critic judgments in the snapshot are attributed reference data.
-    tick_messages = attach_context([{"role": "user", "content": (
+    return attach_context([{"role": "user", "content": (
         "Advance the commissioned project by one concrete step within this tick's "
         "budget and existing publication rules. Apply pending operator advisories over "
         "conflicting prior plans; they remain pending until durable work is saved. "
@@ -2005,6 +2022,23 @@ async def _execute_one_tick(project: dict, *, production: dict | None = None) ->
         authority="commissioned_instruction", status="pending",
     ) for a in pending_advisories]])
 
+
+async def _run_tick_agent(
+    project: dict,
+    spec,
+    provider: str,
+    profile,
+    system_prompt: str,
+    tick_messages: list[dict],
+    agent_tools: list[dict],
+    agent_handlers: dict,
+    budget_tracker: dict,
+    chat_fn,
+    tick_request_id: str,
+) -> str:
+    """Run the agent loop under the per-tick context vars. On failure, log it,
+    record the failure cooldown, and re-raise."""
+    from telegram.channel_broadcast import current_autonomous_project_id
     from jobs.autonomous_publication_controls import current_tick_staged_slugs
 
     ctx_token = current_autonomous_project_id.set(int(project["id"]))
@@ -2012,7 +2046,7 @@ async def _execute_one_tick(project: dict, *, production: dict | None = None) ->
     # staged during this tick cannot be published by this same tick.
     staged_token = current_tick_staged_slugs.set(set())
     try:
-        result_text = await _chat_with_tools(
+        result_text = await chat_fn(
             tick_messages,
             model=profile.model_id,
             system_prompt=system_prompt,
@@ -2054,51 +2088,48 @@ async def _execute_one_tick(project: dict, *, production: dict | None = None) ->
     finally:
         current_tick_staged_slugs.reset(staged_token)
         current_autonomous_project_id.reset(ctx_token)
+    return result_text
 
-    # Increment turn counter and last_run_at AFTER the agent loop completes.
-    db_execute(
-        "UPDATE autonomous_projects SET turn_count = turn_count + 1, last_run_at = NOW(), updated_at = NOW() WHERE id = %s",
-        (project["id"],),
-    )
 
-    actions = _collect_tick_actions(project["id"], tick_started_at_utc)
-    has_durable_action = bool(
-        actions.get("notes")
-        or actions.get("staged_drafts")
-        or actions.get("publications")
-        or actions.get("plan_rationale")
-        or actions.get("state_change")
-    )
-
+def _settle_tick_advisories(
+    project_id: int, pending_advisories: list[dict], has_durable_action: bool,
+) -> list[int]:
+    """Consume advisories only when the tick saved durable work; otherwise
+    log that they were retained. Returns the advisory ids."""
     advisory_ids = [a["id"] for a in pending_advisories]
     if pending_advisories and has_durable_action:
-        _mark_advisories_consumed(project["id"], advisory_ids)
+        _mark_advisories_consumed(project_id, advisory_ids)
         _log_event(
-            project["id"], "advisories_consumed",
+            project_id, "advisories_consumed",
             f"{len(pending_advisories)} advisories marked consumed",
             {"ids": advisory_ids},
         )
     elif pending_advisories:
         _log_event(
-            project["id"],
+            project_id,
             "advisories_retained_no_durable_action",
             f"{len(pending_advisories)} advisories retained because tick saved no durable project action",
             {"ids": advisory_ids},
         )
+    return advisory_ids
 
-    _log_event(
-        project["id"], "tick_end",
-        (result_text or "")[:3000],
-        {"cost_usd": round(budget_tracker.get("total_cost", 0.0), 4),
-         "rounds_used": budget_tracker.get("rounds_used", 0)},
-    )
 
+async def _critique_tick(
+    project: dict,
+    tick_objective: str | None,
+    actions: dict,
+    provider: str,
+    chat_fn,
+    tick_request_id: str,
+    production: dict | None,
+) -> dict | None:
+    """Post-tick critic; a no-op verdict is written back as an experience."""
     # Post-tick critic (CLAW Critic): judge the tick's durable actions against
     # the objective. Durable across ticks — partial/no-op verdicts feed the
     # next tick's warnings, unlike the self-critique paragraph that dies with
     # the chat text.
     tick_review = None if production else await _review_tick_outcome(
-        project, tick_objective, actions, provider, _chat_with_tools, tick_request_id,
+        project, tick_objective, actions, provider, chat_fn, tick_request_id,
     )
     if tick_review and tick_review.get("verdict") == "no-op":
         # Lesson write-back: future ticks on similar objectives recall this
@@ -2111,7 +2142,11 @@ async def _execute_one_tick(project: dict, *, production: dict | None = None) ->
             f"'{objective_head}' but produced no real progress"
             + (f" — {reason}" if reason else ""),
         )
+    return tick_review
 
+
+def _persist_tick_tool_log(project: dict, budget_tracker: dict) -> None:
+    """Store this tick's raw tool-call trace for the next tick."""
     # Persist this tick's tool-call trace so the next tick can see WHAT this
     # tick actually ran and WHAT came back. Curated research_notes only capture
     # final findings; the raw tool log captures execution (retries, dead-end
@@ -2130,6 +2165,98 @@ async def _execute_one_tick(project: dict, *, production: dict | None = None) ->
             # clip at the 4KB default that's fine for human-readable events.
             max_content_chars=40000,
         )
+
+
+async def _execute_one_tick(project: dict, *, production: dict | None = None) -> dict:
+    """Run a single agent wake on the given project. Returns a result dict."""
+    from agents import get_agent
+    from bot_config import _get_autonomous_provider
+    from tool_gateway.security import new_request_id
+
+    spec = get_agent("autonomous_project")
+    configured_provider = _get_autonomous_provider()
+    provider = spec.effective_provider(configured_provider)
+
+    agent_tools, agent_handlers = _compose_tick_tools(spec, project["id"])
+
+    # Fully static spec prompt — cacheable. Current time is injected as runtime
+    # context into the user message below so the system prompt never drifts.
+    system_prompt = spec.render_prompt(provider=provider)
+
+    # Fetch pending operator advisories. They are marked consumed only after
+    # the tick saves durable project work. If the tick raises or completes as a
+    # no-op, advisories remain pending so operator direction is not lost.
+    pending_advisories = _fetch_pending_advisories(project["id"])
+
+    from telegram.bot import _chat_with_tools
+    tick_request_id = production["attempts"][-1]["request_id"] if production else new_request_id()
+
+    agent_tools, agent_handlers = _attach_tick_mode_tools(
+        agent_tools, agent_handlers, project, provider, _chat_with_tools,
+        tick_request_id, production,
+    )
+
+    user_content, tick_objective, editorial_diagnosis = await _prepare_tick_prompt(
+        project, spec, provider, pending_advisories, _chat_with_tools,
+        tick_request_id, production,
+    )
+
+    profile, system_prompt = await _resolve_tick_profile(
+        project, spec, provider, system_prompt, tick_objective, production,
+    )
+    model_for_log = profile.model_id or "unknown"
+    budget_tracker: dict = {}
+
+    # Use tz-aware UTC so Postgres compares against TIMESTAMPTZ unambiguously
+    # regardless of the DB session's timezone setting.
+    tick_started_at_utc = datetime.now(timezone.utc).isoformat()
+    _log_event(
+        project["id"], "tick_start",
+        f"turn #{(project.get('turn_count') or 0) + 1}, state={project['state']}",
+        {"provider": provider, "model": model_for_log,
+         "max_rounds": profile.max_rounds if production else spec.max_rounds,
+         "budget_usd": profile.budget_usd if production else spec.budget_usd},
+    )
+
+    tick_messages = _build_tick_messages(
+        project, user_content, pending_advisories, editorial_diagnosis, tick_started_at_utc,
+    )
+
+    result_text = await _run_tick_agent(
+        project, spec, provider, profile, system_prompt, tick_messages,
+        agent_tools, agent_handlers, budget_tracker, _chat_with_tools, tick_request_id,
+    )
+
+    # Increment turn counter and last_run_at AFTER the agent loop completes.
+    db_execute(
+        "UPDATE autonomous_projects SET turn_count = turn_count + 1, last_run_at = NOW(), updated_at = NOW() WHERE id = %s",
+        (project["id"],),
+    )
+
+    actions = _collect_tick_actions(project["id"], tick_started_at_utc)
+    has_durable_action = bool(
+        actions.get("notes")
+        or actions.get("staged_drafts")
+        or actions.get("publications")
+        or actions.get("plan_rationale")
+        or actions.get("state_change")
+    )
+
+    advisory_ids = _settle_tick_advisories(project["id"], pending_advisories, has_durable_action)
+
+    _log_event(
+        project["id"], "tick_end",
+        (result_text or "")[:3000],
+        {"cost_usd": round(budget_tracker.get("total_cost", 0.0), 4),
+         "rounds_used": budget_tracker.get("rounds_used", 0)},
+    )
+
+    tick_review = await _critique_tick(
+        project, tick_objective, actions, provider, _chat_with_tools,
+        tick_request_id, production,
+    )
+
+    _persist_tick_tool_log(project, budget_tracker)
 
     # Telegram notification — runs after tick data is committed so a notify
     # failure can never lose work. _notify_telegram swallows its own errors.
