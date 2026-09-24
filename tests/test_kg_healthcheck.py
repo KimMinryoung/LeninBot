@@ -4,9 +4,23 @@ import unittest
 from unittest.mock import patch
 
 from scripts import check_kg_integrity as check
+from tool_gateway.results import ToolResult
 
 
 class HealthcheckTests(unittest.TestCase):
+    def test_semantic_fallback_alert_includes_upstream_error(self):
+        fallback = ToolResult(
+            "Knowledge graph semantic search failed; using direct Cypher fallback. "
+            "Graphiti error: 502 upstream unreachable: ConnectError\n[Knowledge Graph fallback]",
+            {"path": "fallback", "fallback": True},
+        )
+        with patch("kg_runtime.search.search_knowledge_graph", return_value=fallback):
+            result = check._run_smoke_search("Soviet economic reform", mode="semantic")
+        self.assertFalse(result["ok"])
+        self.assertIn("502 upstream unreachable: ConnectError", result["error"])
+        self.assertIn(result["error"], check.format_healthcheck_alert(
+            check.healthcheck_status({"ok": True, "semantic_search": result})))
+
     def status(self):
         healthy = {"complete": True, "lag_hours": 2, "phase": "finished"}
         return {"ok": True, "smoke_search": {"ok": True, "preview": "x" * 5000},

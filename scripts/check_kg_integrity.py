@@ -42,8 +42,16 @@ def _run_smoke_search(query: str, *, mode: str = "auto", expected_entity: str | 
     expected_match = not expected_entity or f"- {expected_entity} [" in result
     if mode == "semantic" and metadata.get("path") != "semantic":
         degraded = True
+    reason = None
+    if degraded:
+        reason = result.splitlines()[0][:450]
+        if not reason:
+            reason = f"search path={metadata.get('path') or 'unknown'}, fallback={bool(metadata.get('fallback'))}"
+    elif not expected_match:
+        reason = f"expected entity missing: {expected_entity}"
     return {
         "ok": not degraded and expected_match,
+        "error": reason,
         "expected_entity": expected_entity, "expected_match": expected_match, "metadata": metadata,
         "query": query,
         "degraded": degraded,

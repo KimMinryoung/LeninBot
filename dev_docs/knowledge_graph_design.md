@@ -160,6 +160,7 @@ Operational rules:
 - KG connection failures should degrade features, not crash Telegram/API.
 - Ad-hoc processes: the Postgres write guard covers `kg_sync_state` (needs `LENINBOT_ALLOW_WRITE=1` or a systemd unit); Neo4j writes are not guarded — back up first (`scripts/backup_kg_to_r2.py`) and prefer `--dry-run`.
 - If `check_kg_integrity.py --smoke-query` reports degraded search with `429 RESOURCE_EXHAUSTED`, rerun after a short wait; repeated failures usually mean Gemini embedding quota pressure.
+- Semantic probe alerts include the first line of the search failure (for example, an embedding proxy `502 upstream unreachable: ConnectError`). Check `leninbot-llm-proxy.service` logs and upstream connectivity before treating a fallback result as missing KG data. The full search preview remains in the integrity journal.
 - Any schema expansion must update entity/edge models, `EDGE_TYPE_MAP` or `REFERENCE_EDGE_PAIRS`, write-tool descriptions, `knowledge_graph_schema.md` and this document (`scripts/smoke_kg_schema_docs.py` guards drift).
 - Tests: `tests/test_kg_identity.py`, `test_kg_sync_mapping.py`, `test_kg_search_format.py`, `test_kg_doc_extract.py` (hermetic, `scripts/run_unit_tests.sh kg_`).
 
