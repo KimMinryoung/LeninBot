@@ -1260,6 +1260,296 @@ def _owner_run_context(
     return new_run_context(**ctx_kwargs)
 
 
+# ── _chat_with_tools helpers: profile/toolset, context, provider dispatch ──
+
+async def _resolve_chat_runtime(
+    *,
+    system_prompt: str | None,
+    runtime_kind: str | None,
+    provider_override: str | None,
+    model: str | None,
+    budget_usd: float | None,
+    max_rounds: int | None,
+    max_tokens: int | None,
+    max_input_tokens: int | None,
+    max_output_continuations: int,
+    thinking_policy: str,
+    thinking_budget_tokens: int,
+):
+    """Render the system prompt and resolve the runtime profile and limits.
+
+    Returns (sys_prompt, runtime_kind, profile, max_input_tokens,
+    output_continuations, inference_policy).
+    """
+    # Resolve provider up-front so the system prompt can be rendered in the
+    # format native to the target model family (XML for Claude, Markdown for
+    # OpenAI/Qwen). provider_override wins over the stored config.
+    effective_provider = provider_override or _config.get("provider", "claude")
+
+    # System prompt: orchestrator builds its own fully static prompt; agents
+    # pass their pre-rendered (also static, post-refactor) spec prompt.
+    if system_prompt is None:
+        sys_prompt = _build_orchestrator_system_prompt(effective_provider).format(
+            skills_section=build_skills_prompt(),
+        )
+        _runtime_kind = runtime_kind or "chat"
+    else:
+        sys_prompt = system_prompt
+        _runtime_kind = runtime_kind or "task"
+    if _runtime_kind not in ("chat", "task", "autonomous"):
+        logger.warning("Unknown runtime_kind=%r; falling back to task", _runtime_kind)
+        _runtime_kind = "task"
+    profile = await resolve_runtime_profile(
+        _runtime_kind,
+        provider_override=effective_provider,
+        model_override=model,
+        budget_override=budget_usd,
+        max_rounds_override=max_rounds,
+        max_tokens_override=max_tokens,
+    )
+    from tool_gateway.inference import DEFAULT_AGENT_MAX_INPUT_TOKENS
+    resolved_max_input_tokens = int(max_input_tokens or DEFAULT_AGENT_MAX_INPUT_TOKENS)
+    resolved_output_continuations = max(0, int(max_output_continuations or 0))
+    from tool_gateway.inference import AgentInferencePolicy
+    call_inference_policy = AgentInferencePolicy(
+        max_input_tokens=resolved_max_input_tokens,
+        max_output_tokens=profile.max_tokens,
+        max_rounds=profile.max_rounds,
+        budget_usd=profile.budget_usd,
+        max_output_continuations=resolved_output_continuations,
+        thinking_policy=thinking_policy,
+        thinking_budget_tokens=thinking_budget_tokens,
+    )
+    return (
+        sys_prompt, _runtime_kind, profile,
+        resolved_max_input_tokens, resolved_output_continuations, call_inference_policy,
+    )
+
+
+def _attach_chat_runtime_context(
+    messages: list[dict],
+    *,
+    extra_system_context: str,
+    profile,
+    runtime_kind: str,
+    agent_name: str | None,
+    user_id,
+    task_id: int | None,
+    session_id: str | None,
+) -> list[dict]:
+    """Merge volatile runtime context into the trailing user message."""
+    # Runtime context injection (applies to orchestrator AND agents). Volatile
+    # data — current time, current model, caller-supplied extras (mission,
+    # experiences, state), and system alerts — rides on the trailing user
+    # message so the system prompt and history prefix stay byte-stable across
+    # turns for prompt caching. The active-call record supplies the resolved
+    # model and current time once; do not also inject the default model route.
+    full_runtime_context = _join_context_blocks(
+        extra_system_context or "",
+        _format_system_alerts(profile.provider),
+    )
+    messages = _merge_runtime_context_into_last_user(messages, full_runtime_context)
+    from llm.execution_context import attach_context, context_record
+    return attach_context(messages, [context_record(
+        "active_call", "resolved_runtime_profile", {
+            "provider": profile.provider, "model": profile.model_id,
+            "runtime_kind": runtime_kind, "agent": agent_name,
+            "owner_user_id": user_id, "task_id": task_id,
+        }, scope=session_id or (f"task:{task_id}" if task_id is not None else "unknown"),
+        observed_at=datetime.now(KST), temporal_scope="current turn",
+    )])
+
+
+def _build_chat_toolset(
+    extra_tools: list | None, extra_handlers: dict | None,
+) -> tuple[bool, list, dict]:
+    """Return (is_orchestrator, tools, handlers) for one _chat_with_tools call."""
+    is_orchestrator = extra_tools is None
+
+    if is_orchestrator:
+        merged_tools, merged_handlers = build_orchestrator_toolset(
+            TOOLS,
+            TOOL_HANDLERS,
+            extra_handlers,
+        )
+    else:
+        # Task/agent: use ONLY extra_tools (already filtered by agent spec).
+        # Do NOT merge full TOOLS — that would bypass agent tool restrictions.
+        merged_tools = list(extra_tools or [])
+        merged_handlers = dict(extra_handlers or {})
+
+    if is_orchestrator and "list_agent_tools" in {t.get("name") for t in merged_tools}:
+        from self_runtime.tools import build_list_agent_tools_handler
+        merged_handlers["list_agent_tools"] = build_list_agent_tools_handler(merged_tools)
+
+    # Inject run_agent handler (needs _chat_with_tools closure — can't be registered at import time)
+    if is_orchestrator and "run_agent" not in merged_handlers:
+        from self_runtime.tools import build_run_agent_handler
+        merged_handlers["run_agent"] = build_run_agent_handler(_chat_with_tools)
+    return is_orchestrator, merged_tools, merged_handlers
+
+
+def _resolve_chat_provenance(
+    task_id: int | None, agent_name: str | None, is_orchestrator: bool,
+) -> tuple[str, int | None, object]:
+    """Return (agent_name, mission_id, task_user_id) for provenance tracking."""
+    # Resolve agent name + mission for provenance tracking
+    _agent_name = agent_name or ("orchestrator" if is_orchestrator else "agent")
+    _mission_id: int | None = None
+    _task_user_id = None
+    if task_id is not None:
+        try:
+            from db import query as _db_q
+            row = _db_q(
+                "SELECT agent_type, mission_id, user_id, parent_task_id "
+                "FROM telegram_tasks WHERE id = %s",
+                (task_id,),
+            )
+            if row:
+                if agent_name is None and not is_orchestrator:
+                    _agent_name = str(row[0].get("agent_type") or "agent")
+                _mission_id = row[0].get("mission_id")
+                _task_user_id = row[0].get("user_id")
+        except Exception:
+            pass
+    return _agent_name, _mission_id, _task_user_id
+
+
+async def _dispatch_chat_provider(
+    messages: list[dict],
+    *,
+    effective_provider: str,
+    profile,
+    loop_kwargs: dict,
+    call_inference_policy,
+    is_orchestrator: bool,
+    runtime_kind: str,
+    deepseek_thinking_override: dict | None,
+    budget_tracker: dict | None,
+    on_progress,
+    gw_ctx,
+) -> str:
+    """Run the tool loop on the resolved provider inside the gateway scope."""
+    from tool_gateway.security import caller_scope
+    from tool_gateway.inference import resolve_inference_extra
+    resolved_max_tokens = loop_kwargs["max_tokens"]
+
+    # ── Provider dispatch: Claude vs OpenAI vs Local ──
+    # effective_provider is the resolved runtime profile's provider.
+    if effective_provider == "local":
+        from llm.openai_tool_loop import chat_with_tools as openai_chat
+        from llm.client import (
+            _resolve_backend, LOCAL_SEMAPHORE, LOCAL_CONTEXT_LIMIT,
+            LOCAL_MAX_TOKENS, LOCAL_ENABLE_THINKING,
+        )
+        backend = _resolve_backend()
+        # Floor the completion budget at LOCAL_MAX_TOKENS (default 8192).
+        # The 4096 default shared with Claude truncates Qwen3 responses
+        # mid-<think> on Q4 quantizations, so the tool_call is never
+        # emitted and the loop returns an empty answer.
+        _chat_coro = openai_chat(
+            messages,
+            client=None,
+            base_url=backend["base"],
+            model=profile.model_id or backend["model"],
+            **{**loop_kwargs, "max_tokens": max(resolved_max_tokens, LOCAL_MAX_TOKENS)},
+            context_limit=LOCAL_CONTEXT_LIMIT,
+            enable_thinking=is_orchestrator and LOCAL_ENABLE_THINKING,
+            api_semaphore=LOCAL_SEMAPHORE,
+            provider_label=f"local:{backend['base']}",
+        )
+        with caller_scope(gw_ctx):
+            return await _chat_coro
+
+    if effective_provider == "openai" and _openai_client:
+        from llm.openai_tool_loop import chat_with_tools as openai_chat
+        openai_inference = resolve_inference_extra(call_inference_policy, "openai")
+        _chat_coro = openai_chat(
+            messages,
+            client=_openai_client,
+            model=profile.model_id,
+            **loop_kwargs,
+            provider_label="openai",
+            extra_body=openai_inference.get("extra_body"),
+        )
+        with caller_scope(gw_ctx):
+            return await _chat_coro
+
+    if effective_provider == "kimi" and _kimi_client:
+        from llm.openai_tool_loop import chat_with_tools as openai_chat
+        from llm.provider_registry import kimi_openai_tool_options
+        _chat_coro = openai_chat(
+            messages,
+            client=_kimi_client,
+            model=profile.model_id,
+            **loop_kwargs,
+            provider_label="kimi",
+            **kimi_openai_tool_options(),
+        )
+        with caller_scope(gw_ctx):
+            return await _chat_coro
+
+    if effective_provider == "deepseek" and _deepseek_anthropic_client:
+        deepseek_thinking = deepseek_thinking_override or resolve_inference_extra(
+            call_inference_policy, "deepseek"
+        )
+
+        def _deepseek_primary():
+            return chat_with_tools(
+                messages,
+                client=_deepseek_anthropic_client,
+                model=profile.model_id,
+                **loop_kwargs,
+                thinking=deepseek_thinking.get("thinking"),
+                output_config=deepseek_thinking.get("output_config"),
+            )
+
+        from llm.provider_failover import resolve_deepseek_failover_model
+        failover_model = await resolve_deepseek_failover_model(runtime_kind, _openai_client)
+
+        def _terra_failover():
+            from llm.openai_tool_loop import chat_with_tools as openai_chat
+            return openai_chat(
+                messages,
+                client=_openai_client,
+                model=failover_model,
+                **loop_kwargs,
+                provider_label="openai:failover",
+            )
+
+        with caller_scope(gw_ctx):
+            return await run_with_provider_failover(
+                _deepseek_primary,
+                _terra_failover if failover_model else None,
+                primary_label="deepseek",
+                fallback_label=failover_model or "openai",
+                budget_tracker=budget_tracker,
+                on_progress=on_progress,
+            )
+
+    if effective_provider in ("openai", "deepseek", "kimi"):
+        missing = {
+            "openai": "OPENAI_API_KEY",
+            "deepseek": "DEEPSEEK_API_KEY",
+            "kimi": "MOONSHOT_API_KEY",
+        }[effective_provider]
+        raise RuntimeError(f"{missing} is not configured for provider={effective_provider}")
+
+    # Claude path. `messages` has already had the runtime context merged into
+    # the trailing user turn by `_attach_chat_runtime_context`,
+    # so history remains byte-stable across turns and prefix caching works.
+    claude_inference = resolve_inference_extra(call_inference_policy, "claude")
+    _chat_coro = chat_with_tools(
+        messages,
+        client=_claude,
+        model=profile.model_id,
+        **loop_kwargs,
+        thinking=claude_inference.get("thinking"),
+    )
+    with caller_scope(gw_ctx):
+        return await _chat_coro
+
+
 # ── Thin wrapper: _chat_with_tools (injects module-level dependencies) ──
 
 async def _chat_with_tools(
@@ -1307,119 +1597,49 @@ async def _chat_with_tools(
     their whole max_tokens before any visible reply. Ignored by non-DeepSeek
     providers.
     """
-    # Resolve provider up-front so the system prompt can be rendered in the
-    # format native to the target model family (XML for Claude, Markdown for
-    # OpenAI/Qwen). provider_override wins over the stored config.
-    effective_provider = provider_override or _config.get("provider", "claude")
-
-    # System prompt: orchestrator builds its own fully static prompt; agents
-    # pass their pre-rendered (also static, post-refactor) spec prompt.
-    if system_prompt is None:
-        sys_prompt = _build_orchestrator_system_prompt(effective_provider).format(
-            skills_section=build_skills_prompt(),
-        )
-        _runtime_kind = runtime_kind or "chat"
-    else:
-        sys_prompt = system_prompt
-        _runtime_kind = runtime_kind or "task"
-    if _runtime_kind not in ("chat", "task", "autonomous"):
-        logger.warning("Unknown runtime_kind=%r; falling back to task", _runtime_kind)
-        _runtime_kind = "task"
-    profile = await resolve_runtime_profile(
-        _runtime_kind,
-        provider_override=effective_provider,
-        model_override=model,
-        budget_override=budget_usd,
-        max_rounds_override=max_rounds,
-        max_tokens_override=max_tokens,
+    (
+        sys_prompt, _runtime_kind, profile,
+        resolved_max_input_tokens, resolved_output_continuations, call_inference_policy,
+    ) = await _resolve_chat_runtime(
+        system_prompt=system_prompt,
+        runtime_kind=runtime_kind,
+        provider_override=provider_override,
+        model=model,
+        budget_usd=budget_usd,
+        max_rounds=max_rounds,
+        max_tokens=max_tokens,
+        max_input_tokens=max_input_tokens,
+        max_output_continuations=max_output_continuations,
+        thinking_policy=thinking_policy,
+        thinking_budget_tokens=thinking_budget_tokens,
     )
     effective_provider = profile.provider
     resolved_max_rounds = profile.max_rounds
     resolved_max_tokens = profile.max_tokens
-    from tool_gateway.inference import DEFAULT_AGENT_MAX_INPUT_TOKENS
-    resolved_max_input_tokens = int(max_input_tokens or DEFAULT_AGENT_MAX_INPUT_TOKENS)
-    resolved_output_continuations = max(0, int(max_output_continuations or 0))
     resolved_budget = profile.budget_usd
-    from tool_gateway.inference import AgentInferencePolicy, resolve_inference_extra
-    call_inference_policy = AgentInferencePolicy(
-        max_input_tokens=resolved_max_input_tokens,
-        max_output_tokens=resolved_max_tokens,
-        max_rounds=resolved_max_rounds,
-        budget_usd=resolved_budget,
-        max_output_continuations=resolved_output_continuations,
-        thinking_policy=thinking_policy,
-        thinking_budget_tokens=thinking_budget_tokens,
+
+    messages = _attach_chat_runtime_context(
+        messages,
+        extra_system_context=extra_system_context,
+        profile=profile,
+        runtime_kind=_runtime_kind,
+        agent_name=agent_name,
+        user_id=user_id,
+        task_id=task_id,
+        session_id=session_id,
     )
-
-    # Runtime context injection (applies to orchestrator AND agents). Volatile
-    # data — current time, current model, caller-supplied extras (mission,
-    # experiences, state), and system alerts — rides on the trailing user
-    # message so the system prompt and history prefix stay byte-stable across
-    # turns for prompt caching. The active-call record supplies the resolved
-    # model and current time once; do not also inject the default model route.
-    full_runtime_context = _join_context_blocks(
-        extra_system_context or "",
-        _format_system_alerts(effective_provider),
+    is_orchestrator, merged_tools, merged_handlers = _build_chat_toolset(
+        extra_tools, extra_handlers,
     )
-    messages = _merge_runtime_context_into_last_user(messages, full_runtime_context)
-    from llm.execution_context import attach_context, context_record
-    messages = attach_context(messages, [context_record(
-        "active_call", "resolved_runtime_profile", {
-            "provider": profile.provider, "model": profile.model_id,
-            "runtime_kind": _runtime_kind, "agent": agent_name,
-            "owner_user_id": user_id, "task_id": task_id,
-        }, scope=session_id or (f"task:{task_id}" if task_id is not None else "unknown"),
-        observed_at=datetime.now(KST), temporal_scope="current turn",
-    )])
-    is_orchestrator = extra_tools is None
-
-    if is_orchestrator:
-        merged_tools, merged_handlers = build_orchestrator_toolset(
-            TOOLS,
-            TOOL_HANDLERS,
-            extra_handlers,
-        )
-    else:
-        # Task/agent: use ONLY extra_tools (already filtered by agent spec).
-        # Do NOT merge full TOOLS — that would bypass agent tool restrictions.
-        merged_tools = list(extra_tools or [])
-        merged_handlers = dict(extra_handlers or {})
-
-    if is_orchestrator and "list_agent_tools" in {t.get("name") for t in merged_tools}:
-        from self_runtime.tools import build_list_agent_tools_handler
-        merged_handlers["list_agent_tools"] = build_list_agent_tools_handler(merged_tools)
-
-    # Inject run_agent handler (needs _chat_with_tools closure — can't be registered at import time)
-    if is_orchestrator and "run_agent" not in merged_handlers:
-        from self_runtime.tools import build_run_agent_handler
-        merged_handlers["run_agent"] = build_run_agent_handler(_chat_with_tools)
-
-    # Resolve agent name + mission for provenance tracking
-    _agent_name = agent_name or ("orchestrator" if is_orchestrator else "agent")
-    _mission_id: int | None = None
-    _task_user_id = None
-    if task_id is not None:
-        try:
-            from db import query as _db_q
-            row = _db_q(
-                "SELECT agent_type, mission_id, user_id, parent_task_id "
-                "FROM telegram_tasks WHERE id = %s",
-                (task_id,),
-            )
-            if row:
-                if agent_name is None and not is_orchestrator:
-                    _agent_name = str(row[0].get("agent_type") or "agent")
-                _mission_id = row[0].get("mission_id")
-                _task_user_id = row[0].get("user_id")
-        except Exception:
-            pass
+    _agent_name, _mission_id, _task_user_id = _resolve_chat_provenance(
+        task_id, agent_name, is_orchestrator,
+    )
 
     # ── Security gateway caller context ──
     # Telegram is the owner's gated control channel (ALLOWED_USER_IDS upstream),
     # so calls here are trusted. Orchestrator vs delegated-agent is distinguished
     # for audit attribution; caller_scope restores the parent on exit so a nested
     # run_agent sub-call doesn't leak its agent identity back to the orchestrator.
-    from tool_gateway.security import caller_scope
     _interface = (
         "autonomous" if _runtime_kind == "autonomous"
         else ("telegram" if is_orchestrator else "agent")
@@ -1458,120 +1678,19 @@ async def _chat_with_tools(
         terminal_required=terminal_required,
     )
 
-    # ── Provider dispatch: Claude vs OpenAI vs Local ──
-    # effective_provider already resolved above before prompt rendering.
-    if effective_provider == "local":
-        from llm.openai_tool_loop import chat_with_tools as openai_chat
-        from llm.client import (
-            _resolve_backend, LOCAL_SEMAPHORE, LOCAL_CONTEXT_LIMIT,
-            LOCAL_MAX_TOKENS, LOCAL_ENABLE_THINKING,
-        )
-        backend = _resolve_backend()
-        # Floor the completion budget at LOCAL_MAX_TOKENS (default 8192).
-        # The 4096 default shared with Claude truncates Qwen3 responses
-        # mid-<think> on Q4 quantizations, so the tool_call is never
-        # emitted and the loop returns an empty answer.
-        _chat_coro = openai_chat(
-            messages,
-            client=None,
-            base_url=backend["base"],
-            model=profile.model_id or backend["model"],
-            **{**loop_kwargs, "max_tokens": max(resolved_max_tokens, LOCAL_MAX_TOKENS)},
-            context_limit=LOCAL_CONTEXT_LIMIT,
-            enable_thinking=is_orchestrator and LOCAL_ENABLE_THINKING,
-            api_semaphore=LOCAL_SEMAPHORE,
-            provider_label=f"local:{backend['base']}",
-        )
-        with caller_scope(_gw_ctx):
-            return await _chat_coro
-
-    if effective_provider == "openai" and _openai_client:
-        from llm.openai_tool_loop import chat_with_tools as openai_chat
-        openai_inference = resolve_inference_extra(call_inference_policy, "openai")
-        _chat_coro = openai_chat(
-            messages,
-            client=_openai_client,
-            model=profile.model_id,
-            **loop_kwargs,
-            provider_label="openai",
-            extra_body=openai_inference.get("extra_body"),
-        )
-        with caller_scope(_gw_ctx):
-            return await _chat_coro
-
-    if effective_provider == "kimi" and _kimi_client:
-        from llm.openai_tool_loop import chat_with_tools as openai_chat
-        from llm.provider_registry import kimi_openai_tool_options
-        _chat_coro = openai_chat(
-            messages,
-            client=_kimi_client,
-            model=profile.model_id,
-            **loop_kwargs,
-            provider_label="kimi",
-            **kimi_openai_tool_options(),
-        )
-        with caller_scope(_gw_ctx):
-            return await _chat_coro
-
-    if effective_provider == "deepseek" and _deepseek_anthropic_client:
-        deepseek_thinking = deepseek_thinking_override or resolve_inference_extra(
-            call_inference_policy, "deepseek"
-        )
-
-        def _deepseek_primary():
-            return chat_with_tools(
-                messages,
-                client=_deepseek_anthropic_client,
-                model=profile.model_id,
-                **loop_kwargs,
-                thinking=deepseek_thinking.get("thinking"),
-                output_config=deepseek_thinking.get("output_config"),
-            )
-
-        from llm.provider_failover import resolve_deepseek_failover_model
-        failover_model = await resolve_deepseek_failover_model(_runtime_kind, _openai_client)
-
-        def _terra_failover():
-            from llm.openai_tool_loop import chat_with_tools as openai_chat
-            return openai_chat(
-                messages,
-                client=_openai_client,
-                model=failover_model,
-                **loop_kwargs,
-                provider_label="openai:failover",
-            )
-
-        with caller_scope(_gw_ctx):
-            return await run_with_provider_failover(
-                _deepseek_primary,
-                _terra_failover if failover_model else None,
-                primary_label="deepseek",
-                fallback_label=failover_model or "openai",
-                budget_tracker=budget_tracker,
-                on_progress=on_progress,
-            )
-
-    if effective_provider in ("openai", "deepseek", "kimi"):
-        missing = {
-            "openai": "OPENAI_API_KEY",
-            "deepseek": "DEEPSEEK_API_KEY",
-            "kimi": "MOONSHOT_API_KEY",
-        }[effective_provider]
-        raise RuntimeError(f"{missing} is not configured for provider={effective_provider}")
-
-    # Claude path. `messages` has already had the runtime context merged into
-    # the trailing user turn by `_merge_runtime_context_into_last_user` above,
-    # so history remains byte-stable across turns and prefix caching works.
-    claude_inference = resolve_inference_extra(call_inference_policy, "claude")
-    _chat_coro = chat_with_tools(
+    return await _dispatch_chat_provider(
         messages,
-        client=_claude,
-        model=profile.model_id,
-        **loop_kwargs,
-        thinking=claude_inference.get("thinking"),
+        effective_provider=effective_provider,
+        profile=profile,
+        loop_kwargs=loop_kwargs,
+        call_inference_policy=call_inference_policy,
+        is_orchestrator=is_orchestrator,
+        runtime_kind=_runtime_kind,
+        deepseek_thinking_override=deepseek_thinking_override,
+        budget_tracker=budget_tracker,
+        on_progress=on_progress,
+        gw_ctx=_gw_ctx,
     )
-    with caller_scope(_gw_ctx):
-        return await _chat_coro
 
 
 # ── Router & Handlers ───────────────────────────────────────────────
