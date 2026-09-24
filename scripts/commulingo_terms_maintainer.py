@@ -246,7 +246,7 @@ async def run_once() -> dict:
     task += "\nIf no suitable term remains, call commulingo_no_edit with reason/status/sources. Free-text NO_CANDIDATE alone does not finish the job."
     ctx = new_run_context(interface="autonomous", agent_name=spec.name, is_owner=True,
         scope_type="maintenance_job", scope_id="commulingo_terms_maintainer")
-    from scripts.commulingo_run import RunFailure, submitted_edit
+    from runtime_tools.commulingo_run import RunFailure, submitted_edit
     try:
         with caller_scope(ctx):
             result, tracker, _ = await lane._call_curator_stage(

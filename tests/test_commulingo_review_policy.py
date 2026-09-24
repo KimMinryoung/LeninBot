@@ -37,7 +37,7 @@ class PolicyTests(EditorCase):
         self.addCleanup(reservation.stop)
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
-        ledger = patch('scripts.commulingo_research_memory.STORE_PATH', Path(directory.name) / 'review.sqlite3')
+        ledger = patch('runtime_tools.commulingo_research_memory.STORE_PATH', Path(directory.name) / 'review.sqlite3')
         ledger.start()
         self.addCleanup(ledger.stop)
 

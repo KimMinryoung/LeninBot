@@ -1141,8 +1141,8 @@ async def _run_new_person_path(cycle: _RunCycle):
 
     Returns the creation result, or None when the run fell back.
     """
-    from scripts.commulingo_run import RunBudget
-    from scripts.commulingo_research_memory import STORE_PATH
+    from runtime_tools.commulingo_run import RunBudget
+    from runtime_tools.commulingo_research_memory import STORE_PATH
     config, state, tracker = cycle.config, cycle.state, cycle.tracker
     result = None
     # Seeded from disk and merged back below whether or not the stage
@@ -1341,7 +1341,7 @@ def _finish_run(cycle: _RunCycle, result: str) -> dict:
                 "candidate": candidate and candidate.get("id"), "model": cycle.report_model,
                 "cost_usd": round(float(tracker.get("total_cost") or 0), 4),
                 "rounds": int(tracker.get("rounds_used") or 0), "result": result}
-    from scripts.commulingo_run import submitted_edit
+    from runtime_tools.commulingo_run import submitted_edit
     save_state(state)
     edit = submitted_edit(cycle.write_outcomes, db_query_one)
     if not edit or edit.get("status") != "approved":

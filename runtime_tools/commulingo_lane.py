@@ -19,7 +19,7 @@ from pathlib import Path
 
 from bot_config import resolve_agent_tool_loop
 from db import query_one as db_query_one
-from scripts.commulingo_research_memory import ResearchMemory
+from runtime_tools.commulingo_research_memory import ResearchMemory
 from tool_gateway.results import ToolRejection
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -196,7 +196,7 @@ async def _call_curator_stage(
     research_key: str | None = None, baseline: dict | None = None, run_budget=None,
 ) -> tuple[str, dict, dict | None]:
     import asyncio
-    from scripts.commulingo_run import RunBudget, RunFailure
+    from runtime_tools.commulingo_run import RunBudget, RunFailure
     from tool_gateway.results import ToolFailure
     binding = resolve_agent_tool_loop(spec, policy)
     memory = ResearchMemory(research_key or f"{spec.name}:{stage}:{task}")

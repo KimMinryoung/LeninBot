@@ -9,8 +9,8 @@ from unittest.mock import AsyncMock, patch
 
 from runtime_tools.commulingo_evidence import resolve_evidence_sources
 from runtime_tools.commulingo_review_policy import review_source, resolve_review_checks, validate_decision, DECISION_TOOL
-from scripts.commulingo_research_memory import ResearchMemory
-from scripts.commulingo_run import RunBudget, RunFailure, submitted_edit
+from runtime_tools.commulingo_research_memory import ResearchMemory
+from runtime_tools.commulingo_run import RunBudget, RunFailure, submitted_edit
 from scripts.commulingo_write_session import draft_id, prepare_write, repair_schema
 from tool_gateway.validation import validate_tool_arguments, ToolArgumentValidationError
 from tool_gateway.results import ToolRejection
@@ -187,7 +187,7 @@ class EfficiencyTests(unittest.IsolatedAsyncioTestCase):
             max_output_tokens=1000,max_input_tokens=10000)
         binding=SimpleNamespace(chat=chat,client=None,model='fake',render_provider='test',reasoning={})
         with patch.object(lane,'resolve_agent_tool_loop',return_value=binding), \
-             patch('scripts.commulingo_research_memory.STORE_PATH',self.path):
+             patch('runtime_tools.commulingo_research_memory.STORE_PATH',self.path):
             with self.assertRaises(RunFailure) as failed:
                 await lane._call_curator_stage(task='test',spec=SimpleNamespace(name='test',render_prompt=lambda **kw:'test'),
                     tools=[],handlers={},policy=policy,stage='test',expect_edit=True,

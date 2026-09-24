@@ -51,8 +51,8 @@ async def research(row, current, tracker):
     context = new_run_context(interface='autonomous', agent_name=spec.name, is_owner=True,
         scope_type='maintenance_job',scope_id=f"commulingo_review:{row['id']}")
     with caller_scope(context):
-        from scripts.commulingo_run import RunBudget
-        from scripts.commulingo_research_memory import STORE_PATH
+        from runtime_tools.commulingo_run import RunBudget
+        from runtime_tools.commulingo_research_memory import STORE_PATH
         run = RunBudget(policy, STORE_PATH, 'review', str(row['id']))
         try:
             run.remaining()
@@ -149,8 +149,8 @@ async def run(*, notify_only=False, skip_budget=False):
     if budget_deferred:
         state = 'budget_deferred'
     if tracker.get('run_id'):
-        from scripts.commulingo_run import finish_record
-        from scripts.commulingo_research_memory import STORE_PATH
+        from runtime_tools.commulingo_run import finish_record
+        from runtime_tools.commulingo_research_memory import STORE_PATH
         finish_record(STORE_PATH, tracker['run_id'], state)
     return {'status':state,'suggestion_id':job['suggestion_id'],'run_id':tracker.get('run_id'),
             'cost_usd':float(tracker.get('total_cost') or 0)}
