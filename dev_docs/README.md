@@ -73,6 +73,7 @@
 - 메모리는 사용자 선호·현재 미완료 작업·문서 진입점만 간결하게 유지한다. 완료 배포 로그와 코드에서 조회할 모델·요율·행수는 중복 저장하지 않는다.
 - 코드 기본값, 로컬 설정, 당시 운영 관찰을 구분한다. 재확인하지 않은 해지·활성화·승인 대기를 현재 사실처럼 갱신하지 않는다.
 - 실제 라우트, config key, systemd unit, tool name을 쓸 때는 코드에서 다시 확인한다.
+- Python 변경을 운영에 적용하기 전에 `scripts/run_unit_tests.sh`를 실행한다. 이 명령은 테스트 전에 `scripts/check_python_names.py`로 저장소의 Python 파일에서 미정의 이름과 문법 오류를 검사한다. 의존성은 `requirements.txt`의 `pyflakes`다. import 대상의 실제 존재 여부와 실행 중 동적 이름 해석은 이 검사 범위 밖이므로, 변경한 서비스의 모듈 import와 관련 실행 경로도 확인한다.
 
 ## Top-level Code Layout
 

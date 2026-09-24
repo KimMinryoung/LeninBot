@@ -8,9 +8,12 @@
 # Usage:
 #   scripts/run_unit_tests.sh              # whole suite
 #   scripts/run_unit_tests.sh claude_loop  # only test files matching the pattern
-set -u
+set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT" || exit 1
+
+# Catch names referenced only inside rarely executed workers before deployment.
+venv/bin/python scripts/check_python_names.py
 
 # Keep the suite hermetic: the LLM gateway's journald sink still logs, but no
 # DB writer thread is spawned and no insert is attempted.
