@@ -123,7 +123,7 @@ def _web_chat_feedback() -> None:
 
 
 def _writer_tables() -> None:
-    from creative_writer import ensure_writer_tables
+    from writer import ensure_writer_tables
 
     ensure_writer_tables()
 

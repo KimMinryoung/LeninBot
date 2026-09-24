@@ -71,7 +71,7 @@ async def list_writer_projects(
     limit: int = Query(default=100, ge=1, le=200),
     status: str = Query(default="active", pattern="^(active|deleted)$"),
 ):
-    from creative_writer import (
+    from writer import (
         WRITER_INPUT_PRICE_PER_MTOK,
         WRITER_MODEL,
         WRITER_MODEL_DISPLAY,
@@ -98,7 +98,7 @@ async def list_writer_projects(
 
 @router.put("/writer/settings", dependencies=[Depends(require_writer_access)])
 async def save_writer_settings(request: WriterSettingsRequest):
-    from creative_writer import set_selected_model_choice
+    from writer import set_selected_model_choice
 
     try:
         saved = await asyncio.to_thread(set_selected_model_choice, request.model)
@@ -109,7 +109,7 @@ async def save_writer_settings(request: WriterSettingsRequest):
 
 @router.post("/writer/projects", dependencies=[Depends(require_writer_access)])
 async def create_writer_project(request: WriterProjectRequest):
-    from creative_writer import create_project
+    from writer import create_project
 
     project = await asyncio.to_thread(
         create_project,
@@ -122,7 +122,7 @@ async def create_writer_project(request: WriterProjectRequest):
 
 @router.get("/writer/projects/{project_id}", dependencies=[Depends(require_writer_access)])
 async def get_writer_project(project_id: int):
-    from creative_writer import get_project_with_messages
+    from writer import get_project_with_messages
 
     project = await asyncio.to_thread(get_project_with_messages, project_id)
     if not project:
@@ -132,7 +132,7 @@ async def get_writer_project(project_id: int):
 
 @router.patch("/writer/projects/{project_id}", dependencies=[Depends(require_writer_access)])
 async def update_writer_project(project_id: int, request: WriterProjectRequest):
-    from creative_writer import get_project_with_messages, update_project
+    from writer import get_project_with_messages, update_project
 
     project = await asyncio.to_thread(
         update_project,
@@ -148,7 +148,7 @@ async def update_writer_project(project_id: int, request: WriterProjectRequest):
 
 @router.delete("/writer/projects/{project_id}", dependencies=[Depends(require_writer_access)])
 async def delete_writer_project(project_id: int, permanent: bool = Query(default=False)):
-    from creative_writer import delete_project, trash_project
+    from writer import delete_project, trash_project
 
     if permanent:
         deleted = await asyncio.to_thread(delete_project, project_id)
@@ -163,7 +163,7 @@ async def delete_writer_project(project_id: int, permanent: bool = Query(default
 
 @router.post("/writer/projects/{project_id}/publish", dependencies=[Depends(require_writer_access)])
 async def publish_writer_project(project_id: int, request: WriterPublishRequest):
-    from creative_writer import set_project_public
+    from writer import set_project_public
 
     project = await asyncio.to_thread(set_project_public, project_id, request.is_public)
     if not project:
@@ -177,7 +177,7 @@ _PUBLIC_SLUG_RE = re.compile(r"^[A-Za-z0-9_-]{4,64}$")
 @router.get("/writer/public/{slug}")
 async def get_public_novel(slug: str):
     """Anonymous manuscript read for the public site — no writer key required."""
-    from creative_writer import get_public_manuscript
+    from writer import get_public_manuscript
 
     if not _PUBLIC_SLUG_RE.match(slug):
         raise HTTPException(status_code=404, detail="novel not found")
@@ -189,7 +189,7 @@ async def get_public_novel(slug: str):
 
 @router.post("/writer/projects/{project_id}/restore", dependencies=[Depends(require_writer_access)])
 async def restore_writer_project(project_id: int):
-    from creative_writer import restore_project
+    from writer import restore_project
 
     restored = await asyncio.to_thread(restore_project, project_id)
     if not restored:
@@ -199,7 +199,7 @@ async def restore_writer_project(project_id: int):
 
 @router.get("/writer/projects/{project_id}/manuscript", dependencies=[Depends(require_writer_access)])
 async def get_writer_manuscript(project_id: int):
-    from creative_writer import get_manuscript
+    from writer import get_manuscript
 
     manuscript = await asyncio.to_thread(get_manuscript, project_id)
     if not manuscript:
@@ -209,7 +209,7 @@ async def get_writer_manuscript(project_id: int):
 
 @router.put("/writer/projects/{project_id}/manuscript", dependencies=[Depends(require_writer_access)])
 async def save_writer_manuscript(project_id: int, request: WriterManuscriptRequest):
-    from creative_writer import save_manuscript
+    from writer import save_manuscript
 
     manuscript = await asyncio.to_thread(save_manuscript, project_id, request.body, request.note)
     if not manuscript:
@@ -223,7 +223,7 @@ async def search_writer_manuscript(
     q: str = Query(..., min_length=1, max_length=500),
     limit: int = Query(default=20, ge=1, le=50),
 ):
-    from creative_writer import get_project, search_manuscript
+    from writer import get_project, search_manuscript
 
     project = await asyncio.to_thread(get_project, project_id)
     if not project:
@@ -234,7 +234,7 @@ async def search_writer_manuscript(
 
 @router.post("/writer/projects/{project_id}/manuscript/append", dependencies=[Depends(require_writer_access)])
 async def append_writer_manuscript(project_id: int, request: WriterManuscriptAppendRequest):
-    from creative_writer import append_manuscript
+    from writer import append_manuscript
 
     manuscript = await asyncio.to_thread(append_manuscript, project_id, request.text, request.note)
     if not manuscript:
@@ -244,7 +244,7 @@ async def append_writer_manuscript(project_id: int, request: WriterManuscriptApp
 
 @router.post("/writer/projects/{project_id}/manuscript/replace", dependencies=[Depends(require_writer_access)])
 async def replace_writer_manuscript(project_id: int, request: WriterManuscriptReplaceRequest):
-    from creative_writer import replace_manuscript_range
+    from writer import replace_manuscript_range
 
     try:
         manuscript = await asyncio.to_thread(
@@ -267,7 +267,7 @@ async def list_writer_manuscript_revisions(
     project_id: int,
     limit: int = Query(default=30, ge=1, le=100),
 ):
-    from creative_writer import get_project, list_manuscript_revisions
+    from writer import get_project, list_manuscript_revisions
 
     project = await asyncio.to_thread(get_project, project_id)
     if not project:
@@ -279,7 +279,7 @@ async def list_writer_manuscript_revisions(
 @router.get("/writer/documents", dependencies=[Depends(require_writer_access)])
 async def list_writer_shared_documents():
     """Shared background documents — visible to every writer project."""
-    from creative_writer import list_shared_documents
+    from writer import list_shared_documents
 
     documents = await asyncio.to_thread(list_shared_documents)
     return {"documents": documents}
@@ -287,7 +287,7 @@ async def list_writer_shared_documents():
 
 @router.post("/writer/documents", dependencies=[Depends(require_writer_access)])
 async def save_writer_shared_document(request: WriterDocumentRequest):
-    from creative_writer import save_shared_document
+    from writer import save_shared_document
 
     document = await asyncio.to_thread(
         save_shared_document, request.title, request.content, request.kind
@@ -299,7 +299,7 @@ async def save_writer_shared_document(request: WriterDocumentRequest):
 
 @router.get("/writer/documents/{document_id}", dependencies=[Depends(require_writer_access)])
 async def get_writer_shared_document(document_id: int):
-    from creative_writer import get_shared_document
+    from writer import get_shared_document
 
     document = await asyncio.to_thread(get_shared_document, document_id)
     if not document:
@@ -309,7 +309,7 @@ async def get_writer_shared_document(document_id: int):
 
 @router.put("/writer/documents/{document_id}", dependencies=[Depends(require_writer_access)])
 async def update_writer_shared_document(document_id: int, request: WriterDocumentRequest):
-    from creative_writer import update_document
+    from writer import update_document
 
     document = await asyncio.to_thread(
         update_document, None, document_id, request.title, request.kind, request.content
@@ -321,7 +321,7 @@ async def update_writer_shared_document(document_id: int, request: WriterDocumen
 
 @router.delete("/writer/documents/{document_id}", dependencies=[Depends(require_writer_access)])
 async def delete_writer_shared_document(document_id: int):
-    from creative_writer import delete_document
+    from writer import delete_document
 
     deleted = await asyncio.to_thread(delete_document, None, document_id)
     if not deleted:
@@ -331,7 +331,7 @@ async def delete_writer_shared_document(document_id: int):
 
 @router.get("/writer/projects/{project_id}/documents", dependencies=[Depends(require_writer_access)])
 async def list_writer_documents(project_id: int):
-    from creative_writer import get_project, list_documents
+    from writer import get_project, list_documents
 
     project = await asyncio.to_thread(get_project, project_id)
     if not project:
@@ -342,7 +342,7 @@ async def list_writer_documents(project_id: int):
 
 @router.post("/writer/projects/{project_id}/documents", dependencies=[Depends(require_writer_access)])
 async def save_writer_document(project_id: int, request: WriterDocumentRequest):
-    from creative_writer import save_document
+    from writer import save_document
 
     document = await asyncio.to_thread(
         save_document, project_id, request.title, request.content, request.kind
@@ -354,7 +354,7 @@ async def save_writer_document(project_id: int, request: WriterDocumentRequest):
 
 @router.get("/writer/projects/{project_id}/documents/{document_id}", dependencies=[Depends(require_writer_access)])
 async def get_writer_document(project_id: int, document_id: int):
-    from creative_writer import get_document
+    from writer import get_document
 
     document = await asyncio.to_thread(get_document, project_id, document_id)
     if not document:
@@ -364,7 +364,7 @@ async def get_writer_document(project_id: int, document_id: int):
 
 @router.put("/writer/projects/{project_id}/documents/{document_id}", dependencies=[Depends(require_writer_access)])
 async def update_writer_document(project_id: int, document_id: int, request: WriterDocumentRequest):
-    from creative_writer import update_document
+    from writer import update_document
 
     document = await asyncio.to_thread(
         update_document, project_id, document_id, request.title, request.kind, request.content
@@ -376,7 +376,7 @@ async def update_writer_document(project_id: int, document_id: int, request: Wri
 
 @router.delete("/writer/projects/{project_id}/documents/{document_id}", dependencies=[Depends(require_writer_access)])
 async def delete_writer_document(project_id: int, document_id: int):
-    from creative_writer import delete_document
+    from writer import delete_document
 
     deleted = await asyncio.to_thread(delete_document, project_id, document_id)
     if not deleted:
@@ -388,7 +388,7 @@ async def delete_writer_document(project_id: int, document_id: int):
 async def writer_stream(project_id: int, http_req: Request):
     """Reattach to a live background writer run (page reload / dropped stream).
     Emits no_active_run immediately when there is nothing to attach to."""
-    from creative_writer import stream_active_run
+    from writer import stream_active_run
 
     return StreamingResponse(
         stream_active_run(
@@ -402,7 +402,7 @@ async def writer_stream(project_id: int, http_req: Request):
 
 @router.post("/writer/projects/{project_id}/messages", dependencies=[Depends(require_writer_access)])
 async def writer_message(project_id: int, request: WriterMessageRequest, http_req: Request):
-    from creative_writer import stream_writer_reply
+    from writer import stream_writer_reply
 
     return StreamingResponse(
         stream_writer_reply(
