@@ -32,7 +32,7 @@ from secrets_loader import get_secret
 from bot_config import (
     ANTHROPIC_API_KEY, OPENAI_API_KEY,
     _claude, _openai_client, _deepseek_client, _deepseek_anthropic_client, _kimi_client,
-    _CLAUDE_MAX_TOKENS, _CLAUDE_MAX_TOKENS_TASK,
+    _CLAUDE_MAX_TOKENS_TASK,
     _config, _save_config, _CONFIG_DEFAULTS, _CONFIG_META,
     _resolved_models, _tier_to_display,
     _get_model, _get_model_task, _get_model_light, _get_model_moon,
@@ -116,7 +116,6 @@ OWNER_USER_ID: int = next(iter(ALLOWED_USER_IDS)) if len(ALLOWED_USER_IDS) == 1 
 EMAIL_BRIDGE_ENABLED = os.getenv("EMAIL_BRIDGE_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
 EMAIL_POLLING_ENABLED = os.getenv("EMAIL_POLLING_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
 EMAIL_POLL_INTERVAL_SECONDS = max(30, int(os.getenv("EMAIL_POLL_INTERVAL_SECONDS", "120")))
-EMAIL_APPROVAL_BASE_URL = os.getenv("EMAIL_APPROVAL_BASE_URL", "").rstrip("/")
 EMAIL_DEFAULT_APPROVER_USER_ID = int(os.getenv("EMAIL_DEFAULT_APPROVER_USER_ID", "0") or "0")
 EMAIL_LOG_DIR = Path(os.getenv("EMAIL_LOG_DIR", str(Path(__file__).resolve().parent.parent / "logs" / "email_bridge")))
 PUBLIC_ACCESS_NOTICE = (
@@ -1715,26 +1714,17 @@ register_handlers(router, ctx={
     "chat_with_tools": _chat_with_tools,
     "get_model": _get_model,
     "make_progress_callback": _make_progress_callback,
-    "current_datetime_str": _current_datetime_str,
-    "format_current_model_context": _format_current_model_context,
-    "format_system_alerts": _format_system_alerts,
     "format_autonomous_status": _format_autonomous_status,
     "join_context_blocks": _join_context_blocks,
     "add_system_alert": _add_system_alert,
-    "clear_system_alert": _clear_system_alert,
     "claude_client": _claude,
     "openai_client": _openai_client,
     "deepseek_client": _deepseek_client,
-    "deepseek_anthropic_client": _deepseek_anthropic_client,
     "kimi_client": _kimi_client,
     "extract_text": _extract_text,
     "light_generate": _light_generate,
     "get_model_light": _get_model_light,
     "maybe_summarize_chunk": _maybe_summarize_chunk,
-    "build_skills_prompt": build_skills_prompt,
-    "ALLOWED_USER_IDS": ALLOWED_USER_IDS,
-    "CLAUDE_MAX_TOKENS": _CLAUDE_MAX_TOKENS,
-    "email_approval_base_url": EMAIL_APPROVAL_BASE_URL,
 })
 
 
@@ -2496,21 +2486,10 @@ async def bot_main():
 
     # Register commands for Telegram "/" autocomplete menu
     from aiogram.types import BotCommand
+    from telegram.commands import bot_menu_commands
     await bot.set_my_commands([
-        BotCommand(command="help", description="커맨드 목록"),
-        BotCommand(command="task", description="백그라운드 태스크 등록"),
-        BotCommand(command="commulingo_review", description="인물 검토 목록·근거·승인·반려"),
-        BotCommand(command="curate", description="링크를 읽고 /hub 큐레이션 발행"),
-        BotCommand(command="status", description="시스템 대시보드"),
-        BotCommand(command="llm_balance", description="LLM 잔액·비용 조회"),
-        BotCommand(command="report", description="태스크 리포트 재전송"),
-        BotCommand(command="config", description="설정 패널"),
-        BotCommand(command="agents", description="에이전트 현황 / 워커 상태"),
-        BotCommand(command="projects", description="자율 프로젝트 목록"),
-        BotCommand(command="project", description="자율 프로젝트 상세/수정"),
-        BotCommand(command="channel", description="브로드캐스트 채널 설정"),
-        BotCommand(command="restart", description="서비스 재시작"),
-        BotCommand(command="clear", description="대화 히스토리 초기화"),
+        BotCommand(command=command, description=description)
+        for command, description in bot_menu_commands()
     ])
 
     try:

@@ -154,7 +154,9 @@ def redact_args(args: dict | None) -> str:
 
 # ── Background DB writer ──────────────────────────────────────────────
 # Queue, batching and worker thread live in audit_sink (shared with
-# llm/gateway.py). No atexit flush here, unlike the LLM ledger.
+# llm/gateway.py). Like the LLM ledger, flush at exit so one-shot jobs (pipeline
+# ticks, autonomous ticks, CLI runs) don't lose their last tool rows when the
+# daemon worker dies with the process.
 _WRITER = audit_sink.BatchedAuditWriter(
     "tool",
     thread_name="tool-audit-writer",
@@ -162,7 +164,7 @@ _WRITER = audit_sink.BatchedAuditWriter(
     label="audit",
     maxsize=2000,
     batch_size=50,
-    flush_at_exit=False,
+    flush_at_exit=True,
 )
 _DB_QUEUE: "queue.Queue[dict]" = _WRITER.queue
 _DRAIN_BATCH = _WRITER.batch_size

@@ -183,39 +183,65 @@ async def _persist_assistant_turn(user_id: int, reply: str) -> None:
     except Exception as e:
         logger.warning("post-send chat summarization failed for user_id=%s: %s", user_id, e)
 
-_HELP_TEXT = """\
-*레닌봇 커맨드 목록*
+# One row per command: (help section, command, "/" menu description or None,
+# help lines). Both /help and the Telegram "/" menu (bot.set_my_commands) are
+# built from this table so their descriptions cannot drift apart.
+_COMMANDS = [
+    ("대화", "clear", "대화 히스토리 초기화", [
+        "일반 메시지 — 오케스트레이터와 직접 대화 (도구 사용 가능)",
+        "/clear — 대화 히스토리 초기화",
+    ]),
+    ("태스크", "task", "백그라운드 태스크 등록", ["/task <내용> — 백그라운드 태스크 등록"]),
+    ("태스크", "curate", "링크를 읽고 /hub 큐레이션 발행", ["/curate <url> \\[메모] — 외부 글을 읽고 /hub 큐레이션 발행"]),
+    ("태스크", "commulingo_review", "인물 검토 목록·근거·승인·반려", ["/commulingo_review — 인물 검토 목록·근거·승인·반려"]),
+    ("태스크", "status", "시스템 대시보드", ["/status — 시스템 대시보드"]),
+    ("태스크", "report", "태스크 리포트 재전송", ["/report <id> — 태스크 리포트 재전송"]),
+    ("태스크", "llm_balance", "LLM 잔액·비용 조회", ["/llm_balance \\[1~30] — LLM 공식 잔액/비용"]),
+    ("채널", "channel", "브로드캐스트 채널 설정", [
+        "/channel info — 브로드캐스트 대상/권한 확인",
+        "/channel set <@채널핸들|-100...chat_id> — 대상 지정",
+        '채널 글 발행은 명령어 대신 "확성기에 올려줘"처럼 자연어로 요청',
+        "",
+    ]),
+    ("시스템", "agents", "에이전트 현황 / 워커 상태", ["/agents — 에이전트 및 워커 상태"]),
+    ("시스템", "config", "설정 패널", ["/config — 설정 패널"]),
+    ("시스템", "projects", "자율 프로젝트 목록", ["/projects — 자율 프로젝트 목록"]),
+    ("시스템", "project", "자율 프로젝트 상세/수정", [
+        "/project <id> show — 자율 프로젝트 상세",
+        "/project <id> goal <새 goal> — goal 수정",
+        "/project <id> publishing <일일최대> <쿨다운분> — 발행 속도 조정",
+        "/project <id> pause|resume|archive — 상태 변경",
+    ]),
+    ("시스템", "restart", "서비스 재시작", ["/restart \\[telegram|api|all] [force] — 작업 중이면 거부하는 안전 재시작"]),
+    (None, "help", "커맨드 목록", ["/help — 이 도움말 표시"]),
+]
 
-*대화*
-일반 메시지 — 오케스트레이터와 직접 대화 (도구 사용 가능)
-/clear — 대화 히스토리 초기화
-
-*태스크*
-/task <내용> — 백그라운드 태스크 등록
-/curate <url> \\[메모] — 외부 글을 읽고 /hub 큐레이션 발행
-/commulingo_review — 인물 검토 목록·근거·승인·반려
-/status — 시스템 대시보드
-/report <id> — 태스크 리포트 재전송
-/llm_balance \\[1~30] — LLM 공식 잔액/비용
-
-*채널*
-/channel info — 브로드캐스트 대상/권한 확인
-/channel set <@채널핸들|-100...chat_id> — 대상 지정
-채널 글 발행은 명령어 대신 "확성기에 올려줘"처럼 자연어로 요청
+# Order of the Telegram "/" autocomplete menu.
+BOT_MENU_ORDER = ("help", "task", "commulingo_review", "curate", "status", "llm_balance", "report",
+                  "config", "agents", "projects", "project", "channel", "restart", "clear")
 
 
-*시스템*
-/agents — 에이전트 및 워커 상태
-/config — 설정 패널
-/projects — 자율 프로젝트 목록
-/project <id> show — 자율 프로젝트 상세
-/project <id> goal <새 goal> — goal 수정
-/project <id> publishing <일일최대> <쿨다운분> — 발행 속도 조정
-/project <id> pause|resume|archive — 상태 변경
-/restart \\[telegram|api|all] [force] — 작업 중이면 거부하는 안전 재시작
+def _build_help_text() -> str:
+    lines = ["*레닌봇 커맨드 목록*", ""]
+    section = None
+    for sec, _cmd, _menu, help_lines in _COMMANDS:
+        if sec != section:
+            if section is not None:
+                lines.append("")
+            if sec is not None:
+                lines.append(f"*{sec}*")
+            section = sec
+        lines.extend(help_lines)
+    return "\n".join(lines) + "\n"
 
-/help — 이 도움말 표시
-"""
+
+def bot_menu_commands() -> list[tuple[str, str]]:
+    """(command, description) pairs for bot.set_my_commands, in menu order."""
+    menu = {cmd: desc for _sec, cmd, desc, _lines in _COMMANDS if desc}
+    return [(cmd, menu[cmd]) for cmd in BOT_MENU_ORDER]
+
+
+_HELP_TEXT = _build_help_text()
 
 
 _REFLECTION_PROMPT = """\
