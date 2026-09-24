@@ -3903,17 +3903,18 @@ COMMULINGO_SECTION_SAVE_TOOL = {
             "slug": {"type": "string", "description": "Existing section slug for update only; omit on create."},
             "heading": _BILINGUAL_TEXT_SCHEMA,
             "body": _SECTION_BODY_SCHEMA,
-            "sort_order": {"type": ["integer", "null"], "description": (
-                "Chronological key: YYYYMM of the period the section opens on, with MM=00 "
-                "when only the year is known (1898 -> 189800, 1991-08 -> 199108). Sections "
-                "render in this order, so a life story reads front to back no matter which "
-                "one was written first. Omit or null only when the section has no period at "
-                "all; the year in the heading is then used, and a bare append is the last "
-                "resort."
+            "start_year": {"type": ["integer", "null"], "minimum": -3000, "maximum": 2100, "description": (
+                "Year the period this section covers opens on (1898 for '1898-1918'). Sections "
+                "render in this order, so a life story reads front to back no matter which one "
+                "was written first. For a theme without one period, use the year it begins "
+                "(legacy: the year of death). null only when no year applies: create appends "
+                "after the last section, update keeps the current position."
             )},
+            "start_month": {"type": ["integer", "null"], "minimum": 1, "maximum": 12,
+                            "description": "Month within start_year when the source gives it; otherwise omit."},
             "citations": _CITATIONS_SCHEMA,
         },
-        "required": ["action", "person_id", "heading", "body", "citations", "expected_revision", "evidence"],
+        "required": ["action", "person_id", "heading", "body", "start_year", "citations", "expected_revision", "evidence"],
     },
 }
 
@@ -4122,22 +4123,23 @@ async def _exec_commulingo_person_update(person_id: str, fields: dict, citations
 
 async def _exec_commulingo_section_save(
     action: str, person_id: str, heading: dict, body: dict,
-    citations: list, slug: str | None = None, sort_order: int | None = None,
-    expected_revision: str | None = None, evidence: list | None = None,
+    citations: list, slug: str | None = None, start_year: int | None = None,
+    start_month: int | None = None, expected_revision: str | None = None, evidence: list | None = None,
 ) -> str:
+    from runtime_tools.commulingo_section_slug import generate_section_slug, section_sort_order
     if action == "create":
-        from runtime_tools.commulingo_section_slug import generate_section_slug
         try:
             current = await asyncio.to_thread(call_person_service, {"command": "read", "id": person_id})
             slug = await asyncio.to_thread(generate_section_slug, person_id, heading, body,
                                            (current or {}).get("sections", []))
         except (ValueError, RuntimeError) as exc:
             return _commulingo_error("validation_failed", str(exc))
-        if sort_order is None:
-            from runtime_tools.commulingo_section_slug import section_sort_order
-            sort_order = section_sort_order(heading, (current or {}).get("sections", []))
+        sort_order = section_sort_order(start_year, start_month, (current or {}).get("sections", []))
     elif not slug:
         return "Error: existing section slug is required for update; read get_sections first."
+    else:
+        # Update: an omitted year keeps the section where it is.
+        sort_order = section_sort_order(start_year, start_month) if start_year is not None else None
     fields = {"slug": slug, "heading": heading, "body": body, "sources": citations, "expectedRevision": expected_revision, "evidence": evidence or []}
     if sort_order is not None:
         fields["sortOrder"] = sort_order

@@ -41,15 +41,15 @@ def schema_for(job, current, catalogs=None):
     section = job['kind']=='person' and job['action']=='update' and work_topics(job)==['sections']
     if section:
         props = COMMULINGO_SECTION_SAVE_TOOL['input_schema']['properties']
-        # The server generates a new topic slug after the author submits heading/body.
-        # The reviewed patch still contains the selected slug before hashing.
+        # The server generates the slug and encodes sortOrder from the period start,
+        # after the author submits heading/body/startYear. The reviewed patch holds both.
+        start_year = {**props['start_year'], 'type':'integer',
+                      'description':props['start_year']['description'].split(' null only')[0]}
+        start_month = {**props['start_month'], 'type':'integer'}
         return {'type':'object','additionalProperties':False,
                 'properties':{**{k:deepcopy(props[k]) for k in ('heading','body')},
-                              'sortOrder':{'type':'integer','description':(
-                                  'Chronological key: YYYYMM of the period the section opens on, MM=00 '
-                                  'when only the year is known (1898 -> 189800). Omit only when the '
-                                  'section has no period; the server then uses the heading year.')}},
-                'required':['heading','body']}
+                              'startYear':start_year, 'startMonth':start_month},
+                'required':['heading','body','startYear']}
     canonical_fields = _COMMULINGO_FIELD_SCHEMA['properties']
     # The author chooses from real closed sets; no hidden classifier rewrites a
     # reviewed fact or prevents a format repair when a second provider is down.

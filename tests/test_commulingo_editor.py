@@ -773,20 +773,21 @@ class EditorContractTests(EditorCase):
                     'body':{'ko':"과제 항목은 'sections'다. 1. 'fall-trial-no-rehabilitation' 구획 본문 교체: "+prose['ko'],
                             'en':"The commissioned topic is 'sections'. 1. replace section body 'fall-trial-no-rehabilitation': "+prose['en']}}
             with self.assertRaisesRegex(ValueError,'unexpected'):
-                await kwargs['handler'](value({**plan,'slug':'yezhov'}))
+                await kwargs['handler'](value({**plan,'startYear':1937,'slug':'yezhov'}))
             with self.assertRaisesRegex(ValueError,'person name'):
-                await kwargs['handler'](value({'heading':{'ko':'니콜라이 예조프','en':'Cult'},'body':prose}))
-            await kwargs['handler'](value({'heading':heading,'body':prose,'sortOrder':193707},
+                await kwargs['handler'](value({'heading':{'ko':'니콜라이 예조프','en':'Cult'},'body':prose,'startYear':1937}))
+            await kwargs['handler'](value({'heading':heading,'body':prose,'startYear':1937,'startMonth':7},
                                           notes="also supported: correction of 'fall-trial-no-rehabilitation' dates"))
         with patch('commulingo_pipeline.service.call',return_value=current) as rpc, \
              patch('commulingo_pipeline.stages.model_call',side_effect=model), \
              patch('runtime_tools.commulingo_section_slug.generate_section_slug',return_value='cult-and-erasure') as slugger:
             result = await Editor(store_mock())(job,[],Usage(),.2)
-        self.assertEqual(seen['props'],{'heading','body','sortOrder'})
+        self.assertEqual(seen['props'],{'heading','body','startYear','startMonth'})
         slugger.assert_called_once()
         draft = result.value['draft']
         self.assertEqual((draft['target'],draft['action']),('person_section','create'))
         self.assertEqual(draft['fields']['sortOrder'],193707)
+        self.assertNotIn('startYear',draft['fields'])
         self.assertEqual(draft['fields']['slug'],'cult-and-erasure')
         self.assertIn('fall-trial',draft['notes'])
         validate = [c.args[0] for c in rpc.call_args_list if c.args[0]['command']=='validate'][-1]
@@ -794,8 +795,8 @@ class EditorContractTests(EditorCase):
         self.assertNotIn('notes',validate['fields'])
         self.assertFalse(prose_problem(draft['fields']))
 
-    async def test_section_without_sort_order_uses_heading_year(self):
-        # 2026-09-22..24: every editor section omitted sortOrder and stored 0.
+    async def test_section_sort_order_comes_from_start_year_not_heading(self):
+        # 2026-09-22..24: editor sections had no period field and stored sort_order 0.
         prose = {'ko':'1937년 7월 예조프는 레닌 훈장을 받았고 1941년 1월 24일 모든 훈장을 박탈당했다. '*4,
                  'en':'In July 1937 Yezhov received the Order of Lenin; a decree of 24 January 1941 stripped him of all awards. '*4}
         current = {'revision':'v1','name':{'ko':'니콜라이 예조프','en':'Nikolai Yezhov'},
@@ -806,7 +807,7 @@ class EditorContractTests(EditorCase):
         async def model(**kwargs):
             await fetch_fixture(kwargs)
             await kwargs['handler'](submission({'status':'ready','reason':'The decree and the award record document this section.',
-                'fields':{'heading':{'ko':'1937년의 숭배와 말소','en':'Cult and erasure, 1937-1941'},'body':prose},
+                'fields':{'heading':{'ko':'1941년의 말소','en':'Erasure in 1941'},'body':prose,'startYear':1937},
                 'claims':[{'field':'body','claim':'The awards and their removal are documented.','passages':['P1']}],
                 'issue_results':[{'id':'requested','status':'resolved','reason':'Added one documented section.'}]}))
         with patch('commulingo_pipeline.service.call',return_value=current), \

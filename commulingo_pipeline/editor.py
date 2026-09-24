@@ -115,8 +115,16 @@ class Editor:
             # Older checkpoints asked the author for a slug. The server now
             # owns it, so retain the draft prose and regenerate at validation.
             if section:
-                saved_args.get('fields', {}).pop('slug', None)
-                saved_args['claims'] = [c for c in saved_args.get('claims', []) if c.get('field') != 'slug']
+                saved_fields = saved_args.get('fields', {})
+                saved_fields.pop('slug', None)
+                # Older checkpoints carried the encoded key; the author field is the year.
+                saved_order = saved_fields.pop('sortOrder', None)
+                if isinstance(saved_order, int) and saved_order > 0 and 'startYear' not in saved_fields:
+                    saved_fields['startYear'] = saved_order // 100
+                    if 1 <= saved_order % 100 <= 12:
+                        saved_fields['startMonth'] = saved_order % 100
+                saved_args['claims'] = [c for c in saved_args.get('claims', [])
+                                        if c.get('field') not in {'slug', 'sortOrder'}]
             nested_notes = saved_args.get('fields', {}).pop('notes', None)
             if isinstance(nested_notes, str):
                 saved_args['notes'] = '\n\n'.join(dict.fromkeys(
@@ -266,10 +274,10 @@ class Editor:
                                 (current or {}).get('sections', []), usage=usage)
                             await save_checkpoint()
                         fields['slug'] = section_slug_cache[slug_key]
-                        if not isinstance(fields.get('sortOrder'), int):
-                            from runtime_tools.commulingo_section_slug import section_sort_order
-                            fields['sortOrder'] = section_sort_order(
-                                fields.get('heading'), (current or {}).get('sections', []))
+                    from runtime_tools.commulingo_section_slug import section_sort_order
+                    fields['sortOrder'] = section_sort_order(
+                        fields.pop('startYear', None), fields.pop('startMonth', None),
+                        (current or {}).get('sections', []))
                     if fields['slug']==job['target']:
                         raise ValueError('generated section slug must name the topic, not the person')
                 exists = section and any(s['slug']==fields.get('slug') for s in (current or {}).get('sections', []))
@@ -353,8 +361,8 @@ class Editor:
         initial_status.pop('scope')
         prompt = ('Complete the commissioned edit using the task data below. '
                   'Use commulingo_pipeline_context for additional current values. Editable changes are defined by the tools.\n'
-                  + ('For a person section, submit changes.heading and changes.body. The server generates '
-                     'the section topic slug; do not supply it. Write one distinct documented phase or theme '
+                  + ('For a person section, submit changes.heading, changes.body and changes.startYear '
+                     '(startMonth when known). The server generates the section topic slug; do not supply it. Write one distinct documented phase or theme '
                      'that the current sections do not cover. Give it a specific bilingual heading and a '
                      'substantive bilingual body with original evidence. If sources do not support a useful '
                      'section, submit a reasoned no-edit decision; length and section count are not targets.\n'

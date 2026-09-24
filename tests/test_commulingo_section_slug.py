@@ -66,12 +66,13 @@ class SectionSlugTests(TestCase):
 
 
 class SectionSortOrderTests(TestCase):
-    def test_heading_year_then_append_after_last_section(self):
-        self.assertEqual(section_sort_order({'ko':'1991년 8월, 쿠데타','en':'August 1991'}), 199100)
-        self.assertEqual(section_sort_order({'ko':'지하활동', 'en':'Underground (1898-1918)'}), 189800)
+    def test_start_year_encodes_key_and_missing_year_appends(self):
+        self.assertEqual(section_sort_order(1991, 8), 199108)
+        self.assertEqual(section_sort_order(1898), 189800)
+        self.assertEqual(section_sort_order(1898, 13), 189800)
         existing = [{'sortOrder':189800}, {'sortOrder':193700}, {'sortOrder':None}]
-        self.assertEqual(section_sort_order({'en':'Legacy'}, existing), 193701)
-        self.assertEqual(section_sort_order({'en':'Legacy'}), 0)
+        self.assertEqual(section_sort_order(None, None, existing), 193701)
+        self.assertEqual(section_sort_order(None), 0)
 
 
 class SectionApiTests(IsolatedAsyncioTestCase):
@@ -82,10 +83,11 @@ class SectionApiTests(IsolatedAsyncioTestCase):
              patch('runtime_tools.commulingo_section_slug.generate_section_slug', return_value='military-career') as slugger, \
              patch('runtime_tools.commulingo_people._exec_commulingo_write', return_value='saved') as write:
             result = await _exec_commulingo_section_save('create','nikolai-pukhov',
-                {'en':'Military career'}, {'en':'His commands.'}, [], expected_revision='v1')
+                {'en':'Military career'}, {'en':'His commands.'}, [], start_year=1941,
+                start_month=6, expected_revision='v1')
             self.assertEqual(result, 'saved')
             self.assertEqual(write.call_args.args[4]['slug'], 'military-career')
-            self.assertEqual(write.call_args.args[4]['sortOrder'], 0)
+            self.assertEqual(write.call_args.args[4]['sortOrder'], 194106)
             self.assertEqual(slugger.call_args.args[3], current['sections'])
             read.assert_called_once()
             result = await _exec_commulingo_section_save('update','nikolai-pukhov',
