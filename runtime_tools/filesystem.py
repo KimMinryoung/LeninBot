@@ -385,9 +385,9 @@ async def _exec_write_file(path: str, content: str, mode: str = "overwrite") -> 
     if ext == ".py":
         try:
             sys.path.insert(0, project_root)
-            from self_modification_core import (
-                git_backup_before_modification,
-                git_reset_to_commit,
+            from self_runtime.self_modification_core import (
+                backup_file,
+                restore_backup,
                 run_sandbox_tests,
             )
 
@@ -399,7 +399,7 @@ async def _exec_write_file(path: str, content: str, mode: str = "overwrite") -> 
                 return ToolFailure(f"❌ Syntax error in new content: {exc}")
 
             if os.path.isfile(abs_path):
-                commit_hash = git_backup_before_modification(abs_path)
+                commit_hash = backup_file(abs_path)
             else:
                 commit_hash = None
 
@@ -410,7 +410,7 @@ async def _exec_write_file(path: str, content: str, mode: str = "overwrite") -> 
             test_results = run_sandbox_tests(abs_path)
             if test_results.status == "fail":
                 if commit_hash:
-                    git_reset_to_commit(commit_hash)
+                    restore_backup(commit_hash)
                 elif os.path.isfile(abs_path):
                     os.unlink(abs_path)
                 return f"❌ Sandbox tests failed — rolled back.\n{test_results}"
