@@ -21,6 +21,7 @@ from aiogram.filters import Command
 
 from shared import KST
 from db import query as _query, execute as _execute, query_one as _query_one, get_conn as _get_conn
+from task_store import create_task_in_db
 from psycopg2.extras import RealDictCursor
 from services.replicate_image import (
     generate_image,
@@ -558,12 +559,10 @@ async def cmd_task(message: Message):
         except Exception as e:
             logger.warning("Mission lookup failed: %s", e)
 
-        rows = await asyncio.to_thread(
-            _query,
-            "INSERT INTO telegram_tasks (user_id, content, mission_id) VALUES (%s, %s, %s) RETURNING id",
-            (uid, content, mission_id),
-        )
-        task_id = rows[0]["id"] if rows else None
+        created = await asyncio.to_thread(create_task_in_db, content, uid, mission_id=mission_id)
+        if created.get("status") != "ok":
+            raise RuntimeError(created.get("error") or "task insert failed")
+        task_id = created["task_id"]
         msg = f"태스크가 큐에 추가되었습니다:\n{content}"
 
         # Auto-create mission if none existed
@@ -1740,13 +1739,14 @@ async def handle_message(message: Message):
                 cont_mission_id = m["id"]
         except Exception:
             pass
-        task_row = await asyncio.to_thread(
-            _query_one,
-            "INSERT INTO telegram_tasks (user_id, content, status, mission_id, agent_type) VALUES (%s, %s, 'pending', %s, 'analyst') RETURNING id",
-            (user_id, task_content, cont_mission_id),
+        created = await asyncio.to_thread(
+            create_task_in_db, task_content, user_id, mission_id=cont_mission_id, agent_type="analyst",
         )
-        task_id = task_row["id"] if task_row else "?"
-        await message.answer(f"🔄 미완료 작업을 백그라운드 태스크 `[{task_id}]`로 자동 생성했습니다. 완료되면 알려드리겠습니다.")
+        if created.get("status") == "ok":
+            await message.answer(f"🔄 미완료 작업을 백그라운드 태스크 `[{created['task_id']}]`로 자동 생성했습니다. 완료되면 알려드리겠습니다.")
+        else:
+            logger.error("CONTINUE_TASK auto-task creation failed: %s", created.get("error"))
+            await message.answer(f"⚠️ 미완료 작업의 백그라운드 태스크 생성에 실패했습니다: {created.get('error')}")
 
     # Auto-reflection: every 5 exchanges, reflect on recent conversations
     _reflection_counter[user_id] = _reflection_counter.get(user_id, 0) + 1

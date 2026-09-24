@@ -2019,6 +2019,9 @@ async def recover_processing_tasks_on_startup(
                 metadata[_RESTART_PHASE_KEY] = restart_state
             metadata_json = json.dumps(metadata) if metadata else None
 
+            # Direct insert, not create_task_in_db: the handoff child carries the
+            # parent's scratchpad and must be created even past the depth-5 chain
+            # limit, or a restart would strand the work.
             child_rows = await asyncio.to_thread(
                 _query,
                 "INSERT INTO telegram_tasks (user_id, content, status, parent_task_id, scratchpad, depth, mission_id, agent_type, metadata, "
@@ -2558,11 +2561,12 @@ async def schedule_worker(bot: Bot, *, allowed_user_ids: set[int]):
                             from agents import agent_names
                             if tag in agent_names():
                                 sched_agent = tag
-                    await asyncio.to_thread(
-                        _execute,
-                        "INSERT INTO telegram_tasks (user_id, content, agent_type, metadata) VALUES (%s, %s, %s, %s::jsonb)",
-                        (sched["user_id"], sched_content, sched_agent, json.dumps({"origin": "schedule", "schedule_id": sched["id"]})),
+                    created = await asyncio.to_thread(
+                        create_task_in_db, sched_content, sched["user_id"], agent_type=sched_agent,
+                        metadata={"origin": "schedule", "schedule_id": sched["id"]},
                     )
+                    if created.get("status") != "ok":
+                        raise RuntimeError(created.get("error") or "task insert failed")
                     await asyncio.to_thread(
                         _execute,
                         "UPDATE telegram_schedules SET last_run_at = %s WHERE id = %s",

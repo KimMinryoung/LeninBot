@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-import json
 import logging
 import re
 from typing import Any, Awaitable, Callable
@@ -29,7 +28,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from content_fetch.url_security import UnsafeUrlError
 from content_fetch.url_security import validate_public_http_url as _validate_public_http_url
 from db import execute as _execute, query as _query, query_one as _query_one
-from task_store import load_task_metadata as _load_task_metadata
+from task_store import create_task_in_db, load_task_metadata as _load_task_metadata
 from tool_gateway.results import ToolFailure
 
 logger = logging.getLogger(__name__)
@@ -316,13 +315,13 @@ async def cmd_curate(message, ctx: dict) -> None:
             "source_url_key": url_key,
             "note": note,
         }
-        rows = await asyncio.to_thread(
-            _query,
-            "INSERT INTO telegram_tasks (user_id, content, agent_type, metadata) "
-            "VALUES (%s, %s, %s, %s::jsonb) RETURNING id",
-            (message.from_user.id, build_curation_task_content(url, note), AGENT_NAME, json.dumps(metadata, ensure_ascii=False)),
+        created = await asyncio.to_thread(
+            create_task_in_db, build_curation_task_content(url, note), message.from_user.id,
+            agent_type=AGENT_NAME, metadata=metadata,
         )
-        task_id = rows[0]["id"] if rows else None
+        if created.get("status") != "ok":
+            raise RuntimeError(created.get("error") or "task insert failed")
+        task_id = created["task_id"]
     except Exception as exc:
         logger.error("curate command failed for %s: %s", url, exc)
         await message.answer(f"큐레이션 태스크 등록 실패: {exc}")

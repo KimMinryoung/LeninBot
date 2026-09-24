@@ -235,26 +235,24 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_success_enqueues_hub_curator_task(self):
         msg = _message(f"/curate {URL} 현장 증언이 좋다")
-        calls = []
+        created = []
 
-        def fake_query(sql, params=None):
-            calls.append((sql, params))
-            if sql.startswith("INSERT"):
-                return [{"id": 77}]
-            return []
+        def fake_create(content, user_id=0, **kwargs):
+            created.append((content, user_id, kwargs))
+            return {"status": "ok", "task_id": 77}
 
         with patch.object(curate, "_validate_public_http_url", lambda u: u), \
-             patch.object(curate, "_query", side_effect=fake_query), \
-             patch.object(curate, "_query_one", return_value=None):
+             patch.object(curate, "_query", return_value=[]), \
+             patch.object(curate, "_query_one", return_value=None), \
+             patch.object(curate, "create_task_in_db", side_effect=fake_create):
             await curate.cmd_curate(msg, self.ctx)
 
-        insert = [c for c in calls if c[0].startswith("INSERT")]
-        self.assertEqual(len(insert), 1)
-        user_id, content, agent_type, metadata = insert[0][1]
-        self.assertEqual((user_id, agent_type), (42, "hub_curator"))
+        self.assertEqual(len(created), 1)
+        content, user_id, kwargs = created[0]
+        self.assertEqual((user_id, kwargs["agent_type"]), (42, "hub_curator"))
         self.assertIn(URL, content)
         self.assertIn("현장 증언이 좋다", content)
-        meta = json.loads(metadata)
+        meta = kwargs["metadata"]
         self.assertEqual(meta["source_url"], URL)
         self.assertEqual(meta["source_url_key"], KEY)
         self.assertEqual(meta["origin"], "command")
