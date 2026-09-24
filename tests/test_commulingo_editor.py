@@ -794,6 +794,27 @@ class EditorContractTests(EditorCase):
         self.assertNotIn('notes',validate['fields'])
         self.assertFalse(prose_problem(draft['fields']))
 
+    async def test_section_without_sort_order_uses_heading_year(self):
+        # 2026-09-22..24: every editor section omitted sortOrder and stored 0.
+        prose = {'ko':'1937년 7월 예조프는 레닌 훈장을 받았고 1941년 1월 24일 모든 훈장을 박탈당했다. '*4,
+                 'en':'In July 1937 Yezhov received the Order of Lenin; a decree of 24 January 1941 stripped him of all awards. '*4}
+        current = {'revision':'v1','name':{'ko':'니콜라이 예조프','en':'Nikolai Yezhov'},
+                   'sections':[{'slug':'fall-trial-no-rehabilitation','sortOrder':193900}]}
+        job = {**JOB,'id':5433,'kind':'person','topic':'enrichment','target':'yezhov',
+               'reason':'Add a documented section on the cult and its erasure.',
+               'payload':{'topics':['bio','sections'],'remaining_topics':['sections']}}
+        async def model(**kwargs):
+            await fetch_fixture(kwargs)
+            await kwargs['handler'](submission({'status':'ready','reason':'The decree and the award record document this section.',
+                'fields':{'heading':{'ko':'1937년의 숭배와 말소','en':'Cult and erasure, 1937-1941'},'body':prose},
+                'claims':[{'field':'body','claim':'The awards and their removal are documented.','passages':['P1']}],
+                'issue_results':[{'id':'requested','status':'resolved','reason':'Added one documented section.'}]}))
+        with patch('commulingo_pipeline.service.call',return_value=current), \
+             patch('commulingo_pipeline.stages.model_call',side_effect=model), \
+             patch('runtime_tools.commulingo_section_slug.generate_section_slug',return_value='cult-and-erasure'):
+            result = await Editor(store_mock())(job,[],Usage(),.2)
+        self.assertEqual(result.value['draft']['fields']['sortOrder'],193700)
+
 
 class ReviewAndPublishTests(EditorCase):
     async def test_routing_pins_unpinned_authoring_and_rejects_other_workflows(self):

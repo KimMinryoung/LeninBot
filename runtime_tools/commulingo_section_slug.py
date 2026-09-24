@@ -1,4 +1,4 @@
-"""Server-owned topic slug for a new CommuLingo person section."""
+"""Server-owned slug and chronological key for a new CommuLingo person section."""
 import json
 import logging
 import re
@@ -12,10 +12,26 @@ logger = logging.getLogger(__name__)
 FEATURE = 'commulingo_section_slug'
 _SLUG = re.compile(r'^[a-z0-9][a-z0-9-]{1,60}$')
 _FALLBACK_CHARS = 48
+_YEAR = re.compile(r'(1[6-9]\d\d|20[0-2]\d)')
 _SYSTEM = ('Return exactly one lowercase English kebab-case slug for the distinct section topic. '
            'Use 2 to 61 characters: letters, digits and hyphens only. '
            'Do not use the person ID, an existing section slug, a generic word such as biography, '
            'a quote, JSON, an explanation, or a suffix to disguise a duplicate topic.')
+
+
+def section_sort_order(heading, existing=()):
+    """YYYY00 from the earliest heading year (ko first), else append after the last section.
+
+    Sections render by sort_order. The shared store writes 0 when none is given,
+    which put every undated pipeline section at the top of the life story.
+    """
+    for lang in ('ko', 'en'):
+        match = _YEAR.search(str((heading or {}).get(lang) or ''))
+        if match:
+            return int(match.group(1)) * 100
+    orders = [row.get('sortOrder') for row in existing or () if isinstance(row, dict)]
+    orders = [order for order in orders if isinstance(order, int)]
+    return max(orders) + 1 if orders else 0
 
 
 def _available(slug, person_id, taken):

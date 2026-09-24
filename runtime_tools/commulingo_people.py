@@ -4133,6 +4133,9 @@ async def _exec_commulingo_section_save(
                                            (current or {}).get("sections", []))
         except (ValueError, RuntimeError) as exc:
             return _commulingo_error("validation_failed", str(exc))
+        if sort_order is None:
+            from runtime_tools.commulingo_section_slug import section_sort_order
+            sort_order = section_sort_order(heading, (current or {}).get("sections", []))
     elif not slug:
         return "Error: existing section slug is required for update; read get_sections first."
     fields = {"slug": slug, "heading": heading, "body": body, "sources": citations, "expectedRevision": expected_revision, "evidence": evidence or []}

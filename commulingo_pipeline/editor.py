@@ -266,6 +266,10 @@ class Editor:
                                 (current or {}).get('sections', []), usage=usage)
                             await save_checkpoint()
                         fields['slug'] = section_slug_cache[slug_key]
+                        if not isinstance(fields.get('sortOrder'), int):
+                            from runtime_tools.commulingo_section_slug import section_sort_order
+                            fields['sortOrder'] = section_sort_order(
+                                fields.get('heading'), (current or {}).get('sections', []))
                     if fields['slug']==job['target']:
                         raise ValueError('generated section slug must name the topic, not the person')
                 exists = section and any(s['slug']==fields.get('slug') for s in (current or {}).get('sections', []))

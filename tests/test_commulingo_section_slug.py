@@ -2,7 +2,7 @@ from types import SimpleNamespace
 from unittest import IsolatedAsyncioTestCase, TestCase
 from unittest.mock import Mock, patch
 
-from runtime_tools.commulingo_section_slug import generate_section_slug
+from runtime_tools.commulingo_section_slug import generate_section_slug, section_sort_order
 
 
 class SectionSlugTests(TestCase):
@@ -65,6 +65,15 @@ class SectionSlugTests(TestCase):
             call.assert_not_called()
 
 
+class SectionSortOrderTests(TestCase):
+    def test_heading_year_then_append_after_last_section(self):
+        self.assertEqual(section_sort_order({'ko':'1991년 8월, 쿠데타','en':'August 1991'}), 199100)
+        self.assertEqual(section_sort_order({'ko':'지하활동', 'en':'Underground (1898-1918)'}), 189800)
+        existing = [{'sortOrder':189800}, {'sortOrder':193700}, {'sortOrder':None}]
+        self.assertEqual(section_sort_order({'en':'Legacy'}, existing), 193701)
+        self.assertEqual(section_sort_order({'en':'Legacy'}), 0)
+
+
 class SectionApiTests(IsolatedAsyncioTestCase):
     async def test_create_generates_slug_after_read_and_update_keeps_existing_slug(self):
         from runtime_tools.commulingo_people import _exec_commulingo_section_save
@@ -76,12 +85,14 @@ class SectionApiTests(IsolatedAsyncioTestCase):
                 {'en':'Military career'}, {'en':'His commands.'}, [], expected_revision='v1')
             self.assertEqual(result, 'saved')
             self.assertEqual(write.call_args.args[4]['slug'], 'military-career')
+            self.assertEqual(write.call_args.args[4]['sortOrder'], 0)
             self.assertEqual(slugger.call_args.args[3], current['sections'])
             read.assert_called_once()
             result = await _exec_commulingo_section_save('update','nikolai-pukhov',
                 {'en':'Early life'}, {'en':'A revision.'}, [], slug='early-life', expected_revision='v2')
             self.assertEqual(result, 'saved')
             self.assertEqual(write.call_args.args[4]['slug'], 'early-life')
+            self.assertNotIn('sortOrder', write.call_args.args[4])
             slugger.assert_called_once()
             read.assert_called_once()
 
