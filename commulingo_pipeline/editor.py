@@ -112,6 +112,11 @@ class Editor:
         # Joining preserves their text; canonical length checks still apply.
         if repair.draft and structured_args(repair.draft['args']):
             saved_args = repair.draft['args']
+            # Older checkpoints asked the author for a slug. The server now
+            # owns it, so retain the draft prose and regenerate at validation.
+            if section:
+                saved_args.get('fields', {}).pop('slug', None)
+                saved_args['claims'] = [c for c in saved_args.get('claims', []) if c.get('field') != 'slug']
             nested_notes = saved_args.get('fields', {}).pop('notes', None)
             if isinstance(nested_notes, str):
                 saved_args['notes'] = '\n\n'.join(dict.fromkeys(
@@ -140,6 +145,7 @@ class Editor:
             k:v for k,v in field_schema['properties'].items() if k in needed and k != 'notes'}
         repair.configure(focused_contract['properties']['fields'], issues)
         failures = dict(checkpoint.get('failures') or {})
+        section_slug_cache = dict(checkpoint.get('section_slug_cache') or {})
         box = {}
         error_kind = checkpoint.get('error_kind', '')
         last_error = repair.author_error(checkpoint.get('error', '') or '')
@@ -159,7 +165,8 @@ class Editor:
                     'error':last_error if error is None else repair.author_error(error),
                     'error_kind':error_kind,
                     'repair_only':reads.repair_only,'missing_fields':reads.missing_fields,
-                    'classification_cache':decisions.cache})
+                    'classification_cache':decisions.cache,
+                    'section_slug_cache':section_slug_cache})
 
         async def finish(value, *, update=False):
             nonlocal error_kind, last_error
@@ -240,16 +247,28 @@ class Editor:
                 for issue in issues:
                     if issue['id'] in resolved and issue['field']!='*' and issue['field'] not in fields:
                         raise ValueError(f"issue {issue['id']} cannot be resolved without its field or evidence in the patch")
-                exists = section and any(s['slug']==fields.get('slug') for s in (current or {}).get('sections', []))
                 if section:
-                    if fields.get('slug')==job['target'] and not exists:
-                        raise ValueError('fields.slug must name the section topic, not the person')
                     name = (current or {}).get('name') or {}
                     if any(fields['heading'].get(lang) and fields['heading'][lang].strip()==name.get(lang) for lang in ('ko','en')):
                         raise ValueError('fields.heading must name the section topic, not repeat the person name')
                     original = (job.get('payload') or {}).get('original_proposal') or {}
-                    if original and fields['slug']!=(original.get('patch_json') or {}).get('slug'):
-                        raise ValueError('correction must preserve the original section slug')
+                    original_slug = (original.get('patch_json') or {}).get('slug')
+                    if original and not original_slug:
+                        raise ValueError('correction is missing its original section slug')
+                    if original_slug:
+                        fields['slug'] = original_slug
+                    else:
+                        slug_key = canonical(fields.get('heading'))
+                        if slug_key not in section_slug_cache:
+                            from runtime_tools.commulingo_section_slug import generate_section_slug
+                            section_slug_cache[slug_key] = await asyncio.to_thread(
+                                generate_section_slug, job['target'], fields.get('heading'), fields.get('body'),
+                                (current or {}).get('sections', []), usage=usage)
+                            await save_checkpoint()
+                        fields['slug'] = section_slug_cache[slug_key]
+                    if fields['slug']==job['target']:
+                        raise ValueError('generated section slug must name the topic, not the person')
+                exists = section and any(s['slug']==fields.get('slug') for s in (current or {}).get('sections', []))
                 fields['evidence'] = evidence
                 if job['action']=='update':
                     fields['expectedRevision'] = baseline
@@ -330,9 +349,11 @@ class Editor:
         initial_status.pop('scope')
         prompt = ('Complete the commissioned edit using the task data below. '
                   'Use commulingo_pipeline_context for additional current values. Editable changes are defined by the tools.\n'
-                  + ('For a person section, write one distinct documented phase or theme that the current sections do not cover. '
-                     'Give it a specific heading and a substantive bilingual body. If the available sources do not support '
-                     'a useful section, submit a reasoned no-edit decision; length and section count are not targets.\n'
+                  + ('For a person section, submit changes.heading and changes.body. The server generates '
+                     'the section topic slug; do not supply it. Write one distinct documented phase or theme '
+                     'that the current sections do not cover. Give it a specific bilingual heading and a '
+                     'substantive bilingual body with original evidence. If sources do not support a useful '
+                     'section, submit a reasoned no-edit decision; length and section count are not targets.\n'
                      if section else '')
                   + stage_evidence({'job':{k:job[k] for k in ('id','kind','action','target')},
                       'current':focused_current,'issues':issues,

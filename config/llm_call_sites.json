@@ -347,6 +347,14 @@
     "kind": "system_one",
     "note": "TypeSafe Jev(System One 판정 모델) 스모크·shadow 평가용. scripts/smoke_jev.py 전용. decide()/decide_sync() 진입점(텍스트 생성 아님). 2026-09-19 직접 API(/v1/systemone, $0.042/M 입력, 출력 무료, 버전 고정 jev-1.13.0)로 전환 — 같은 날 오전까지는 OpenRouter Decisions(/api/alpha/decisions, typesafe/jev-1.13)로 대기열을 우회했고 판정·비용은 동일했다. 문턱값 튜닝 뒤에는 버전 고정 유지. dev_docs/jev_system_one_adoption.md"
   },
+  "commulingo_section_slug": {
+    "provider": "openai",
+    "model": "tier:low",
+    "max_tokens": 64,
+    "reasoning_effort": "none",
+    "timeout": 20,
+    "note": "인물 상세 절 등록 시 서버가 한영 heading과 짧은 본문 문맥으로 주제 slug를 생성. 기존 절 수정은 원래 slug 사용; 형식·인물 ID·중복 검증 실패나 호출 실패 시 영문 제목의 결정적 slug로 대체."
+  },
   "commulingo_citation_support": {
     "provider": "typesafe",
     "model": "jev-1.13.0",

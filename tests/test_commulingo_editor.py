@@ -769,22 +769,25 @@ class EditorContractTests(EditorCase):
             seen['props'] = set(kwargs['tool']['input_schema']['properties']['changes']['properties'])
             self.assertIn('one distinct documented phase',kwargs['prompt'])
             await fetch_fixture(kwargs)
-            plan = {'slug':'yezhov','heading':{'ko':'구획 개정: 정정과 신설 구획 둘','en':'Sections revision: corrections and two new sections'},
+            plan = {'heading':{'ko':'구획 개정: 정정과 신설 구획 둘','en':'Sections revision: corrections and two new sections'},
                     'body':{'ko':"과제 항목은 'sections'다. 1. 'fall-trial-no-rehabilitation' 구획 본문 교체: "+prose['ko'],
                             'en':"The commissioned topic is 'sections'. 1. replace section body 'fall-trial-no-rehabilitation': "+prose['en']}}
-            with self.assertRaisesRegex(ValueError,'not the person'):
-                await kwargs['handler'](value(plan))
+            with self.assertRaisesRegex(ValueError,'unexpected'):
+                await kwargs['handler'](value({**plan,'slug':'yezhov'}))
             with self.assertRaisesRegex(ValueError,'person name'):
-                await kwargs['handler'](value({'slug':'cult','heading':{'ko':'니콜라이 예조프','en':'Cult'},'body':prose}))
-            await kwargs['handler'](value({'slug':'cult-and-erasure','heading':heading,'body':prose,'sortOrder':193707},
+                await kwargs['handler'](value({'heading':{'ko':'니콜라이 예조프','en':'Cult'},'body':prose}))
+            await kwargs['handler'](value({'heading':heading,'body':prose,'sortOrder':193707},
                                           notes="also supported: correction of 'fall-trial-no-rehabilitation' dates"))
         with patch('commulingo_pipeline.service.call',return_value=current) as rpc, \
-             patch('commulingo_pipeline.stages.model_call',side_effect=model):
+             patch('commulingo_pipeline.stages.model_call',side_effect=model), \
+             patch('runtime_tools.commulingo_section_slug.generate_section_slug',return_value='cult-and-erasure') as slugger:
             result = await Editor(store_mock())(job,[],Usage(),.2)
-        self.assertEqual(seen['props'],{'slug','heading','body','sortOrder'})
+        self.assertEqual(seen['props'],{'heading','body','sortOrder'})
+        slugger.assert_called_once()
         draft = result.value['draft']
         self.assertEqual((draft['target'],draft['action']),('person_section','create'))
         self.assertEqual(draft['fields']['sortOrder'],193707)
+        self.assertEqual(draft['fields']['slug'],'cult-and-erasure')
         self.assertIn('fall-trial',draft['notes'])
         validate = [c.args[0] for c in rpc.call_args_list if c.args[0]['command']=='validate'][-1]
         self.assertEqual(validate['target'],'person_section')

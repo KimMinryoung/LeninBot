@@ -41,9 +41,11 @@ def schema_for(job, current, catalogs=None):
     section = job['kind']=='person' and job['action']=='update' and work_topics(job)==['sections']
     if section:
         props = COMMULINGO_SECTION_SAVE_TOOL['input_schema']['properties']
+        # The server generates a new topic slug after the author submits heading/body.
+        # The reviewed patch still contains the selected slug before hashing.
         return {'type':'object','additionalProperties':False,
-                'properties':{**{k:deepcopy(props[k]) for k in ('slug','heading','body')},
-                              'sortOrder':{'type':'integer'}}, 'required':['slug','heading','body']}
+                'properties':{**{k:deepcopy(props[k]) for k in ('heading','body')},
+                              'sortOrder':{'type':'integer'}}, 'required':['heading','body']}
     canonical_fields = _COMMULINGO_FIELD_SCHEMA['properties']
     # The author chooses from real closed sets; no hidden classifier rewrites a
     # reviewed fact or prevents a format repair when a second provider is down.

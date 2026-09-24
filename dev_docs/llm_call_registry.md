@@ -109,6 +109,12 @@ registry 항목의 max_tokens는 여전히 첫 시도 예산이다. 추론 호�
 
 2026-09-10부터 DeepSeek executor 모델 ID는 `deepseek-flash`(V4.1 Flash)다. Writer의 model-only 기본 선택은 `deepseek_flash`이며 옛 Pro 선택 호환은 Writer 입력 경계에서 처리한다.
 
+CommuLingo 신규 인물 상세 절은 `commulingo_section_slug` 원샷 항목(OpenAI low 티어,
+추론 없음)을 사용한다. 작성 도구는 slug를 받지 않고 Python API 경계가 한영 제목과 짧은
+본문 문맥으로 생성한다. 기존 절 수정과 기존 제안 정정은 저장된 slug를 재사용한다.
+결과가 인물 ID와 같거나 기존 절과 충돌하거나 형식에 맞지 않으면 영문 제목의 결정적 slug로 대체한다.
+파이프라인에서는 원샷 사용량을 해당 단계의 공용 비용에도 합산한다.
+
 ## 역할극 자동 판정
 
 `roleplay_scene_adjudication`은 Jev 고정 선택지 분류이며, `roleplay_duration_estimate`는 단일 사건 소요 분만 생성하는 별도 호출이다. 수치 계산·저장은 코드가 수행한다. 계약과 실패 정책은 [roleplay_jev.md](roleplay_jev.md)를 따른다.

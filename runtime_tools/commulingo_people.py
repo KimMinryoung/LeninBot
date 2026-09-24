@@ -3892,7 +3892,7 @@ COMMULINGO_PERSON_UPDATE_TOOL = _person_write_tool("commulingo_person_update", "
 
 COMMULINGO_SECTION_SAVE_TOOL = {
     "name": "commulingo_section_save",
-    "description": "Create or update one bilingual long-form person section. Citations are stored on the section.",
+    "description": "Create or update one bilingual long-form person section. The server generates the slug on create; supply an existing slug on update. Citations are stored on the section.",
     "input_schema": {
         "type": "object", "additionalProperties": False,
         "properties": {
@@ -3900,7 +3900,7 @@ COMMULINGO_SECTION_SAVE_TOOL = {
             "evidence": _EVIDENCE_SCHEMA,
             "action": {"type": "string", "enum": ["create", "update"]},
             "person_id": {"type": "string"},
-            "slug": {"type": "string"},
+            "slug": {"type": "string", "description": "Existing section slug for update only; omit on create."},
             "heading": _BILINGUAL_TEXT_SCHEMA,
             "body": _SECTION_BODY_SCHEMA,
             "sort_order": {"type": ["integer", "null"], "description": (
@@ -3913,7 +3913,7 @@ COMMULINGO_SECTION_SAVE_TOOL = {
             )},
             "citations": _CITATIONS_SCHEMA,
         },
-        "required": ["action", "person_id", "slug", "heading", "body", "citations", "expected_revision", "evidence"],
+        "required": ["action", "person_id", "heading", "body", "citations", "expected_revision", "evidence"],
     },
 }
 
@@ -4121,9 +4121,20 @@ async def _exec_commulingo_person_update(person_id: str, fields: dict, citations
 
 
 async def _exec_commulingo_section_save(
-    action: str, person_id: str, slug: str, heading: dict, body: dict,
-    citations: list, sort_order: int | None = None, expected_revision: str | None = None, evidence: list | None = None,
+    action: str, person_id: str, heading: dict, body: dict,
+    citations: list, slug: str | None = None, sort_order: int | None = None,
+    expected_revision: str | None = None, evidence: list | None = None,
 ) -> str:
+    if action == "create":
+        from runtime_tools.commulingo_section_slug import generate_section_slug
+        try:
+            current = await asyncio.to_thread(call_person_service, {"command": "read", "id": person_id})
+            slug = await asyncio.to_thread(generate_section_slug, person_id, heading, body,
+                                           (current or {}).get("sections", []))
+        except (ValueError, RuntimeError) as exc:
+            return _commulingo_error("validation_failed", str(exc))
+    elif not slug:
+        return "Error: existing section slug is required for update; read get_sections first."
     fields = {"slug": slug, "heading": heading, "body": body, "sources": citations, "expectedRevision": expected_revision, "evidence": evidence or []}
     if sort_order is not None:
         fields["sortOrder"] = sort_order

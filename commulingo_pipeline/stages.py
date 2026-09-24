@@ -182,6 +182,7 @@ async def model_call(*, spec, prompt, tool, handler, reads, usage, budget, read_
                 terminal_required=True,continue_on_length=policy.max_output_continuations > 0,
                 max_length_continuations=policy.max_output_continuations,**binding.reasoning)
     jev_before = usage.tracker.get('jev_cost_usd',0)
+    auxiliary_before = usage.tracker.get('auxiliary_cost_usd',0)
     observed_before = usage.tracker.get('observed_llm_cost_usd',0)
     cost_before = usage.tracker.get('total_cost',0)
     try:
@@ -202,7 +203,8 @@ async def model_call(*, spec, prompt, tool, handler, reads, usage, budget, read_
         loop_cost = (cost_before + usage.tracker['observed_llm_cost_usd'] - observed_before
                      if 'observed_llm_cost_usd' in usage.tracker else usage.tracker.get('total_cost',0))
         usage.tracker['total_cost'] = loop_cost + (
-            usage.tracker.get('jev_cost_usd',0)-jev_before)
+            usage.tracker.get('jev_cost_usd',0)-jev_before +
+            usage.tracker.get('auxiliary_cost_usd',0)-auxiliary_before)
     usage.complete = True
     if not completed:
         detail = '; '.join(dict.fromkeys(rejections[-3:]))
