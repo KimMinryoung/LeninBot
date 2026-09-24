@@ -57,6 +57,6 @@ writer/frontend 역할 복구에는 기존 credential 또는 암호만 담은 06
 
 Supabase → 로컬 main/writer 통합과 Supabase pause는 2026-07-28 완료 기록이 있다. `story_scenes`는 `legacy_game`으로 분리했고 구 writer 복제 테이블은 제거했다. 과거 행수·크기·성능 측정은 현재 상태로 사용하지 않는다.
 
-Supabase 최종 해지는 운영자 확인에 따라 완료됐다(2026-09-24). 최종 스냅샷 R2 보관, `.env.bak-supabase-cutover`와 구 `leninbot_writer_pg_data` 보험 볼륨 삭제 여부는 이번 코드 점검으로 확인할 수 없다. 외부 백업·볼륨을 확인한 뒤 별도 작업으로 처리한다.
+Supabase 최종 해지는 운영자 확인에 따라 완료됐다(2026-09-24). 같은 날 구 `.env.bak-supabase-cutover` 파일과 `leninbot_writer_pg_data` Docker 볼륨을 삭제했다. 삭제 전 `docker inspect leninbot-pg`로 운영 컨테이너가 별도 `leninbot_pg_data`를 `/var/lib/postgresql/data`에 마운트하고 구 볼륨을 쓰는 컨테이너가 없음을 확인했다. 최종 스냅샷의 R2 보관 여부는 확인하지 않았다.
 
 다음 이전에서는 `pg_stat_activity.application_name`으로 frontend를 포함한 접속 주체를 확인한다. 외부 덤프의 RLS·역할·권한을 비-superuser로 검증하고, 컨테이너 환경 변경 후에는 재생성이 필요한지 확인한다.
