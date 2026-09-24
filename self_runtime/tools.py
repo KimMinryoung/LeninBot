@@ -3067,43 +3067,54 @@ async def _exec_read_autonomous_project(
     Keyword filter (if given) matches against title/topic on the list form, and
     against note content on the detail form.
     """
+    if not project_id:
+        return await _read_autonomous_project_list(limit=limit, keyword=keyword)
+    return await _read_autonomous_project_detail(project_id, limit=limit, keyword=keyword)
+
+
+async def _read_autonomous_project_list(limit: int = 10, keyword: str | None = None) -> str:
+    """List mode of _exec_read_autonomous_project: one line per project."""
+    from db import query as db_query
+
+    clauses = []
+    params: list = []
+    if keyword:
+        clauses.append("(title ILIKE %s OR topic ILIKE %s)")
+        params.extend([f"%{keyword}%", f"%{keyword}%"])
+    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+    params.append(min(limit, 50))
+    try:
+        rows = await asyncio.to_thread(
+            db_query,
+            f"SELECT id, title, topic, state, turn_count, last_run_at, created_at "
+            f"FROM autonomous_projects {where} "
+            f"ORDER BY CASE state WHEN 'researching' THEN 0 WHEN 'planning' THEN 0 "
+            f"                    WHEN 'paused' THEN 1 ELSE 2 END, id DESC LIMIT %s",
+            tuple(params),
+        )
+    except Exception as e:
+        return ToolFailure(f"=== AUTONOMOUS PROJECTS ===\n(error: {e})")
+    if not rows:
+        return "=== AUTONOMOUS PROJECTS ===\n(none)"
+    lines = ["=== AUTONOMOUS PROJECTS ===",
+             "Use read_self(content_type='autonomous_project', id=<id>) for full detail."]
+    for r in rows:
+        last = _to_kst(r.get("last_run_at")) if r.get("last_run_at") else "never"
+        topic = (r.get("topic") or "").replace("\n", " ")[:150]
+        lines.append(
+            f"#{r['id']} [{r['state']}] turns={r['turn_count']} last_run={last}\n"
+            f"  title: {r['title']}\n"
+            f"  topic: {topic}{'…' if len(r.get('topic') or '') > 150 else ''}"
+        )
+    return "\n".join(lines)
+
+
+async def _read_autonomous_project_detail(
+    project_id: int, limit: int = 10, keyword: str | None = None,
+) -> str:
+    """Detail mode of _exec_read_autonomous_project: goal, plan, notes, events."""
     from db import query as db_query, query_one as db_query_one
 
-    # ── LIST MODE ─────────────────────────────────────────────
-    if not project_id:
-        clauses = []
-        params: list = []
-        if keyword:
-            clauses.append("(title ILIKE %s OR topic ILIKE %s)")
-            params.extend([f"%{keyword}%", f"%{keyword}%"])
-        where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
-        params.append(min(limit, 50))
-        try:
-            rows = await asyncio.to_thread(
-                db_query,
-                f"SELECT id, title, topic, state, turn_count, last_run_at, created_at "
-                f"FROM autonomous_projects {where} "
-                f"ORDER BY CASE state WHEN 'researching' THEN 0 WHEN 'planning' THEN 0 "
-                f"                    WHEN 'paused' THEN 1 ELSE 2 END, id DESC LIMIT %s",
-                tuple(params),
-            )
-        except Exception as e:
-            return ToolFailure(f"=== AUTONOMOUS PROJECTS ===\n(error: {e})")
-        if not rows:
-            return "=== AUTONOMOUS PROJECTS ===\n(none)"
-        lines = ["=== AUTONOMOUS PROJECTS ===",
-                 "Use read_self(content_type='autonomous_project', id=<id>) for full detail."]
-        for r in rows:
-            last = _to_kst(r.get("last_run_at")) if r.get("last_run_at") else "never"
-            topic = (r.get("topic") or "").replace("\n", " ")[:150]
-            lines.append(
-                f"#{r['id']} [{r['state']}] turns={r['turn_count']} last_run={last}\n"
-                f"  title: {r['title']}\n"
-                f"  topic: {topic}{'…' if len(r.get('topic') or '') > 150 else ''}"
-            )
-        return "\n".join(lines)
-
-    # ── DETAIL MODE ───────────────────────────────────────────
     try:
         proj = await asyncio.to_thread(
             db_query_one,
