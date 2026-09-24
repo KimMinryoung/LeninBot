@@ -583,6 +583,22 @@ def get_autonomous_tick_critic() -> bool:
     return bool(_config.get("autonomous_tick_critic", True))
 
 
+def _resolve_provider_model(provider: str, alias: str) -> str | None:
+    """Model ID for the OpenAI/DeepSeek/Kimi paths, or None for the Claude alias path.
+
+    Membership is checked against each family's full alias map, not just its
+    tier values, so a legacy alias saved as the tier (``gpt56``,
+    ``deepseek_pro``) keeps routing to its own family under another provider.
+    """
+    if provider == "openai" or alias in _OPENAI_MODEL_MAP:
+        return _resolve_openai_model(alias)
+    if provider == "deepseek" or alias in _DEEPSEEK_MODEL_MAP:
+        return _resolve_deepseek_model(alias)
+    if provider == "kimi" or alias in _KIMI_MODEL_MAP:
+        return _resolve_kimi_model(alias)
+    return None
+
+
 def get_current_model_selection(
     kind: str = "chat",
     provider_override: str | None = None,
@@ -617,15 +633,11 @@ def get_current_model_selection(
     if provider == "local":
         from llm.client import MOON_MODEL
         model_id = MOON_MODEL
-    elif provider == "openai" or alias in _OPENAI_MODEL_MAP:
-        model_id = _resolve_openai_model(alias)
-    elif provider == "deepseek" or alias in _DEEPSEEK_MODEL_MAP:
-        model_id = _resolve_deepseek_model(alias)
-    elif provider == "kimi" or alias in _KIMI_MODEL_MAP:
-        model_id = _resolve_kimi_model(alias)
     else:
-        model_alias, fallback = _MODEL_ALIAS_MAP.get(alias, (alias, alias))
-        model_id = _resolved_models.get(alias, fallback)
+        model_id = _resolve_provider_model(provider, alias)
+        if model_id is None:
+            model_alias, fallback = _MODEL_ALIAS_MAP.get(alias, (alias, alias))
+            model_id = _resolved_models.get(alias, fallback)
     return {
         "kind": kind,
         "provider": provider,
@@ -639,33 +651,14 @@ def get_current_model_selection(
 
 async def _get_model() -> str:
     """Get the current chat model based on runtime config."""
-    if _config.get("provider") == "local":
-        from llm.client import _resolve_backend
-        return _resolve_backend()["model"]
-    alias = _resolve_tier(_config["chat_model"])
-    if _config.get("provider") == "openai" or alias in _OPENAI_MODEL_MAP:
-        return _resolve_openai_model(alias)
-    if _config.get("provider") == "deepseek" or alias in _DEEPSEEK_MODEL_MAP:
-        return _resolve_deepseek_model(alias)
-    if _config.get("provider") == "kimi" or alias in _KIMI_MODEL_MAP:
-        return _resolve_kimi_model(alias)
-    return await _get_model_by_alias(alias)
+    from llm.runtime_profile import resolve_runtime_profile
+    return (await resolve_runtime_profile("chat")).model_id
 
 
 async def _get_model_task() -> str:
     """Get the current task model based on runtime config."""
-    provider = _get_task_provider()
-    if provider == "local":
-        from llm.client import _resolve_backend
-        return _resolve_backend()["model"]
-    alias = _resolve_tier(_config["task_model"], provider=provider)
-    if provider == "openai" or alias in _OPENAI_MODEL_MAP:
-        return _resolve_openai_model(alias)
-    if provider == "deepseek" or alias in _DEEPSEEK_MODEL_MAP:
-        return _resolve_deepseek_model(alias)
-    if provider == "kimi" or alias in _KIMI_MODEL_MAP:
-        return _resolve_kimi_model(alias)
-    return await _get_model_by_alias(alias)
+    from llm.runtime_profile import resolve_runtime_profile
+    return (await resolve_runtime_profile("task")).model_id
 
 
 async def _get_model_light() -> str:
