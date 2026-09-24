@@ -676,7 +676,7 @@ async def cmd_stats(message: Message):
 
     import psutil
     from datetime import timezone, timedelta
-    from scripts.metrics_snapshot import parse_cpu_json, parse_memory_json, _sparkline
+    from ops.metrics import parse_cpu_json, parse_memory_json, _sparkline
 
     KST_tz = timezone(timedelta(hours=9))
     now_kst = datetime.now(timezone.utc).astimezone(KST_tz)
@@ -1427,7 +1427,7 @@ async def cmd_llm_balance(message: Message):
     await message.chat.do("typing")
     try:
         from llm.gateway import proxy_base
-        from scripts.llm_balances import collect, format_telegram_report
+        from ops.llm_balances import collect, format_telegram_report
 
         report = await asyncio.to_thread(
             collect,

@@ -2,7 +2,7 @@
 from copy import deepcopy
 import re
 
-from scripts.commulingo_write_session import draft_id, prepare_write, repair_schema
+from commulingo_pipeline.write_session import draft_id, prepare_write, repair_schema
 from tool_gateway.results import ToolRejection
 from jsonschema import Draft202012Validator
 import json

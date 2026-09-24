@@ -989,7 +989,7 @@ class Review:
 
     async def __call__(self, job, artifacts, usage, budget):
         from agents.commulingo_reviewer import COMMULINGO_REVIEWER as spec
-        from scripts.commulingo_person_reviewer import make_handlers, review_risks
+        from runtime_tools.commulingo_review_handlers import make_handlers, review_risks
         from runtime_tools.registry import TOOL_HANDLERS
         from runtime_tools.commulingo_review_policy import DECISION_TOOL
         draft = latest(artifacts,'draft')

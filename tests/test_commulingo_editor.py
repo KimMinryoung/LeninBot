@@ -579,7 +579,7 @@ class ReviewAndPublishTests(EditorCase):
                  for name in ('wiki_search','wiki_get','web_search','fetch_url','commulingo_people')}
         with patch('commulingo_pipeline.service.call',return_value=CURRENT), \
              patch('runtime_tools.registry.TOOL_HANDLERS',reads), \
-             patch('scripts.commulingo_person_reviewer.review_risks',return_value=[]), \
+             patch('runtime_tools.commulingo_review_handlers.review_risks',return_value=[]), \
              patch('commulingo_pipeline.stages.model_call',side_effect=model):
             result = await workflow.Review()(JOB,artifacts,Usage(),.2)
         self.assertEqual(result.next_stage,'submit')

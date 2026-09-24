@@ -315,7 +315,7 @@ def _store_entries(entries: list[dict], period_start: str, period_end: str) -> i
 def _run_pending_curation_ingest() -> None:
     """Run the curation corpus ingest that shares this daily timer."""
     try:
-        from scripts.ingest_pending_curations import run as _ingest_curations
+        from corpus.curation_ingest import run as _ingest_curations
         _ingest_curations()
     except Exception as e:
         logger.warning("[경험] curation ingest step failed: %s", e)

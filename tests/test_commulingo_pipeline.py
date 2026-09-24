@@ -574,7 +574,7 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
                 await kwargs['handler']({'decision':decision,'reason':'Verified feedback','checks':[],'resolved_risks':[]})
             previous=[{'stage':'review','value':{'decision':'revise'}} for _ in range(count)]
             with patch('commulingo_pipeline.stages.service.call',return_value=None) as rpc, \
-                 patch('scripts.commulingo_person_reviewer.make_handlers',side_effect=handlers), \
+                 patch('runtime_tools.commulingo_review_handlers.make_handlers',side_effect=handlers), \
                  patch('commulingo_pipeline.stages.model_call',side_effect=model):
                 result=await Review()(job,artifacts+previous,Usage(),.2)
             self.assertEqual((result.next_stage,result.status),expected)
@@ -592,7 +592,7 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
             await kwargs['handler']({'decision':'revise','reason':'Correct classification from existing sources',
                 'checks':[],'resolved_risks':[],'needs_research':False})
         with patch('commulingo_pipeline.stages.service.call',return_value=None), \
-             patch('scripts.commulingo_person_reviewer.make_handlers',side_effect=handlers), \
+             patch('runtime_tools.commulingo_review_handlers.make_handlers',side_effect=handlers), \
              patch('commulingo_pipeline.stages.model_call',side_effect=model):
             first=await Review()(job,artifacts,Usage(),.2)
             self.assertEqual(first.next_stage,'draft')
@@ -630,7 +630,7 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
             prompts.append(kwargs['prompt'])
             await kwargs['handler']({'decision':'approve','reason':'Corrections were made','checks':[],'resolved_risks':[]})
         with patch('commulingo_pipeline.stages.service.call',return_value=None), \
-             patch('scripts.commulingo_person_reviewer.make_handlers',side_effect=handlers), \
+             patch('runtime_tools.commulingo_review_handlers.make_handlers',side_effect=handlers), \
              patch('commulingo_pipeline.stages.model_call',side_effect=model):
             result=await Review()(job,artifacts,Usage(),.2)
             self.assertEqual(result.next_stage,'submit')

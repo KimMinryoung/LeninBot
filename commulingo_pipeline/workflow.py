@@ -18,7 +18,7 @@ class Review:
     async def __call__(self, job, artifacts, usage, budget):
         from .stages import latest, current_artifacts, write_request, model_call, stage_evidence, READS
         from agents.commulingo_reviewer import COMMULINGO_REVIEWER
-        from scripts.commulingo_person_reviewer import make_handlers, review_risks
+        from runtime_tools.commulingo_review_handlers import make_handlers, review_risks
         from runtime_tools.commulingo_review_policy import DECISION_TOOL
         from runtime_tools.registry import TOOL_HANDLERS
         draft = latest(artifacts,'draft')
