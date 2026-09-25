@@ -205,46 +205,16 @@ _git_fetch_with_retry() {
     return 1
 }
 
-# ── Frontend docker build + deploy ───────────────────────────────
+# ── Frontend deploy ──────────────────────────────────────────────
+# The frontend repository owns its deploy (tests, build, labels, the container
+# user and data mount). An ad hoc `docker run` here used to start the container
+# as root, which then wrote root-owned 0600 files into the shared data dir.
 _deploy_frontend() {
     local force_restart="${1:-0}"
-    cd "$FRONTEND_DIR"
-
-    git fetch origin
-    local LOCAL_FE REMOTE_FE
-    LOCAL_FE=$(git rev-parse HEAD)
-    REMOTE_FE=$(git rev-parse origin/master)
-
-    if [[ "$LOCAL_FE" == "$REMOTE_FE" && "$force_restart" -eq 0 ]]; then
-        log "frontend: no changes → skip"
-        cd "$DEPLOY_DIR"
-        return 0
-    fi
-
-    git pull origin master
-    docker build -t leninbot-frontend .
-
-    docker stop leninbot-frontend 2>/dev/null || true
-    docker rm leninbot-frontend 2>/dev/null || true
-
-    # --network leninbot_default gives the container:
-    #   (a) hostname DNS to leninbot-redis / leninbot-neo4j (user-defined
-    #       networks have Docker's embedded DNS; the default bridge does not)
-    #   (b) a 172.18.x source IP which the host's ufw rule allows to reach
-    #       the :8000 backend (rule is 172.16.0.0/12, covering all Docker
-    #       private subnets)
-    docker run -d \
-        --name leninbot-frontend \
-        --network leninbot_default \
-        --add-host=host.docker.internal:host-gateway \
-        -p 127.0.0.1:3000:3000 \
-        --restart unless-stopped \
-        --env-file "$FRONTEND_DIR/.env" \
-        -v "$FRONTEND_DIR/data:/app/data" \
-        leninbot-frontend
-
-    docker image prune -f
-    log "frontend: deployed"
+    local args=()
+    [[ "$force_restart" -eq 1 ]] && args+=(--restart)
+    "$FRONTEND_DIR/scripts/deploy" "${args[@]}"
+    log "frontend: deploy finished"
     cd "$DEPLOY_DIR"
 }
 
