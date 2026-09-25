@@ -92,22 +92,20 @@ class AuthorDraft(DraftRepair):
                                'Does not delete stored content.'}
         # Authors invented 'partial'/'blocked' and sent notes (2026-09-25 logs).
         no_edit = obj({'status': {'type': 'string', 'enum': ['complete', 'not_applicable', 'sources_unavailable'],
-                                  'description': 'complete: current content already satisfies the commission; '
-                                                 'not_applicable: the commission does not fit this target; '
-                                                 'sources_unavailable: no accessible original supports an edit. '
-                                                 'A partially supported edit is submitted, not a no-edit.'},
+                                  'description': 'complete=already satisfied; not_applicable=does not fit this '
+                                                 'target; sources_unavailable=no accessible original. Submit a '
+                                                 'partial edit instead.'},
                        'reason': deepcopy(properties['reason']),
                        'issues': deepcopy(outcomes),
                        'notes': deepcopy(properties['notes'])}, ['status', 'reason', 'issues'])
         no_edit['properties']['issues']['required'] = self.issue_ids
         self.submit_tool = {'name': SUBMIT_TOOL, 'description':
-            'Submit the edit for validation and independent review. Top-level keys are changes, issues, reason, '
-            'notes and remove_fields; never put issues, reason or notes inside changes. Each change is '
-            '{value, evidence}. Without a saved draft (work_status.draft_saved=false) send changes, reason and a '
-            'decision for every commissioned issue. With a saved draft send only what changes: a supplied field '
-            'replaces its whole value, and its evidence too when evidence is given (omit evidence to keep the saved '
-            'evidence); omitted fields, issue decisions, reason and notes stay saved; arrays replace the whole list. '
-            'All validations run again on the complete draft. Use commulingo_pipeline_no_edit to finish without edits.', 'input_schema': submit}
+            # Provider payloads cut tool descriptions at 360 characters
+            # (tool_gateway.dispatcher._TOOL_DESC_LIMIT); keep this within it.
+            'Submit the edit for review. Each change is {value, evidence}. Top-level keys only: changes, issues, '
+            'reason, notes, remove_fields. First submission: changes, reason, every issue. With a saved draft send '
+            'only what changes; the rest stays saved. Omit evidence to keep saved evidence. Arrays replace the whole '
+            'list. No edit: commulingo_pipeline_no_edit.', 'input_schema': submit}
         self.no_edit_tool = {'name': 'commulingo_pipeline_no_edit', 'description':
             'Finish without a public edit. Explain the decision and each commissioned issue. '
             'Any saved draft remains in history; do not remove its fields first.', 'input_schema': no_edit}

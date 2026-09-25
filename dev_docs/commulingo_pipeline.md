@@ -282,6 +282,21 @@ Jev 호출 수와 비용은 `jev_calls`·`jev_cost_usd`로 분리한다.
 해결 과제 수는 작성자가 보고하고 검토자가 승인한 값이다. 독립 사후 표본 감사의 오류율은 아직 계측하지 않는다.
 단위 테스트 통과나 소수 성공 사례만으로 품질 향상·비용 절감률을 주장하지 않는다.
 
+DeepSeek(Anthropic 호환 엔드포인트, `llm/claude_loop.py`)은 인자가 필요한 도구 호출에 `input: {}`를
+보낼 때가 있다(2026-09-22~25 편집기 제출 약 46회). 이때 `claude_loop._log_empty_tool_input`이
+`Empty tool input from provider` WARNING으로 응답 전체(최대 8000자), `stop_reason`, `output_tokens`,
+응답 id를 파이프라인 journal에 남긴다. `{}`를 정당하게 받는 도구(목록 조회 등, 스키마에 `required`나
+`minProperties`가 없는 도구)는 기록하지 않는다. `output_tokens`가 크면 모델이 인자를 생성했는데 서버가
+버린 경우, 작으면 모델이 인자 없이 호출한 경우다.
+
+```bash
+journalctl -u leninbot-commulingo-pipeline.service --since -1d | grep 'Empty tool input from provider'
+```
+
+제공자에 보내는 도구 설명은 `tool_gateway.dispatcher.compact_tool_definitions`가 도구 360자·필드 160자로
+자른다. 작성 도구 설명은 이 한도 안에 두며(`test_author_tool_guidance_survives_provider_compaction`),
+넘치는 뒷부분은 모델에게 보이지 않는다.
+
 ### 무편집 대기열 정리와 실행 결과
 
 Editor `tick`은 실행 전에 미착수 자동 보강을 최대 200건 재평가한다.

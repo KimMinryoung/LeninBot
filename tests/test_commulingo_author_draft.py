@@ -140,6 +140,14 @@ class AuthorDraftTests(unittest.TestCase):
         draft.prepare(draft.submission(edit()))
         self.assertEqual(draft.view()['changes']['bio'], edit()['changes']['bio'])
 
+    def test_author_tool_guidance_survives_provider_compaction(self):
+        from tool_gateway.dispatcher import _SCHEMA_DESC_LIMIT, _TOOL_DESC_LIMIT
+        draft = session()
+        for tool in (draft.submit_tool, draft.no_edit_tool):
+            self.assertLessEqual(len(tool['description']), _TOOL_DESC_LIMIT, tool['name'])
+        self.assertLessEqual(len(draft.no_edit_tool['input_schema']['properties']['status']['description']),
+                             _SCHEMA_DESC_LIMIT)
+
     def test_no_edit_has_no_content_or_pointer_protocol(self):
         draft = session()
         good = {'status':'sources_unavailable','reason':'The original could not be retrieved.',
