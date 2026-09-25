@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Compose a 4-panel political comic page for cyber-lenin.com.
 
-CLI wrapper around ``runtime_tools.comic_composer``, which holds the layout,
+CLI wrapper around ``publishing.comic_composer``, which holds the layout,
 content rules and payload schema.
 """
 
@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from runtime_tools.comic_composer import (  # noqa: E402
+from publishing.comic_composer import (  # noqa: E402
     build_html_body,
     build_page_payload,
     validate_payload,

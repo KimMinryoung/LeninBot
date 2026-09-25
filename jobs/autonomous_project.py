@@ -2031,7 +2031,7 @@ async def _run_tick_agent(
     """Run the agent loop under the per-tick context vars. On failure, log it,
     record the failure cooldown, and re-raise."""
     from telegram.channel_broadcast import current_autonomous_project_id
-    from jobs.autonomous_publication_controls import current_tick_staged_slugs
+    from publishing.autonomous_publication_controls import current_tick_staged_slugs
 
     ctx_token = current_autonomous_project_id.set(int(project["id"]))
     # Fresh per-tick set backing the cross-tick stage→publish gate: a draft

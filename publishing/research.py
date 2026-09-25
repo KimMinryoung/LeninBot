@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import Any
 
 from telegram.channel_broadcast import maybe_broadcast_autonomous_publication
-from jobs.autonomous_publication_controls import (
+from publishing.autonomous_publication_controls import (
     check_autonomous_publication_allowed,
     is_autonomous_publication_context,
     record_autonomous_publication,
