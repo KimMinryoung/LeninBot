@@ -275,3 +275,29 @@ class TestEstimateTokens(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestEmptyToolInputLog(unittest.TestCase):
+    """DeepSeek returns input {} for tools that need arguments; record the response."""
+
+    def response(self, *blocks):
+        return SimpleNamespace(
+            id="msg_1", stop_reason="tool_use", usage=SimpleNamespace(output_tokens=3100),
+            content=[SimpleNamespace(**b) for b in blocks],
+            model_dump=lambda: {"id": "msg_1", "content": list(blocks)},
+        )
+
+    def test_logs_raw_response_only_for_tools_that_need_arguments(self):
+        from llm.claude_loop import _log_empty_tool_input
+        tools = [{"name": "submit", "input_schema": {"type": "object", "minProperties": 1}},
+                 {"name": "list_pages", "input_schema": {"type": "object", "properties": {}}}]
+        empty_submit = {"type": "tool_use", "id": "t1", "name": "submit", "input": {}}
+        with self.assertLogs("llm.claude_loop", "WARNING") as logs:
+            _log_empty_tool_input("deepseek-v4-flash", tools, 7, self.response(empty_submit), "round")
+        self.assertIn("output_tokens=3100", logs.output[0])
+        self.assertIn('"name": "submit"', logs.output[0])
+        self.assertIn("raw response", logs.output[0])
+        with self.assertNoLogs("llm.claude_loop", "WARNING"):
+            _log_empty_tool_input("m", tools, 1, self.response(
+                {"type": "tool_use", "id": "t2", "name": "list_pages", "input": {}},
+                {"type": "tool_use", "id": "t3", "name": "submit", "input": {"changes": {}}}), "round")

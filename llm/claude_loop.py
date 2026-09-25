@@ -330,6 +330,45 @@ async def _drain_stream_with_idle_guard(stream, idle_timeout_sec: float, on_prog
         ) from exc
 
 
+_RAW_LOG_LIMIT = 8000
+
+
+def _log_empty_tool_input(model, tools, round_num, response, where):
+    """Record the provider's whole response when a tool that needs arguments gets {}.
+
+    DeepSeek's Anthropic-compatible endpoint returns input {} for editor
+    submissions dozens of times a day (2026-09-25), and nothing recorded what
+    else the response held. Tools whose schema accepts {} (list calls) are
+    not logged. output_tokens separates "generated arguments the server
+    dropped" from "generated nothing".
+    """
+    needs_args = {
+        t.get("name") for t in tools or []
+        if isinstance(t, dict) and ((t.get("input_schema") or {}).get("required")
+                                    or (t.get("input_schema") or {}).get("minProperties"))
+    }
+    empty = []
+    for block in getattr(response, "content", None) or []:
+        b = _to_block_dict(block) or {}
+        if b.get("type") == "tool_use" and b.get("name") in needs_args and not b.get("input"):
+            empty.append({"name": b.get("name"), "id": b.get("id"), "input": repr(b.get("input"))})
+    if not empty:
+        return
+    try:
+        dump = response.model_dump() if hasattr(response, "model_dump") else repr(response)
+        logger.warning(
+            "Empty tool input from provider (%s, model=%s, round=%s, stop_reason=%s, "
+            "output_tokens=%s, response_id=%s): %s | raw response: %s",
+            where, model, round_num, getattr(response, "stop_reason", None),
+            getattr(getattr(response, "usage", None), "output_tokens", None),
+            getattr(response, "id", None), json.dumps(empty, ensure_ascii=False),
+            json.dumps(dump, default=str, ensure_ascii=False)[:_RAW_LOG_LIMIT],
+        )
+    except Exception:  # diagnostics must never break the loop
+        logger.warning("Empty tool input from provider (%s, model=%s): %s",
+                       where, model, empty, exc_info=True)
+
+
 class _ClaudeProtocolAdapter:
     """Anthropic-protocol mechanics for agent_loop.run_tool_loop.
 
@@ -552,6 +591,7 @@ class _ClaudeProtocolAdapter:
                 raw=response,
             )
 
+        _log_empty_tool_input(self.model, self.cached_tools, round_num, response, "round")
         assistant_content = []
         tool_calls: list[tuple[str, str, dict]] = []
         malformed: list[tuple[str, str, str]] = []
@@ -760,6 +800,7 @@ class _ClaudeProtocolAdapter:
         if getattr(final, "stop_reason", None) == "max_tokens":
             logger.warning("Forced final response truncated by max_tokens (%d)", self.max_tokens)
 
+        _log_empty_tool_input(self.model, self.cached_tools, "final", final, "forced-final")
         allowed = set(final_tool_names or [])
         final_assistant_content: list[dict] = []
         batch: list[tuple[str, str, dict]] = []
