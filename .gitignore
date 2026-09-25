@@ -89,3 +89,6 @@ local_graffiti/
 
 # Host-specific systemd migration staging (credential paths, never key bytes).
 /systemd/.web-gateway-stage/
+
+# Editor settings
+.vscode/

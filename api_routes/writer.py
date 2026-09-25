@@ -58,7 +58,7 @@ class WriterManuscriptReplaceRequest(BaseModel):
 
 @router.get("/writer")
 async def writer_page():
-    html_path = Path(__file__).resolve().parents[1] / "frontend" / "writer.html"
+    html_path = Path(__file__).resolve().parents[1] / "writer" / "static" / "writer.html"
     return Response(
         content=html_path.read_text(encoding="utf-8"),
         media_type="text/html; charset=utf-8",

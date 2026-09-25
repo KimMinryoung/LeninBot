@@ -162,7 +162,7 @@ Current default chunking for new corpus ingestion is language-specific in `corpu
 |---|---|
 | Identity and prompt rendering | `identity/prompts.py`, `identity/agent_prompts/*.md`, `llm/prompt_renderer.py`, `agents/base.py` |
 | LLM provider config | `bot_config.py`, `llm/agent_loop.py` (shared loop engine), `llm/claude_loop.py`, `llm/openai_tool_loop.py`, `llm/client.py` |
-| Personal fiction workspace | `writer/` package (store/documents/models/prompts/tools/runs/stream), `frontend/writer.html`, `/writer/*` routes in `api_routes/writer.py`, `services/novel_writer_api.py` |
+| Personal fiction workspace | `writer/` package (store/documents/models/prompts/tools/runs/stream), `writer/static/writer.html`, `/writer/*` routes in `api_routes/writer.py`, `services/novel_writer_api.py` |
 | Agents | `agents/*.py`, `config/agent_runtime.json`, `api_routes/task_reports.py` |
 | Tools | `runtime_tools/*`, `self_runtime/tools.py`, `crypto_wallet/*` |
 | KG facade | `kg_runtime/search.py`, `kg_runtime/writes.py`, `kg_runtime/admin.py`, `kg_runtime/service_runtime.py` |
