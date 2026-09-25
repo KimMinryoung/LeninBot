@@ -69,6 +69,10 @@ class EvidenceContracts(TestCase):
             validate_tool_arguments('commulingo_pipeline_result',{'notes':'x'},schema=schema,risk_class='state')
         merge={'type':'object','properties':{'changes':{'type':'object'}},'minProperties':1}
         with self.assertRaisesRegex(ToolArgumentValidationError,'empty object.*not parseable'):
+            validate_tool_arguments('merge_tool',{},schema=merge,risk_class='state')
+        # The editor submit tool accepts parts, so an empty call asks for smaller ones.
+        import commulingo.pipeline.author_draft  # noqa: F401  registers the hint
+        with self.assertRaisesRegex(ToolArgumentValidationError,'Do not resend the same call.*in parts'):
             validate_tool_arguments('commulingo_pipeline_submit_draft',{},schema=merge,risk_class='state')
 
     def test_many_passages_are_all_kept(self):

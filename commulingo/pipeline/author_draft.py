@@ -8,7 +8,7 @@ import json
 import re
 
 from jsonschema import Draft202012Validator
-from tool_gateway.validation import register_argument_shape_repair
+from tool_gateway.validation import register_argument_shape_repair, register_empty_arguments_hint
 
 from .draft_repair import DraftRepair, RepairProtocolError
 from .evidence import MAX_PASSAGES, PASSAGE_PATTERN
@@ -259,3 +259,9 @@ class AuthorDraft(DraftRepair):
 
 
 register_argument_shape_repair(SUBMIT_TOOL, repair_submission_shape)
+# DeepSeek drops long tool arguments and delivers {} (2,600-2,900 output
+# tokens each, 2026-09-25); resending the same call fails the same way.
+register_empty_arguments_hint(SUBMIT_TOOL, (
+    'Arguments arrived empty: the provider dropped this call because its arguments were too long. '
+    'Do not resend the same call. Send the draft in parts, one or two fields per call with their '
+    'evidence, then issues and reason; each part is saved and merged.'))

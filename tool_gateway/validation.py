@@ -284,10 +284,18 @@ def _validate_confirmation_nonce(args: dict) -> None:
 # (args, notes); notes describe what moved and are logged. Owners register
 # at import so this module stays free of domain imports.
 _ARGUMENT_SHAPE_REPAIRS: dict = {}
+# What to tell the model when a tool that needs arguments receives {}. The
+# default asks for a resend; a tool that accepts partial calls can ask for
+# smaller ones instead.
+_EMPTY_ARGUMENT_HINTS: dict = {}
 
 
 def register_argument_shape_repair(tool_name: str, repair) -> None:
     _ARGUMENT_SHAPE_REPAIRS[tool_name] = repair
+
+
+def register_empty_arguments_hint(tool_name: str, hint: str) -> None:
+    _EMPTY_ARGUMENT_HINTS[tool_name] = hint
 
 
 def validate_tool_arguments(
@@ -334,11 +342,12 @@ def validate_tool_arguments(
                 # is a required property" then reads as a missing key, and the
                 # model resends the same broken JSON. A merge-style tool has no
                 # required keys, only minProperties, and needs the same hint.
-                message = (
+                message = _EMPTY_ARGUMENT_HINTS.get(tool_name) or (
                     "arguments arrived as an empty object, so the call's JSON was probably "
                     "not parseable (unescaped quotes, an unterminated string): resend the same "
-                    "content as valid JSON. " + message
+                    "content as valid JSON."
                 )
+                message = message + " " + _format_jsonschema_errors(errors)
             raise ToolArgumentValidationError(message)
 
     _validate_json_numbers(normalized)
@@ -361,6 +370,7 @@ def validate_tool_arguments(
 __all__ = [
     "ToolArgumentValidationError",
     "register_argument_shape_repair",
+    "register_empty_arguments_hint",
     "tool_schema_map",
     "validate_tool_arguments",
 ]
