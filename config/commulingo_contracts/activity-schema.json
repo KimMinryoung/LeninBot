@@ -1,0 +1,98 @@
+{
+  "type": "array",
+  "minItems": 1,
+  "maxItems": 30,
+  "description": "Documented activities. Exactly one primary; function, affiliation and period refer to the same career. Never infer affiliation from citizenship.",
+  "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "functionId",
+      "affiliationId",
+      "affiliationStatus",
+      "relation",
+      "primary",
+      "evidence"
+    ],
+    "properties": {
+      "functionId": {
+        "type": "string"
+      },
+      "affiliationId": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "affiliationStatus": {
+        "type": "string",
+        "enum": [
+          "confirmed",
+          "independent",
+          "unresolved"
+        ]
+      },
+      "relation": {
+        "type": "string",
+        "enum": [
+          "service",
+          "membership",
+          "employment",
+          "independent",
+          "unresolved"
+        ]
+      },
+      "startYear": {
+        "type": [
+          "integer",
+          "null"
+        ],
+        "minimum": -3000,
+        "maximum": 2200
+      },
+      "endYear": {
+        "type": [
+          "integer",
+          "null"
+        ],
+        "minimum": -3000,
+        "maximum": 2200
+      },
+      "primary": {
+        "type": "boolean"
+      },
+      "evidence": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "source",
+            "locator",
+            "claim",
+            "excerpt"
+          ],
+          "properties": {
+            "source": {
+              "type": "string",
+              "minLength": 1
+            },
+            "locator": {
+              "type": "string",
+              "minLength": 1
+            },
+            "claim": {
+              "type": "string",
+              "minLength": 1
+            },
+            "excerpt": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    }
+  }
+}

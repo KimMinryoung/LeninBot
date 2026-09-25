@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "limits": {"epithet": [60, 140], "bio": [380, 900], "moment": [140, 300], "body": [2600, 5800], "fate_label": [22, 50]},
+  "factFields": ["bio", "moment", "years", "citizenship", "nationalOrigin", "origin", "body"],
+  "reviewFlags": ["identity_uncertain", "source_conflict"],
+  "topics": ["basics", "nationality", "bio", "moment", "events", "sections"],
+  "statuses": ["open", "complete", "not_applicable", "sources_unavailable"]
+}

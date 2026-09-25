@@ -1,0 +1,2527 @@
+{
+  "version": 3,
+  "functions": [
+    {
+      "id": "political-leadership",
+      "label": {
+        "ko": "정치·당 지도",
+        "en": "Political and party leadership"
+      },
+      "icon": "flag",
+      "criteria": "Leading a political party or movement and setting its strategy. Incidental Politburo membership does not override a defining security, military, economic or propaganda career."
+    },
+    {
+      "id": "government",
+      "label": {
+        "ko": "정부·행정",
+        "en": "Government and administration"
+      },
+      "icon": "briefcase",
+      "criteria": "Heads of government or state, general public and regional administration. Prefer a specialized function when it defines the career."
+    },
+    {
+      "id": "military",
+      "label": {
+        "ko": "군사·지휘",
+        "en": "Military command"
+      },
+      "icon": "star",
+      "criteria": "Military command, operations and organization. Intelligence and counterintelligence chiefs belong to security."
+    },
+    {
+      "id": "security",
+      "label": {
+        "ko": "보안·정보·치안",
+        "en": "Security, intelligence and policing"
+      },
+      "icon": "eye",
+      "criteria": "Intelligence, counterintelligence, policing and security administration. Being persecuted does not qualify."
+    },
+    {
+      "id": "diplomacy",
+      "label": {
+        "ko": "외교·국제활동",
+        "en": "Diplomacy and international organization"
+      },
+      "icon": "handshake",
+      "criteria": "Diplomats and international organization staff, including Comintern international work. Living abroad alone does not qualify."
+    },
+    {
+      "id": "economy",
+      "label": {
+        "ko": "경제·재정·계획",
+        "en": "Economy, finance and planning"
+      },
+      "icon": "chart",
+      "criteria": "Economic planning, finance, banking, trade and policy administration. Academic research alone belongs to scholarship."
+    },
+    {
+      "id": "industry",
+      "label": {
+        "ko": "산업·생산 운영",
+        "en": "Industry and production"
+      },
+      "icon": "factory",
+      "criteria": "Industrial administration, factory and armaments production management. Research and technical design belong to science."
+    },
+    {
+      "id": "agriculture",
+      "label": {
+        "ko": "농업·토지정책",
+        "en": "Agriculture and land policy"
+      },
+      "icon": "corn",
+      "criteria": "Agricultural administration, land policy and agrarian organizing. Peasant origins alone do not qualify."
+    },
+    {
+      "id": "propaganda",
+      "label": {
+        "ko": "이념·선전",
+        "en": "Ideology and propaganda"
+      },
+      "icon": "megaphone",
+      "criteria": "Party/state ideological administration, propaganda, censorship and cultural control. Independent creative work belongs to arts."
+    },
+    {
+      "id": "organizing",
+      "label": {
+        "ko": "사회운동·조직",
+        "en": "Social movements and organizing"
+      },
+      "icon": "flame",
+      "criteria": "Labor, peasant, civic or underground political organizing, activism and resistance. Not a catch-all for everyone called a revolutionary or dissident."
+    },
+    {
+      "id": "scholarship",
+      "label": {
+        "ko": "학술·연구",
+        "en": "Scholarship and theory"
+      },
+      "icon": "library",
+      "criteria": "Historical, social-scientific, philosophical and theoretical research. Research subjects and citizenship are not political affiliations."
+    },
+    {
+      "id": "science",
+      "label": {
+        "ko": "과학·기술",
+        "en": "Science and technology"
+      },
+      "icon": "atom",
+      "criteria": "Natural science, engineering, medicine, research, development and technical design. An industry minister is not automatically a scientist."
+    },
+    {
+      "id": "arts",
+      "label": {
+        "ko": "문학·예술",
+        "en": "Literature and arts"
+      },
+      "icon": "feather",
+      "criteria": "Literary, visual, musical and performing arts. Administration of censorship belongs to propaganda."
+    },
+    {
+      "id": "law",
+      "label": {
+        "ko": "법률·사법",
+        "en": "Law and justice"
+      },
+      "icon": "landmark",
+      "criteria": "Legal practice, defense counsel, prosecution, judging and judicial administration. Academic legal theory belongs to scholarship; being a defendant or victim alone does not qualify."
+    }
+  ],
+  "affiliations": [
+    {
+      "id": "state-afghanistan",
+      "kind": "state",
+      "label": {
+        "ko": "아프가니스탄 국가기관",
+        "en": "Afghanistan state institutions"
+      },
+      "countryCode": "afghanistan",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-albania",
+      "kind": "state",
+      "label": {
+        "ko": "알바니아 국가기관",
+        "en": "Albania state institutions"
+      },
+      "countryCode": "albania",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-angola",
+      "kind": "state",
+      "label": {
+        "ko": "앙골라 국가기관",
+        "en": "Angola state institutions"
+      },
+      "countryCode": "angola",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-argentina",
+      "kind": "state",
+      "label": {
+        "ko": "아르헨티나 국가기관",
+        "en": "Argentina state institutions"
+      },
+      "countryCode": "argentina",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-austria",
+      "kind": "state",
+      "label": {
+        "ko": "오스트리아 국가기관",
+        "en": "Austria state institutions"
+      },
+      "countryCode": "austria",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-azerbaijan",
+      "kind": "state",
+      "label": {
+        "ko": "아제르바이잔 국가기관",
+        "en": "Azerbaijan state institutions"
+      },
+      "countryCode": "azerbaijan",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-belarus",
+      "kind": "state",
+      "label": {
+        "ko": "벨라루스 국가기관",
+        "en": "Belarus state institutions"
+      },
+      "countryCode": "belarus",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-belgium",
+      "kind": "state",
+      "label": {
+        "ko": "벨기에 국가기관",
+        "en": "Belgium state institutions"
+      },
+      "countryCode": "belgium",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-benin",
+      "kind": "state",
+      "label": {
+        "ko": "베냉 국가기관",
+        "en": "Benin state institutions"
+      },
+      "countryCode": "benin",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-brazil",
+      "kind": "state",
+      "label": {
+        "ko": "브라질 국가기관",
+        "en": "Brazil state institutions"
+      },
+      "countryCode": "brazil",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-bulgaria",
+      "kind": "state",
+      "label": {
+        "ko": "불가리아 국가기관",
+        "en": "Bulgaria state institutions"
+      },
+      "countryCode": "bulgaria",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-burkina-faso",
+      "kind": "state",
+      "label": {
+        "ko": "부르키나파소 국가기관",
+        "en": "Burkina Faso state institutions"
+      },
+      "countryCode": "burkina-faso",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-cambodia",
+      "kind": "state",
+      "label": {
+        "ko": "캄보디아 국가기관",
+        "en": "Cambodia state institutions"
+      },
+      "countryCode": "cambodia",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-chile",
+      "kind": "state",
+      "label": {
+        "ko": "칠레 국가기관",
+        "en": "Chile state institutions"
+      },
+      "countryCode": "chile",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-congo",
+      "kind": "state",
+      "label": {
+        "ko": "콩고민주공화국 국가기관",
+        "en": "DR Congo state institutions"
+      },
+      "countryCode": "congo",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-cuba",
+      "kind": "state",
+      "label": {
+        "ko": "쿠바 국가기관",
+        "en": "Cuba state institutions"
+      },
+      "countryCode": "cuba",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-czechia",
+      "kind": "state",
+      "label": {
+        "ko": "체코 국가기관",
+        "en": "Czechia state institutions"
+      },
+      "countryCode": "czechia",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-czechoslovakia",
+      "kind": "state",
+      "label": {
+        "ko": "체코슬로바키아 국가기관",
+        "en": "Czechoslovakia state institutions"
+      },
+      "countryCode": "czechoslovakia",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-east-germany",
+      "kind": "state",
+      "label": {
+        "ko": "동독 국가기관",
+        "en": "East Germany state institutions"
+      },
+      "countryCode": "east-germany",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-el-salvador",
+      "kind": "state",
+      "label": {
+        "ko": "엘살바도르 국가기관",
+        "en": "El Salvador state institutions"
+      },
+      "countryCode": "el-salvador",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-estonia",
+      "kind": "state",
+      "label": {
+        "ko": "에스토니아 국가기관",
+        "en": "Estonia state institutions"
+      },
+      "countryCode": "estonia",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-ethiopia",
+      "kind": "state",
+      "label": {
+        "ko": "에티오피아 국가기관",
+        "en": "Ethiopia state institutions"
+      },
+      "countryCode": "ethiopia",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-finland",
+      "kind": "state",
+      "label": {
+        "ko": "핀란드 국가기관",
+        "en": "Finland state institutions"
+      },
+      "countryCode": "finland",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-france",
+      "kind": "state",
+      "label": {
+        "ko": "프랑스 국가기관",
+        "en": "France state institutions"
+      },
+      "countryCode": "france",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-georgia",
+      "kind": "state",
+      "label": {
+        "ko": "그루지야 국가기관",
+        "en": "Georgia state institutions"
+      },
+      "countryCode": "georgia",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-germany",
+      "kind": "state",
+      "label": {
+        "ko": "독일 국가기관",
+        "en": "Germany state institutions"
+      },
+      "countryCode": "germany",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-ghana",
+      "kind": "state",
+      "label": {
+        "ko": "가나 국가기관",
+        "en": "Ghana state institutions"
+      },
+      "countryCode": "ghana",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-greece",
+      "kind": "state",
+      "label": {
+        "ko": "그리스 국가기관",
+        "en": "Greece state institutions"
+      },
+      "countryCode": "greece",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-grenada",
+      "kind": "state",
+      "label": {
+        "ko": "그레나다 국가기관",
+        "en": "Grenada state institutions"
+      },
+      "countryCode": "grenada",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-guyana",
+      "kind": "state",
+      "label": {
+        "ko": "가이아나 국가기관",
+        "en": "Guyana state institutions"
+      },
+      "countryCode": "guyana",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-hungary",
+      "kind": "state",
+      "label": {
+        "ko": "헝가리 국가기관",
+        "en": "Hungary state institutions"
+      },
+      "countryCode": "hungary",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-india",
+      "kind": "state",
+      "label": {
+        "ko": "인도 국가기관",
+        "en": "India state institutions"
+      },
+      "countryCode": "india",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-indonesia",
+      "kind": "state",
+      "label": {
+        "ko": "인도네시아 국가기관",
+        "en": "Indonesia state institutions"
+      },
+      "countryCode": "indonesia",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-ireland",
+      "kind": "state",
+      "label": {
+        "ko": "아일랜드 국가기관",
+        "en": "Ireland state institutions"
+      },
+      "countryCode": "ireland",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-israel",
+      "kind": "state",
+      "label": {
+        "ko": "이스라엘 국가기관",
+        "en": "Israel state institutions"
+      },
+      "countryCode": "israel",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-italy",
+      "kind": "state",
+      "label": {
+        "ko": "이탈리아 국가기관",
+        "en": "Italy state institutions"
+      },
+      "countryCode": "italy",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-japan",
+      "kind": "state",
+      "label": {
+        "ko": "일본 국가기관",
+        "en": "Japan state institutions"
+      },
+      "countryCode": "japan",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-kazakhstan",
+      "kind": "state",
+      "label": {
+        "ko": "카자흐스탄 국가기관",
+        "en": "Kazakhstan state institutions"
+      },
+      "countryCode": "kazakhstan",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-korea",
+      "kind": "state",
+      "label": {
+        "ko": "조선 국가기관",
+        "en": "Korea state institutions"
+      },
+      "countryCode": "korea",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-kyrgyzstan",
+      "kind": "state",
+      "label": {
+        "ko": "키르기스스탄 국가기관",
+        "en": "Kyrgyzstan state institutions"
+      },
+      "countryCode": "kyrgyzstan",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-laos",
+      "kind": "state",
+      "label": {
+        "ko": "라오스 국가기관",
+        "en": "Laos state institutions"
+      },
+      "countryCode": "laos",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-latvia",
+      "kind": "state",
+      "label": {
+        "ko": "라트비아 국가기관",
+        "en": "Latvia state institutions"
+      },
+      "countryCode": "latvia",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-lithuania",
+      "kind": "state",
+      "label": {
+        "ko": "리투아니아 국가기관",
+        "en": "Lithuania state institutions"
+      },
+      "countryCode": "lithuania",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-madagascar",
+      "kind": "state",
+      "label": {
+        "ko": "마다가스카르 국가기관",
+        "en": "Madagascar state institutions"
+      },
+      "countryCode": "madagascar",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-moldova",
+      "kind": "state",
+      "label": {
+        "ko": "몰도바 국가기관",
+        "en": "Moldova state institutions"
+      },
+      "countryCode": "moldova",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-mongolia",
+      "kind": "state",
+      "label": {
+        "ko": "몽골 국가기관",
+        "en": "Mongolia state institutions"
+      },
+      "countryCode": "mongolia",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-mozambique",
+      "kind": "state",
+      "label": {
+        "ko": "모잠비크 국가기관",
+        "en": "Mozambique state institutions"
+      },
+      "countryCode": "mozambique",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-netherlands",
+      "kind": "state",
+      "label": {
+        "ko": "네덜란드 국가기관",
+        "en": "Netherlands state institutions"
+      },
+      "countryCode": "netherlands",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-nicaragua",
+      "kind": "state",
+      "label": {
+        "ko": "니카라과 국가기관",
+        "en": "Nicaragua state institutions"
+      },
+      "countryCode": "nicaragua",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-north-korea",
+      "kind": "state",
+      "label": {
+        "ko": "조선민주주의인민공화국 국가기관",
+        "en": "Democratic People's Republic of Korea state institutions"
+      },
+      "countryCode": "north-korea",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-peru",
+      "kind": "state",
+      "label": {
+        "ko": "페루 국가기관",
+        "en": "Peru state institutions"
+      },
+      "countryCode": "peru",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-poland",
+      "kind": "state",
+      "label": {
+        "ko": "폴란드 국가기관",
+        "en": "Poland state institutions"
+      },
+      "countryCode": "poland",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-portugal",
+      "kind": "state",
+      "label": {
+        "ko": "포르투갈 국가기관",
+        "en": "Portugal state institutions"
+      },
+      "countryCode": "portugal",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-republic-of-congo",
+      "kind": "state",
+      "label": {
+        "ko": "콩고-브라자빌 국가기관",
+        "en": "Congo - Brazzaville state institutions"
+      },
+      "countryCode": "republic-of-congo",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-romania",
+      "kind": "state",
+      "label": {
+        "ko": "루마니아 국가기관",
+        "en": "Romania state institutions"
+      },
+      "countryCode": "romania",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-somalia",
+      "kind": "state",
+      "label": {
+        "ko": "소말리아 국가기관",
+        "en": "Somalia state institutions"
+      },
+      "countryCode": "somalia",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-south-africa",
+      "kind": "state",
+      "label": {
+        "ko": "남아프리카 공화국 국가기관",
+        "en": "South Africa state institutions"
+      },
+      "countryCode": "south-africa",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-south-korea",
+      "kind": "state",
+      "label": {
+        "ko": "대한민국 국가기관",
+        "en": "South Korea state institutions"
+      },
+      "countryCode": "south-korea",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-soviet",
+      "kind": "state",
+      "label": {
+        "ko": "소련 국가기관",
+        "en": "Soviet Union state institutions"
+      },
+      "countryCode": "soviet",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-spain",
+      "kind": "state",
+      "label": {
+        "ko": "스페인 국가기관",
+        "en": "Spain state institutions"
+      },
+      "countryCode": "spain",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-switzerland",
+      "kind": "state",
+      "label": {
+        "ko": "스위스 국가기관",
+        "en": "Switzerland state institutions"
+      },
+      "countryCode": "switzerland",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-tanzania",
+      "kind": "state",
+      "label": {
+        "ko": "탄자니아 국가기관",
+        "en": "Tanzania state institutions"
+      },
+      "countryCode": "tanzania",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-trinidad",
+      "kind": "state",
+      "label": {
+        "ko": "트리니다드 토바고 국가기관",
+        "en": "Trinidad and Tobago state institutions"
+      },
+      "countryCode": "trinidad",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-turkey",
+      "kind": "state",
+      "label": {
+        "ko": "튀르키예 국가기관",
+        "en": "Turkey state institutions"
+      },
+      "countryCode": "turkey",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-turkmenistan",
+      "kind": "state",
+      "label": {
+        "ko": "투르크메니스탄 국가기관",
+        "en": "Turkmenistan state institutions"
+      },
+      "countryCode": "turkmenistan",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-uk",
+      "kind": "state",
+      "label": {
+        "ko": "영국 국가기관",
+        "en": "United Kingdom state institutions"
+      },
+      "countryCode": "uk",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-ukraine",
+      "kind": "state",
+      "label": {
+        "ko": "우크라이나 국가기관",
+        "en": "Ukraine state institutions"
+      },
+      "countryCode": "ukraine",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-usa",
+      "kind": "state",
+      "label": {
+        "ko": "미국 국가기관",
+        "en": "United States state institutions"
+      },
+      "countryCode": "usa",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-uzbekistan",
+      "kind": "state",
+      "label": {
+        "ko": "우즈베키스탄 국가기관",
+        "en": "Uzbekistan state institutions"
+      },
+      "countryCode": "uzbekistan",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-vietnam",
+      "kind": "state",
+      "label": {
+        "ko": "베트남 국가기관",
+        "en": "Vietnam state institutions"
+      },
+      "countryCode": "vietnam",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-yemen",
+      "kind": "state",
+      "label": {
+        "ko": "예멘 국가기관",
+        "en": "Yemen state institutions"
+      },
+      "countryCode": "yemen",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-yugoslavia",
+      "kind": "state",
+      "label": {
+        "ko": "유고슬라비아 국가기관",
+        "en": "Yugoslavia state institutions"
+      },
+      "countryCode": "yugoslavia",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "china-ccp",
+      "kind": "party",
+      "label": {
+        "ko": "중국공산당",
+        "en": "Communist Party of China"
+      },
+      "countryCode": "china",
+      "icon": "hammer-sickle",
+      "parentId": null,
+      "criteria": "Choose only when the cited career explicitly establishes service or organizational membership in this body; not citizenship or sympathy."
+    },
+    {
+      "id": "china-prc",
+      "kind": "state",
+      "label": {
+        "ko": "중화인민공화국 국가기관",
+        "en": "PRC state institutions"
+      },
+      "countryCode": "china",
+      "icon": "landmark",
+      "parentId": null,
+      "criteria": "Choose only when the cited career explicitly establishes service or organizational membership in this body; not citizenship or sympathy."
+    },
+    {
+      "id": "china-kmt",
+      "kind": "party",
+      "label": {
+        "ko": "중국국민당",
+        "en": "Kuomintang"
+      },
+      "countryCode": "china",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Choose only when the cited career explicitly establishes service or organizational membership in this body; not citizenship or sympathy."
+    },
+    {
+      "id": "china-qing",
+      "kind": "state",
+      "label": {
+        "ko": "청 왕조",
+        "en": "Qing dynasty"
+      },
+      "countryCode": "china",
+      "icon": "crown",
+      "parentId": null,
+      "criteria": "Choose only when the cited career explicitly establishes service or organizational membership in this body; not citizenship or sympathy."
+    },
+    {
+      "id": "china-beiyang",
+      "kind": "force",
+      "label": {
+        "ko": "북양정부·군벌",
+        "en": "Beiyang government and warlords"
+      },
+      "countryCode": "china",
+      "icon": "shield",
+      "parentId": null,
+      "criteria": "Choose only when the cited career explicitly establishes service or organizational membership in this body; not citizenship or sympathy."
+    },
+    {
+      "id": "china-pla",
+      "kind": "military",
+      "label": {
+        "ko": "중국공산당 계열 군대",
+        "en": "CCP armed forces"
+      },
+      "countryCode": "china",
+      "icon": "star",
+      "parentId": "china-ccp",
+      "criteria": "Choose only when the cited career explicitly establishes service or organizational membership in this body; not citizenship or sympathy."
+    },
+    {
+      "id": "russian-empire",
+      "kind": "state",
+      "label": {
+        "ko": "러시아 제국",
+        "en": "Russian Empire"
+      },
+      "countryCode": "russia",
+      "icon": "crown",
+      "parentId": null,
+      "criteria": "Choose only when the cited career explicitly establishes service or organizational membership in this body; not citizenship or sympathy."
+    },
+    {
+      "id": "russian-white",
+      "kind": "force",
+      "label": {
+        "ko": "러시아 백색운동",
+        "en": "Russian White movement"
+      },
+      "countryCode": "russia",
+      "icon": "shield",
+      "parentId": null,
+      "criteria": "Choose only when the cited career explicitly establishes service or organizational membership in this body; not citizenship or sympathy."
+    },
+    {
+      "id": "russia-federation",
+      "kind": "state",
+      "label": {
+        "ko": "러시아 연방 국가기관",
+        "en": "Russian Federation state institutions"
+      },
+      "countryCode": "russia",
+      "icon": "landmark",
+      "parentId": null,
+      "criteria": "Choose only when the cited career explicitly establishes service or organizational membership in this body; not citizenship or sympathy."
+    },
+    {
+      "id": "soviet-party",
+      "kind": "party",
+      "label": {
+        "ko": "소련 공산당·볼셰비키",
+        "en": "Soviet Communist Party and Bolsheviks"
+      },
+      "countryCode": "soviet",
+      "icon": "flag",
+      "parentId": "state-soviet",
+      "criteria": "Choose only when the cited career explicitly establishes service or organizational membership in this body; not citizenship or sympathy."
+    },
+    {
+      "id": "comintern",
+      "kind": "international",
+      "label": {
+        "ko": "코민테른",
+        "en": "Comintern"
+      },
+      "countryCode": null,
+      "icon": "globe",
+      "parentId": null,
+      "criteria": "Choose only when the cited career explicitly establishes service or organizational membership in this body; not citizenship or sympathy."
+    },
+    {
+      "id": "spanish-republic",
+      "kind": "state",
+      "label": {
+        "ko": "스페인 공화파",
+        "en": "Spanish Republic"
+      },
+      "countryCode": "spain",
+      "icon": "landmark",
+      "parentId": null,
+      "criteria": "Choose only when the cited career explicitly establishes service or organizational membership in this body; not citizenship or sympathy."
+    },
+    {
+      "id": "spanish-nationalists",
+      "kind": "force",
+      "label": {
+        "ko": "스페인 국민파·프랑코 정권",
+        "en": "Spanish Nationalists and Franco regime"
+      },
+      "countryCode": "spain",
+      "icon": "shield",
+      "parentId": null,
+      "criteria": "Choose only when the cited career explicitly establishes service or organizational membership in this body; not citizenship or sympathy."
+    },
+    {
+      "id": "german-nazi",
+      "kind": "party",
+      "label": {
+        "ko": "나치당·나치 정권",
+        "en": "Nazi party and regime"
+      },
+      "countryCode": "germany",
+      "icon": "landmark",
+      "parentId": null,
+      "criteria": "Choose only when the cited career explicitly establishes service or organizational membership in this body; not citizenship or sympathy."
+    },
+    {
+      "id": "french-revolution",
+      "kind": "force",
+      "label": {
+        "ko": "프랑스 혁명 진영",
+        "en": "French revolutionary movement"
+      },
+      "countryCode": "france",
+      "icon": "flame",
+      "parentId": null,
+      "criteria": "Choose only when the cited career explicitly establishes service or organizational membership in this body; not citizenship or sympathy."
+    },
+    {
+      "id": "french-monarchy",
+      "kind": "state",
+      "label": {
+        "ko": "프랑스 왕정",
+        "en": "French monarchy"
+      },
+      "countryCode": "france",
+      "icon": "crown",
+      "parentId": null,
+      "criteria": "Choose only when the cited career explicitly establishes service or organizational membership in this body; not citizenship or sympathy."
+    },
+    {
+      "id": "russian-sr",
+      "kind": "party",
+      "label": {
+        "ko": "사회혁명당",
+        "en": "Socialist Revolutionary Party (PSR/SR)"
+      },
+      "countryCode": "russia",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Socialist Revolutionary Party (PSR/SR). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "russian-left-sr",
+      "kind": "party",
+      "label": {
+        "ko": "좌파 사회혁명당",
+        "en": "Party of Left Socialist Revolutionaries"
+      },
+      "countryCode": "russia",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Party of Left Socialist Revolutionaries. Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "russian-mensheviks",
+      "kind": "party",
+      "label": {
+        "ko": "멘셰비키",
+        "en": "Mensheviks (RSDLP)"
+      },
+      "countryCode": "russia",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Mensheviks (RSDLP). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "russian-octobrists",
+      "kind": "party",
+      "label": {
+        "ko": "10월당",
+        "en": "Union of 17 October (Octobrists)"
+      },
+      "countryCode": "russia",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Union of 17 October (Octobrists). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "russian-kadets",
+      "kind": "party",
+      "label": {
+        "ko": "입헌민주당",
+        "en": "Constitutional Democratic Party (Kadets)"
+      },
+      "countryCode": "russia",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Constitutional Democratic Party (Kadets). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "russian-narodnaya-volya",
+      "kind": "force",
+      "label": {
+        "ko": "인민의 의지",
+        "en": "Narodnaya Volya"
+      },
+      "countryCode": "russia",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Narodnaya Volya. Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "russian-provisional-government",
+      "kind": "state",
+      "label": {
+        "ko": "러시아 임시정부",
+        "en": "Russian Provisional Government"
+      },
+      "countryCode": "russia",
+      "icon": "swords",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Russian Provisional Government. Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-french-communist",
+      "kind": "party",
+      "label": {
+        "ko": "프랑스 공산당",
+        "en": "French Communist Party (PCF)"
+      },
+      "countryCode": "france",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in French Communist Party (PCF). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-german-communist",
+      "kind": "party",
+      "label": {
+        "ko": "독일 공산당",
+        "en": "Communist Party of Germany (KPD)"
+      },
+      "countryCode": "germany",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Communist Party of Germany (KPD). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-german-spd",
+      "kind": "party",
+      "label": {
+        "ko": "독일 사회민주당",
+        "en": "Social Democratic Party of Germany (SPD)"
+      },
+      "countryCode": "germany",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Social Democratic Party of Germany (SPD). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-german-sed",
+      "kind": "party",
+      "label": {
+        "ko": "독일 사회주의통일당",
+        "en": "Socialist Unity Party of Germany (SED)"
+      },
+      "countryCode": "east-germany",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Socialist Unity Party of Germany (SED). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-czechoslovak-communist",
+      "kind": "party",
+      "label": {
+        "ko": "체코슬로바키아 공산당",
+        "en": "Communist Party of Czechoslovakia (KSČ)"
+      },
+      "countryCode": "czechoslovakia",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Communist Party of Czechoslovakia (KSČ). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-polish-pzpr",
+      "kind": "party",
+      "label": {
+        "ko": "폴란드 통일노동당",
+        "en": "Polish United Workers' Party (PZPR)"
+      },
+      "countryCode": "poland",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Polish United Workers' Party (PZPR). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-romanian-communist",
+      "kind": "party",
+      "label": {
+        "ko": "루마니아 공산당",
+        "en": "Romanian Communist Party (PCR)"
+      },
+      "countryCode": "romania",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Romanian Communist Party (PCR). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-bulgarian-communist",
+      "kind": "party",
+      "label": {
+        "ko": "불가리아 공산당",
+        "en": "Bulgarian Communist Party (BKP)"
+      },
+      "countryCode": "bulgaria",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Bulgarian Communist Party (BKP). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-hungarian-communist",
+      "kind": "party",
+      "label": {
+        "ko": "헝가리 공산주의자당",
+        "en": "Party of Communists in Hungary (KMP)"
+      },
+      "countryCode": "hungary",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Party of Communists in Hungary (KMP). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-hungarian-workers",
+      "kind": "party",
+      "label": {
+        "ko": "헝가리 노동인민당",
+        "en": "Hungarian Working People's Party (MDP)"
+      },
+      "countryCode": "hungary",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Hungarian Working People's Party (MDP). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-hungarian-socialist-workers",
+      "kind": "party",
+      "label": {
+        "ko": "헝가리 사회주의노동자당",
+        "en": "Hungarian Socialist Workers' Party (MSzMP)"
+      },
+      "countryCode": "hungary",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Hungarian Socialist Workers' Party (MSzMP). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-yugoslav-communist",
+      "kind": "party",
+      "label": {
+        "ko": "유고슬라비아 공산주의자동맹",
+        "en": "Communist Party / League of Communists of Yugoslavia (KPJ/SKJ)"
+      },
+      "countryCode": "yugoslavia",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Communist Party / League of Communists of Yugoslavia (KPJ/SKJ). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-albanian-labour",
+      "kind": "party",
+      "label": {
+        "ko": "알바니아 노동당",
+        "en": "Party of Labour of Albania"
+      },
+      "countryCode": "albania",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Party of Labour of Albania. Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-italian-communist",
+      "kind": "party",
+      "label": {
+        "ko": "이탈리아 공산당",
+        "en": "Communist Party of Italy / Italian Communist Party (PCdI/PCI)"
+      },
+      "countryCode": "italy",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Communist Party of Italy / Italian Communist Party (PCdI/PCI). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-italian-socialist",
+      "kind": "party",
+      "label": {
+        "ko": "이탈리아 사회당",
+        "en": "Italian Socialist Party (PSI)"
+      },
+      "countryCode": "italy",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Italian Socialist Party (PSI). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-italian-fascist",
+      "kind": "party",
+      "label": {
+        "ko": "이탈리아 국가파시스트당",
+        "en": "National Fascist Party (PNF)"
+      },
+      "countryCode": "italy",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in National Fascist Party (PNF). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-spanish-communist",
+      "kind": "party",
+      "label": {
+        "ko": "스페인 공산당",
+        "en": "Communist Party of Spain (PCE)"
+      },
+      "countryCode": "spain",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Communist Party of Spain (PCE). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-spanish-poum",
+      "kind": "party",
+      "label": {
+        "ko": "마르크스주의통일노동자당",
+        "en": "Workers' Party of Marxist Unification (POUM)"
+      },
+      "countryCode": "spain",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Workers' Party of Marxist Unification (POUM). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-portuguese-communist",
+      "kind": "party",
+      "label": {
+        "ko": "포르투갈 공산당",
+        "en": "Portuguese Communist Party (PCP)"
+      },
+      "countryCode": "portugal",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Portuguese Communist Party (PCP). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-greek-communist",
+      "kind": "party",
+      "label": {
+        "ko": "그리스 공산당",
+        "en": "Communist Party of Greece (KKE)"
+      },
+      "countryCode": "greece",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Communist Party of Greece (KKE). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-finnish-social-democratic",
+      "kind": "party",
+      "label": {
+        "ko": "핀란드 사회민주당",
+        "en": "Social Democratic Party of Finland"
+      },
+      "countryCode": "finland",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Social Democratic Party of Finland. Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-finnish-communist",
+      "kind": "party",
+      "label": {
+        "ko": "핀란드 공산당",
+        "en": "Communist Party of Finland (SKP)"
+      },
+      "countryCode": "finland",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Communist Party of Finland (SKP). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-british-labour",
+      "kind": "party",
+      "label": {
+        "ko": "영국 노동당",
+        "en": "Labour Party (United Kingdom)"
+      },
+      "countryCode": "uk",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Labour Party (United Kingdom). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-british-communist",
+      "kind": "party",
+      "label": {
+        "ko": "영국 공산당",
+        "en": "Communist Party of Great Britain (CPGB)"
+      },
+      "countryCode": "uk",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Communist Party of Great Britain (CPGB). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-us-communist",
+      "kind": "party",
+      "label": {
+        "ko": "미국 공산당",
+        "en": "Communist Party USA (CPUSA)"
+      },
+      "countryCode": "usa",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Communist Party USA (CPUSA). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-vietnamese-communist",
+      "kind": "party",
+      "label": {
+        "ko": "베트남 공산당",
+        "en": "Communist Party of Vietnam / Workers' Party of Vietnam"
+      },
+      "countryCode": "vietnam",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Communist Party of Vietnam / Workers' Party of Vietnam. Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-korean-workers",
+      "kind": "party",
+      "label": {
+        "ko": "조선로동당",
+        "en": "Workers' Party of Korea (WPK)"
+      },
+      "countryCode": "north-korea",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Workers' Party of Korea (WPK). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-choson-new-people",
+      "kind": "party",
+      "label": {
+        "ko": "조선신민당",
+        "en": "New People's Party of Korea"
+      },
+      "countryCode": "north-korea",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in New People's Party of Korea. Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-korean-democratic",
+      "kind": "party",
+      "label": {
+        "ko": "조선민주당",
+        "en": "Democratic Party of Korea"
+      },
+      "countryCode": "north-korea",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Democratic Party of Korea. Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-indonesian-communist",
+      "kind": "party",
+      "label": {
+        "ko": "인도네시아 공산당",
+        "en": "Communist Party of Indonesia (PKI)"
+      },
+      "countryCode": "indonesia",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Communist Party of Indonesia (PKI). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-indian-communist",
+      "kind": "party",
+      "label": {
+        "ko": "인도 공산당",
+        "en": "Communist Party of India (CPI)"
+      },
+      "countryCode": "india",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Communist Party of India (CPI). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-indian-cpim",
+      "kind": "party",
+      "label": {
+        "ko": "인도 공산당(마르크스주의)",
+        "en": "Communist Party of India (Marxist), CPI(M)"
+      },
+      "countryCode": "india",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Communist Party of India (Marxist), CPI(M). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-afghan-pdpa",
+      "kind": "party",
+      "label": {
+        "ko": "아프가니스탄 인민민주당",
+        "en": "People's Democratic Party of Afghanistan (PDPA)"
+      },
+      "countryCode": "afghanistan",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in People's Democratic Party of Afghanistan (PDPA). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-yemeni-socialist",
+      "kind": "party",
+      "label": {
+        "ko": "예멘 사회당",
+        "en": "Yemeni Socialist Party (YSP)"
+      },
+      "countryCode": "yemen",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Yemeni Socialist Party (YSP). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-angolan-mpla",
+      "kind": "party",
+      "label": {
+        "ko": "앙골라 해방인민운동",
+        "en": "Popular Movement for the Liberation of Angola (MPLA)"
+      },
+      "countryCode": "angola",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Popular Movement for the Liberation of Angola (MPLA). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-mozambican-frelimo",
+      "kind": "party",
+      "label": {
+        "ko": "모잠비크 해방전선",
+        "en": "Mozambique Liberation Front (FRELIMO)"
+      },
+      "countryCode": "mozambique",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Mozambique Liberation Front (FRELIMO). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-paigc",
+      "kind": "party",
+      "label": {
+        "ko": "기니·카보베르데 아프리카독립당",
+        "en": "African Party for the Independence of Guinea and Cape Verde (PAIGC)"
+      },
+      "countryCode": "guinea-bissau",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in African Party for the Independence of Guinea and Cape Verde (PAIGC). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-south-african-communist",
+      "kind": "party",
+      "label": {
+        "ko": "남아프리카 공산당",
+        "en": "South African Communist Party (SACP)"
+      },
+      "countryCode": "south-africa",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in South African Communist Party (SACP). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-african-national-congress",
+      "kind": "party",
+      "label": {
+        "ko": "아프리카민족회의",
+        "en": "African National Congress (ANC)"
+      },
+      "countryCode": "south-africa",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in African National Congress (ANC). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-cuban-communist",
+      "kind": "party",
+      "label": {
+        "ko": "쿠바 공산당",
+        "en": "Communist Party of Cuba (PCC)"
+      },
+      "countryCode": "cuba",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Communist Party of Cuba (PCC). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "cuban-july-26",
+      "kind": "force",
+      "label": {
+        "ko": "7월 26일 운동",
+        "en": "26th of July Movement"
+      },
+      "countryCode": "cuba",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in 26th of July Movement. Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "polish-solidarity",
+      "kind": "force",
+      "label": {
+        "ko": "폴란드 연대노조",
+        "en": "Solidarity (Solidarność)"
+      },
+      "countryCode": "poland",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Solidarity (Solidarność). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "polish-kor",
+      "kind": "force",
+      "label": {
+        "ko": "노동자방어위원회",
+        "en": "Workers' Defence Committee (KOR)"
+      },
+      "countryCode": "poland",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Workers' Defence Committee (KOR). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "polish-wzz",
+      "kind": "force",
+      "label": {
+        "ko": "연안 자유노조",
+        "en": "Free Trade Unions of the Coast (WZZ)"
+      },
+      "countryCode": "poland",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Free Trade Unions of the Coast (WZZ). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "french-cgt",
+      "kind": "force",
+      "label": {
+        "ko": "프랑스 노동총동맹",
+        "en": "General Confederation of Labour (CGT, France)"
+      },
+      "countryCode": "france",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in General Confederation of Labour (CGT, France). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "spanish-cnt",
+      "kind": "force",
+      "label": {
+        "ko": "스페인 전국노동연맹",
+        "en": "Confederación Nacional del Trabajo (CNT)"
+      },
+      "countryCode": "spain",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Confederación Nacional del Trabajo (CNT). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "greek-eam",
+      "kind": "force",
+      "label": {
+        "ko": "그리스 민족해방전선",
+        "en": "National Liberation Front (EAM)"
+      },
+      "countryCode": "greece",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in National Liberation Front (EAM). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "greek-elas",
+      "kind": "military",
+      "label": {
+        "ko": "그리스 인민해방군",
+        "en": "Greek People's Liberation Army (ELAS)"
+      },
+      "countryCode": "greece",
+      "icon": "swords",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Greek People's Liberation Army (ELAS). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "french-ftp",
+      "kind": "military",
+      "label": {
+        "ko": "프랑스 의용유격대",
+        "en": "Francs-Tireurs et Partisans (FTP/FTPF)"
+      },
+      "countryCode": "france",
+      "icon": "swords",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Francs-Tireurs et Partisans (FTP/FTPF). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "south-african-mk",
+      "kind": "military",
+      "label": {
+        "ko": "움콘토 웨 시즈웨",
+        "en": "Umkhonto we Sizwe (MK)"
+      },
+      "countryCode": "south-africa",
+      "icon": "swords",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Umkhonto we Sizwe (MK). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "latvian-popular-front",
+      "kind": "force",
+      "label": {
+        "ko": "라트비아 인민전선",
+        "en": "Popular Front of Latvia"
+      },
+      "countryCode": "latvia",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Popular Front of Latvia. Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "estonian-popular-front",
+      "kind": "force",
+      "label": {
+        "ko": "에스토니아 인민전선",
+        "en": "Popular Front of Estonia (Rahvarinne)"
+      },
+      "countryCode": "estonia",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Popular Front of Estonia (Rahvarinne). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "azerbaijani-popular-front",
+      "kind": "force",
+      "label": {
+        "ko": "아제르바이잔 인민전선",
+        "en": "Azerbaijani Popular Front"
+      },
+      "countryCode": "azerbaijan",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Azerbaijani Popular Front. Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "nicaraguan-fsln",
+      "kind": "party",
+      "label": {
+        "ko": "산디니스타 민족해방전선",
+        "en": "Sandinista National Liberation Front (FSLN)"
+      },
+      "countryCode": "nicaragua",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Sandinista National Liberation Front (FSLN). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "german-kpo",
+      "kind": "party",
+      "label": {
+        "ko": "독일 공산당 반대파",
+        "en": "Communist Party of Germany Opposition (KPO)"
+      },
+      "countryCode": "germany",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Communist Party of Germany Opposition (KPO). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "french-girondins",
+      "kind": "force",
+      "label": {
+        "ko": "지롱드파",
+        "en": "Girondins"
+      },
+      "countryCode": "france",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Girondins. Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "french-jacobins",
+      "kind": "force",
+      "label": {
+        "ko": "자코뱅 클럽",
+        "en": "Jacobin Club"
+      },
+      "countryCode": "france",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Jacobin Club. Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "french-feuillants",
+      "kind": "force",
+      "label": {
+        "ko": "푀양파",
+        "en": "Feuillants"
+      },
+      "countryCode": "france",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Feuillants. Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-mongolian-people",
+      "kind": "party",
+      "label": {
+        "ko": "몽골인민당·인민혁명당",
+        "en": "Mongolian People's Party / Mongolian People's Revolutionary Party"
+      },
+      "countryCode": "mongolia",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Mongolian People's Party / Mongolian People's Revolutionary Party. Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-lao-revolutionary",
+      "kind": "party",
+      "label": {
+        "ko": "라오인민혁명당",
+        "en": "Lao People's Revolutionary Party"
+      },
+      "countryCode": "laos",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Lao People's Revolutionary Party. Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-kampuchean-communist",
+      "kind": "party",
+      "label": {
+        "ko": "캄푸치아 공산당",
+        "en": "Communist Party of Kampuchea (CPK)"
+      },
+      "countryCode": "cambodia",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Communist Party of Kampuchea (CPK). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-kampuchean-revolutionary",
+      "kind": "party",
+      "label": {
+        "ko": "캄푸치아 인민혁명당",
+        "en": "Kampuchean People's Revolutionary Party (KPRP)"
+      },
+      "countryCode": "cambodia",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Kampuchean People's Revolutionary Party (KPRP). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-japanese-communist",
+      "kind": "party",
+      "label": {
+        "ko": "일본 공산당",
+        "en": "Japanese Communist Party (JCP)"
+      },
+      "countryCode": "japan",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Japanese Communist Party (JCP). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-brazilian-communist",
+      "kind": "party",
+      "label": {
+        "ko": "브라질 공산당",
+        "en": "Brazilian Communist Party (PCB)"
+      },
+      "countryCode": "brazil",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Brazilian Communist Party (PCB). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-chilean-communist",
+      "kind": "party",
+      "label": {
+        "ko": "칠레 공산당",
+        "en": "Communist Party of Chile"
+      },
+      "countryCode": "chile",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Communist Party of Chile. Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-ethiopian-workers",
+      "kind": "party",
+      "label": {
+        "ko": "에티오피아 노동자당",
+        "en": "Workers' Party of Ethiopia"
+      },
+      "countryCode": "ethiopia",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Workers' Party of Ethiopia. Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-polish-communist",
+      "kind": "party",
+      "label": {
+        "ko": "폴란드 공산당",
+        "en": "Communist Party of Poland (KPP)"
+      },
+      "countryCode": "poland",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Communist Party of Poland (KPP). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-polish-workers",
+      "kind": "party",
+      "label": {
+        "ko": "폴란드 노동자당",
+        "en": "Polish Workers' Party (PPR)"
+      },
+      "countryCode": "poland",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Polish Workers' Party (PPR). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-polish-peoples",
+      "kind": "party",
+      "label": {
+        "ko": "폴란드 인민당",
+        "en": "Polish People's Party (PSL)"
+      },
+      "countryCode": "poland",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Polish People's Party (PSL). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-sdkpil",
+      "kind": "party",
+      "label": {
+        "ko": "폴란드왕국·리투아니아 사회민주당",
+        "en": "Social Democracy of the Kingdom of Poland and Lithuania (SDKPiL)"
+      },
+      "countryCode": "poland",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Social Democracy of the Kingdom of Poland and Lithuania (SDKPiL). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-korean-communist",
+      "kind": "party",
+      "label": {
+        "ko": "조선공산당",
+        "en": "Communist Party of Korea"
+      },
+      "countryCode": "south-korea",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Communist Party of Korea. Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-south-korean-workers",
+      "kind": "party",
+      "label": {
+        "ko": "남조선로동당",
+        "en": "Workers' Party of South Korea"
+      },
+      "countryCode": "south-korea",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Workers' Party of South Korea. Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-north-korean-workers",
+      "kind": "party",
+      "label": {
+        "ko": "북조선로동당",
+        "en": "Workers' Party of North Korea"
+      },
+      "countryCode": "north-korea",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Workers' Party of North Korea. Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-french-sfio",
+      "kind": "party",
+      "label": {
+        "ko": "노동자 인터내셔널 프랑스 지부",
+        "en": "French Section of the Workers' International (SFIO)"
+      },
+      "countryCode": "france",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in French Section of the Workers' International (SFIO). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-spanish-socialist",
+      "kind": "party",
+      "label": {
+        "ko": "스페인 사회노동당",
+        "en": "Spanish Socialist Workers' Party (PSOE)"
+      },
+      "countryCode": "spain",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Spanish Socialist Workers' Party (PSOE). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-german-cdu",
+      "kind": "party",
+      "label": {
+        "ko": "독일 기독교민주연합",
+        "en": "Christian Democratic Union (CDU)"
+      },
+      "countryCode": "germany",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Christian Democratic Union (CDU). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-british-conservative",
+      "kind": "party",
+      "label": {
+        "ko": "영국 보수당",
+        "en": "Conservative Party (United Kingdom)"
+      },
+      "countryCode": "uk",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Conservative Party (United Kingdom). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-australian-labor",
+      "kind": "party",
+      "label": {
+        "ko": "오스트레일리아 노동당",
+        "en": "Australian Labor Party (ALP)"
+      },
+      "countryCode": "australia",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Australian Labor Party (ALP). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-indian-congress",
+      "kind": "party",
+      "label": {
+        "ko": "인도 국민회의",
+        "en": "Indian National Congress"
+      },
+      "countryCode": "india",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Indian National Congress. Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-algerian-fln",
+      "kind": "party",
+      "label": {
+        "ko": "알제리 민족해방전선",
+        "en": "National Liberation Front (FLN, Algeria)"
+      },
+      "countryCode": "algeria",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in National Liberation Front (FLN, Algeria). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-congolese-labour",
+      "kind": "party",
+      "label": {
+        "ko": "콩고 노동당",
+        "en": "Congolese Party of Labour (PCT)"
+      },
+      "countryCode": "congo-republic",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Congolese Party of Labour (PCT). Never infer affiliation from nationality, residence or ideology.",
+      "countryLabel": {
+        "ko": "콩고공화국",
+        "en": "Republic of the Congo"
+      }
+    },
+    {
+      "id": "party-congolese-mnc",
+      "kind": "party",
+      "label": {
+        "ko": "콩고민족운동",
+        "en": "Congolese National Movement (MNC)"
+      },
+      "countryCode": "congo",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Congolese National Movement (MNC). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-grenadian-new-jewel",
+      "kind": "party",
+      "label": {
+        "ko": "신보석운동",
+        "en": "New JEWEL Movement (NJM)"
+      },
+      "countryCode": "grenada",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in New JEWEL Movement (NJM). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "lithuanian-sajudis",
+      "kind": "force",
+      "label": {
+        "ko": "사유디스",
+        "en": "Sąjūdis (Reform Movement of Lithuania)"
+      },
+      "countryCode": "lithuania",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Sąjūdis (Reform Movement of Lithuania). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "polish-home-army",
+      "kind": "military",
+      "label": {
+        "ko": "폴란드 국내군",
+        "en": "Home Army (Armia Krajowa, AK)"
+      },
+      "countryCode": "poland",
+      "icon": "landmark",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Home Army (Armia Krajowa, AK). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "ukrainian-insurgent-army-makhno",
+      "kind": "military",
+      "label": {
+        "ko": "우크라이나 혁명반란군",
+        "en": "Revolutionary Insurgent Army of Ukraine (Makhnovists)"
+      },
+      "countryCode": "ukraine",
+      "icon": "landmark",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Revolutionary Insurgent Army of Ukraine (Makhnovists). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "russian-rovs",
+      "kind": "military",
+      "label": {
+        "ko": "러시아 전군연합",
+        "en": "Russian All-Military Union (ROVS)"
+      },
+      "countryCode": "russia",
+      "icon": "landmark",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Russian All-Military Union (ROVS). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "russian-orthodox-church",
+      "kind": "institution",
+      "label": {
+        "ko": "러시아 정교회",
+        "en": "Russian Orthodox Church"
+      },
+      "countryCode": "russia",
+      "icon": "landmark",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Russian Orthodox Church. Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "international-un",
+      "kind": "international",
+      "label": {
+        "ko": "유엔",
+        "en": "United Nations"
+      },
+      "countryCode": null,
+      "icon": "landmark",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in United Nations. Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "international-iwa",
+      "kind": "international",
+      "label": {
+        "ko": "국제노동자협회(제1인터내셔널)",
+        "en": "International Workingmen's Association (First International)"
+      },
+      "countryCode": null,
+      "icon": "landmark",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in International Workingmen's Association (First International). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "international-iww",
+      "kind": "international",
+      "label": {
+        "ko": "세계산업노동자연맹",
+        "en": "Industrial Workers of the World (IWW)"
+      },
+      "countryCode": null,
+      "icon": "landmark",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Industrial Workers of the World (IWW). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "american-relief-administration",
+      "kind": "institution",
+      "label": {
+        "ko": "미국구호청",
+        "en": "American Relief Administration (ARA)"
+      },
+      "countryCode": "usa",
+      "icon": "landmark",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in American Relief Administration (ARA). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "french-catholic-royal-army",
+      "kind": "military",
+      "label": {
+        "ko": "가톨릭 왕당군",
+        "en": "Catholic and Royal Army (Vendée)"
+      },
+      "countryCode": "france",
+      "icon": "landmark",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Catholic and Royal Army (Vendée). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "french-conde-army",
+      "kind": "military",
+      "label": {
+        "ko": "콩데군",
+        "en": "Army of Condé"
+      },
+      "countryCode": "france",
+      "icon": "landmark",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Army of Condé. Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "french-action-francaise",
+      "kind": "force",
+      "label": {
+        "ko": "악시옹 프랑세즈",
+        "en": "Action Française"
+      },
+      "countryCode": "france",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Action Française. Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "french-enrages",
+      "kind": "force",
+      "label": {
+        "ko": "앙라제",
+        "en": "Enragés"
+      },
+      "countryCode": "france",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Enragés. Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "french-equals",
+      "kind": "force",
+      "label": {
+        "ko": "평등주의자 결사",
+        "en": "Conspiracy of the Equals / Société des Égaux"
+      },
+      "countryCode": "france",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Conspiracy of the Equals / Société des Égaux. Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "russian-bund",
+      "kind": "party",
+      "label": {
+        "ko": "유대인 노동자 총동맹(분트)",
+        "en": "General Jewish Labour Bund"
+      },
+      "countryCode": "russia",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in General Jewish Labour Bund. Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "russian-rsdlp",
+      "kind": "party",
+      "label": {
+        "ko": "러시아 사회민주노동당",
+        "en": "Russian Social Democratic Labour Party (RSDLP)"
+      },
+      "countryCode": "russia",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Russian Social Democratic Labour Party (RSDLP). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "russian-emancipation-labour",
+      "kind": "force",
+      "label": {
+        "ko": "노동해방단",
+        "en": "Emancipation of Labour group"
+      },
+      "countryCode": "russia",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Emancipation of Labour group. Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "state-congo-republic",
+      "kind": "state",
+      "label": {
+        "ko": "콩고공화국 국가기관",
+        "en": "Republic of the Congo state institutions"
+      },
+      "countryCode": "congo-republic",
+      "countryLabel": {
+        "ko": "콩고공화국",
+        "en": "Republic of the Congo"
+      },
+      "icon": "landmark",
+      "parentId": null,
+      "criteria": "Actual service in Republic of the Congo (Congo-Brazzaville) state institutions, not DR Congo (Congo-Kinshasa). Not citizenship or sympathy."
+    }
+  ],
+  "legacy": {
+    "party-leadership": [
+      "political-leadership",
+      "soviet-party"
+    ],
+    "party-secretariat-cadres": [
+      "organizing",
+      "soviet-party"
+    ],
+    "head-of-government": [
+      "government",
+      "state-soviet"
+    ],
+    "defence": [
+      "military",
+      "state-soviet"
+    ],
+    "state-security": [
+      "security",
+      "state-soviet"
+    ],
+    "ideology-propaganda": [
+      "propaganda",
+      "soviet-party"
+    ],
+    "culture-literature": [
+      "propaganda",
+      "state-soviet"
+    ],
+    "state-head": [
+      "government",
+      null
+    ],
+    "foreign-affairs": [
+      "diplomacy",
+      "state-soviet"
+    ],
+    "nationalities-federal": [
+      "government",
+      "state-soviet"
+    ],
+    "central-planning": [
+      "economy",
+      "state-soviet"
+    ],
+    "economic-management": [
+      "economy",
+      "state-soviet"
+    ],
+    "heavy-military-industry": [
+      "industry",
+      "state-soviet"
+    ],
+    "agriculture": [
+      "agriculture",
+      "state-soviet"
+    ],
+    "science-nuclear-space": [
+      "science",
+      "state-soviet"
+    ],
+    "comintern": [
+      "diplomacy",
+      "comintern"
+    ],
+    "writer-artist": [
+      "arts",
+      null
+    ],
+    "theorist": [
+      "scholarship",
+      null
+    ],
+    "scholar": [
+      "scholarship",
+      null
+    ],
+    "military-commander": [
+      "military",
+      null
+    ],
+    "ccp-leadership": [
+      "political-leadership",
+      "china-ccp"
+    ],
+    "prc-government": [
+      "government",
+      "china-prc"
+    ],
+    "ccp-security": [
+      "security",
+      "china-ccp"
+    ],
+    "ccp-ideology-propaganda": [
+      "propaganda",
+      "china-ccp"
+    ],
+    "prc-economy-planning": [
+      "economy",
+      "china-prc"
+    ],
+    "prc-foreign-affairs": [
+      "diplomacy",
+      "china-prc"
+    ]
+  }
+}
