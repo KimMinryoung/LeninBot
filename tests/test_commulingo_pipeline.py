@@ -10,15 +10,15 @@ from unittest.mock import AsyncMock, Mock, patch
 from types import SimpleNamespace
 from concurrent.futures import ThreadPoolExecutor
 
-from commulingo_pipeline.evidence import snapshot, compile_evidence
-from commulingo_pipeline.engine import Engine, Result
-from commulingo_pipeline.store import Store, LostLease, BudgetUnavailable
+from commulingo.pipeline.evidence import snapshot, compile_evidence
+from commulingo.pipeline.engine import Engine, Result
+from commulingo.pipeline.store import Store, LostLease, BudgetUnavailable
 
 
 class EvidenceTests(unittest.TestCase):
     def test_person_create_rejects_update_only_fields_in_tool_schema(self):
         from jsonschema import Draft202012Validator
-        from runtime_tools.commulingo_people import COMMULINGO_PERSON_CREATE_TOOL, COMMULINGO_PERSON_UPDATE_TOOL
+        from commulingo.people import COMMULINGO_PERSON_CREATE_TOOL, COMMULINGO_PERSON_UPDATE_TOOL
         for field,value in [('aliasEdits',[]),('careerEdits',[]),('sceneEdits',[]),('expectedRevision','revision')]:
             with self.subTest(field=field):
                 create = COMMULINGO_PERSON_CREATE_TOOL['input_schema']['properties']['fields']
@@ -34,7 +34,7 @@ class EvidenceTests(unittest.TestCase):
         self.assertEqual(source['id'],same['id'])
 
     def test_passage_labels_resolve_to_displayed_paragraphs(self):
-        from commulingo_pipeline.evidence import SourceHandles, Passages, resolve_passages
+        from commulingo.pipeline.evidence import SourceHandles, Passages, resolve_passages
         body = ('Intro sentence here.\n•\n그는 1917년에 입당했다 — «Правда» 편집부에서 일했다.\n\n'
                 'Later he was exiled to Siberia! Final sentence of the page.')
         source = snapshot('https://example.org/source', body)
@@ -93,7 +93,7 @@ class EvidenceTests(unittest.TestCase):
 
 class PlannerSelectionTests(unittest.TestCase):
     def candidates(self, ordinary, *, gaps=(), jobs=(), limit=40):
-        from commulingo_pipeline.planner import Planner
+        from commulingo.pipeline.planner import Planner
         cur = Mock()
         cur.fetchall.side_effect = [ordinary, gaps, jobs]
         store = Mock()
@@ -101,7 +101,7 @@ class PlannerSelectionTests(unittest.TestCase):
         def transaction():
             yield cur
         store.transaction = transaction
-        with patch('commulingo_pipeline.planner.report_mentions_by_term', return_value={}):
+        with patch('commulingo.pipeline.planner.report_mentions_by_term', return_value={}):
             return Planner(store, overlap_allow=[], exclude=[]).candidates(limit)
 
     def row(self, target):
@@ -109,8 +109,8 @@ class PlannerSelectionTests(unittest.TestCase):
                     priority=20, baseline='new', reason='Missing facts')
 
     def test_person_commissions_use_importance_cap_and_grace(self):
-        from commulingo_pipeline.planner import Planner
-        from commulingo_pipeline.store import GRACE_PARAMS
+        from commulingo.pipeline.planner import Planner
+        from commulingo.pipeline.store import GRACE_PARAMS
         cur = Mock()
         cur.fetchall.side_effect = [[], [], []]
         store = Mock()
@@ -118,7 +118,7 @@ class PlannerSelectionTests(unittest.TestCase):
         def transaction():
             yield cur
         store.transaction = transaction
-        with patch('commulingo_pipeline.planner.report_mentions_by_term', return_value={}):
+        with patch('commulingo.pipeline.planner.report_mentions_by_term', return_value={}):
             Planner(store).candidates(5)
         sql, params = cur.execute.call_args_list[0].args
         self.assertIn("100 - LEAST((SELECT count(DISTINCT e.event_id)", sql)  # importance ordering
@@ -138,7 +138,7 @@ class PlannerSelectionTests(unittest.TestCase):
         self.assertEqual(gap_params[0], ['battle-of-lake-khasan'])
 
     def test_editor_commissions_first_section_without_section_quota(self):
-        from commulingo_pipeline.planner import Planner
+        from commulingo.pipeline.planner import Planner
         cur = Mock()
         cur.fetchall.side_effect = [[], [], []]
         store = Mock()
@@ -146,7 +146,7 @@ class PlannerSelectionTests(unittest.TestCase):
         def transaction():
             yield cur
         store.transaction = transaction
-        with patch('commulingo_pipeline.planner.report_mentions_by_term', return_value={}):
+        with patch('commulingo.pipeline.planner.report_mentions_by_term', return_value={}):
             Planner(store, overlap_allow=[], exclude=[], concrete=True).candidates(5)
         sql = cur.execute.call_args_list[0].args[0]
         self.assertIn("('sections',50,NOT EXISTS (SELECT 1 FROM commulingo_person_sections", sql)
@@ -166,7 +166,7 @@ class PlannerSelectionTests(unittest.TestCase):
                       cur.execute.call_args.args[0])
 
     def test_term_candidates_are_ordered_by_body_and_report_mentions(self):
-        from commulingo_pipeline.planner import Planner
+        from commulingo.pipeline.planner import Planner
         cur = Mock()
         rows = [dict(kind='term', action='update', target=t, topic='history', priority=40, baseline='b',
                      reason='r', body_empty=empty) for t, empty in
@@ -177,7 +177,7 @@ class PlannerSelectionTests(unittest.TestCase):
         def transaction():
             yield cur
         store.transaction = transaction
-        with patch('commulingo_pipeline.planner.report_mentions_by_term',
+        with patch('commulingo.pipeline.planner.report_mentions_by_term',
                    return_value={'popular': 18, 'written-popular': 40}):
             selected = Planner(store, overlap_allow=[], exclude=[]).candidates(10)
         self.assertEqual([r['target'] for r in selected], ['popular', 'quiet', 'written-popular', 'written'])
@@ -281,14 +281,14 @@ class BatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(store.defer.call_args.kwargs['failed'])
 
     async def test_bundle_judges_each_card_topic_then_advances_to_sections(self):
-        from commulingo_pipeline.stages import judge
-        from commulingo_pipeline.engine import Usage
-        from commulingo_pipeline.bundles import work_topics
+        from commulingo.pipeline.stages import judge
+        from commulingo.pipeline.engine import Usage
+        from commulingo.pipeline.bundles import work_topics
         job = {'id':7,'kind':'person','target':'p','topic':'enrichment',
                'payload':{'topics':['basics','bio','sections']}}
         research = {'current':{'revision':'r1'},'baseline':'r1','status':'complete',
                     'reason':'All card facts already supported','inspected_sources':['source']}
-        with patch('commulingo_pipeline.stages.service.call') as rpc:
+        with patch('commulingo.pipeline.stages.service.call') as rpc:
             result = await judge(job,[{'stage':'research','value':research}],Usage(),.2)
         self.assertEqual([c.args[0]['topic'] for c in rpc.call_args_list],['basics','bio'])
         self.assertEqual({c.args[0]['expectedRevision'] for c in rpc.call_args_list},{'r1'})
@@ -297,28 +297,28 @@ class BatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(work_topics({**job,'payload':{**job['payload'],**result.value}}),['sections'])
 
     async def test_bundle_unavailable_does_not_skip_topics(self):
-        from commulingo_pipeline.stages import judge
-        from commulingo_pipeline.engine import Usage
+        from commulingo.pipeline.stages import judge
+        from commulingo.pipeline.engine import Usage
         job = {'id':7,'kind':'person','target':'p','topic':'enrichment',
                'payload':{'topics':['bio','sections']}}
-        with patch('commulingo_pipeline.stages.service.call'):
+        with patch('commulingo.pipeline.stages.service.call'):
             result = await judge(job,[{'stage':'research','value':{'status':'sources_unavailable'}}],Usage(),.2)
         self.assertEqual(result.status,'deferred')
         self.assertNotIn('remaining_topics',result.value)
 
     async def test_approved_card_advances_without_reusing_its_draft(self):
-        from commulingo_pipeline.workflow import publish
-        from commulingo_pipeline.stages import latest, write_request
-        from commulingo_pipeline.patches import patch_hash
-        from commulingo_pipeline.engine import Usage
+        from commulingo.pipeline.workflow import publish
+        from commulingo.pipeline.stages import latest, write_request
+        from commulingo.pipeline.patches import patch_hash
+        from commulingo.pipeline.engine import Usage
         job = {'id':7,'kind':'person','action':'update','target':'p','topic':'enrichment',
                'payload':{'topics':['bio','sections'],'workflow':'editor'}}
         draft = {'fields':{'bio':{'ko':'소개','en':'Bio'},'expectedRevision':'r1'},'sources':['source']}
         artifacts = [{'stage':'research','value':{'editor_version':2,'research':{'baseline':'r1'},'draft':draft}},
                      {'stage':'review','value':{'decision':'approve','reason':'Verified','checks':[],
                                                 'approved_patch_hash':patch_hash(write_request(job,draft))}}]
-        with patch('commulingo_pipeline.config.load',return_value={'phase':'live'}), \
-             patch('commulingo_pipeline.service.call',return_value={'status':'approved','suggestionId':9}) as rpc, \
+        with patch('commulingo.pipeline.config.load',return_value={'phase':'live'}), \
+             patch('commulingo.pipeline.service.call',return_value={'status':'approved','suggestionId':9}) as rpc, \
              patch.object(Store,'publication_slot') as slot:
             result = await publish(job,artifacts,Usage(),.2)
         slot.assert_not_called()
@@ -332,8 +332,8 @@ class BatchTests(unittest.IsolatedAsyncioTestCase):
 
 class EngineTests(unittest.IsolatedAsyncioTestCase):
     async def test_explicit_gap_contract_is_single_requested_entry(self):
-        from commulingo_pipeline.stages import Discover
-        from commulingo_pipeline.engine import Usage
+        from commulingo.pipeline.stages import Discover
+        from commulingo.pipeline.engine import Usage
         from jsonschema import validate, ValidationError
         payload = {'material_id':'gap:2007','requested_kind':'term','label':'독립',
                    'body':'독립과 주변 인물 및 개념들'}
@@ -351,7 +351,7 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
             decorated = {**candidate,'label':'독립 (Independence)','mention':'본문 표현: 독립','kind':'person'}
             validate({'candidates':[decorated]},schema)
             await kwargs['handler']({'candidates':[decorated]})
-        with patch('commulingo_pipeline.stages.model_call',side_effect=model), patch('db.query_one',return_value=None):
+        with patch('commulingo.pipeline.stages.model_call',side_effect=model), patch('db.query_one',return_value=None):
             result = await Discover()({'id':1,'payload':payload},[],Usage(),.2)
         self.assertEqual(result.value['candidates'],[candidate])
         # Declining a requested entry needs a visible reason.
@@ -359,7 +359,7 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(ValueError):
                 await kwargs['handler']({'candidates':[]})
             await kwargs['handler']({'candidates':[],'reason':'The entry already exists as another term.'})
-        with patch('commulingo_pipeline.stages.model_call',side_effect=decline), patch('db.query_one',return_value=None):
+        with patch('commulingo.pipeline.stages.model_call',side_effect=decline), patch('db.query_one',return_value=None):
             result = await Discover()({'id':1,'payload':payload},[],Usage(),.2)
         self.assertEqual(result.value, {'candidates':[], 'skip_reason':'The entry already exists as another term.'})
 
@@ -375,9 +375,9 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(store.defer.call_args.kwargs['failed'])
 
     async def test_model_stage_uses_real_dispatcher_for_artifact_schema(self):
-        from commulingo_pipeline.stages import model_call, result_tool
-        from commulingo_pipeline.prompts import spec
-        from commulingo_pipeline.engine import Usage
+        from commulingo.pipeline.stages import model_call, result_tool
+        from commulingo.pipeline.prompts import spec
+        from commulingo.pipeline.engine import Usage
         from tool_gateway.dispatcher import execute_tool
         saved = []
         tool = result_tool({'type':'object','additionalProperties':False,
@@ -405,9 +405,9 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(saved,[{'reason':'A sourced conclusion'}])
 
     async def test_repair_tool_is_a_terminal_including_forced_finalization(self):
-        from commulingo_pipeline.stages import model_call, result_tool
-        from commulingo_pipeline.prompts import spec
-        from commulingo_pipeline.engine import Usage
+        from commulingo.pipeline.stages import model_call, result_tool
+        from commulingo.pipeline.prompts import spec
+        from commulingo.pipeline.engine import Usage
         from tool_gateway.dispatcher import execute_tool
         tool = result_tool({'type':'object','properties':{}})
         repair = {'name':'commulingo_pipeline_repair','input_schema':{
@@ -430,9 +430,9 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(saved,['fixture'])
 
     async def test_model_stage_reruns_on_gpt_when_deepseek_refuses_content(self):
-        from commulingo_pipeline.stages import model_call, result_tool
-        from commulingo_pipeline.prompts import spec
-        from commulingo_pipeline.engine import Usage
+        from commulingo.pipeline.stages import model_call, result_tool
+        from commulingo.pipeline.prompts import spec
+        from commulingo.pipeline.engine import Usage
         tool = result_tool({'type':'object','properties':{'reason':{'type':'string'}},'required':['reason']})
         saved, seen = [], []
         async def handler(value):
@@ -475,7 +475,7 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
     def test_term_fact_echoes_are_dropped_but_real_changes_kept(self):
         # End to end through the editor: test_commulingo_editor
         # EditorContractTests.test_echoed_term_years_never_reach_validation.
-        from commulingo_pipeline.stages import drop_unchanged_term_facts
+        from commulingo.pipeline.stages import drop_unchanged_term_facts
         current = {'startYear':2023,'endYear':None,'period':{'ko':'2023년–현재','en':'2023–present'}}
         fields = {'definition':{'ko':'정의','en':'Definition'},'startYear':2023,'endYear':None,
                   'period':{'ko':'2023년–현재','en':'2023–present'}}
@@ -560,7 +560,7 @@ class PostgresTests(unittest.TestCase):
                 conn.close()
         cls.store = Store(connect)
         with cls.store.transaction() as cur:
-            cur.execute(Path('commulingo_pipeline/schema.sql').read_text())
+            cur.execute(Path('commulingo/pipeline/schema.sql').read_text())
 
     def test_review_repair_survives_replay_and_is_not_consolidated(self):
         row={'id':77,'target_type':'person_section','target_id':'fixture','action':'create',
@@ -618,7 +618,7 @@ class PostgresTests(unittest.TestCase):
             self.assertEqual(cur.fetchone()['metrics'],{'provider_fallback':'openai','rounds_used':3})
 
     def test_consolidate_keeps_all_explicit_gap_links(self):
-        from commulingo_pipeline.bundles import gap_ids
+        from commulingo.pipeline.bundles import gap_ids
         for topic,gap in [('bio',11),('basics',12)]:
             self.store.enqueue(kind='person',action='update',target='bundle',topic=topic,
                                reason='Gap',payload={'gap_id':gap})
@@ -637,7 +637,7 @@ class PostgresTests(unittest.TestCase):
         self.assertEqual(states,{'canary':'ready','budget':'deferred'})
 
     def test_handoff_approval_resumes_bundle_and_ignores_old_reviews(self):
-        from commulingo_pipeline.stages import latest
+        from commulingo.pipeline.stages import latest
         job_id = self.store.enqueue(kind='person',action='update',target='handoff',topic='enrichment',
             reason='test',payload={'topics':['bio','sections']})
         with self.store.transaction() as cur:
@@ -738,7 +738,7 @@ class PostgresTests(unittest.TestCase):
             self.assertEqual(cur.fetchone()['content_hash'],'fixed-hash')
 
     def test_planner_sql_and_material_hash_are_stable(self):
-        from commulingo_pipeline.planner import Planner
+        from commulingo.pipeline.planner import Planner
         # No source data copied from production; only a minimal public-document fixture.
         with self.store.transaction() as cur:
             cur.execute('''CREATE TABLE IF NOT EXISTS research_documents

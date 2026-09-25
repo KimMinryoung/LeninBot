@@ -4,7 +4,7 @@
 Used when config/commulingo_people.json has direct_apply=false, so agent
 edits land as pending rows in commulingo_agent_suggestions instead of being
 applied. Approving reuses the exact apply path the direct mode uses
-(runtime_tools.commulingo_people.apply_edit), so behavior is identical.
+(commulingo.people.apply_edit), so behavior is identical.
 
 Usage (from repo root; needs DB_PASSWORD — see scripts/run_writer_tests.sh
 for the credential-loading pattern, or run inside a service credential env):
@@ -30,7 +30,7 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 from psycopg2.extras import RealDictCursor
 
 from db import get_conn
-from runtime_tools.commulingo_people import apply_edit, _validate, _dumps
+from commulingo.people import apply_edit, _validate, _dumps
 
 
 def _reviewer() -> str:
@@ -76,7 +76,7 @@ def cmd_show(sid: int) -> int:
 
 
 def cmd_review(sid: int, approve: bool, note: str) -> int:
-    from runtime_tools.commulingo_person_service import call_person_service
+    from commulingo.person_service import call_person_service
     with get_conn() as conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
         candidate = _fetch(cur, sid)
     if candidate and (candidate["target_type"] in {"person", "person_section"}

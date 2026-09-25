@@ -22,8 +22,8 @@ class Review:
     async def __call__(self, job, artifacts, usage, budget):
         from .stages import latest, current_artifacts, write_request, model_call, stage_evidence, READS
         from agents.commulingo_reviewer import COMMULINGO_REVIEWER
-        from runtime_tools.commulingo_review_handlers import make_handlers, review_risks
-        from runtime_tools.commulingo_review_policy import DECISION_TOOL
+        from commulingo.review_handlers import make_handlers, review_risks
+        from commulingo.review_policy import DECISION_TOOL
         from runtime_tools.registry import TOOL_HANDLERS
         draft = latest(artifacts,'draft')
         research = latest(artifacts,'research')
@@ -161,7 +161,7 @@ async def publish(job, artifacts, usage, budget):
         # ours to replace; finish quietly instead of failing the atomic publish.
         # One this job's own earlier publish replaced falls through, so the
         # replay returns the stored receipt.
-        from runtime_tools import commulingo_review_queue as queue
+        from commulingo import review_queue as queue
         original = await asyncio.to_thread(queue.suggestion, replaced)
         ours = (original or {}).get('status')=='rejected' and \
             (original.get('review_note') or '')==REPLACED_NOTE_PREFIX+digest

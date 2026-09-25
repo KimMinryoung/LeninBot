@@ -1,8 +1,8 @@
 import unittest
 from unittest.mock import patch
 from llm.call_registry import Decision, DecisionResult
-from runtime_tools.commulingo_activities import activity_questions, activity_person_from, load_catalog
-from runtime_tools import commulingo_classify as c
+from commulingo.activities import activity_questions, activity_person_from, load_catalog
+from commulingo import classify as c
 from tests.test_commulingo_classify import PROFILE, CATALOGS, FIELDS
 
 EVIDENCE=[{'field':'career','source':'https://example.org/kang','locator':'Career','claim':'Party intelligence work','excerpt':'Kang Sheng directed the party intelligence apparatus.'}]
@@ -57,7 +57,7 @@ class ActivitiesTests(unittest.TestCase):
         self.assertIsNone(filled['activities'][0]['startYear'])
 
     def test_search_filters_expand_children_and_reject_unknown_ids(self):
-        from runtime_tools.commulingo_activities import activity_search_params
+        from commulingo.activities import activity_search_params
         params = activity_search_params('military', 'china-ccp')
         self.assertIn('china-ccp', params['descendants'])
         self.assertIn('china-pla', params['descendants'])

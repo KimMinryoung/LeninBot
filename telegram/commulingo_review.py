@@ -2,8 +2,8 @@
 import asyncio
 import json
 from aiogram.types import BufferedInputFile
-from runtime_tools import commulingo_review_queue as queue
-from runtime_tools.commulingo_person_service import call_person_service
+from commulingo import review_queue as queue
+from commulingo.person_service import call_person_service
 
 HELP = ('/commulingo_review list\n/commulingo_review show 번호\n'
         '/commulingo_review approve 번호 승인 사유\n/commulingo_review reject 번호 반려 사유\n'

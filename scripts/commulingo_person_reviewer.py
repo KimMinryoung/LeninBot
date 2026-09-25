@@ -12,10 +12,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-from runtime_tools import commulingo_review_queue as queue
-from runtime_tools.commulingo_person_service import call_person_service
-from runtime_tools.commulingo_review_policy import DECISION_TOOL, validate_decision
-from runtime_tools.commulingo_review_handlers import make_handlers, review_risks
+from commulingo import review_queue as queue
+from commulingo.person_service import call_person_service
+from commulingo.review_policy import DECISION_TOOL, validate_decision
+from commulingo.review_handlers import make_handlers, review_risks
 
 logger = logging.getLogger('commulingo_person_reviewer')
 
@@ -41,8 +41,8 @@ async def research(row, current, tracker):
     policy = resolve_agent_inference_policy(spec)
     binding = resolve_agent_tool_loop(spec,policy)
     from types import SimpleNamespace
-    from commulingo_pipeline.citation_gate import review_gate
-    from commulingo_pipeline.search_triage import Shadow
+    from commulingo.pipeline.citation_gate import review_gate
+    from commulingo.pipeline.search_triage import Shadow
     snapshots,box = {},{}
     usage = SimpleNamespace(tracker=tracker)
     triage = Shadow(row.get('target_type','person'),row.get('target_id'),current,usage=usage)
@@ -51,8 +51,8 @@ async def research(row, current, tracker):
     context = new_run_context(interface='autonomous', agent_name=spec.name, is_owner=True,
         scope_type='maintenance_job',scope_id=f"commulingo_review:{row['id']}")
     with caller_scope(context):
-        from runtime_tools.commulingo_run import RunBudget
-        from runtime_tools.commulingo_research_memory import STORE_PATH
+        from commulingo.run import RunBudget
+        from commulingo.research_memory import STORE_PATH
         run = RunBudget(policy, STORE_PATH, 'review', str(row['id']))
         try:
             run.remaining()
@@ -93,14 +93,14 @@ async def process(job, tracker):
         decision,fetched = await asyncio.wait_for(research(row,current,tracker),timeout=480)
     if not queue.save_decision(job,decision,fetched) or not queue.owned(job): return
     if decision['decision']=='revise':
-        from commulingo_pipeline.store import Store
+        from commulingo.pipeline.store import Store
         repair_id = await asyncio.to_thread(Store().enqueue_review_repair,row,decision)
         queue.finish(job,'escalated',f'Automatic correction job {repair_id}; no human review requested')
         return
     if decision['decision']=='escalate':
         queue.finish(job,'escalated',decision['reason'])
         return
-    from commulingo_pipeline.stages import review_note_checks
+    from commulingo.pipeline.stages import review_note_checks
     note = decision['reason']+'\n'+json.dumps(review_note_checks(decision['checks']),ensure_ascii=False)
     try:
         result = await asyncio.to_thread(call_person_service, {'command':'review','suggestionId':row['id'],**({'target':'term'} if row['target_type']=='term' else {}),
@@ -149,8 +149,8 @@ async def run(*, notify_only=False, skip_budget=False):
     if budget_deferred:
         state = 'budget_deferred'
     if tracker.get('run_id'):
-        from runtime_tools.commulingo_run import finish_record
-        from runtime_tools.commulingo_research_memory import STORE_PATH
+        from commulingo.run import finish_record
+        from commulingo.research_memory import STORE_PATH
         finish_record(STORE_PATH, tracker['run_id'], state)
     return {'status':state,'suggestion_id':job['suggestion_id'],'run_id':tracker.get('run_id'),
             'cost_usd':float(tracker.get('total_cost') or 0)}

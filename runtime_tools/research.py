@@ -248,7 +248,7 @@ def _mechanical_spelling_pass(content: str) -> dict | None:
     one-shot proofread) can revert individual corrections. Returns a pending
     state dict, or None when nothing needed correcting.
     """
-    from runtime_tools.commulingo_people import _name_normalization, _QUOTED_SPAN_RE
+    from commulingo.people import _name_normalization, _QUOTED_SPAN_RE
 
     text = str(content or "")
     norm = _name_normalization()

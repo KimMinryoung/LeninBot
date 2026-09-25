@@ -7,8 +7,8 @@
 import unittest
 from datetime import datetime, timedelta, timezone
 
-from commulingo_pipeline import evidence
-from commulingo_pipeline.evidence import MAX_SNAPSHOT_CHARS, SourcePages, snapshot
+from commulingo.pipeline import evidence
+from commulingo.pipeline.evidence import MAX_SNAPSHOT_CHARS, SourcePages, snapshot
 
 URL = "https://en.wikipedia.org/wiki/Alexei_Kosygin"
 T0 = datetime.now(timezone.utc) - timedelta(days=1)

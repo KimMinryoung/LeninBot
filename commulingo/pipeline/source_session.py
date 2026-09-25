@@ -5,7 +5,7 @@ import re
 from datetime import datetime, timezone
 
 from provenance.runtime import external_body
-from runtime_tools.commulingo_review_policy import external_url
+from commulingo.review_policy import external_url
 from .evidence import Passages, snapshot, MAX_SNAPSHOT_CHARS
 
 

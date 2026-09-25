@@ -4,7 +4,7 @@
 The em dash is not this site's punctuation. On 2026-08-09 the only ones in
 hand-written text were inside quoted titles (「스페인의 교훈 — 마지막 경고」);
 every other one, 3,113 rows of them, came from the curator lanes, which reach
-for it in both languages. `_em_dash_problem` in runtime_tools/commulingo_people.py
+for it in both languages. `_em_dash_problem` in commulingo/people.py
 now stops new ones at the save. This clears the ones already stored.
 
 It is a rewrite, not a substitution. Swapping the character for a comma
@@ -47,7 +47,7 @@ os.environ.setdefault("COMMULINGO_SUGGESTED_BY", "commulingo-em-dash-sweep")
 from bot_config import _deepseek_anthropic_client, _resolve_deepseek_model  # noqa: E402
 from db import query as db_query, get_conn  # noqa: E402
 from psycopg2.extras import RealDictCursor  # noqa: E402
-from runtime_tools.commulingo_people import _QUOTED_SPAN_RE, _write_revision  # noqa: E402
+from commulingo.people import _QUOTED_SPAN_RE, _write_revision  # noqa: E402
 
 logger = logging.getLogger("commulingo_strip_em_dashes")
 LOCK_PATH = Path("/tmp/leninbot-commulingo-em-dash-sweep.lock")

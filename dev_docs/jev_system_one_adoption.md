@@ -32,8 +32,8 @@ CommuLingo의 필요한 설명·라벨·원문 발췌 전송과 자동 실행은
 
 ## 분류 기준과 감사
 
-`runtime_tools/commulingo_classify.py`가 criteria와 허용 선택지를 관리한다.
-`commulingo_pipeline/decisions.py`는 작성 schema에서 분류 필드를 제거하고 판정 결과를 채운다.
+`commulingo/classify.py`가 criteria와 허용 선택지를 관리한다.
+`commulingo/pipeline/decisions.py`는 작성 schema에서 분류 필드를 제거하고 판정 결과를 채운다.
 기존 인물의 그룹·관직은 보존하며 신규 또는 누락 항목만 채운다.
 수정되는 citizenship/nationalOrigin/fate의 코드는 라벨과 해당 근거를 사용한다.
 분류 입력과 결과는 체크포인트에 캐시하여 동일 초안의 재시도 비용을 줄인다.
@@ -47,7 +47,7 @@ CommuLingo의 필요한 설명·라벨·원문 발췌 전송과 자동 실행은
 판정 장애와 낮은 신뢰도는 다르다. editor는 장애로 초안을 버리거나 작성 LLM에 분류를 떠넘기지 않는다.
 직접 등록 도구도 공통 분류 함수를 사용하지만 editor의 체크포인트 복구는 editor 전용이다.
 
-현재 등록·보강 경로는 `commulingo_activities.py`와 frontend의 `activity-catalog.json`을 공유한다. 국적별 role 목록 대신 기능 13개와 실제 활동 소속을 판정하고, 같은 경력을 지지하는 출처 발췌를 함께 선택한다. 발췌가 없거나 선택이 허용 목록 밖이면 초안을 보존하고 보류한다. `legacy=True`는 이전 분류의 명시적 호환 검사에만 쓰며 운영 작성 경로는 사용하지 않는다. 직접 도구의 낮은 신뢰도 활동 배정은 공통 편집 검토 대기로 보낸다.
+현재 등록·보강 경로는 `commulingo/activities.py`와 frontend의 `activity-catalog.json`을 공유한다. 국적별 role 목록 대신 기능 13개와 실제 활동 소속을 판정하고, 같은 경력을 지지하는 출처 발췌를 함께 선택한다. 발췌가 없거나 선택이 허용 목록 밖이면 초안을 보존하고 보류한다. `legacy=True`는 이전 분류의 명시적 호환 검사에만 쓰며 운영 작성 경로는 사용하지 않는다. 직접 도구의 낮은 신뢰도 활동 배정은 공통 편집 검토 대기로 보낸다.
 
 `list_activity_catalog`가 공통 카탈로그를 반환하고 `get_person.activities`는 원본 활동 묶음을 반환한다. 각 활동은 functionId, affiliationId/affiliationStatus, relation, 기간, primary, evidence를 가진다. 국적이나 연구 주제를 소속으로 대신하지 않는다. `scripts/audit_person_activities.py`는 전체 공개 사전의 기능·소속 후보를 JSONL에 기록하며 사전을 수정하지 않는다. 자동 판정과 출처 검토를 마친 배정을 구별한다.
 
@@ -56,7 +56,7 @@ CommuLingo의 필요한 설명·라벨·원문 발췌 전송과 자동 실행은
 
 ## 인용 지지 게이트
 
-`commulingo_pipeline/citation_gate.py`는 주장·필드·출처 URL·실제 발췌를 판정한다.
+`commulingo/pipeline/citation_gate.py`는 주장·필드·출처 URL·실제 발췌를 판정한다.
 검토 게이트는 검토자가 직접 가져온 발췌와 finding을 사용한다.
 두 게이트는 enforce 설정을 사용하며 임계값 이상의 unrelated/contradicts 또는 boilerplate를
 해당 항목의 수정 요청으로 반환한다. 반박 근거를 나타내는 stance=disputes에서는 contradicts를 허용한다.

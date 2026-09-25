@@ -3,7 +3,7 @@
 scripts/commulingo_people_maintainer.py is the command line around run_once,
 and the gap worker calls run_once to deepen an existing card. Set
 COMMULINGO_SUGGESTED_BY before importing this module: it imports
-runtime_tools.commulingo_people, which reads the lane name once at import time.
+commulingo.people, which reads the lane name once at import time.
 """
 
 from __future__ import annotations
@@ -20,11 +20,11 @@ from pathlib import Path
 from agents import get_agent
 from bot_config import resolve_agent_tool_loop
 from db import query as db_query, query_one as db_query_one
-from runtime_tools.commulingo_lane import (
+from commulingo.lane import (
     COMMULINGO_NO_EDIT_TOOL, NARROW_WRITE_TOOLS, _call_curator_stage,
     build_no_edit_handler, build_retrying_write_handler, completed_run_count,
 )
-from runtime_tools.commulingo_people import (
+from commulingo.people import (
     DENSE_SENTENCE_CHARS, FIELD_LIMITS, SECTION_BODY_TARGET, _dedup_key,
     _surname, sentence_budget, sentence_prescription,
 )
@@ -162,7 +162,7 @@ MAX_SECTIONS = 12
 
 # Nationality flag codes the frontend has vendored SVGs for (data/commulingo/flag-icons.js).
 # The curator must pick citizenship_code / nationalOrigin code from this set or the card shows no flag.
-from runtime_tools.commulingo_people import _NATIONALITY_CODES, _NATIONALITY_POLICY
+from commulingo.people import _NATIONALITY_CODES, _NATIONALITY_POLICY
 
 NATIONALITY_CODES = ", ".join(sorted(_NATIONALITY_CODES))
 
@@ -1141,8 +1141,8 @@ async def _run_new_person_path(cycle: _RunCycle):
 
     Returns the creation result, or None when the run fell back.
     """
-    from runtime_tools.commulingo_run import RunBudget
-    from runtime_tools.commulingo_research_memory import STORE_PATH
+    from commulingo.run import RunBudget
+    from commulingo.research_memory import STORE_PATH
     config, state, tracker = cycle.config, cycle.state, cycle.tracker
     result = None
     # Seeded from disk and merged back below whether or not the stage
@@ -1244,7 +1244,7 @@ def _prepare_enrich_stage(cycle: _RunCycle) -> dict:
     )
     enrich_tools, enrich_handlers = cycle.stage_tools(PEOPLE_ENRICH_WRITE_TOOLS)
     no_edit_box: dict = {}
-    from runtime_tools.commulingo_person_service import call_person_service
+    from commulingo.person_service import call_person_service
     baseline = call_person_service({"command": "read", "id": candidate["id"]})
     baseline["id"] = candidate["id"]
     from provenance.runtime import _wrap_external
@@ -1308,7 +1308,7 @@ def _record_enrich_outcome(cycle: _RunCycle, stage: dict, result: str, enrich_tr
         state["new_cooldown_remaining"] -= 1
     no_edit_reason = no_edit_box.get("reason")
     if no_edit_reason:
-        from runtime_tools.commulingo_person_service import call_person_service
+        from commulingo.person_service import call_person_service
         call_person_service({"command": "enrichment", "id": candidate["id"], "topic": stage["topic"],
             "status": no_edit_box.get("status", "sources_unavailable"), "reason": no_edit_reason,
             "sources": no_edit_box.get("sources", []), "expectedRevision": stage["baseline"]["revision"],
@@ -1341,7 +1341,7 @@ def _finish_run(cycle: _RunCycle, result: str) -> dict:
                 "candidate": candidate and candidate.get("id"), "model": cycle.report_model,
                 "cost_usd": round(float(tracker.get("total_cost") or 0), 4),
                 "rounds": int(tracker.get("rounds_used") or 0), "result": result}
-    from runtime_tools.commulingo_run import submitted_edit
+    from commulingo.run import submitted_edit
     save_state(state)
     edit = submitted_edit(cycle.write_outcomes, db_query_one)
     if not edit or edit.get("status") != "approved":
@@ -1366,7 +1366,7 @@ async def run_once(*, mode: str, candidate_id: str, config: dict) -> dict:
     if not config["enabled"]:
         return {"status": "disabled"}
 
-    from runtime_tools.commulingo_people import direct_apply_enabled
+    from commulingo.people import direct_apply_enabled
     from tool_gateway.inference import resolve_agent_inference_policy
 
     # The shared service can stage a reviewed edit even in direct mode.

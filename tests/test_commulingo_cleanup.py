@@ -3,8 +3,8 @@ from copy import deepcopy
 from unittest import TestCase
 from unittest.mock import Mock
 
-from commulingo_pipeline.cleanup import automatic, has_work, retire
-from commulingo_pipeline.engine import disposition, Result
+from commulingo.pipeline.cleanup import automatic, has_work, retire
+from commulingo.pipeline.engine import disposition, Result
 
 JOB = {'id': 1, 'kind': 'term', 'action': 'update', 'target': 'fixture',
        'topic': 'enrichment', 'reason': 'Bundled enrichment: definition, history',

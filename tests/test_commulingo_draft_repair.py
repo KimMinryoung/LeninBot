@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from commulingo_pipeline.draft_repair import DraftRepair, RepairProtocolError
+from commulingo.pipeline.draft_repair import DraftRepair, RepairProtocolError
 from scripts.commulingo_write_session import draft_id
 from tool_gateway.dispatcher import execute_tool
 from tool_gateway.security import caller_scope, new_run_context

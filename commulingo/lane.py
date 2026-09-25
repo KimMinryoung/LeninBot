@@ -6,7 +6,7 @@ approved-edit counter, narrow write tools whose structured errors become
 retryable tool failures, the typed no-edit terminal, and one stage runner.
 They live here so the lane scripts import a library instead of each other.
 
-This module does not import runtime_tools.commulingo_people or the tool
+This module does not import commulingo.people or the tool
 registry. That module reads the lane name from COMMULINGO_SUGGESTED_BY once, at
 import time, so importing this one never fixes the lane name early.
 """
@@ -19,7 +19,7 @@ from pathlib import Path
 
 from bot_config import resolve_agent_tool_loop
 from db import query_one as db_query_one
-from runtime_tools.commulingo_research_memory import ResearchMemory
+from commulingo.research_memory import ResearchMemory
 from tool_gateway.results import ToolRejection
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -196,7 +196,7 @@ async def _call_curator_stage(
     research_key: str | None = None, baseline: dict | None = None, run_budget=None,
 ) -> tuple[str, dict, dict | None]:
     import asyncio
-    from runtime_tools.commulingo_run import RunBudget, RunFailure
+    from commulingo.run import RunBudget, RunFailure
     from tool_gateway.results import ToolFailure
     binding = resolve_agent_tool_loop(spec, policy)
     memory = ResearchMemory(research_key or f"{spec.name}:{stage}:{task}")

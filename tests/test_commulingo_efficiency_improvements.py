@@ -5,11 +5,11 @@ from unittest import TestCase
 from unittest.mock import AsyncMock, Mock, patch
 
 from commulingo_test_support import HermeticAsyncCase
-from commulingo_pipeline.engine import Engine, Result, Usage
-from commulingo_pipeline.fetch_backoff import FetchBackoff
-from commulingo_pipeline.review_context import context, context_tool
-from commulingo_pipeline.store import BudgetUnavailable
-from commulingo_pipeline import workflow
+from commulingo.pipeline.engine import Engine, Result, Usage
+from commulingo.pipeline.fetch_backoff import FetchBackoff
+from commulingo.pipeline.review_context import context, context_tool
+from commulingo.pipeline.store import BudgetUnavailable
+from commulingo.pipeline import workflow
 from tool_gateway.results import ToolFailure
 
 JOB = {'id': 42, 'kind':'term', 'action':'update', 'topic':'history',
@@ -63,8 +63,8 @@ class PreflightTests(HermeticAsyncCase):
     async def test_provider_fallback_cost_and_jev_are_counted_once(self):
         from dataclasses import replace
         from types import SimpleNamespace
-        from commulingo_pipeline.stages import model_call, result_tool
-        from commulingo_pipeline.prompts import spec
+        from commulingo.pipeline.stages import model_call, result_tool
+        from commulingo.pipeline.prompts import spec
         tool = result_tool({'type':'object','properties':{'reason':{'type':'string'}},'required':['reason']})
         async def refuse(*args,**kwargs):
             kwargs['budget_tracker']['observed_llm_cost_usd'] = .01
@@ -96,8 +96,8 @@ class PreflightTests(HermeticAsyncCase):
     async def test_routed_no_edit_completes_even_when_budget_exhausted(self):
         store = self.store()
         stages = workflow.routed_stages(store)
-        with patch('commulingo_pipeline.service.call',return_value=CURRENT) as read, \
-             patch('commulingo_pipeline.stages.model_call') as model:
+        with patch('commulingo.pipeline.service.call',return_value=CURRENT) as read, \
+             patch('commulingo.pipeline.stages.model_call') as model:
             result = await Engine(store, stages).run_one()
         self.assertEqual(result['stage'],'judge')
         read.assert_called_once()
@@ -108,7 +108,7 @@ class PreflightTests(HermeticAsyncCase):
     async def test_explicit_request_still_needs_budget(self):
         store = self.store({**JOB, 'payload':{'workflow':'editor','gap_id':7}})
         stages = workflow.routed_stages(store)
-        with patch('commulingo_pipeline.service.call',return_value=CURRENT):
+        with patch('commulingo.pipeline.service.call',return_value=CURRENT):
             result = await Engine(store, stages).run_one()
         self.assertEqual(result['status'],'budget_deferred')
         store.reserve.assert_called_once()
@@ -148,7 +148,7 @@ class FetchTests(HermeticAsyncCase):
     async def test_failures_survive_retry_and_offsets_cannot_bypass_backoff(self):
         store, usage = Mock(), Usage()
         call = AsyncMock(return_value=ToolFailure('Fetch diagnosis: http_forbidden - HTTP 403'))
-        with patch('commulingo_pipeline.fetch_backoff.time.time',return_value=1000):
+        with patch('commulingo.pipeline.fetch_backoff.time.time',return_value=1000):
             guard = FetchBackoff(store,JOB,usage,[])
             fetch = guard.wrap('fetch_url',call)
             first, second = await asyncio.gather(fetch(url='https://example.org'),fetch(url='https://example.org',offset=10))
@@ -162,7 +162,7 @@ class FetchTests(HermeticAsyncCase):
             call.assert_awaited_once()
             await fetch(url='https://another.example.org')
             self.assertEqual(call.await_count,2)
-        with patch('commulingo_pipeline.fetch_backoff.time.time',return_value=3000):
+        with patch('commulingo.pipeline.fetch_backoff.time.time',return_value=3000):
             call.return_value = '<external source="web">Original text.</external>'
             result = await retry.wrap('fetch_url',call)(url='https://example.org')
             self.assertIn('Original text',result)

@@ -7,10 +7,10 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from runtime_tools.commulingo_evidence import resolve_evidence_sources
-from runtime_tools.commulingo_review_policy import review_source, resolve_review_checks, validate_decision, DECISION_TOOL
-from runtime_tools.commulingo_research_memory import ResearchMemory
-from runtime_tools.commulingo_run import RunBudget, RunFailure, submitted_edit
+from commulingo.evidence import resolve_evidence_sources
+from commulingo.review_policy import review_source, resolve_review_checks, validate_decision, DECISION_TOOL
+from commulingo.research_memory import ResearchMemory
+from commulingo.run import RunBudget, RunFailure, submitted_edit
 from scripts.commulingo_write_session import draft_id, prepare_write, repair_schema
 from tool_gateway.validation import validate_tool_arguments, ToolArgumentValidationError
 from tool_gateway.results import ToolRejection
@@ -19,7 +19,7 @@ from tool_gateway.results import ToolRejection
 class EfficiencyTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         # Unit tests exercise the local run ledger, independently of deployed flags.
-        reservation = patch('commulingo_pipeline.config.legacy_reserve',return_value=None)
+        reservation = patch('commulingo.pipeline.config.legacy_reserve',return_value=None)
         reservation.start()
         self.addCleanup(reservation.stop)
         self.directory = tempfile.TemporaryDirectory()
@@ -35,7 +35,7 @@ class EfficiencyTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(ValueError): resolve_evidence_sources([item], ['First','Second'])
 
     async def test_person_boundary_resolves_ids_after_prose_normalization(self):
-        from runtime_tools import commulingo_people as people
+        from commulingo import people
         citation = r'Archive\nreference — full description'
         async def inline(call,*args,**kwargs): return call(*args,**kwargs)
         with patch.object(people,'_run_edit',return_value='OK — approved: Logged as edit #12.') as write, \
@@ -51,7 +51,7 @@ class EfficiencyTests(unittest.IsolatedAsyncioTestCase):
     def test_review_checks_cite_displayed_passage_labels(self):
         body = 'The original archive records the birth — and the “subsequent” appointment.\nAnother paragraph.'
         url = 'https://archive.example/person'
-        from commulingo_pipeline.evidence import Passages
+        from commulingo.pipeline.evidence import Passages
         snapshots, passages = {}, Passages()
         source_id, shown = review_source(url, body, snapshots, passages, base=500)
         # Short labels bind the immutable slice, independently of its page offset.
@@ -173,7 +173,7 @@ class EfficiencyTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(RuntimeError): submitted_edit([{'result':'OK — approved: Logged as edit #12.','target':'other'}],query)
 
     async def test_stage_exception_keeps_previous_attempt_cost(self):
-        from runtime_tools import commulingo_lane as lane
+        from commulingo import lane
         calls=[]
         async def chat(messages, **kwargs):
             calls.append(kwargs)
@@ -187,7 +187,7 @@ class EfficiencyTests(unittest.IsolatedAsyncioTestCase):
             max_output_tokens=1000,max_input_tokens=10000)
         binding=SimpleNamespace(chat=chat,client=None,model='fake',render_provider='test',reasoning={})
         with patch.object(lane,'resolve_agent_tool_loop',return_value=binding), \
-             patch('runtime_tools.commulingo_research_memory.STORE_PATH',self.path):
+             patch('commulingo.research_memory.STORE_PATH',self.path):
             with self.assertRaises(RunFailure) as failed:
                 await lane._call_curator_stage(task='test',spec=SimpleNamespace(name='test',render_prompt=lambda **kw:'test'),
                     tools=[],handlers={},policy=policy,stage='test',expect_edit=True,
@@ -216,7 +216,7 @@ if __name__ == '__main__': unittest.main()
 
 class DraftLengthGuidanceTests(unittest.TestCase):
     def test_overlength_rejection_lists_paragraph_sizes_and_counts_repeats(self):
-        from commulingo_pipeline.draft_repair import DraftRepair
+        from commulingo.pipeline.draft_repair import DraftRepair
         tool = {'name':'commulingo_pipeline_result','input_schema':{'type':'object','additionalProperties':False,
             'properties':{'fields':{'type':'object','properties':{'body':{'type':'object',
                 'properties':{'en':{'type':'string','maxLength':20}}}}}},'required':['fields']}}

@@ -6,8 +6,8 @@ one missing person), then gives only that task to the dedicated DeepSeek V4 Pro 
 Each stage exposes only its read tools and the narrow terminal write tools it can use.
 
 This file is the command line. The cycle itself lives in
-runtime_tools/commulingo_people_lane.py and the plumbing every lane shares in
-runtime_tools/commulingo_lane.py; both are re-exported here for older callers.
+commulingo/people_lane.py and the plumbing every lane shares in
+commulingo/lane.py; both are re-exported here for older callers.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 # Distinguish unattended writes in revisions/suggestion provenance. This must be set before
-# runtime_tools.registry imports runtime_tools.commulingo_people.
+# runtime_tools.registry imports commulingo.people.
 os.environ.setdefault("COMMULINGO_SUGGESTED_BY", "commulingo-maintainer")
 # The lane this process writes as. The new/enrich wrappers set the variable
 # before importing this module, so the lock follows their lane without
@@ -37,11 +37,11 @@ SUGGESTED_BY = os.environ["COMMULINGO_SUGGESTED_BY"]
 # Everything the people lane used to define here, re-exported so that
 # `commulingo_people_maintainer.X` keeps resolving. Patching a name on this
 # module does not reach code inside the library modules; patch it there.
-from runtime_tools.commulingo_lane import *  # noqa: E402,F401,F403
-from runtime_tools.commulingo_lane import _call_curator_stage  # noqa: E402,F401
-from runtime_tools.commulingo_people_lane import *  # noqa: E402,F401,F403
-from runtime_tools.commulingo_lane import load_config  # noqa: E402
-from runtime_tools.commulingo_people_lane import (  # noqa: E402
+from commulingo.lane import *  # noqa: E402,F401,F403
+from commulingo.lane import _call_curator_stage  # noqa: E402,F401
+from commulingo.people_lane import *  # noqa: E402,F401,F403
+from commulingo.lane import load_config  # noqa: E402
+from commulingo.people_lane import (  # noqa: E402
     pending_person_gap_count, run_once, select_sparse_person, stale_turn,
 )
 from scripts import commulingo_budget_guard as budget_guard  # noqa: E402

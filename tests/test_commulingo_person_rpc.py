@@ -15,8 +15,8 @@ db.query = lambda *a, **k: []
 db.query_one = lambda *a, **k: None
 import runtime_tools
 runtime_tools.__path__.insert(0, str(source_root / 'runtime_tools'))
-from runtime_tools import commulingo_people as people
-from runtime_tools.commulingo_person_service import call_person_service
+from commulingo import people
+from commulingo.person_service import call_person_service
 
 class SharedPersonRPC(unittest.TestCase):
     def test_actual_python_writes_reads_and_review(self):
@@ -51,7 +51,7 @@ class SharedPersonRPC(unittest.TestCase):
             self.assertEqual(approved['status'], 'approved')
             self.assertEqual(people._get_person(person_id)['bio']['ko'], '검토할 주장')
         # Legacy backfills now pass an explicit spec through the same atomic CLI.
-        from runtime_tools.commulingo_person_service import apply_person_spec
+        from commulingo.person_service import apply_person_spec
         import tempfile, json
         with tempfile.NamedTemporaryFile(mode='w', suffix='.json') as spec:
             json.dump({'people': [{'id': person_id, 'expectedRevision': people._get_person(person_id)['revision'],

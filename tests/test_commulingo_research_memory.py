@@ -5,14 +5,14 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from runtime_tools.commulingo_research_memory import ResearchMemory, RETENTION
+from commulingo.research_memory import ResearchMemory, RETENTION
 from tool_gateway.observations import argument_rejection_observer
 from tool_gateway.results import ToolFailure, ToolRejection
 
 
 class ResearchMemoryTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        reservation = patch('commulingo_pipeline.config.legacy_reserve',return_value=None)
+        reservation = patch('commulingo.pipeline.config.legacy_reserve',return_value=None)
         reservation.start()
         self.addCleanup(reservation.stop)
         self.tmp = tempfile.TemporaryDirectory()
@@ -44,9 +44,9 @@ class ResearchMemoryTests(unittest.IsolatedAsyncioTestCase):
     async def test_recency_expiry_and_explicit_refresh(self):
         provider = AsyncMock(return_value="evidence")
         handler = self.memory.wrap({"web_search": provider})["web_search"]
-        with patch("runtime_tools.commulingo_research_memory.time.time", return_value=1000):
+        with patch("commulingo.research_memory.time.time", return_value=1000):
             await handler(query="q", topic="news")
-        with patch("runtime_tools.commulingo_research_memory.time.time", return_value=1061):
+        with patch("commulingo.research_memory.time.time", return_value=1061):
             self.assertNotIn('"tool":"web_search"', self.memory.context())
             await handler(query="q", topic="news")
             await handler(query="q", topic="news", use_cache=False)
@@ -123,7 +123,7 @@ class ResearchMemoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(argument_rejection_observer.get())
 
     async def test_real_stage_retry_keeps_evidence_and_rejected_draft(self):
-        from runtime_tools import commulingo_lane as lane
+        from commulingo import lane
 
         state = {"attempt": 0, "writes": 0}
         research = AsyncMock(return_value="verified source body")
@@ -160,7 +160,7 @@ class ResearchMemoryTests(unittest.IsolatedAsyncioTestCase):
         spec = SimpleNamespace(name="commulingo_curator", render_prompt=lambda **kwargs: "system")
         with patch.object(lane, "resolve_agent_tool_loop", return_value=binding), \
              patch.object(lane, "completed_run_count", side_effect=lambda: state["writes"]), \
-             patch("runtime_tools.commulingo_research_memory.STORE_PATH", self.path):
+             patch("commulingo.research_memory.STORE_PATH", self.path):
             result, _, _ = await lane._call_curator_stage(
                 task="repair person", spec=spec, tools=[],
                 handlers={"fetch_url": research, "commulingo_person_create": write},
@@ -173,9 +173,9 @@ class ResearchMemoryTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_retention_expires_persisted_evidence(self):
         provider = AsyncMock(return_value="old evidence")
-        with patch("runtime_tools.commulingo_research_memory.time.time", return_value=1000):
+        with patch("commulingo.research_memory.time.time", return_value=1000):
             await self.memory.wrap({"web_search": provider})["web_search"](query="q")
-        with patch("runtime_tools.commulingo_research_memory.time.time", return_value=1001 + RETENTION):
+        with patch("commulingo.research_memory.time.time", return_value=1001 + RETENTION):
             restarted = ResearchMemory("gap:974", path=self.path)
             self.assertNotIn("old evidence", restarted.context())
 

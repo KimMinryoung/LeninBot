@@ -12,7 +12,7 @@ import json
 from pathlib import Path
 import sys
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-from runtime_tools.commulingo_activities import load_catalog, activity_questions
+from commulingo.activities import load_catalog, activity_questions
 from scripts.commulingo_classification_audit import state_of
 from llm.call_registry import decide_detailed
 from db import query

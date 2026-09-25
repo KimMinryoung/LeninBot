@@ -37,7 +37,7 @@ from datetime import date
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 FEATURE = "commulingo_classification_audit"
-from runtime_tools.commulingo_classify import build_questions, offices_allowed, role_scope  # noqa: E402  shared editorial rules
+from commulingo.classify import build_questions, offices_allowed, role_scope  # noqa: E402  shared editorial rules
 
 # stored→judged pairs the operator has accepted as boundary judgements; a
 # disagreement on these lines is not reported (2026-09-19 decisions).
@@ -112,7 +112,7 @@ def main() -> int:
     ap.add_argument("--out", default=f"logs/commulingo/person_classification_audit_{date.today().isoformat()}.md")
     args = ap.parse_args()
     from llm.call_registry import decide_detailed
-    from runtime_tools.commulingo_people import _list_categories, _list_groups, _list_offices
+    from commulingo.people import _list_categories, _list_groups, _list_offices
     catalogs = (_list_groups(), _list_offices(), _list_categories())
     people = load_people(args.limit)
     with ThreadPoolExecutor(args.concurrency) as ex:

@@ -384,7 +384,7 @@ def main() -> int:
         if args.dry_run:
             ap.error("--apply-spec and --dry-run cannot be combined")
         sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-        from runtime_tools.commulingo_person_service import apply_person_spec
+        from commulingo.person_service import apply_person_spec
         print(apply_person_spec(args.apply_spec))
         return 0
 

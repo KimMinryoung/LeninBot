@@ -5,14 +5,14 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from commulingo_test_support import EditorCase, citation_result
 
-from commulingo_pipeline.editor import Editor
-from commulingo_pipeline.engine import Usage
-from commulingo_pipeline.evidence import snapshot
-from commulingo_pipeline.issues import commission
-from commulingo_pipeline.patches import changes, patch_hash
-from commulingo_pipeline.source_session import Sources
-from commulingo_pipeline import workflow
-from commulingo_pipeline.stages import latest, write_request
+from commulingo.pipeline.editor import Editor
+from commulingo.pipeline.engine import Usage
+from commulingo.pipeline.evidence import snapshot
+from commulingo.pipeline.issues import commission
+from commulingo.pipeline.patches import changes, patch_hash
+from commulingo.pipeline.source_session import Sources
+from commulingo.pipeline import workflow
+from commulingo.pipeline.stages import latest, write_request
 
 URL = 'https://example.org/archive'
 BODY = 'The original historical account documents the definition and its context.'
@@ -128,7 +128,7 @@ class SourceAndIssueTests(EditorCase):
             await read(passages=['P1'])
 
     def test_prose_diagnostics_locate_exact_field_and_keep_quoted_titles(self):
-        from commulingo_pipeline.diagnostics import prose_errors
+        from commulingo.pipeline.diagnostics import prose_errors
         errors = json.loads(prose_errors({'body':{'en':'A clause — another clause.',
             'ko':'「스페인의 교훈 — 마지막 경고」'}}))
         self.assertEqual([e['path'] for e in errors],['/fields/body/en'])
@@ -204,8 +204,8 @@ class EditorTests(EditorCase):
                 issues={'missing:body': {'status':'deferred', 'reason':'No reliable original could be retrieved.'}})
             self.assertIn('no-edit judgment recorded', response)
             self.assertEqual(store.save_editor_checkpoint.call_args.args[1]['draft'], saved)
-        with patch('commulingo_pipeline.service.call', return_value=CURRENT) as rpc, \
-             patch('commulingo_pipeline.stages.model_call', side_effect=model):
+        with patch('commulingo.pipeline.service.call', return_value=CURRENT) as rpc, \
+             patch('commulingo.pipeline.stages.model_call', side_effect=model):
             result = await Editor(store)(JOB, [], Usage(), .2)
         self.assertEqual(result.next_stage, 'judge')
         self.assertNotIn('draft', result.value)
@@ -228,8 +228,8 @@ class EditorTests(EditorCase):
             self.assertEqual(state['saved_fields'], ['body'])
             self.assertEqual(state['next_tool'], 'commulingo_pipeline_repair')
             raise RuntimeError('disconnect')
-        with patch('commulingo_pipeline.service.call', return_value=CURRENT), \
-             patch('commulingo_pipeline.stages.model_call', side_effect=first):
+        with patch('commulingo.pipeline.service.call', return_value=CURRENT), \
+             patch('commulingo.pipeline.stages.model_call', side_effect=first):
             with self.assertRaisesRegex(RuntimeError, 'disconnect'):
                 await Editor(store)(JOB, [], Usage(), .2)
         checkpoint = deepcopy(store.save_editor_checkpoint.call_args.args[1])
@@ -254,8 +254,8 @@ class EditorTests(EditorCase):
             self.assertIn('"mode": "research_allowed"', response)
             self.assertFalse(store.save_editor_checkpoint.call_args.args[1]['repair_only'])
             await repair_call(kwargs, candidate())
-        with patch('commulingo_pipeline.service.call', return_value=CURRENT), \
-             patch('commulingo_pipeline.stages.model_call', side_effect=resume):
+        with patch('commulingo.pipeline.service.call', return_value=CURRENT), \
+             patch('commulingo.pipeline.stages.model_call', side_effect=resume):
             result = await Editor(store)(JOB, [{'stage':'editor_checkpoint','value':checkpoint}], Usage(), .2)
         self.assertEqual(result.next_stage, 'review')
 
@@ -271,8 +271,8 @@ class EditorTests(EditorCase):
             self.assertIsNone(saved['draft'])
             self.assertIn('P1', saved['passages'])
             await kwargs['handler'](submission(candidate()))
-        with patch('commulingo_pipeline.service.call', return_value=CURRENT), \
-             patch('commulingo_pipeline.stages.model_call', side_effect=model):
+        with patch('commulingo.pipeline.service.call', return_value=CURRENT), \
+             patch('commulingo.pipeline.stages.model_call', side_effect=model):
             result = await Editor(store)(JOB, [], Usage(), .2)
         self.assertEqual(result.next_stage, 'review')
 
@@ -295,8 +295,8 @@ class EditorTests(EditorCase):
             self.assertEqual(store.save_editor_checkpoint.call_args.args[1]['draft']['args']['fields'], value['fields'])
             self.jev.side_effect = citation_result
             await repair_call(kwargs, candidate())
-        with patch('commulingo_pipeline.service.call', return_value=CURRENT) as rpc, \
-             patch('commulingo_pipeline.stages.model_call', side_effect=model):
+        with patch('commulingo.pipeline.service.call', return_value=CURRENT) as rpc, \
+             patch('commulingo.pipeline.stages.model_call', side_effect=model):
             result = await Editor(store)(JOB, [], usage, .2)
         self.assertEqual(result.next_stage, 'review')
         self.assertEqual([call.args[0]['command'] for call in rpc.call_args_list], ['read', 'validate'])
@@ -320,9 +320,9 @@ class EditorTests(EditorCase):
                            for field in ('definition', 'period')],
                 'issue_results': [{'id': 'register', 'status': 'resolved', 'reason': 'Supported bilingual entry.'}],
             }))
-        with patch('commulingo_pipeline.service.call', return_value=None) as rpc, \
-             patch('runtime_tools.commulingo_classify.classify_term', return_value=None), \
-             patch('commulingo_pipeline.stages.model_call', side_effect=model):
+        with patch('commulingo.pipeline.service.call', return_value=None) as rpc, \
+             patch('commulingo.classify.classify_term', return_value=None), \
+             patch('commulingo.pipeline.stages.model_call', side_effect=model):
             with self.assertRaisesRegex(RuntimeError, 'classification unavailable'):
                 await Editor(store)(job, [], Usage(), .2)
         self.assertEqual([call.args[0]['command'] for call in rpc.call_args_list], ['read'])
@@ -357,13 +357,13 @@ class EditorTests(EditorCase):
             await kwargs['read_wrap']('fetch_url',AsyncMock(return_value=f'<external source="web">\n{BODY}\n</external>'))(url=URL)
             value = candidate(); value['fields']['notes']='Private deferred detail'
             await kwargs['handler'](submission(value))
-        with patch('commulingo_pipeline.service.call',return_value=current), patch('commulingo_pipeline.stages.model_call',side_effect=model):
+        with patch('commulingo.pipeline.service.call',return_value=current), patch('commulingo.pipeline.stages.model_call',side_effect=model):
             result = await Editor(store_mock())(job,[],Usage(),.2)
         self.assertNotIn('notes',result.value['draft']['fields'])
         self.assertEqual(result.value['draft']['notes'],'Private deferred detail')
 
     async def test_create_person_and_term_use_jev_classification(self):
-        from runtime_tools.commulingo_people import _COMMULINGO_FIELD_SCHEMA
+        from commulingo.people import _COMMULINGO_FIELD_SCHEMA
         group = [{'id':'fixture-group'}]
         catalogs = (group, [], [{'id':'fixture-role'}])
         person_fields = {'givenName':{'ko':'검증','en':'Fixture'},'groupId':'fixture-group',
@@ -379,7 +379,7 @@ class EditorTests(EditorCase):
                                     ('term',term_fields,['definition','period'])]:
             with self.subTest(kind=kind):
                 job = {**JOB,'kind':kind,'action':'create'}
-                from commulingo_pipeline.decisions import Decisions
+                from commulingo.pipeline.decisions import Decisions
                 fields = deepcopy(fields)
                 Decisions(job,None,catalogs,Usage()).strip_assigned(fields)
                 async def model(**kwargs):
@@ -387,11 +387,11 @@ class EditorTests(EditorCase):
                     await kwargs['handler'](submission({'status':'ready','reason':'The original archive supports this new entry.',
                         'fields':fields,'claims':[{'field':f,'claim':'The source documents this field.','passages':['P1']} for f in facts],
                         'issue_results':[{'id':'register','status':'resolved','reason':'Registered a supported bilingual entry.'}]}))
-                with patch('commulingo_pipeline.service.call',return_value=None), \
-                     patch('runtime_tools.commulingo_classify.load_catalogs',return_value=catalogs), \
-                     patch('runtime_tools.commulingo_classify.classify_person_card',return_value={'codes':{'citizenship':{'code':'france'},'nationalOrigin':{'code':'france'}},'person':{'groupId':'fixture-group','role':{'category':'fixture-role'}}}) as classifier, \
-                     patch('runtime_tools.commulingo_classify.classify_term',return_value={'category':'culture'}), \
-                     patch('commulingo_pipeline.stages.model_call',side_effect=model):
+                with patch('commulingo.pipeline.service.call',return_value=None), \
+                     patch('commulingo.classify.load_catalogs',return_value=catalogs), \
+                     patch('commulingo.classify.classify_person_card',return_value={'codes':{'citizenship':{'code':'france'},'nationalOrigin':{'code':'france'}},'person':{'groupId':'fixture-group','role':{'category':'fixture-role'}}}) as classifier, \
+                     patch('commulingo.classify.classify_term',return_value={'category':'culture'}), \
+                     patch('commulingo.pipeline.stages.model_call',side_effect=model):
                     result = await Editor(store_mock())(job,[],Usage(),.2)
                 self.assertEqual(result.next_stage,'review')
                 self.assertEqual(classifier.call_count,1 if kind=='person' else 0)
@@ -406,8 +406,8 @@ class EditorTests(EditorCase):
             with self.assertRaisesRegex(ValueError, 'evidence required for body'):
                 await kwargs['handler'](submission(value))
             await repair_call(kwargs, candidate())
-        with patch('commulingo_pipeline.service.call',return_value=CURRENT) as rpc, \
-             patch('commulingo_pipeline.stages.model_call',side_effect=model) as model_call:
+        with patch('commulingo.pipeline.service.call',return_value=CURRENT) as rpc, \
+             patch('commulingo.pipeline.stages.model_call',side_effect=model) as model_call:
             result = await Editor(store)(JOB,[],usage,.2)
         self.assertEqual(model_call.call_count,1)
         fetch.assert_awaited_once()
@@ -449,7 +449,7 @@ class EditorTests(EditorCase):
                     {'changes':submission(candidate())['changes']},
                     {edit_tool['name']:kwargs['local_tools'][0][1]},tool_schema=edit_tool)
                 self.assertFalse(failed,response)
-        with patch('commulingo_pipeline.service.call',return_value=CURRENT), patch('commulingo_pipeline.stages.model_call',side_effect=model):
+        with patch('commulingo.pipeline.service.call',return_value=CURRENT), patch('commulingo.pipeline.stages.model_call',side_effect=model):
             result = await Editor(store)(JOB,[],Usage(),.2)
         self.assertEqual(result.next_stage,'review')
 
@@ -463,7 +463,7 @@ class EditorTests(EditorCase):
             with self.assertRaisesRegex(ValueError, 'evidence required for body'):
                 await kwargs['handler'](submission(value))
             raise RuntimeError('end test after feedback')
-        with patch('commulingo_pipeline.service.call',return_value=CURRENT), patch('commulingo_pipeline.stages.model_call',side_effect=model):
+        with patch('commulingo.pipeline.service.call',return_value=CURRENT), patch('commulingo.pipeline.stages.model_call',side_effect=model):
             with self.assertRaisesRegex(RuntimeError,'end test'):
                 await Editor(store_mock())(JOB,[],Usage(),.2)
 
@@ -483,7 +483,7 @@ class EditorTests(EditorCase):
                 self.assertEqual(store.save_editor_checkpoint.call_args.args[1]['draft']['args'], value)
             await repair_call(kwargs, candidate())
         usage = Usage()
-        with patch('commulingo_pipeline.service.call',return_value=CURRENT), patch('commulingo_pipeline.stages.model_call',side_effect=model):
+        with patch('commulingo.pipeline.service.call',return_value=CURRENT), patch('commulingo.pipeline.stages.model_call',side_effect=model):
             result = await Editor(store)(JOB,[],usage,.2)
         self.assertEqual(result.next_stage,'review')
         self.assertEqual(usage.tracker['repair_protocol_errors'],6)
@@ -495,7 +495,7 @@ class EditorTests(EditorCase):
             value['claims'].append({'field':'startYear','claim':'The year is 1923.','passages':['P1']})
             value['issue_results'].append({'id':'requested', 'status':'resolved', 'reason':'Checked the historical context and dates.'})
             await kwargs['handler'](submission(value))
-        with patch('commulingo_pipeline.service.call',return_value={**CURRENT,'startYear':1923}), patch('commulingo_pipeline.stages.model_call',side_effect=model):
+        with patch('commulingo.pipeline.service.call',return_value={**CURRENT,'startYear':1923}), patch('commulingo.pipeline.stages.model_call',side_effect=model):
             result = await Editor(store_mock())({**JOB, 'reason':'Verify historical context and dates'},[],Usage(),.2)
         self.assertEqual(result.next_stage,'review')
         self.assertNotIn('startYear',result.value['draft']['fields'])
@@ -509,7 +509,7 @@ class EditorTests(EditorCase):
             with self.assertRaises(ValueError):
                 await kwargs['handler'](submission(value))
             raise RuntimeError('simulated provider disconnect')
-        with patch('commulingo_pipeline.service.call',return_value=CURRENT), patch('commulingo_pipeline.stages.model_call',side_effect=first):
+        with patch('commulingo.pipeline.service.call',return_value=CURRENT), patch('commulingo.pipeline.stages.model_call',side_effect=first):
             with self.assertRaisesRegex(RuntimeError,'disconnect'):
                 await Editor(store)(JOB,[],Usage(),.2)
         checkpoint = deepcopy(store.save_editor_checkpoint.call_args.args[1])
@@ -520,7 +520,7 @@ class EditorTests(EditorCase):
             self.assertIn('"missing_evidence_fields": ["body"]', kwargs['prompt'])
             self.assertIn('"error_kind": "missing_evidence"', kwargs['prompt'])
             await repair_call(kwargs, candidate())
-        with patch('commulingo_pipeline.service.call',return_value=CURRENT), patch('commulingo_pipeline.stages.model_call',side_effect=resume):
+        with patch('commulingo.pipeline.service.call',return_value=CURRENT), patch('commulingo.pipeline.stages.model_call',side_effect=resume):
             result = await Editor(store)(JOB,[{'stage':'editor_checkpoint','value':checkpoint}],Usage(),.2)
         self.assertEqual(result.next_stage,'review')
         self.assertEqual(result.value['draft']['fields']['evidence'][0]['excerpt'],BODY)
@@ -531,14 +531,14 @@ class EditorTests(EditorCase):
             value = candidate(); value['claims']=[]
             with self.assertRaises(ValueError): await kwargs['handler'](submission(value))
             await kwargs['handler'](submission(value))
-        with patch('commulingo_pipeline.service.call',return_value=CURRENT), patch('commulingo_pipeline.stages.model_call',side_effect=model):
+        with patch('commulingo.pipeline.service.call',return_value=CURRENT), patch('commulingo.pipeline.stages.model_call',side_effect=model):
             result = await Editor(store)(JOB,[],Usage(),.2)
         self.assertEqual(result.status,'escalated')
         self.assertIn('without progress',result.value['hold_reason'])
 
     async def test_no_concrete_defect_needs_no_model_call(self):
         current = {**CURRENT,'body':{'ko':'본문','en':'Body'},'evidence':[{'field':'body'}]}
-        with patch('commulingo_pipeline.service.call',return_value=current), patch('commulingo_pipeline.stages.model_call') as model:
+        with patch('commulingo.pipeline.service.call',return_value=current), patch('commulingo.pipeline.stages.model_call') as model:
             result = await Editor(store_mock())(JOB,[],Usage(),.2)
         self.assertEqual(result.next_stage,'judge'); model.assert_not_called()
 
@@ -597,8 +597,8 @@ class EditorContractTests(EditorCase):
                 await lookup(action='get_term',term_id='fixture')
             self.assertEqual(call.await_count,3)
             await repair_call(kwargs, candidate())
-        with patch('commulingo_pipeline.service.call',return_value=CURRENT), \
-             patch('commulingo_pipeline.stages.model_call',side_effect=model):
+        with patch('commulingo.pipeline.service.call',return_value=CURRENT), \
+             patch('commulingo.pipeline.stages.model_call',side_effect=model):
             result = await Editor(store_mock())(JOB,[],Usage(),.2)
         self.assertEqual(result.next_stage,'review')
         self.assertEqual(result.value['draft']['fields']['expectedRevision'],CURRENT['revision'])
@@ -621,8 +621,8 @@ class EditorContractTests(EditorCase):
             with self.assertRaisesRegex(ValueError,'passage labels not displayed: P999'):
                 await kwargs['handler'](submission(value))
             await kwargs['handler'](submission(candidate()))
-        with patch('commulingo_pipeline.service.call',return_value=CURRENT), \
-             patch('commulingo_pipeline.stages.model_call',side_effect=model):
+        with patch('commulingo.pipeline.service.call',return_value=CURRENT), \
+             patch('commulingo.pipeline.stages.model_call',side_effect=model):
             result = await Editor(store_mock())(JOB,[],Usage(),.2)
         self.assertEqual(result.next_stage,'review')
 
@@ -634,8 +634,8 @@ class EditorContractTests(EditorCase):
             value['fields'].update(startYear=2023,endYear=None)
             value['issue_results'].append({'id':'requested','status':'resolved','reason':'Checked the historical context and dates.'})
             await kwargs['handler'](submission(value))
-        with patch('commulingo_pipeline.service.call',return_value=current) as rpc, \
-             patch('commulingo_pipeline.stages.model_call',side_effect=model):
+        with patch('commulingo.pipeline.service.call',return_value=current) as rpc, \
+             patch('commulingo.pipeline.stages.model_call',side_effect=model):
             result = await Editor(store_mock())({**JOB,'reason':'Verify historical context and dates'},[],Usage(),.2)
         self.assertEqual(result.next_stage,'review')
         validate = next(c.args[0] for c in rpc.call_args_list if c.args[0]['command']=='validate')
@@ -644,8 +644,8 @@ class EditorContractTests(EditorCase):
 
     def test_person_schemas_carry_catalogs_and_store_rules(self):
         from jsonschema import Draft202012Validator
-        from commulingo_pipeline.decisions import Decisions
-        from commulingo_pipeline.patches import schema_for
+        from commulingo.pipeline.decisions import Decisions
+        from commulingo.pipeline.patches import schema_for
         update = {**JOB,'kind':'person','action':'update','topic':'basics','target':'fixture'}
         canonical = schema_for(update,None,CATALOGS)
         self.assertEqual(canonical['properties']['groupId']['enum'],['bolshevik'])
@@ -682,10 +682,10 @@ class EditorContractTests(EditorCase):
                 await kwargs['handler'](person_submission(dashed))
             self.assertEqual(calls,[])
             await kwargs['handler'](person_submission(PERSON_FIELDS))
-        with patch('commulingo_pipeline.service.call',return_value=None), \
-             patch('runtime_tools.commulingo_classify.load_catalogs',return_value=CATALOGS), \
-             patch('runtime_tools.commulingo_classify.classify_person_card',side_effect=card), \
-             patch('commulingo_pipeline.stages.model_call',side_effect=model):
+        with patch('commulingo.pipeline.service.call',return_value=None), \
+             patch('commulingo.classify.load_catalogs',return_value=CATALOGS), \
+             patch('commulingo.classify.classify_person_card',side_effect=card), \
+             patch('commulingo.pipeline.stages.model_call',side_effect=model):
             result = await Editor(store_mock())(job,[],Usage(),.2)
         self.assertEqual(result.next_stage,'review')
         self.assertEqual(len(calls),1)
@@ -694,12 +694,12 @@ class EditorContractTests(EditorCase):
         self.assertEqual((fields['citizenship']['code'],fields['nationalOrigin']['code']),('soviet','russia'))
         self.assertEqual(result.value['draft']['classification']['person']['groupId'],'bolshevik')
         # The verdict is memoised on the classified inputs, not on the call.
-        from commulingo_pipeline.decisions import Decisions
+        from commulingo.pipeline.decisions import Decisions
         page = snapshot(URL,BODY)
         claims = [{'field':f,'claim':'x','source_id':page['id'],'start':0,'end':20} for f in ('bio','citizenship')]
         decisions = Decisions(job,None,CATALOGS,Usage())
         calls.clear()
-        with patch('runtime_tools.commulingo_classify.classify_person_card',side_effect=card):
+        with patch('commulingo.classify.classify_person_card',side_effect=card):
             await decisions.classify(deepcopy(PERSON_FIELDS),claims,{page['id']:page})
             await decisions.classify(deepcopy(PERSON_FIELDS),claims,{page['id']:page})
             self.assertEqual(len(calls),1)
@@ -712,10 +712,10 @@ class EditorContractTests(EditorCase):
         async def model(**kwargs):
             await fetch_fixture(kwargs)
             await kwargs['handler'](person_submission(PERSON_FIELDS))
-        with patch('commulingo_pipeline.service.call',return_value=None) as rpc, \
-             patch('runtime_tools.commulingo_classify.load_catalogs',return_value=CATALOGS), \
-             patch('runtime_tools.commulingo_classify.classify_person_card',return_value=None), \
-             patch('commulingo_pipeline.stages.model_call',side_effect=model):
+        with patch('commulingo.pipeline.service.call',return_value=None) as rpc, \
+             patch('commulingo.classify.load_catalogs',return_value=CATALOGS), \
+             patch('commulingo.classify.classify_person_card',return_value=None), \
+             patch('commulingo.pipeline.stages.model_call',side_effect=model):
             with self.assertRaisesRegex(RuntimeError,'classification unavailable'):
                 await Editor(store)(job,[],Usage(),.2)
         self.assertEqual([c.args[0]['command'] for c in rpc.call_args_list],['read'])
@@ -724,8 +724,8 @@ class EditorContractTests(EditorCase):
         self.assertFalse({'groupId','role'} & set(saved))
 
     async def test_existing_person_classification_is_not_reassigned(self):
-        from commulingo_pipeline.decisions import Decisions
-        from commulingo_pipeline.patches import schema_for
+        from commulingo.pipeline.decisions import Decisions
+        from commulingo.pipeline.patches import schema_for
         page = snapshot(URL,BODY)
         sources = {page['id']:page}
         job = {**JOB,'kind':'person','action':'update','topic':'basics','target':'stalin'}
@@ -734,21 +734,21 @@ class EditorContractTests(EditorCase):
         self.assertFalse({'role','group','groupId'} & set(decisions.author_schema(schema_for(job,current,CATALOGS))['properties']))
         fields = {'citizenship':{'label':{'ko':'소련','en':'Soviet'}}}
         claim = [{'field':'citizenship','claim':'x','source_id':page['id'],'start':0,'end':20}]
-        with patch('runtime_tools.commulingo_classify.classify_person_codes',return_value={'citizenship':{'code':'soviet'}}), \
-             patch('runtime_tools.commulingo_classify.classify_person_card') as card:
+        with patch('commulingo.classify.classify_person_codes',return_value={'citizenship':{'code':'soviet'}}), \
+             patch('commulingo.classify.classify_person_card') as card:
             out, _ = await decisions.classify(fields,claim,sources)
         card.assert_not_called()
         self.assertEqual(out,{'citizenship':{'label':{'ko':'소련','en':'Soviet'},'code':'soviet'}})
         # A person without any classification receives one from the runner.
         bare = Decisions({**job,'target':'new'},{'revision':'v1','role':{}},CATALOGS,Usage())
         claim = [{'field':'bio','claim':'x','source_id':page['id'],'start':0,'end':20}]
-        with patch('runtime_tools.commulingo_classify.classify_person_card',return_value=deepcopy(PERSON_VERDICT)):
+        with patch('commulingo.classify.classify_person_card',return_value=deepcopy(PERSON_VERDICT)):
             out, _ = await bare.classify({'bio':{'ko':'문장이다.','en':'A sentence.'}},claim,sources)
         self.assertEqual((out['groupId'],out['role']),('bolshevik',{'category':'bolshevik'}))
 
     async def test_section_is_one_topic_and_notes_stay_out_of_fields(self):
         # Job 5432 (2026-09-19): the author's work plan went live as a section.
-        from commulingo_pipeline.stages import prose_problem
+        from commulingo.pipeline.stages import prose_problem
         prose = {'ko':'1937년 7월 예조프는 레닌 훈장을 받았고 1941년 1월 24일 모든 훈장을 박탈당했다. '*4,
                  'en':'In July 1937 Yezhov received the Order of Lenin; a decree of 24 January 1941 stripped him of all awards. '*4}
         heading = {'ko':'숭배와 말소','en':'Cult and erasure'}
@@ -778,9 +778,9 @@ class EditorContractTests(EditorCase):
                 await kwargs['handler'](value({'heading':{'ko':'니콜라이 예조프','en':'Cult'},'body':prose,'startYear':1937}))
             await kwargs['handler'](value({'heading':heading,'body':prose,'startYear':1937,'startMonth':7},
                                           notes="also supported: correction of 'fall-trial-no-rehabilitation' dates"))
-        with patch('commulingo_pipeline.service.call',return_value=current) as rpc, \
-             patch('commulingo_pipeline.stages.model_call',side_effect=model), \
-             patch('runtime_tools.commulingo_section_slug.generate_section_slug',return_value='cult-and-erasure') as slugger:
+        with patch('commulingo.pipeline.service.call',return_value=current) as rpc, \
+             patch('commulingo.pipeline.stages.model_call',side_effect=model), \
+             patch('commulingo.section_slug.generate_section_slug',return_value='cult-and-erasure') as slugger:
             result = await Editor(store_mock())(job,[],Usage(),.2)
         self.assertEqual(seen['props'],{'heading','body','startYear','startMonth'})
         slugger.assert_called_once()
@@ -810,9 +810,9 @@ class EditorContractTests(EditorCase):
                 'fields':{'heading':{'ko':'1941년의 말소','en':'Erasure in 1941'},'body':prose,'startYear':1937},
                 'claims':[{'field':'body','claim':'The awards and their removal are documented.','passages':['P1']}],
                 'issue_results':[{'id':'requested','status':'resolved','reason':'Added one documented section.'}]}))
-        with patch('commulingo_pipeline.service.call',return_value=current), \
-             patch('commulingo_pipeline.stages.model_call',side_effect=model), \
-             patch('runtime_tools.commulingo_section_slug.generate_section_slug',return_value='cult-and-erasure'):
+        with patch('commulingo.pipeline.service.call',return_value=current), \
+             patch('commulingo.pipeline.stages.model_call',side_effect=model), \
+             patch('commulingo.section_slug.generate_section_slug',return_value='cult-and-erasure'):
             result = await Editor(store_mock())(job,[],Usage(),.2)
         self.assertEqual(result.value['draft']['fields']['sortOrder'],193700)
 
@@ -821,7 +821,7 @@ class ReviewAndPublishTests(EditorCase):
     async def test_routing_pins_unpinned_authoring_and_rejects_other_workflows(self):
         store = Mock()
         editor = {name:AsyncMock(return_value=name) for name in ('discover','research','draft','submit')}
-        with patch('commulingo_pipeline.workflow.stages',return_value=editor):
+        with patch('commulingo.pipeline.workflow.stages',return_value=editor):
             routed = workflow.routed_stages(store)
         # A job predating the workflow field cannot resume after drafting:
         # its draft came from the removed two-RPC stages.
@@ -866,10 +866,10 @@ class ReviewAndPublishTests(EditorCase):
             await kwargs['handler'](value)
         reads = {name:AsyncMock(return_value=f'<external source="web">\n{BODY}\n</external>')
                  for name in ('wiki_search','wiki_get','web_search','fetch_url','commulingo_people')}
-        with patch('commulingo_pipeline.service.call',return_value=CURRENT), \
+        with patch('commulingo.pipeline.service.call',return_value=CURRENT), \
              patch('runtime_tools.registry.TOOL_HANDLERS',reads), \
-             patch('runtime_tools.commulingo_review_handlers.review_risks',return_value=[]), \
-             patch('commulingo_pipeline.stages.model_call',side_effect=model):
+             patch('commulingo.review_handlers.review_risks',return_value=[]), \
+             patch('commulingo.pipeline.stages.model_call',side_effect=model):
             result = await workflow.Review()(JOB,artifacts,Usage(),.2)
         self.assertEqual(result.next_stage,'submit')
         self.assertEqual(result.value['approved_patch_hash'],patch_hash(write_request(JOB,latest(artifacts,'draft'))))
@@ -879,7 +879,7 @@ class ReviewAndPublishTests(EditorCase):
         artifacts = self.artifacts()
         digest = patch_hash(write_request(JOB,latest(artifacts,'draft')))
         artifacts.append({'stage':'review','value':{'decision':'revise','reviewed_patch_hash':digest}})
-        with patch('commulingo_pipeline.service.call',return_value=CURRENT), patch('commulingo_pipeline.stages.model_call') as model:
+        with patch('commulingo.pipeline.service.call',return_value=CURRENT), patch('commulingo.pipeline.stages.model_call') as model:
             result = await workflow.Review()(JOB,artifacts,Usage(),.2)
         self.assertEqual(result.status,'escalated'); model.assert_not_called()
 
@@ -889,8 +889,8 @@ class ReviewAndPublishTests(EditorCase):
         decision = {'decision':'approve','approved_patch_hash':digest,'reason':'Independently verified.',
                     'checks':[{'citation':URL,'source':URL,'quote':BODY,'finding':'Verified.'}]}
         artifacts.append({'stage':'review','value':decision})
-        with patch('commulingo_pipeline.config.load',return_value={'phase':'live'}), \
-             patch('commulingo_pipeline.service.call',return_value={'status':'approved','suggestionId':123}) as rpc:
+        with patch('commulingo.pipeline.config.load',return_value={'phase':'live'}), \
+             patch('commulingo.pipeline.service.call',return_value={'status':'approved','suggestionId':123}) as rpc:
             result = await workflow.publish(JOB,artifacts,Usage(),.2)
             rpc.assert_called_once()
             request = rpc.call_args.args[0]
@@ -920,11 +920,11 @@ class ReviewAndPublishTests(EditorCase):
 
     def review_patches(self, handlers, model):
         reads = {name:AsyncMock() for name in ('wiki_search','wiki_get','web_search','fetch_url','commulingo_people')}
-        return (patch('commulingo_pipeline.service.call',return_value=CURRENT),
+        return (patch('commulingo.pipeline.service.call',return_value=CURRENT),
                 patch('runtime_tools.registry.TOOL_HANDLERS',reads),
-                patch('runtime_tools.commulingo_review_handlers.review_risks',return_value=[]),
-                patch('runtime_tools.commulingo_review_handlers.make_handlers',side_effect=handlers),
-                patch('commulingo_pipeline.stages.model_call',side_effect=model))
+                patch('commulingo.review_handlers.review_risks',return_value=[]),
+                patch('commulingo.review_handlers.make_handlers',side_effect=handlers),
+                patch('commulingo.pipeline.stages.model_call',side_effect=model))
 
     async def run_review(self, job, artifacts, decision, prompts=None, proposals=None):
         handlers, model = self.fake_review([decision], prompts, proposals)
@@ -967,8 +967,8 @@ class ReviewAndPublishTests(EditorCase):
         self.assertEqual(first.next_stage,'draft')
         history.append({'stage':'review','value':first.value})
         # The same patch comes back: held before a paid review.
-        with patch('commulingo_pipeline.service.call',return_value=CURRENT) as rpc, \
-             patch('commulingo_pipeline.stages.model_call') as model:
+        with patch('commulingo.pipeline.service.call',return_value=CURRENT) as rpc, \
+             patch('commulingo.pipeline.stages.model_call') as model:
             stalled = await workflow.Review()(job,history,Usage(),.2)
         model.assert_not_called()
         self.assertEqual(stalled.status,'escalated')
@@ -1026,8 +1026,8 @@ class ReviewAndPublishTests(EditorCase):
 
     async def test_publish_replay_is_identical_and_keeps_notes_out_of_fields(self):
         artifacts, digest = self.approved(notes='examples still unsupported')
-        with patch('commulingo_pipeline.config.load',return_value={'phase':'live'}), \
-             patch('commulingo_pipeline.service.call',return_value={'status':'approved','suggestionId':12}) as rpc:
+        with patch('commulingo.pipeline.config.load',return_value={'phase':'live'}), \
+             patch('commulingo.pipeline.service.call',return_value={'status':'approved','suggestionId':12}) as rpc:
             await workflow.publish(JOB,artifacts,Usage(),.2)
             await workflow.publish(JOB,artifacts,Usage(),.2)
         first, second = [c.args[0] for c in rpc.call_args_list]
@@ -1041,17 +1041,17 @@ class ReviewAndPublishTests(EditorCase):
         job = {**JOB,'topic':'review-repair:7','payload':{'workflow':'editor','replaces_suggestion_id':7}}
         artifacts, digest = self.approved(job)
         pending = {'id':7,'status':'pending','review_note':None}
-        with patch('commulingo_pipeline.config.load',return_value={'phase':'live'}), \
-             patch('runtime_tools.commulingo_review_queue.suggestion',return_value=pending), \
-             patch('commulingo_pipeline.service.call',return_value={'status':'approved','suggestionId':8}) as rpc:
+        with patch('commulingo.pipeline.config.load',return_value={'phase':'live'}), \
+             patch('commulingo.review_queue.suggestion',return_value=pending), \
+             patch('commulingo.pipeline.service.call',return_value={'status':'approved','suggestionId':8}) as rpc:
             result = await workflow.publish(job,artifacts,Usage(),.2)
         self.assertEqual(result.value['status'],'approved')
         # Replay after this job's own publish replaced the original: the same
         # request goes out again and the service returns the stored receipt.
         ours = {'id':7,'status':'rejected','review_note':workflow.REPLACED_NOTE_PREFIX+digest}
-        with patch('commulingo_pipeline.config.load',return_value={'phase':'live'}), \
-             patch('runtime_tools.commulingo_review_queue.suggestion',return_value=ours), \
-             patch('commulingo_pipeline.service.call',return_value={'status':'approved','suggestionId':8}) as replay:
+        with patch('commulingo.pipeline.config.load',return_value={'phase':'live'}), \
+             patch('commulingo.review_queue.suggestion',return_value=ours), \
+             patch('commulingo.pipeline.service.call',return_value={'status':'approved','suggestionId':8}) as replay:
             await workflow.publish(job,artifacts,Usage(),.2)
         first, second = rpc.call_args.args[0], replay.call_args.args[0]
         self.assertEqual(first,second)
@@ -1062,16 +1062,16 @@ class ReviewAndPublishTests(EditorCase):
                          {'id':7,'status':'rejected','review_note':'duplicate'},
                          None):
             with self.subTest(original=original), \
-                 patch('commulingo_pipeline.config.load',return_value={'phase':'live'}), \
-                 patch('runtime_tools.commulingo_review_queue.suggestion',return_value=original), \
-                 patch('commulingo_pipeline.service.call') as rpc:
+                 patch('commulingo.pipeline.config.load',return_value={'phase':'live'}), \
+                 patch('commulingo.review_queue.suggestion',return_value=original), \
+                 patch('commulingo.pipeline.service.call') as rpc:
                 result = await workflow.publish(job,artifacts,Usage(),.2)
             rpc.assert_not_called()
             self.assertEqual((result.next_stage,result.status),('complete','complete'))
         # Without an approval bound to this patch nothing is written.
         unapproved = artifacts[:-1]+[{'stage':'review','value':{'decision':'revise'}}]
-        with patch('commulingo_pipeline.config.load',return_value={'phase':'live'}), \
-             patch('commulingo_pipeline.service.call') as rpc:
+        with patch('commulingo.pipeline.config.load',return_value={'phase':'live'}), \
+             patch('commulingo.pipeline.service.call') as rpc:
             result = await workflow.publish(job,unapproved,Usage(),.2)
         rpc.assert_not_called()
         self.assertEqual(result.next_stage,'review')
@@ -1083,7 +1083,7 @@ class ReviewAndPublishTests(EditorCase):
                                   (ValueError('400: definition too long'), 'draft'),
                                   (ValueError('409: revision_conflict'), 'research')]:
             with self.subTest(outcome=str(outcome)), \
-                 patch('commulingo_pipeline.service.call',side_effect=[outcome] if isinstance(outcome,Exception) else None,
+                 patch('commulingo.pipeline.service.call',side_effect=[outcome] if isinstance(outcome,Exception) else None,
                        return_value=outcome) as rpc:
                 result = await workflow.validate(JOB,artifacts,Usage(),.2)
             self.assertEqual(result.next_stage,expected)

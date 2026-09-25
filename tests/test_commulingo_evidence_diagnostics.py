@@ -7,7 +7,7 @@ import unittest
 from ops.paths import commulingo_data_file
 
 ROOT = Path(__file__).resolve().parents[1]
-source = ROOT / "runtime_tools/commulingo_people.py"
+source = ROOT / "commulingo/people.py"
 module = ast.parse(source.read_text())
 namespace = {"_EDITORIAL_CONTRACT": json.loads(commulingo_data_file(
     "person-editorial-contract.json", "COMMULINGO_PERSON_CONTRACT").read_text())}

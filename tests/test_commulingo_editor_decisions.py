@@ -1,9 +1,9 @@
 from unittest.mock import AsyncMock, Mock, patch
 from types import SimpleNamespace
 from commulingo_test_support import HermeticAsyncCase
-from commulingo_pipeline.decisions import Decisions
-from commulingo_pipeline.editor_context import RepairReads, prose_budgets
-from commulingo_pipeline.engine import Usage
+from commulingo.pipeline.decisions import Decisions
+from commulingo.pipeline.editor_context import RepairReads, prose_budgets
+from commulingo.pipeline.engine import Usage
 from tool_gateway.results import ToolRejection
 
 
@@ -12,21 +12,21 @@ class DecisionTests(HermeticAsyncCase):
         usage = Usage()
         helper = Decisions({'kind':'term','action':'create'},None,None,usage)
         verdict = {'category':'economy','low_confidence':False}
-        with patch('runtime_tools.commulingo_classify.classify_term',return_value=verdict) as classify:
+        with patch('commulingo.classify.classify_term',return_value=verdict) as classify:
             a,_ = await helper.classify({'term':{'en':'Planning'}},[],{})
             b,_ = await helper.classify({'term':{'en':'Planning'}},[],{})
         self.assertEqual(a['category'],'economy'); self.assertEqual(a,b)
         classify.assert_called_once()
         helper.cache.clear()
-        with patch('runtime_tools.commulingo_classify.classify_term',return_value=None):
+        with patch('commulingo.classify.classify_term',return_value=None):
             with self.assertRaisesRegex(RuntimeError,'no LLM fallback'):
                 await helper.classify({'term':{'en':'Planning'}},[],{})
 
     async def test_existing_classification_is_preserved_during_code_assignment(self):
         helper = Decisions({'kind':'person','action':'update'},
             {'groupId':'existing','role':{'category':'scholar'}},None,Usage())
-        with patch('runtime_tools.commulingo_classify.classify_person_codes',return_value={'citizenship':{'code':'france'}}), \
-             patch('runtime_tools.commulingo_classify.classify_person_card') as card:
+        with patch('commulingo.classify.classify_person_codes',return_value={'citizenship':{'code':'france'}}), \
+             patch('commulingo.classify.classify_person_card') as card:
             result,_ = await helper.classify({'citizenship':{'label':{'ko':'프랑스','en':'France'}}},[],{})
         card.assert_not_called()
         self.assertNotIn('groupId',result); self.assertNotIn('role',result)

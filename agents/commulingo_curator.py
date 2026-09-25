@@ -2,7 +2,7 @@
 
 from agents.base import AgentSpec
 from llm.prompt_renderer import SystemPrompt
-from runtime_tools.commulingo_people import (
+from commulingo.people import (
     DENSE_SENTENCE_CHARS, FIELD_LIMITS, sentence_budget, sentence_prescription,
 )
 

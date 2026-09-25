@@ -79,7 +79,7 @@ class Editor:
         catalogs = None
         section = job['kind']=='person' and job['action']=='update' and work_topics(job)==['sections']
         if job['kind']=='person' and not section:
-            from runtime_tools.commulingo_classify import load_catalogs
+            from commulingo.classify import load_catalogs
             catalogs = await asyncio.to_thread(load_catalogs)
         decisions = Decisions(job,current,catalogs,usage,deepcopy(checkpoint.get('classification_cache',{})))
         field_schema = decisions.author_schema(schema_for(job, current, catalogs))
@@ -268,13 +268,13 @@ class Editor:
                     else:
                         slug_key = canonical(fields.get('heading'))
                         if slug_key not in section_slug_cache:
-                            from runtime_tools.commulingo_section_slug import generate_section_slug
+                            from commulingo.section_slug import generate_section_slug
                             section_slug_cache[slug_key] = await asyncio.to_thread(
                                 generate_section_slug, job['target'], fields.get('heading'), fields.get('body'),
                                 (current or {}).get('sections', []), usage=usage)
                             await save_checkpoint()
                         fields['slug'] = section_slug_cache[slug_key]
-                    from runtime_tools.commulingo_section_slug import section_sort_order
+                    from commulingo.section_slug import section_sort_order
                     fields['sortOrder'] = section_sort_order(
                         fields.pop('startYear', None), fields.pop('startMonth', None),
                         (current or {}).get('sections', []))

@@ -1,6 +1,6 @@
 # CommuLingo 영속 편집 파이프라인
 
-인물·용어의 등록과 보강은 `commulingo_pipeline/`이 맡는다. 진입점은
+인물·용어의 등록과 보강은 `commulingo/pipeline/`이 맡는다. 진입점은
 `scripts/commulingo_pipeline.py`, 운영 설정은 `config/commulingo_pipeline.json`이다.
 저장 도구의 계약은 [편집 서비스](commulingo_editorial.md), 판정 정책은 [Jev 연동](jev_system_one_adoption.md)을 따른다.
 

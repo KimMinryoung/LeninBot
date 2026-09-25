@@ -179,7 +179,7 @@ def load_term_categories() -> list[dict]:
         logger.warning("term categories unavailable for classification (%s); using the built-in list", exc)
         rows = []
     if not rows:
-        from runtime_tools.commulingo_people import _TERM_CATEGORY_FALLBACK
+        from commulingo.people import _TERM_CATEGORY_FALLBACK
         rows = [{"id": slug, "label_ko": slug, "label_en": label} for slug, label in _TERM_CATEGORY_FALLBACK]
     return rows
 
@@ -307,7 +307,7 @@ def person_code_state(fields: dict, claims: dict | None) -> dict:
 
 def _codes_from(decision, questions, fields, accept) -> dict:
     """Code verdicts from a decision that answered person_code_questions."""
-    from runtime_tools.commulingo_people import _NATIONAL_ORIGIN_CODES, _NATIONALITY_CODES
+    from commulingo.people import _NATIONAL_ORIGIN_CODES, _NATIONALITY_CODES
     out = _living_fate(fields)
     for key, field, valid in (("nationalOrigin", "code", _NATIONAL_ORIGIN_CODES), ("citizenship", "code", _NATIONALITY_CODES),
                               ("fate", "kind", FATE_CRITERIA)):
@@ -326,7 +326,7 @@ def classify_person_codes(fields: dict, *, claims: dict | None = None, decide=No
     objects still lacking a code, or None when the model is unavailable. ``claims``
     maps field name to [{"claim", "excerpt"}] from the research artifact."""
     from llm.call_registry import decide_detailed
-    from runtime_tools.commulingo_people import _NATIONAL_ORIGIN_CODES, _NATIONALITY_CODES
+    from commulingo.people import _NATIONAL_ORIGIN_CODES, _NATIONALITY_CODES
 
     enabled, accept = _profile(CODES_FEATURE)
     if not enabled:
@@ -454,7 +454,7 @@ def state_from_fields(fields: dict) -> dict:
 
 
 def load_catalogs() -> tuple[list[dict], list[dict], list[dict]]:
-    from runtime_tools.commulingo_people import _list_categories, _list_groups, _list_offices
+    from commulingo.people import _list_categories, _list_groups, _list_offices
     return _list_groups(), _list_offices(), _list_categories()
 
 
@@ -540,7 +540,7 @@ def classify_person_card(fields: dict, *, catalogs=None, claims: dict | None = N
     Each stage sees the preceding choice; Jev question heads are independent.
     """
     from llm.call_registry import decide_detailed, Decision
-    from runtime_tools.commulingo_people import _NATIONAL_ORIGIN_CODES, _NATIONALITY_CODES
+    from commulingo.people import _NATIONAL_ORIGIN_CODES, _NATIONALITY_CODES
 
     enabled, accept = _profile(FEATURE)
     if not enabled:
@@ -550,7 +550,7 @@ def classify_person_card(fields: dict, *, catalogs=None, claims: dict | None = N
         return None
     questions = person_card_questions(fields, groups, offices, categories, sorted(_NATIONALITY_CODES),
                                       sorted(_NATIONAL_ORIGIN_CODES), codes=codes)
-    from runtime_tools.commulingo_activities import activity_evidence, activity_questions, activity_person_from, load_catalog
+    from commulingo.activities import activity_evidence, activity_questions, activity_person_from, load_catalog
     basis = activity_evidence(fields, claims)
     if not basis and not legacy:
         logger.warning("activity classification requires cited career/bio evidence excerpts; no legacy fallback")

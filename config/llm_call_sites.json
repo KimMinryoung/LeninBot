@@ -366,7 +366,7 @@
       "reject": 0.85,
       "boilerplate": 0.9
     },
-    "note": "CommuLingo 조사 단계 인용 지지 게이트(commulingo_pipeline/citation_gate.py): 위치 확인된 인용 발췌가 주장을 실제로 뒷받침하는지 Jev choice(supports/contradicts/unrelated)+noul(specific, boilerplate)로 판정. confidence≥thresholds.reject의 unrelated/contradicts 또는 boilerplate≥thresholds.boilerplate는 결과 호출을 거절해 모델이 인용을 고치게 함. enforce=false면 기록만(shadow), enabled=false면 호출 안 함. 판정 실패(None)는 기록만 하고 통과. 2026-09-19 기준선: 실제 30쌍 중 N 5건을 오탐 0으로 5/5 unrelated(3건 고신뢰), 대조군 29/29. claim당 ~$0.00002."
+    "note": "CommuLingo 조사 단계 인용 지지 게이트(commulingo/pipeline/citation_gate.py): 위치 확인된 인용 발췌가 주장을 실제로 뒷받침하는지 Jev choice(supports/contradicts/unrelated)+noul(specific, boilerplate)로 판정. confidence≥thresholds.reject의 unrelated/contradicts 또는 boilerplate≥thresholds.boilerplate는 결과 호출을 거절해 모델이 인용을 고치게 함. enforce=false면 기록만(shadow), enabled=false면 호출 안 함. 판정 실패(None)는 기록만 하고 통과. 2026-09-19 기준선: 실제 30쌍 중 N 5건을 오탐 0으로 5/5 unrelated(3건 고신뢰), 대조군 29/29. claim당 ~$0.00002."
   },
   "commulingo_review_citation_support": {
     "provider": "typesafe",
@@ -379,7 +379,7 @@
       "reject": 0.85,
       "boilerplate": 0.9
     },
-    "note": "CommuLingo 독립 검토 인용 게이트(commulingo_pipeline/citation_gate.py::check_review_checks): 검토자의 checks[].quote가 finding이 확인한다고 말하는 사실을 실제로 담는지 Jev choice(supports/contradicts/unrelated)+noul(specific, boilerplate)로 판정. 판정 수치는 각 check의 citation_check에, 집계는 review artifact metrics의 review_citation_*에 남는다. 2026-09-19 기준선(저장된 검토 40건): 무관 인용 2건을 오탐 0으로 검출(conf 0.98·0.83). 2026-09-19 사용자 지시로 처음부터 enforce=true. enforce=true면 고신뢰 unrelated/contradicts 또는 boilerplate 인용을 가진 결정 호출을 거절해 검토자가 그 check만 고치게 한다."
+    "note": "CommuLingo 독립 검토 인용 게이트(commulingo/pipeline/citation_gate.py::check_review_checks): 검토자의 checks[].quote가 finding이 확인한다고 말하는 사실을 실제로 담는지 Jev choice(supports/contradicts/unrelated)+noul(specific, boilerplate)로 판정. 판정 수치는 각 check의 citation_check에, 집계는 review artifact metrics의 review_citation_*에 남는다. 2026-09-19 기준선(저장된 검토 40건): 무관 인용 2건을 오탐 0으로 검출(conf 0.98·0.83). 2026-09-19 사용자 지시로 처음부터 enforce=true. enforce=true면 고신뢰 unrelated/contradicts 또는 boilerplate 인용을 가진 결정 호출을 거절해 검토자가 그 check만 고치게 한다."
   },
   "scout_kg_fact_filter": {
     "provider": "typesafe",
@@ -401,7 +401,7 @@
     "thresholds": {
       "accept": 0.7
     },
-    "note": "인물 등록 시 groupId·role 자동 배정(runtime_tools/commulingo_classify.py::classify_person). 작성 모델은 두 값을 내지 않고 실행기가 초안의 이름·생몰·국적·별칭·경력·bio로 Jev choice 판정을 받아 채운다(관직은 소련·후계국 국적에만 제시). confidence<thresholds.accept면 그래도 채우고 검토 단계가 classification_low_confidence 위험 항목으로 확인 요청. criteria는 2026-09-19 운영자 확정 규칙. 판정 불가면 작업을 미뤄 재시도(작성 모델에게 넘기지 않음). dev_docs/commulingo_editorial.md 2026-09-20: 신규 인물은 classify_person_card가 코드(citizenship/origin/fate)·group·role(소련용·비소련용 두 벌, citizenship 답으로 선택)을 한 요청으로 묻는다(라벨 person-card, 요청당 ~9k 토큰)."
+    "note": "인물 등록 시 groupId·role 자동 배정(commulingo/classify.py::classify_person). 작성 모델은 두 값을 내지 않고 실행기가 초안의 이름·생몰·국적·별칭·경력·bio로 Jev choice 판정을 받아 채운다(관직은 소련·후계국 국적에만 제시). confidence<thresholds.accept면 그래도 채우고 검토 단계가 classification_low_confidence 위험 항목으로 확인 요청. criteria는 2026-09-19 운영자 확정 규칙. 판정 불가면 작업을 미뤄 재시도(작성 모델에게 넘기지 않음). dev_docs/commulingo_editorial.md 2026-09-20: 신규 인물은 classify_person_card가 코드(citizenship/origin/fate)·group·role(소련용·비소련용 두 벌, citizenship 답으로 선택)을 한 요청으로 묻는다(라벨 person-card, 요청당 ~9k 토큰)."
   },
   "commulingo_term_classification": {
     "provider": "typesafe",
@@ -412,7 +412,7 @@
     "thresholds": {
       "accept": 0.7
     },
-    "note": "용어 등록 시 category 자동 배정(runtime_tools/commulingo_classify.py::classify_term). 작성 모델은 category를 내지 않고 실행기가 term·정의·기간·본문으로 Jev choice(10종)를 받아 채운다. 작성 모델 schema에 category 없음; 판정 불가면 작업을 미뤄 재시도. 2026-09-19 기준선(저장 용어 1,086건, 작성 모델이 고른 값이라 일관성 낮음): 일치 813, conf≥0.85 628/714, ≥0.95 521/565. 용어당 ~$0.00007. dev_docs/commulingo_editorial.md"
+    "note": "용어 등록 시 category 자동 배정(commulingo/classify.py::classify_term). 작성 모델은 category를 내지 않고 실행기가 term·정의·기간·본문으로 Jev choice(10종)를 받아 채운다. 작성 모델 schema에 category 없음; 판정 불가면 작업을 미뤄 재시도. 2026-09-19 기준선(저장 용어 1,086건, 작성 모델이 고른 값이라 일관성 낮음): 일치 813, conf≥0.85 628/714, ≥0.95 521/565. 용어당 ~$0.00007. dev_docs/commulingo_editorial.md"
   },
   "commulingo_person_codes": {
     "provider": "typesafe",
@@ -423,7 +423,7 @@
     "thresholds": {
       "accept": 0.7
     },
-    "note": "인물 등록·수정 시 citizenship.code(국가 코드 ~190종)와 fate.kind(9종) 자동 배정(runtime_tools/commulingo_classify.py::classify_person_codes). 작성 모델은 라벨 문장만 쓰고 실행기가 라벨+조사 claim 발췌(파이프라인) 또는 라벨만(도구)으로 Jev choice를 받아 코드를 채운다. 생존 인물의 fate는 호출 없이 빈 kind. 작성 모델 schema에 code/kind 키 없음; 판정 불가면 작업을 미뤄 재시도. nationalOrigin.code도 채운다 — 출신 규칙(민족·국가 배경, 출생지 아님, 유대계는 가족의 출신 국가이지 israel 아님, 비러시아 민족의 소련 관리는 그 민족)을 instructions에 적으면 48/49(규칙 없이는 42/49). 2026-09-19 기준선(최근 초안 60건): citizenship 50/50, fate 32/35, nationalOrigin 48/49. dev_docs/commulingo_editorial.md"
+    "note": "인물 등록·수정 시 citizenship.code(국가 코드 ~190종)와 fate.kind(9종) 자동 배정(commulingo/classify.py::classify_person_codes). 작성 모델은 라벨 문장만 쓰고 실행기가 라벨+조사 claim 발췌(파이프라인) 또는 라벨만(도구)으로 Jev choice를 받아 코드를 채운다. 생존 인물의 fate는 호출 없이 빈 kind. 작성 모델 schema에 code/kind 키 없음; 판정 불가면 작업을 미뤄 재시도. nationalOrigin.code도 채운다 — 출신 규칙(민족·국가 배경, 출생지 아님, 유대계는 가족의 출신 국가이지 israel 아님, 비러시아 민족의 소련 관리는 그 민족)을 instructions에 적으면 48/49(규칙 없이는 42/49). 2026-09-19 기준선(최근 초안 60건): citizenship 50/50, fate 32/35, nationalOrigin 48/49. dev_docs/commulingo_editorial.md"
   },
   "commulingo_classification_audit": {
     "provider": "typesafe",
@@ -449,7 +449,7 @@
     "timeout": 15,
     "kind": "system_one",
     "enabled": true,
-    "note": "web_search 결과 선별 shadow(commulingo_pipeline/search_triage.py): 조사·검토 래퍼가 검색 결과 hit(제목·URL·요약)마다 choice [directly/possibly/unrelated] '대상 항목을 직접 다루는가'를 한 요청으로 묻고 판정을 usage tracker의 search_triage(artifact metrics)에만 기록한다 — 표시는 바꾸지 않는다. 1주 뒤 tool_audit_log의 fetch·인용과 join해 점수가 쓸모를 예측하는지 본 뒤 표시 여부 결정(dev_docs/jev_system_one_adoption.md 4.13). 근거: 검토당 fetch URL 5.8개 중 인용 3.1개. 검색당 ~$0.0001. enabled=false면 호출 없음; 판정 실패는 search_triage_unavailable 집계."
+    "note": "web_search 결과 선별 shadow(commulingo/pipeline/search_triage.py): 조사·검토 래퍼가 검색 결과 hit(제목·URL·요약)마다 choice [directly/possibly/unrelated] '대상 항목을 직접 다루는가'를 한 요청으로 묻고 판정을 usage tracker의 search_triage(artifact metrics)에만 기록한다 — 표시는 바꾸지 않는다. 1주 뒤 tool_audit_log의 fetch·인용과 join해 점수가 쓸모를 예측하는지 본 뒤 표시 여부 결정(dev_docs/jev_system_one_adoption.md 4.13). 근거: 검토당 fetch URL 5.8개 중 인용 3.1개. 검색당 ~$0.0001. enabled=false면 호출 없음; 판정 실패는 search_triage_unavailable 집계."
   },
   "roleplay_duration_estimate": {
     "provider": "deepseek",

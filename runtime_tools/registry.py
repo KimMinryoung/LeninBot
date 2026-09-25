@@ -1161,7 +1161,7 @@ TOOLS.extend(WIKI_TOOLS)
 TOOL_HANDLERS.update(WIKI_TOOL_HANDLERS)
 
 # ── CommuLingo people dictionary (read + staged edit suggestions) ──
-from runtime_tools.commulingo_people import COMMULINGO_TOOLS, COMMULINGO_TOOL_HANDLERS
+from commulingo.people import COMMULINGO_TOOLS, COMMULINGO_TOOL_HANDLERS
 
 TOOLS.extend(COMMULINGO_TOOLS)
 TOOL_HANDLERS.update(COMMULINGO_TOOL_HANDLERS)

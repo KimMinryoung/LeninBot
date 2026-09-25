@@ -4,10 +4,10 @@ import unittest
 from contextlib import nullcontext
 from unittest.mock import patch
 
-from commulingo_pipeline.evidence import (
+from commulingo.pipeline.evidence import (
     Passages, SourcePages, compile_evidence, resolve_passages, snapshot,
 )
-from runtime_tools.commulingo_review_policy import review_source, resolve_review_checks
+from commulingo.review_policy import review_source, resolve_review_checks
 
 
 class ImmutablePassageTests(unittest.TestCase):
@@ -50,9 +50,9 @@ class ImmutablePassageTests(unittest.TestCase):
 
     def test_growing_and_restarted_snapshots_do_not_invalidate_old_labels(self):
         pages, registry, sources = SourcePages(), Passages(), {}
-        with patch('commulingo_pipeline.evidence.MAX_SNAPSHOT_CHARS', 50):
+        with patch('commulingo.pipeline.evidence.MAX_SNAPSHOT_CHARS', 50):
             for body in ('first page', 'second page', 'z' * 45):
-                logging = self.assertLogs('commulingo_pipeline.evidence', level='WARNING') if body.startswith('z') else nullcontext()
+                logging = self.assertLogs('commulingo.pipeline.evidence', level='WARNING') if body.startswith('z') else nullcontext()
                 with logging:
                     source, span, _ = pages.absorb('https://example.org/page', body)
                 sources[source['id']] = source

@@ -15,7 +15,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import runtime_tools, telegram
 runtime_tools.__path__.insert(0,str(ROOT/'runtime_tools'))
 telegram.__path__.insert(0,str(ROOT/'telegram'))
-from runtime_tools.commulingo_review_policy import validate_decision, resolve_review_checks
+from commulingo.review_policy import validate_decision, resolve_review_checks
 from telegram.commulingo_review import cmd_commulingo_review
 spec=importlib.util.spec_from_file_location('reviewer_test_module',ROOT/'scripts/commulingo_person_reviewer.py')
 worker=importlib.util.module_from_spec(spec);spec.loader.exec_module(worker)
@@ -24,20 +24,20 @@ QUOTE='The archived register identifies two distinct people with different birth
 PROPOSAL={'source_refs':[SOURCE],'risks':['identity_uncertain']}
 DECISION={'decision':'approve','reason':'원본 기록의 생년과 직책을 대조하여 동명이인임을 확인했습니다.',
     'resolved_risks':['identity_uncertain'],'checks':[{'citation':SOURCE,'source':SOURCE,'quote':QUOTE,'finding':'서로 다른 인물임을 확인'}]}
-from runtime_tools.commulingo_review_policy import review_source as _review_source
-from commulingo_pipeline.evidence import Passages
+from commulingo.review_policy import review_source as _review_source
+from commulingo.pipeline.evidence import Passages
 LABEL='P1'  # First paragraph displayed in a fresh review registry.
 SUBMITTED={**DECISION,'checks':[{'citation':SOURCE,'passages':[LABEL],'finding':'서로 다른 인물임을 확인'}]}
 
 class PolicyTests(EditorCase):
     def setUp(self):
         super().setUp()
-        reservation = patch('commulingo_pipeline.config.legacy_reserve',return_value=None)
+        reservation = patch('commulingo.pipeline.config.legacy_reserve',return_value=None)
         reservation.start()
         self.addCleanup(reservation.stop)
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
-        ledger = patch('runtime_tools.commulingo_research_memory.STORE_PATH', Path(directory.name) / 'review.sqlite3')
+        ledger = patch('commulingo.research_memory.STORE_PATH', Path(directory.name) / 'review.sqlite3')
         ledger.start()
         self.addCleanup(ledger.stop)
 
@@ -114,7 +114,7 @@ class PolicyTests(EditorCase):
              patch.object(worker.queue,'finish') as finish, \
              patch.object(worker,'research',new=AsyncMock(return_value=(decision,{SOURCE:QUOTE}))), \
              patch.object(worker,'call_person_service',return_value=None) as rpc, \
-             patch('commulingo_pipeline.store.Store.enqueue_review_repair',return_value=123) as enqueue:
+             patch('commulingo.pipeline.store.Store.enqueue_review_repair',return_value=123) as enqueue:
             await worker.process(job,{})
         enqueue.assert_called_once_with(row,decision)
         self.assertEqual(rpc.call_count,1)

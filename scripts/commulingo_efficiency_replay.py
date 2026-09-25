@@ -17,9 +17,9 @@ sys.path.insert(0,str(ROOT))
 
 
 def replay(cases, repair_class=None):
-    from commulingo_pipeline.draft_repair import DraftRepair
+    from commulingo.pipeline.draft_repair import DraftRepair
     from scripts.commulingo_write_session import draft_id
-    from runtime_tools.commulingo_people import (COMMULINGO_PERSON_CREATE_TOOL,
+    from commulingo.people import (COMMULINGO_PERSON_CREATE_TOOL,
         COMMULINGO_PERSON_UPDATE_TOOL,COMMULINGO_TERM_CREATE_TOOL,COMMULINGO_TERM_UPDATE_TOOL)
     tools={('person','create'):COMMULINGO_PERSON_CREATE_TOOL,
            ('person','update'):COMMULINGO_PERSON_UPDATE_TOOL,
@@ -75,7 +75,7 @@ def main():
     result=replay(cases)
     if args.baseline_ref:
         import subprocess
-        source=subprocess.run(['git','show',args.baseline_ref+':commulingo_pipeline/draft_repair.py'],
+        source=subprocess.run(['git','show',args.baseline_ref+':commulingo/pipeline/draft_repair.py'],
             cwd=ROOT,check=True,capture_output=True,text=True).stdout
         namespace={}
         exec(compile(source,'baseline_draft_repair.py','exec'),namespace)

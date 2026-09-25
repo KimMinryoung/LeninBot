@@ -186,7 +186,7 @@ def main() -> int:
         parser.error("--apply requires --apply-spec; inferred nationality is report-only")
     if args.apply_spec:
         sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-        from runtime_tools.commulingo_person_service import apply_person_spec
+        from commulingo.person_service import apply_person_spec
         print(apply_person_spec(args.apply_spec))
         return 0
 

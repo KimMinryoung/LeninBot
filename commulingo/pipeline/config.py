@@ -2,7 +2,7 @@ import json
 import math
 from pathlib import Path
 
-PATH = Path(__file__).resolve().parents[1] / 'config/commulingo_pipeline.json'
+PATH = Path(__file__).resolve().parents[2] / 'config/commulingo_pipeline.json'
 
 
 def load():

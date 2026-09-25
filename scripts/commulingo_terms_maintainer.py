@@ -27,11 +27,11 @@ if str(PROJECT_ROOT) not in sys.path:
 SUGGESTED_BY = "commulingo-maintainer-terms"
 os.environ["COMMULINGO_SUGGESTED_BY"] = SUGGESTED_BY
 
-from runtime_tools import commulingo_lane as lane  # noqa: E402
+from commulingo import lane  # noqa: E402
 from agents import get_agent  # noqa: E402
 from bot_config import resolve_agent_tool_loop  # noqa: E402
 from db import query as db_query, query_one as db_query_one  # noqa: E402
-from runtime_tools.commulingo_people import (  # noqa: E402
+from commulingo.people import (  # noqa: E402
     DENSE_SENTENCE_CHARS,
     FIELD_LIMITS,
     registered_event_labels,
@@ -210,7 +210,7 @@ async def run_once() -> dict:
     if not config.get("enabled") or not config.get("term_lane_enabled"):
         return {"status": "skipped", "reason": "term_lane_enabled=false"}
 
-    from runtime_tools.commulingo_people import direct_apply_enabled
+    from commulingo.people import direct_apply_enabled
     from tool_gateway.inference import resolve_agent_inference_policy
 
     if not direct_apply_enabled():
@@ -246,7 +246,7 @@ async def run_once() -> dict:
     task += "\nIf no suitable term remains, call commulingo_no_edit with reason/status/sources. Free-text NO_CANDIDATE alone does not finish the job."
     ctx = new_run_context(interface="autonomous", agent_name=spec.name, is_owner=True,
         scope_type="maintenance_job", scope_id="commulingo_terms_maintainer")
-    from runtime_tools.commulingo_run import RunFailure, submitted_edit
+    from commulingo.run import RunFailure, submitted_edit
     try:
         with caller_scope(ctx):
             result, tracker, _ = await lane._call_curator_stage(

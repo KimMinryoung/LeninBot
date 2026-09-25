@@ -30,7 +30,7 @@ def changes(current, fields):
 
 
 def schema_for(job, current, catalogs=None):
-    from runtime_tools.commulingo_people import (
+    from commulingo.people import (
         _COMMULINGO_FIELD_SCHEMA, COMMULINGO_PERSON_CREATE_TOOL, COMMULINGO_PERSON_UPDATE_TOOL,
         COMMULINGO_TERM_CREATE_TOOL, COMMULINGO_TERM_UPDATE_TOOL, COMMULINGO_SECTION_SAVE_TOOL,
     )

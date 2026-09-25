@@ -9,8 +9,8 @@ ROOT = Path(os.environ.get('COMMULINGO_TEST_SOURCE', Path(__file__).resolve().pa
 queries = []
 namespace = {'db_query': lambda sql, params: queries.append((sql, params)) or [], 'json': __import__('json'), 'MAX_SECTIONS': 12}
 for source, names in (
-    (ROOT / 'runtime_tools/commulingo_people_lane.py', {'select_sparse_person', 'enrich_step'}),
-    (ROOT / 'runtime_tools/commulingo_lane.py', {'build_no_edit_handler', '_call_curator_stage'}),
+    (ROOT / 'commulingo/people_lane.py', {'select_sparse_person', 'enrich_step'}),
+    (ROOT / 'commulingo/lane.py', {'build_no_edit_handler', '_call_curator_stage'}),
 ):
     module = ast.parse(source.read_text())
     selected = [n for n in module.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name in names]
@@ -19,7 +19,7 @@ for source, names in (
 
 class EditorialSelection(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        reservation = patch('commulingo_pipeline.config.legacy_reserve',return_value=None)
+        reservation = patch('commulingo.pipeline.config.legacy_reserve',return_value=None)
         reservation.start()
         self.addCleanup(reservation.stop)
 

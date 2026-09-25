@@ -52,7 +52,7 @@ def _worker_tag() -> str:
     with an error note.
 
     argparse runs in main(), which is far too late — COMMULINGO_SUGGESTED_BY has
-    to be set before runtime_tools.commulingo_people is imported a few lines
+    to be set before commulingo.people is imported a few lines
     down. Hence reading argv by hand here. Same fix as commulingo_people_parallel,
     which gives each of its lanes its own suggested_by for the same reason.
     """
@@ -70,8 +70,8 @@ def _worker_tag() -> str:
 SUGGESTED_BY = f"commulingo-gap-worker-{_worker_tag()}"
 os.environ["COMMULINGO_SUGGESTED_BY"] = SUGGESTED_BY
 
-from runtime_tools import commulingo_lane as lane  # noqa: E402
-from runtime_tools import commulingo_people_lane as people_lane  # noqa: E402
+from commulingo import lane  # noqa: E402
+from commulingo import people_lane  # noqa: E402
 from scripts import commulingo_gap_event_links as event_links  # noqa: E402
 from agents import get_agent  # noqa: E402
 from bot_config import _resolve_deepseek_model  # noqa: E402
@@ -212,7 +212,7 @@ def produced_entry(gap: dict) -> str:
         return gap["target_id"]  # a deepen request; the card existed all along
     with get_conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            from runtime_tools.commulingo_people import _already_covered
+            from commulingo.people import _already_covered
             return _already_covered(
                 cur, gap["kind"], {"ko": gap["label_ko"], "en": gap["label_en"]}, ""
             )
@@ -310,7 +310,7 @@ def build_term_task(gap: dict) -> str:
     # on 2026-08-09 that way, each one a second page saying what its event page
     # already said. Same list, same instruction, so the two lanes refuse the same
     # thing.
-    from runtime_tools.commulingo_people import registered_event_labels
+    from commulingo.people import registered_event_labels
     events = registered_event_labels()
     return f"""MODE: GLOSSARY TERM REGISTRATION, commissioned by a history-event page.
 
@@ -355,7 +355,7 @@ async def run_once(kind: str = "", events: list[str] | None = None) -> dict:
     if not config.get("enabled"):
         return {"status": "skipped", "reason": "maintainer disabled"}
 
-    from runtime_tools.commulingo_people import direct_apply_enabled
+    from commulingo.people import direct_apply_enabled
     from tool_gateway.inference import resolve_agent_inference_policy
 
     if not direct_apply_enabled():

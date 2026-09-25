@@ -9,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from commulingo_pipeline.citation_gate import FEATURE, QUESTIONS, verdict, settings
+from commulingo.pipeline.citation_gate import FEATURE, QUESTIONS, verdict, settings
 from llm.call_registry import Decision, decide_detailed
 
 

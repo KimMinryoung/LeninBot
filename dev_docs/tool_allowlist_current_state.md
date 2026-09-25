@@ -254,7 +254,7 @@ commulingo_review_decision뿐이다. 판단 도구는 검증된 결과를 메모
 
 ### CommuLingo 영속 파이프라인의 작성 단계
 
-작성은 `commulingo_pipeline/editor.py`의 Editor가 한 세션에서 맡는다(legacy `stages.Draft`는 2026-09-24 제거).
+작성은 `commulingo/pipeline/editor.py`의 Editor가 한 세션에서 맡는다(legacy `stages.Draft`는 2026-09-24 제거).
 읽기 도구는 wiki_search/wiki_get/web_search/fetch_url/commulingo_people이고, 제출·수정·무편집 종료·원문 캐시·
 현재 값 조회·조사 재개는 runner-local 도구다. 형식 수정 모드에서는 검색·원문 조회를 막고 사전 조회만
 get_person/get_term/get_office/get_event/get_sections로 세 번 이내 허용한다. 공통 전역 도구 정의는 수정하지 않는다.

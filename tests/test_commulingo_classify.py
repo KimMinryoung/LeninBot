@@ -3,7 +3,7 @@ import unittest
 from unittest.mock import patch
 
 from llm.call_registry import CallSiteProfile, Decision, DecisionResult
-from runtime_tools import commulingo_classify as cc
+from commulingo import classify as cc
 
 GROUPS = [{'id': 'thaw', 'title_en': 'Thaw', 'range_label': '1953–1985'},
           {'id': 'international-revolutionary', 'title_en': 'Non-Soviet', 'range_label': ''}]
@@ -264,7 +264,7 @@ class ClassifyCodesTests(unittest.TestCase):
         self.assertEqual(cc.missing_person_codes(cc.fill_person_codes(CARD, codes)), ['citizenship.code', 'fate.kind'])
 
     def test_create_tool_schema_no_longer_requires_the_codes(self):
-        from runtime_tools.commulingo_people import COMMULINGO_PERSON_CREATE_TOOL, _NATIONALITY_SCHEMA
+        from commulingo.people import COMMULINGO_PERSON_CREATE_TOOL, _NATIONALITY_SCHEMA
         props = COMMULINGO_PERSON_CREATE_TOOL['input_schema']['properties']['fields']['properties']
         for key in ('citizenship', 'nationalOrigin', 'fate'):
             self.assertEqual(props[key]['required'], ['label'])

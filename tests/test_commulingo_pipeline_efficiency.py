@@ -2,17 +2,17 @@ import asyncio
 from unittest import IsolatedAsyncioTestCase, TestCase
 from unittest.mock import AsyncMock, Mock, patch
 
-from commulingo_pipeline.draft_repair import DraftRepair
-from commulingo_pipeline.editor import Editor
-from commulingo_pipeline.evidence import SourceHandles, snapshot, Passages, resolve_passages, compile_evidence
-from commulingo_pipeline.engine import Engine, Result, Usage
+from commulingo.pipeline.draft_repair import DraftRepair
+from commulingo.pipeline.editor import Editor
+from commulingo.pipeline.evidence import SourceHandles, snapshot, Passages, resolve_passages, compile_evidence
+from commulingo.pipeline.engine import Engine, Result, Usage
 from scripts.commulingo_write_session import draft_id
 from commulingo_test_support import EditorCase
 
 
 class EvidenceContracts(TestCase):
     def test_uncertain_fate_has_a_supported_schema_value(self):
-        from runtime_tools.commulingo_people import COMMULINGO_PERSON_CREATE_TOOL, _COMMULINGO_FIELD_SCHEMA
+        from commulingo.people import COMMULINGO_PERSON_CREATE_TOOL, _COMMULINGO_FIELD_SCHEMA
         from jsonschema import validate as schema_validate, ValidationError
         schema=_COMMULINGO_FIELD_SCHEMA['properties']['fate']
         schema_validate({'kind':'','label':{'ko':'사망 경위 미확정','en':'Circumstances unconfirmed'}},schema)
@@ -38,7 +38,7 @@ class EvidenceContracts(TestCase):
         self.assertEqual(handles.ids['S1'],later['id'])
 
     def test_pages_of_one_url_merge_into_one_snapshot(self):
-        from commulingo_pipeline.evidence import SourcePages
+        from commulingo.pipeline.evidence import SourcePages
         pages=SourcePages()
         first,span1,created=pages.absorb('https://example.org/long','A'*600)
         self.assertTrue(created); self.assertEqual(span1,(0,600))
@@ -138,8 +138,8 @@ class EditorStorageContracts(EditorCase):
             value['fields']['body']['en']='A corrected documented historical context.'
             await repair_call(kw,value)
         usage=Usage()
-        with patch('commulingo_pipeline.stages.model_call',side_effect=model) as call, \
-             patch('commulingo_pipeline.service.call',rpc):
+        with patch('commulingo.pipeline.stages.model_call',side_effect=model) as call, \
+             patch('commulingo.pipeline.service.call',rpc):
             result=await Editor(store_mock())(JOB,[],usage,.2)
         call.assert_called_once()
         self.assertEqual(result.next_stage,'review')

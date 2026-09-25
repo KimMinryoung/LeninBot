@@ -43,7 +43,7 @@ class AuditTests(unittest.TestCase):
 
     def test_chinese_citizens_get_the_party_state_categories_and_nobody_else_does(self):
         from scripts import commulingo_classification_audit as audit
-        from runtime_tools.commulingo_classify import role_scope
+        from commulingo.classify import role_scope
         self.assertEqual(role_scope('china'), 'china')
         self.assertEqual(role_scope('soviet'), 'soviet')
         self.assertEqual(role_scope('poland'), 'other')
@@ -63,7 +63,7 @@ class AuditTests(unittest.TestCase):
         self.assertEqual(seen[0], {'ccp-security', 'scholar'})
 
     def test_undecided_citizenship_asks_the_role_three_ways(self):
-        from runtime_tools.commulingo_classify import ROLE_KEYS, person_card_questions
+        from commulingo.classify import ROLE_KEYS, person_card_questions
         q = person_card_questions({'citizenship': {'label': {'en': 'China'}}}, GROUPS, OFFICES, CATS, ['china', 'soviet'], ['china'])
         self.assertEqual(set(ROLE_KEYS.values()) - set(q), set())
         self.assertIn('ccp-security', q['role_china']['criteria'])

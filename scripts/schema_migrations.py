@@ -144,7 +144,7 @@ def _commulingo_pipeline() -> None:
     from db import get_conn
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute("SET LOCAL lock_timeout = '5s'")
-        cur.execute((ROOT / 'commulingo_pipeline/schema.sql').read_text())
+        cur.execute((ROOT / 'commulingo/pipeline/schema.sql').read_text())
 
 
 def _mail_briefing() -> None:

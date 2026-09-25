@@ -64,8 +64,8 @@ class RunBudget:
         if seconds <= 0 or rounds <= 0 or (self.policy.budget_usd > 0 and cost <= 0):
             raise RunFailure("job budget, round or time limit exhausted", self.record("exhausted"))
         if not self.reservation:
-            from commulingo_pipeline.config import legacy_reserve
-            from commulingo_pipeline.store import BudgetUnavailable
+            from commulingo.pipeline.config import legacy_reserve
+            from commulingo.pipeline.store import BudgetUnavailable
             try:
                 self.reservation = legacy_reserve(cost or 0.35, 'review' if self.stage=='review' else self.stage)
             except BudgetUnavailable as exc:

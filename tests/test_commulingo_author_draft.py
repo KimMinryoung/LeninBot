@@ -5,8 +5,8 @@ import unittest
 
 from jsonschema import Draft202012Validator
 
-from commulingo_pipeline.author_draft import AuthorDraft, obj
-from commulingo_pipeline.draft_repair import RepairProtocolError
+from commulingo.pipeline.author_draft import AuthorDraft, obj
+from commulingo.pipeline.draft_repair import RepairProtocolError
 from commulingo_test_support import EditorCase
 
 
@@ -129,11 +129,11 @@ class AuthorDraftTests(unittest.TestCase):
 class AuthorWorkflowTests(EditorCase):
     async def test_typed_edit_reaches_independent_review_and_bound_publication(self):
         from test_commulingo_editor import JOB, CURRENT, URL, BODY, candidate, submission, store_mock
-        from commulingo_pipeline.editor import Editor
-        from commulingo_pipeline.engine import Usage
-        from commulingo_pipeline import workflow
-        from commulingo_pipeline.stages import latest, write_request
-        from commulingo_pipeline.patches import patch_hash
+        from commulingo.pipeline.editor import Editor
+        from commulingo.pipeline.engine import Usage
+        from commulingo.pipeline import workflow
+        from commulingo.pipeline.stages import latest, write_request
+        from commulingo.pipeline.patches import patch_hash
         async def author(**kwargs):
             schema = kwargs['tool']['input_schema']
             self.assertEqual(set(schema['properties']['changes']['properties']), {'body'})
@@ -145,20 +145,20 @@ class AuthorWorkflowTests(EditorCase):
             await kwargs['handler']({'decision':'approve','reason':'Independent original verifies the changed facts.',
                 'resolved_risks':[], 'checks':[{'citation_id':'S1','passages':['P1'], 'finding':'The explanation matches the original.'}],
                 'required_corrections':[], 'optional_suggestions':[]})
-        with patch('commulingo_pipeline.service.call', return_value=CURRENT), \
-             patch('commulingo_pipeline.stages.model_call', side_effect=author):
+        with patch('commulingo.pipeline.service.call', return_value=CURRENT), \
+             patch('commulingo.pipeline.stages.model_call', side_effect=author):
             result = await Editor(store_mock())(JOB, [], Usage(), .2)
         artifacts = [{'stage':'research', 'value':result.value}]
         reads = {name:AsyncMock(return_value=f'<external source="web">\n{BODY}\n</external>')
                  for name in ('wiki_search','wiki_get','web_search','fetch_url','commulingo_people')}
-        with patch('commulingo_pipeline.service.call', return_value=CURRENT), \
+        with patch('commulingo.pipeline.service.call', return_value=CURRENT), \
              patch('runtime_tools.registry.TOOL_HANDLERS', reads), \
-             patch('runtime_tools.commulingo_review_handlers.review_risks', return_value=[]), \
-             patch('commulingo_pipeline.stages.model_call', side_effect=reviewer):
+             patch('commulingo.review_handlers.review_risks', return_value=[]), \
+             patch('commulingo.pipeline.stages.model_call', side_effect=reviewer):
             review = await workflow.Review()(JOB, artifacts, Usage(), .2)
         artifacts.append({'stage':'review', 'value':review.value})
-        with patch('commulingo_pipeline.config.load', return_value={'phase':'live'}), \
-             patch('commulingo_pipeline.service.call', return_value={'status':'approved','suggestionId':123}) as rpc:
+        with patch('commulingo.pipeline.config.load', return_value={'phase':'live'}), \
+             patch('commulingo.pipeline.service.call', return_value={'status':'approved','suggestionId':123}) as rpc:
             await workflow.publish(JOB, artifacts, Usage(), .2)
         request = rpc.call_args.args[0]
         self.assertEqual(request['approvedPatchHash'], patch_hash(write_request(JOB, latest(artifacts, 'draft'))))
@@ -166,9 +166,9 @@ class AuthorWorkflowTests(EditorCase):
         self.assertTrue(request['fields']['evidence'])
 
     async def test_no_edit_is_a_terminal_through_the_real_model_dispatcher(self):
-        from commulingo_pipeline.stages import model_call
-        from commulingo_pipeline.prompts import spec
-        from commulingo_pipeline.engine import Usage
+        from commulingo.pipeline.stages import model_call
+        from commulingo.pipeline.prompts import spec
+        from commulingo.pipeline.engine import Usage
         from tool_gateway.dispatcher import execute_tool
         draft = session()
         handler = AsyncMock()

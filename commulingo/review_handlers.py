@@ -2,7 +2,7 @@
 reviewer (``scripts/commulingo_person_reviewer.py``) and the staged pipeline."""
 import re
 
-from runtime_tools.commulingo_review_policy import (
+from commulingo.review_policy import (
     DECISION_TOOL, validate_decision, external_url, review_source, resolve_review_checks,
 )
 
@@ -33,7 +33,7 @@ def make_handlers(read_handlers, proposal, snapshots, box, gate=None, triage=Non
     ValueError to send it back to the reviewer before it is boxed;
     ``triage(text)`` (async) sees each rendered web_search result (shadow)."""
     from tool_gateway.results import ToolRejection
-    from commulingo_pipeline.evidence import Passages
+    from commulingo.pipeline.evidence import Passages
     from provenance.runtime import external_body
     handlers = {}
     passages = Passages()

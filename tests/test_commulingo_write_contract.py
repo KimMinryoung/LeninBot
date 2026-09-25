@@ -4,10 +4,10 @@ import unittest
 from unittest.mock import Mock
 from commulingo_test_support import no_external_io
 
-from commulingo_pipeline.decisions import Decisions
-from commulingo_pipeline.engine import Usage
-from commulingo_pipeline.patches import schema_for
-from runtime_tools import commulingo_people as people
+from commulingo.pipeline.decisions import Decisions
+from commulingo.pipeline.engine import Usage
+from commulingo.pipeline.patches import schema_for
+from commulingo import people
 
 
 class WriteContractTests(unittest.TestCase):

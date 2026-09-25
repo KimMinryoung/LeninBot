@@ -5,7 +5,7 @@ import re
 
 from llm.call_registry import generate_detailed, resolve
 from llm.gateway import estimate_cost_usd
-from runtime_tools.commulingo_people import _dedup_key, _fold_slug
+from commulingo.people import _dedup_key, _fold_slug
 
 logger = logging.getLogger(__name__)
 

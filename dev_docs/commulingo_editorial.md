@@ -6,8 +6,8 @@
 ## 저장 소유권과 RPC
 
 인물·상세 절 저장은 frontend `data/commulingo/person-editorial-service.js`가 소유한다.
-Python `runtime_tools/commulingo_people.py`와 제안 승인 스크립트는
-`runtime_tools/commulingo_person_service.py`를 통해 같은 JS Admin 저장소를 호출한다.
+Python `commulingo/people.py`와 제안 승인 스크립트는
+`commulingo/person_service.py`를 통해 같은 JS Admin 저장소를 호출한다.
 직접 SQL fallback은 없다. 파이프라인의 용어·원자적 공개는 frontend
 `editorial-pipeline-service.js`가 담당한다. 편집 쓰기는 공통 advisory lock으로 직렬화한다.
 

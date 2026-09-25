@@ -320,7 +320,7 @@ def review_note_checks(checks):
 
 
 def prose_problem(fields):
-    from runtime_tools.commulingo_people import _em_dash_problem, _script_leak_problem, _contains_north_korea
+    from commulingo.people import _em_dash_problem, _script_leak_problem, _contains_north_korea
     prose = {k:v for k,v in fields.items() if k not in {'evidence','sources'}}
     return '; '.join(e for e in (_em_dash_problem(prose), _script_leak_problem(prose),
         'Use 조선민주주의인민공화국 or 조선 in Korean text' if _contains_north_korea(prose) else None) if e)

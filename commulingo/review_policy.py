@@ -4,7 +4,7 @@ import json
 import hashlib
 from urllib.parse import urlsplit
 
-from commulingo_pipeline.evidence import MAX_PASSAGES, PASSAGE_PATTERN, Passages
+from commulingo.pipeline.evidence import MAX_PASSAGES, PASSAGE_PATTERN, Passages
 
 DECISION_TOOL = {"name": "commulingo_review_decision", "description": "Submit one independently researched review decision; does not directly write dictionary content.",
     "input_schema": {"type": "object", "additionalProperties": False,

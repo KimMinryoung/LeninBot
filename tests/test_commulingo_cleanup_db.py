@@ -6,8 +6,8 @@ import unittest
 import uuid
 
 from psycopg2.errors import LockNotAvailable
-from commulingo_pipeline.cleanup import retire
-from commulingo_pipeline.store import Store
+from commulingo.pipeline.cleanup import retire
+from commulingo.pipeline.store import Store
 
 
 @unittest.skipUnless(os.getenv('COMMULINGO_CLEANUP_TEST_PORT'), 'disposable cleanup PostgreSQL required')
@@ -30,7 +30,7 @@ class CleanupDatabaseTests(unittest.TestCase):
         cls.store = Store(connect)
         with cls.store.transaction() as cur:
             cur.execute('CREATE SCHEMA ' + cls.schema)
-            cur.execute(Path('commulingo_pipeline/schema.sql').read_text())
+            cur.execute(Path('commulingo/pipeline/schema.sql').read_text())
             cur.execute('''CREATE TABLE commulingo_people(id text PRIMARY KEY,years_label text,
                 epithet_ko text,epithet_en text,bio_ko text,bio_en text,moment_ko text,moment_en text,
                 citizenship_label_ko text,citizenship_label_en text,origin_label_ko text,origin_label_en text);
@@ -152,7 +152,7 @@ class CleanupDatabaseTests(unittest.TestCase):
         self.assertEqual(row['review_chars'],1000)
 
     def test_failure_checkpoint_is_fenced_and_cannot_overwrite_editor_checkpoint(self):
-        from commulingo_pipeline.store import LostLease
+        from commulingo.pipeline.store import LostLease
         job_id = self.job('checkpoint')
         job = self.store.claim(job_id=job_id)
         self.store.save_editor_checkpoint(job,{'draft':{'fields':{'body':'retained'}}})

@@ -1,4 +1,4 @@
-"""runtime_tools.commulingo_people — CommuLingo dictionary read + narrow write tools.
+"""commulingo.people — CommuLingo dictionary read + narrow write tools.
 
 The people dictionary at cyber-lenin.com/commulingo/people is DB-backed
 (commulingo_* tables in the main Postgres; see
@@ -41,7 +41,7 @@ from psycopg2.extras import RealDictCursor, execute_values
 from db import query as db_query, query_one as db_query_one, get_conn
 from ops.paths import COMMULINGO_DATA_DIR, commulingo_data_file
 from tool_gateway.results import ToolFailure
-from runtime_tools.commulingo_person_service import call_person_service
+from commulingo.person_service import call_person_service
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +92,7 @@ _PERSON_PATCH_KEYS = frozenset({
 })
 
 # Flag codes the frontend has vendored SVGs for (data/commulingo/flag-icons.js).
-# runtime_tools/commulingo_people_lane.py derives its prompt NATIONALITY_CODES from this set.
+# commulingo/people_lane.py derives its prompt NATIONALITY_CODES from this set.
 # Codes map to country flags, not an exhaustive ethnicity taxonomy. Use sourced
 # national background; never assign Russia or a neighbouring state by default.
 # Preserve documented ethnic and mixed backgrounds in bilingual labels.
@@ -625,7 +625,7 @@ def _list_groups() -> list[dict]:
 
 def _search_people(q: str, group_id: str, limit: int, function_id: str = "", affiliation_id: str = "") -> list[dict]:
     if function_id or affiliation_id:
-        from runtime_tools.commulingo_activities import activity_search_params
+        from commulingo.activities import activity_search_params
         params = activity_search_params(function_id, affiliation_id)
         params.update(q=q, g=group_id, limit=limit)
         return db_query(
@@ -960,7 +960,7 @@ def _list_terms(q: str = "") -> list[dict]:
 
 
 def _get_term(term_id: str) -> dict | None:
-    from commulingo_pipeline.config import load
+    from commulingo.pipeline.config import load
     if load()['term_editorial_service']:
         return call_person_service({'command':'read','target':'term','id':term_id})
     with get_conn() as conn:
@@ -1080,7 +1080,7 @@ async def _exec_commulingo_people(
                 return "Error: q is required for search."
             result = await asyncio.to_thread(_search_all, q.strip(), limit)
         elif action == "list_activity_catalog":
-            from runtime_tools.commulingo_activities import load_catalog
+            from commulingo.activities import load_catalog
             result = load_catalog()
         elif action == "list_groups":
             result = await asyncio.to_thread(_list_groups)
@@ -2906,13 +2906,13 @@ def _public_page(target_type: str, target_id: str) -> str:
 def _run_edit(target_type: str, action: str, target_id: str, patch: dict,
               sources: list[str], confidence: float | None) -> str:
     if target_type=='term' and action=='create' and not patch.get('category'):
-        from runtime_tools.commulingo_classify import classify_term, fill_term_category
+        from commulingo.classify import classify_term, fill_term_category
         classification = classify_term(patch)
         if classification is None:
             return "Error: activity classification needs cited bio/career evidence with source, locator, claim and excerpt; if already provided, retry the saved draft after the classifier recovers."
         patch = fill_term_category(patch, classification)
     if target_type=='term':
-        from commulingo_pipeline.config import load
+        from commulingo.pipeline.config import load
         if load()['term_editorial_service']:
             prose = {k:v for k,v in patch.items() if k not in {'evidence','sources'}}
             problems = [p for p in (_em_dash_problem(prose),_script_leak_problem(prose),
@@ -2940,7 +2940,7 @@ def _run_edit(target_type: str, action: str, target_id: str, patch: dict,
             fields["role"].pop("categoryId")
         activity_review_required = False
         if target_type == "person":
-            from runtime_tools.commulingo_classify import (classify_person, classify_person_card, classify_person_codes,
+            from commulingo.classify import (classify_person, classify_person_card, classify_person_codes,
                                                           fill_classification, fill_person_codes, missing_person_codes)
             needs_codes = bool(missing_person_codes(fields))
             needs_group = action == "create" and not (fields.get("groupId") and fields.get("role"))
@@ -3718,7 +3718,7 @@ async def _exec_commulingo_write(
         # Expand references after prose normalization so citation bytes are
         # copied exactly, including any intentional literal escape sequences.
         if target_type in {"person", "person_section", "term"} and "evidence" in patch:
-            from runtime_tools.commulingo_evidence import resolve_evidence_sources
+            from commulingo.evidence import resolve_evidence_sources
             try:
                 patch = {**patch, "evidence": resolve_evidence_sources(patch["evidence"], sources)}
             except ValueError as exc:
@@ -4126,7 +4126,7 @@ async def _exec_commulingo_section_save(
     citations: list, slug: str | None = None, start_year: int | None = None,
     start_month: int | None = None, expected_revision: str | None = None, evidence: list | None = None,
 ) -> str:
-    from runtime_tools.commulingo_section_slug import generate_section_slug, section_sort_order
+    from commulingo.section_slug import generate_section_slug, section_sort_order
     if action == "create":
         try:
             current = await asyncio.to_thread(call_person_service, {"command": "read", "id": person_id})

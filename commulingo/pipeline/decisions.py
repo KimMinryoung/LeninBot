@@ -45,7 +45,7 @@ class Decisions:
                 fields[field].pop(key,None)
 
     async def classify(self, fields, claims, sources):
-        from runtime_tools import commulingo_classify as c
+        from commulingo import classify as c
         excerpts = {}
         for claim in claims:
             page = sources[claim['source_id']]['body']
@@ -61,7 +61,7 @@ class Decisions:
         if not (person or codes or term):
             return fields, {}
         state = c.term_state(merged) if term else c.person_card_state(merged,excerpts)
-        from runtime_tools.commulingo_activities import load_catalog
+        from commulingo.activities import load_catalog
         key = canonical({'state':state,'person':person,'codes':codes,'term':term,'activity_catalog':load_catalog() if person else None})
         verdict = self.cache.get(key)
         if verdict is None:

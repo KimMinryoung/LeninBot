@@ -25,7 +25,7 @@ if SUGGESTED_BY not in {"commulingo-maintainer-enrich", "commulingo-maintainer-n
 # The edit tool reads this during the imported module graph's initialization.
 os.environ["COMMULINGO_SUGGESTED_BY"] = SUGGESTED_BY
 
-from runtime_tools.commulingo_lane import load_config  # noqa: E402
+from commulingo.lane import load_config  # noqa: E402
 # This wrapper runs the maintainer's command line under another lane name, so
 # it imports the script for main() and nothing else.
 from scripts import commulingo_people_maintainer as maintainer  # noqa: E402

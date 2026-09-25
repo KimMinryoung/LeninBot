@@ -2,8 +2,8 @@ import unittest
 from unittest.mock import AsyncMock, patch
 from types import SimpleNamespace
 
-from commulingo_pipeline import search_triage
-from commulingo_pipeline.search_triage import parse_hits, triage_hits, Shadow, search_target
+from commulingo.pipeline import search_triage
+from commulingo.pipeline.search_triage import parse_hits, triage_hits, Shadow, search_target
 
 RENDERED = ('<external source="web_search:brave:Постышев реабилитация">\n'
             'Search snippets, not full source pages. Retrieved at 2026-09-20T00:00:00+00:00; cache reuse preserves this retrieval time. '

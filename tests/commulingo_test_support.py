@@ -66,5 +66,5 @@ class EditorCase(HermeticAsyncCase):
     def setUp(self):
         super().setUp()
         self.jev = self.enterContext(patch('llm.call_registry.decide_detailed', side_effect=citation_result))
-        self.enterContext(patch('commulingo_pipeline.citation_gate.settings', return_value={
+        self.enterContext(patch('commulingo.pipeline.citation_gate.settings', return_value={
             'enabled': True, 'enforce': True, 'thresholds': {'reject': .85, 'boilerplate': .9}}))

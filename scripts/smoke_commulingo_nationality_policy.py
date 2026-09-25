@@ -4,7 +4,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import db
 db.query = lambda *a, **k: []
 db.query_one = lambda *a, **k: None
-from runtime_tools.commulingo_people import _NATIONALITY_SCHEMA, _NATIONAL_ORIGIN_SCHEMA
+from commulingo.people import _NATIONALITY_SCHEMA, _NATIONAL_ORIGIN_SCHEMA
 from scripts.commulingo_people_maintainer import CARD_STYLE_GUIDANCE
 from scripts.commulingo_backfill_person_nationality import plan
 for code in ('soviet', 'yugoslavia'):

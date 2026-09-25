@@ -23,7 +23,7 @@ os.environ.setdefault("COMMULINGO_SUGGESTED_BY", "commulingo-gap-event-links")
 from bot_config import _deepseek_anthropic_client  # noqa: E402
 from db import get_conn  # noqa: E402
 from psycopg2.extras import RealDictCursor  # noqa: E402
-from runtime_tools.commulingo_people import (  # noqa: E402
+from commulingo.people import (  # noqa: E402
     _HISTORY_RELATION_KINDS,
     normalize_commulingo_write,
     _run_edit,
@@ -111,7 +111,7 @@ async def describe(rows: list[dict], model: str) -> list[dict]:
         f"why the event asked for this card: {row['reason']}"
         for i, row in enumerate(rows)
     )
-    from commulingo_pipeline.config import legacy_reserve
+    from commulingo.pipeline.config import legacy_reserve
     from llm.claude_loop import _calculate_cost
     reservation = legacy_reserve(0.20,'links')
     response = await _deepseek_anthropic_client.messages.create(

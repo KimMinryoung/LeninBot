@@ -2,10 +2,10 @@
 import unittest
 from unittest.mock import patch
 
-from commulingo_pipeline import citation_gate
-from commulingo_pipeline.citation_gate import check_claims, verdict
-from commulingo_pipeline.engine import Usage
-from commulingo_pipeline.evidence import snapshot
+from commulingo.pipeline import citation_gate
+from commulingo.pipeline.citation_gate import check_claims, verdict
+from commulingo.pipeline.engine import Usage
+from commulingo.pipeline.evidence import snapshot
 from llm.call_registry import Decision
 
 
@@ -74,7 +74,7 @@ class CitationGateTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(usage.tracker['citation_rejections'], 1)
 
     async def test_expanded_citations_report_original_draft_repair_path(self):
-        from commulingo_pipeline.evidence import Passages, resolve_passages
+        from commulingo.pipeline.evidence import Passages, resolve_passages
         first = snapshot('https://example.org/first', 'Born in 1904.')
         second = snapshot('https://example.org/second', 'Unrelated text.')
         sources = {s['id']:s for s in (first, second)}
@@ -212,7 +212,7 @@ class CitationGateTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('reject', checks[0])
 
     async def test_review_checks_use_finding_and_quote_and_record_under_review_prefix(self):
-        from commulingo_pipeline.citation_gate import check_review_checks
+        from commulingo.pipeline.citation_gate import check_review_checks
         checks = [{'citation': 'c', 'source': 'https://example.org/a', 'quote': 'Kosygin was born in 1904.',
                    'finding': '1904년 출생 확인'},
                   {'citation': 'c', 'source': 'https://example.org/a', 'quote': 'He chaired the Council.',
@@ -235,7 +235,7 @@ class CitationGateTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(usage.tracker['review_citation_rejections'], 1)
         self.assertEqual(usage.tracker['review_citation_unavailable'], 1)
         self.assertNotIn('citation_checks', usage.tracker)
-        from commulingo_pipeline.citation_gate import annotate
+        from commulingo.pipeline.citation_gate import annotate
         annotated = annotate(checks, judged)
         self.assertEqual(annotated[1]['citation_check']['support'], 'unrelated')
         self.assertNotIn('citation_check', annotated[2])
@@ -254,7 +254,7 @@ class CitationGateTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([c['support'] for c in checks], ['supports'] * 3)
 
     async def test_review_gate_factory_annotates_the_decision(self):
-        from commulingo_pipeline.citation_gate import review_gate
+        from commulingo.pipeline.citation_gate import review_gate
         citation_gate.settings.return_value = {**SETTINGS, 'enforce': False}
         value = {'decision': 'approve', 'checks': [{'source': 's', 'quote': 'q' * 20, 'finding': 'f'}]}
         async def decide(feature, state, questions):
@@ -267,12 +267,12 @@ class CitationGateTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(usage.tracker['review_citation_checks'], 1)
 
     def test_review_note_checks_drop_verdict_numbers(self):
-        from commulingo_pipeline.stages import review_note_checks
+        from commulingo.pipeline.stages import review_note_checks
         checks = [{'citation': 'c', 'quote': 'q', 'finding': 'f', 'citation_check': {'support': 'supports'}}, 'odd']
         self.assertEqual(review_note_checks(checks), [{'citation': 'c', 'quote': 'q', 'finding': 'f'}, 'odd'])
 
     def test_annotate_puts_compact_check_on_claim_without_reject_text(self):
-        from commulingo_pipeline.citation_gate import annotate
+        from commulingo.pipeline.citation_gate import annotate
         checks = [verdict(decision('unrelated', 0.99), SETTINGS['thresholds']), {'support': None, 'error': 'x'}]
         annotated = annotate(self.claims, checks)
         self.assertEqual(annotated[0]['citation_check'],

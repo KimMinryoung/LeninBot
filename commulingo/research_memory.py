@@ -19,7 +19,7 @@ from pathlib import Path
 from provenance.runtime import _wrap_external
 from tool_gateway.observations import argument_rejection_observer
 from tool_gateway.results import ToolFailure, ToolRejection
-from commulingo_pipeline.write_session import draft_id, prepare_write, repair_schema
+from commulingo.pipeline.write_session import draft_id, prepare_write, repair_schema
 
 logger = logging.getLogger(__name__)
 STORE_PATH = Path(__file__).resolve().parents[1] / "data" / "commulingo_research.sqlite3"

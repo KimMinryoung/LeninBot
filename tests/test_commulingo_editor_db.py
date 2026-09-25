@@ -10,10 +10,10 @@ import unittest
 import uuid
 from unittest.mock import AsyncMock, patch
 
-from commulingo_pipeline.engine import Engine
-from commulingo_pipeline.planner import Planner
-from commulingo_pipeline.store import Store, LostLease
-from commulingo_pipeline.stages import stages
+from commulingo.pipeline.engine import Engine
+from commulingo.pipeline.planner import Planner
+from commulingo.pipeline.store import Store, LostLease
+from commulingo.pipeline.stages import stages
 
 PORT = os.getenv('COMMULINGO_PIPELINE_TEST_PORT')
 FRONTEND = os.getenv('COMMULINGO_EDITOR_FRONTEND')
@@ -38,7 +38,7 @@ class EditorDatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.target = 'editor-e2e-'+uuid.uuid4().hex[:12]
         self.job_id = None
         with self.store.transaction() as cur:
-            cur.execute(Path('commulingo_pipeline/schema.sql').read_text())
+            cur.execute(Path('commulingo/pipeline/schema.sql').read_text())
             cur.execute("INSERT INTO commulingo_term_categories(id,label_ko,label_en) VALUES ('editor-test','테스트','Test') ON CONFLICT DO NOTHING")
             cur.execute("INSERT INTO commulingo_terms(id,term_ko,term_en,category,definition_ko,definition_en,period_ko,period_en) VALUES (%s,%s,%s,'editor-test','기존 정의','Existing definition','역사','History')",(self.target,'검증 '+self.target,'Test '+self.target))
 
@@ -64,7 +64,7 @@ class EditorDatabaseTests(unittest.IsolatedAsyncioTestCase):
         return value['result']
 
     def test_concrete_planner_sql_omits_quotas(self):
-        with patch('commulingo_pipeline.planner.report_mentions_by_term',return_value={}):
+        with patch('commulingo.pipeline.planner.report_mentions_by_term',return_value={}):
             candidates = Planner(self.store,overlap_allow=[],exclude=[],concrete=True).candidates()
         candidate = next(c for c in candidates if c['target']==self.target)
         self.assertEqual(set(candidate['payload']['topics']),{'definition','history'})
@@ -99,12 +99,12 @@ class EditorDatabaseTests(unittest.IsolatedAsyncioTestCase):
                 await kwargs['handler']({'decision':'approve','reason':'Independent original text supports the changed historical explanation.',
                     'resolved_risks':[], 'checks':[{'citation_id':'S1','passages':['P1'],'finding':'The original confirms the explanation.'}],
                     'required_corrections':[], 'optional_suggestions':[]})
-        from commulingo_pipeline.stages import READS
+        from commulingo.pipeline.stages import READS
         reads = {name:AsyncMock(return_value=f'<external source="web">\n{text}\n</external>') for name in READS}
-        with patch('commulingo_pipeline.service.call',side_effect=self.rpc), \
+        with patch('commulingo.pipeline.service.call',side_effect=self.rpc), \
              patch('runtime_tools.registry.TOOL_HANDLERS',reads), \
-             patch('commulingo_pipeline.stages.model_call',side_effect=model), \
-             patch('commulingo_pipeline.config.load',return_value={'phase':'live'}):
+             patch('commulingo.pipeline.stages.model_call',side_effect=model), \
+             patch('commulingo.pipeline.config.load',return_value={'phase':'live'}):
             first = await Engine(self.store,stages(self.store),cap=1000).run_one(job_id=self.job_id,draft_only=False)
             self.assertEqual(first.get('stage'),'review',first)
             self.assertEqual(self.store.detail(self.job_id)['job']['payload']['workflow'],'editor')

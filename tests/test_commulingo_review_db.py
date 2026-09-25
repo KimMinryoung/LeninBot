@@ -16,8 +16,8 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 ROOT=Path(os.environ.get('COMMULINGO_REVIEW_SOURCE',Path(__file__).resolve().parents[1]))
 import runtime_tools
 runtime_tools.__path__.insert(0,str(ROOT/'runtime_tools'))
-from runtime_tools import commulingo_review_queue as queue
-from runtime_tools.commulingo_person_service import call_person_service as rpc
+from commulingo import review_queue as queue
+from commulingo.person_service import call_person_service as rpc
 import psycopg2
 spec=importlib.util.spec_from_file_location('review_db_worker',ROOT/'scripts/commulingo_person_reviewer.py')
 worker=importlib.util.module_from_spec(spec);spec.loader.exec_module(worker)
