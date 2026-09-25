@@ -1222,23 +1222,16 @@ RESEARCH_DOCUMENT_TOOL = {
     "name": "research_document",
     "description": (
         "Create, publish, edit, unpublish, republish, or privately save a markdown "
-        "research document. Public and private documents are the same content family; "
-        "private documents are simply unpublished research documents. The public "
-        "publishing flow is two-step: action='stage_public' saves an exact draft and "
-        "does not publish; action='publish_public' requires fact_check_notes and publishes "
-        "the checked version. Task/manual public writes run an independent read-only document "
-        "review before publication; repair any returned material issues and retry. "
-        "To publish an EXISTING staged draft, call publish_public with "
-        "the slug and fact_check_notes and OMIT content — the stored staged text is published "
-        "as-is (do not re-emit long drafts). To revise a staged draft, use action='edit_staged' "
-        "with the slug and `edits` (exact find/replace pairs) instead of restaging the full "
-        "document. Use this tool for research documents only. Use edit_content "
-        "for diary, task report, blog post, and hub curation edits. Citation format is fixed "
-        "for website rendering: cite sources in body text only as Markdown footnotes `[^1]`, "
-        "`[^2]`, etc.; end the document with matching footnote definitions that contain URLs, "
-        "e.g. `[^1]: Publisher, title, date. https://example.com`. Do not invent other "
-        "citation formats such as bare `[1]`, numbered source lists, parenthetical source "
-        "notes, or raw body URLs."
+        "research document (private = unpublished). Public publishing is two-step: "
+        "stage_public saves an exact draft without publishing; publish_public requires "
+        "fact_check_notes. Task/manual public writes get an independent review first; "
+        "fix any material issues it returns and retry. To publish an existing staged draft, "
+        "call publish_public with slug and fact_check_notes and omit content. To revise a "
+        "staged draft, use edit_staged with find/replace `edits` instead of restaging. "
+        "Research documents only; use edit_content for diary, task report, blog post and hub "
+        "curation. Cite only as Markdown footnotes `[^1]` in the body, ending with matching "
+        "definitions containing URLs, e.g. `[^1]: Publisher, title, date. https://example.com`. "
+        "No bare `[1]`, numbered source lists, parenthetical sources or raw body URLs."
     ),
     "input_schema": {
         "type": "object",
@@ -1271,7 +1264,7 @@ RESEARCH_DOCUMENT_TOOL = {
                 "items": {
                     "type": "object",
                     "properties": {
-                        "find": {"type": "string", "description": "Exact text from the editable body returned by read_self for this staged draft; must match exactly once. Generated title/author/date headers are excluded."},
+                        "find": {"type": "string", "description": "Exact text from the staged draft body as returned by read_self (excluding generated title/author/date headers); must match exactly once."},
                         "replace": {"type": "string", "description": "Replacement text."},
                     },
                     "required": ["find", "replace"],
@@ -1284,7 +1277,7 @@ RESEARCH_DOCUMENT_TOOL = {
             "source_task_id": {"type": "integer", "description": "Optional originating task id. Public staging/publishing defaults to the current caller's task id."},
             "fact_check_notes": {
                 "type": "string",
-                "description": "Required for publish_public, republish_public, publish_private, and autonomous edit_public. Summarize checked claims, sources, and corrections. Task/manual public writes additionally run an independent body review; these notes do not substitute for its verdict.",
+                "description": "Required for publish_public, republish_public, publish_private and autonomous edit_public: checked claims, sources and corrections. Does not replace the independent review.",
             },
             "broadcast": {
                 "type": "boolean",

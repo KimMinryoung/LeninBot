@@ -27,7 +27,7 @@ GENERATE_IMAGE_TOOL = {
         "properties": {
             "prompt": {
                 "type": "string",
-                "description": "Image description prompt (English). The prompt is sent directly to the model with no automatic style prefix. Include all desired visual style, composition, and aesthetic details in the prompt itself.",
+                "description": "English prompt, sent as is with no style prefix: include all style, composition and aesthetic details.",
             },
             "style": {
                 "type": "string",
@@ -46,11 +46,11 @@ GENERATE_IMAGE_TOOL = {
             },
             "count": {
                 "type": "integer",
-                "description": "Number of images to generate in one batch (1-4). Single API call, no rate limit concern. Default: 1.",
+                "description": "Images in one call (1-4). Default: 1.",
             },
             "reference_image": {
                 "type": "string",
-                "description": "Optional reference image for FLUX editing only. Prefer a downloaded local file path under the project root. Remote URL and data URI are also accepted. When set, backend uses input_image-compatible Replicate model routing. Do not use with rd_fast or rd_plus.",
+                "description": "FLUX editing only, never with rd_fast/rd_plus. Prefer a local file path under the project root; URL or data URI also accepted.",
             },
         },
         "required": ["prompt"],
@@ -60,25 +60,21 @@ GENERATE_IMAGE_TOOL = {
 BROWSE_WEB_TOOL = {
     "name": "browse_web",
     "description": (
-        "AI-driven browser automation. The default mode=computer uses GPT-6 Luna "
-        "with native screenshot-and-action computer use. Supply start_url when known; "
-        "without a URL, the browser starts at a search page. "
-        "Choose mode=agent for browser-use with DeepSeek and a vision fallback. "
-        "An AI agent will autonomously navigate websites, fill forms, click buttons, "
-        "and extract information. Use for complex multi-step web interactions "
-        "(e.g., login flows, form submissions, multi-page navigation, data extraction "
-        "from dynamic sites). For simple page reads, prefer fetch_url (faster, cheaper)."
+        "An AI agent drives a browser to navigate, fill forms, click and extract data. "
+        "Use for multi-step interactions (logins, form submissions, dynamic sites); for "
+        "simple page reads use fetch_url. Supply start_url when known, otherwise it starts "
+        "at a search page."
     ),
     "input_schema": {
         "type": "object",
         "properties": {
             "task": {
                 "type": "string",
-                "description": "Natural language description of what to do in the browser. Be specific about the goal and expected output.",
+                "description": "What to do in the browser, with the specific goal and expected output.",
             },
             "start_url": {
                 "type": "string",
-                "description": "Optional URL to navigate to before starting the task.",
+                "description": "URL to open first.",
             },
             "max_steps": {
                 "type": "integer",
@@ -86,7 +82,7 @@ BROWSE_WEB_TOOL = {
             },
             "mode": {
                 "type": "string", "enum": ["agent", "computer"],
-                "description": "computer (default): GPT-6 Luna native screen/mouse/keyboard control. agent: browser-use with DeepSeek by default.",
+                "description": "computer (default): GPT-6 Luna screenshot-and-action control. agent: browser-use with DeepSeek and a vision fallback.",
             },
             "model": {
                 "type": "string", "enum": ["tier:low", "tier:high"],

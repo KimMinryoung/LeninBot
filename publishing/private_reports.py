@@ -181,12 +181,9 @@ def publish_private_report_sync(
 PRIVATE_RESEARCH_DOCUMENT_TOOL = {
     "name": "private_research_document",
     "description": (
-        "Manage admin-only private research documents with one action-based interface. "
-        "Use action='save' to save or overwrite sensitive/unfinished research privately; "
-        "action='read' to read one private research document; action='list' to list "
-        "metadata/summaries; action='publish' only when the user/orchestrator explicitly "
-        "asks to make a private research document public. Do not use public `research_document` "
-        "actions for material that should remain private."
+        "Manage admin-only private research documents. publish only when the user or "
+        "orchestrator explicitly asks to make one public. Keep private material out of "
+        "public `research_document` actions."
     ),
     "input_schema": {
         "type": "object",

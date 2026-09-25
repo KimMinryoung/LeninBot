@@ -95,14 +95,10 @@ def _json_default(o):
 QUERY_DB_TOOL = {
     "name": "query_db",
     "description": (
-        "Run a single SQL statement against the project's Postgres (local leninbot-pg). "
-        "SELECT/WITH/SHOW/EXPLAIN → row list as JSON. INSERT/UPDATE/DELETE → "
-        "affected row count. CREATE/ALTER → OK. Use `params` for "
-        "parameterized queries (%s placeholders) — never interpolate user input "
-        "into the SQL string. Each call runs in its own transaction; exceptions "
-        "roll back. **Blocked at the tool level**: DROP, TRUNCATE (irreversible), "
-        "and any UPDATE/DELETE that would affect ≥10 rows (bulk maintenance — "
-        "operator job). Operator runs blocked ops via scripts/psql-main."
+        "Run one SQL statement on the project Postgres, in its own transaction. Reads "
+        "return rows as JSON, writes the affected count. Pass values via `params` (%s "
+        "placeholders), never interpolated. Blocked: DROP, TRUNCATE, and UPDATE/DELETE "
+        "affecting ≥10 rows (operator job via scripts/psql-main)."
     ),
     "input_schema": {
         "type": "object",

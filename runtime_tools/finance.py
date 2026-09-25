@@ -387,10 +387,8 @@ def search_ticker(query: str, max_results: int = 5) -> list[dict]:
 FINANCE_TOOL = {
     "name": "get_finance_data",
     "description": (
-        "Market data via yfinance. Presets: gold, silver, DXY, WTI/Brent, "
-        "S&P 500, US 10Y, KOSPI, BTC, ETH, SOL, USDC. Accepts any yfinance "
-        "ticker (stocks/crypto/forex). `query` resolves a name to a ticker "
-        "(Korean names OK for KR stocks). Optional period + news headlines."
+        "Market data via yfinance: preset assets, any yfinance ticker, or a name "
+        "resolved by `query`. Optional history period and news headlines."
     ),
     "input_schema": {
         "type": "object",
@@ -414,9 +412,8 @@ FINANCE_TOOL = {
             "query": {
                 "type": "string",
                 "description": (
-                    "Search by company/asset name. Korean stocks: use Korean name (e.g. '삼성전자', '카카오'). "
-                    "All other assets: use English name or ticker (e.g. 'Apple', 'bitcoin', 'Tesla'). "
-                    "Resolves to ticker automatically and fetches data for the top match."
+                    "Asset name resolved to its top-match ticker. Korean stocks by Korean name "
+                    "(e.g. '삼성전자'), others by English name or ticker (e.g. 'Apple', 'bitcoin')."
                 ),
             },
             "period": {
@@ -426,7 +423,7 @@ FINANCE_TOOL = {
             },
             "include_news": {
                 "type": "boolean",
-                "description": "Include recent news headlines for queried assets. Default false.",
+                "description": "Include recent news headlines.",
             },
         },
         "required": [],

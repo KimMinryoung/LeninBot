@@ -983,29 +983,24 @@ def _list_suggestions(status: str, limit: int) -> list[dict]:
 COMMULINGO_PEOPLE_TOOL = {
     "name": "commulingo_people",
     "description": (
-        "Read the CommuLingo people dictionary (cyber-lenin.com/commulingo/people): "
-        "figures of Soviet history and of the Chinese revolution and People's "
-        "Republic, with bios, career timelines, and Soviet institution (office) "
-        "leadership timelines, all bilingual ko/en. Actions: "
-        "`search` (q matched across people, glossary terms, historical events, "
-        "and offices at once — a single match returns its full record inline; "
-        "use this when the category is uncertain), "
+        "Read the CommuLingo people dictionary: Soviet and Chinese revolutionary "
+        "figures with bios and career timelines, glossary terms, historical events and "
+        "Soviet institution (office) leadership timelines, bilingual ko/en. Actions: "
+        "`search` (q across people, terms, events and offices; a single match returns "
+        "its full record; use when the category is uncertain), "
         "`list_activity_catalog` (shared functions and activity affiliations; activities bind function + organization + period + evidence, separate from citizenship), "
         "`list_groups` (era groups on the Soviet, China and world shelves + people counts), "
         "`search_people` (q matches id/name/cyrillic; optional group_id/function_id/affiliation_id; function and affiliation must match the same activity), "
-        "`get_person` (full record — returned in the canonical person-field shape "
-        "accepted by the narrow person writers; "
-        "office_rows, sections and role.resolvedIcon are read-only info), "
+        "`get_person` (full record in the person-writer field shape; office_rows, "
+        "sections and role.resolvedIcon are read-only), "
         "`list_offices` (institution timelines + row counts), "
         "`get_office` (one institution's full leadership timeline), "
         "`list_categories` (office-less role categories for role {category}: general role categories and Chinese party-state functions; Soviet leadership timelines use offices), "
-        "`get_sections` (a person's full detail-page sections, returned in the "
-        "exact person_section patch shape — edit and send back), "
+        "`get_sections` (a person's detail sections in the section patch shape), "
         "`list_events` (historical event ids, titles, and linked-person counts), "
         "`get_event` (one event and all current person relationships), "
-        "`list_terms` (glossary term ids, names, and every registered alias — "
-        "check this before registering a term; pass `q` to match one candidate "
-        "instead of listing all of them), "
+        "`list_terms` (term ids, names and aliases; check before registering a term; "
+        "pass `q` to match one candidate), "
         "`get_term` (one glossary term in the exact term patch shape), "
         "`list_suggestions` (narrow-write edit history/queue; "
         "optional status filter: pending/approved/rejected/superseded). "
@@ -1026,11 +1021,8 @@ COMMULINGO_PEOPLE_TOOL = {
             "q": {
                 "type": "string",
                 "description": (
-                    "search: substring matched across people, glossary terms, "
-                    "historical events, and offices at once. "
-                    "search_people: substring matched against id/name/cyrillic. "
-                    "list_terms: substring matched against term id/ko/en/original/alias — "
-                    "use it to check one candidate instead of pulling the whole glossary."
+                    "Substring. search: people, terms, events and offices. "
+                    "search_people: id/name/cyrillic. list_terms: term id/ko/en/original/alias."
                 ),
             },
             "group_id": {
@@ -3171,12 +3163,8 @@ def sentence_prescription(field: str) -> str:
 # (a section is markdown and may run to paragraphs, so counting its sentences
 # prescribes nothing).
 _CEILING = (
-    "Hard ceiling {ko} Korean / {en} English characters — write to the prescribed {target},"
-    " not to this number, but COUNT YOUR DRAFT AGAINST IT BEFORE CALLING: a rejected"
-    " write costs a full round. Count the ENGLISH side first — it is the side that"
-    " actually overruns (every length rejection on 2026-08-03/04 was an English field"
-    " landing 3-9% over). An English draft within ~50 characters of its ceiling loses"
-    " its weakest clause before the call, not after the reject."
+    "Hard ceiling {ko} Korean / {en} English characters; write to the prescribed {target},"
+    " not to the ceiling. Check the English side, which overruns first, before calling."
 )
 
 
@@ -3192,33 +3180,28 @@ def _capped_bilingual_schema(field: str, extra: str = "", target: str = "sentenc
 
 _EPITHET_SCHEMA = _capped_bilingual_schema(
     "epithet",
-    " One clause. A characterization that needs a second clause after a dash"
-    " belongs in the bio.",
+    " One clause; a second clause belongs in the bio.",
 )
 
 _BIO_SCHEMA = _capped_bilingual_schema(
     "bio",
-    " Write to the tier's sentence count (the commissioned task states it);"
-    " keep career chronology in career rows, not the bio."
-    f" A dense sentence of this register costs ~{DENSE_SENTENCE_CHARS[0]} Korean"
-    f" and ~{DENSE_SENTENCE_CHARS[1]} English characters, so the ceiling pays for"
-    f" {sentence_budget('bio')} of them. Over by about that much or more: cut a"
-    " sentence rather than squeezing every clause. Over by only a little: delete"
-    " the weakest clause — do not reword at the same length.",
+    " Use the tier's sentence count from the task; career chronology goes in career rows."
+    f" A dense sentence costs ~{DENSE_SENTENCE_CHARS[0]} Korean / ~{DENSE_SENTENCE_CHARS[1]}"
+    f" English characters, so the ceiling fits {sentence_budget('bio')}. Over by a sentence:"
+    " cut a sentence. Slightly over: delete the weakest clause, do not reword.",
 )
 
 _MOMENT_SCHEMA = _capped_bilingual_schema(
     "moment",
-    " This is the pull-quote on the person LIST card, so it is budgeted in"
-    " rendered lines: 44-85 Korean characters is 2 lines, 86-127 is 3."
-    " A quotation too long to fit is excerpted to its sharpest clause with '…',"
-    " or traded for a shorter one — never padded out to the ceiling.",
+    " Pull-quote on the person list card: 44-85 Korean characters = 2 lines, 86-127 = 3."
+    " Excerpt an overlong quotation to its sharpest clause with '…' or pick a shorter"
+    " one; never pad.",
 )
 
 _EVENT_NOTE_SCHEMA = _capped_bilingual_schema(
     "event_note",
-    " The note is a caption under the person's name on the event page, stating what"
-    f" the person did in the event: {sentence_prescription('event_note')}.",
+    " Caption under the person's name on the event page: what the person did in the"
+    f" event, {sentence_prescription('event_note')}.",
 )
 
 # The section body is markdown and may carry paragraphs, so its guidance is a
@@ -3227,9 +3210,8 @@ _EVENT_NOTE_SCHEMA = _capped_bilingual_schema(
 _SECTION_BODY_SCHEMA = _capped_bilingual_schema(
     "section_body",
     f" One topic, {SECTION_BODY_TARGET[0]}-{SECTION_BODY_TARGET[1]} Korean characters"
-    " plus the equivalent English. The ceiling above is a runaway guard: a body"
-    " approaching it is a section that should have been two, or a topic the bio"
-    " already covers.",
+    " plus equivalent English. A body near the ceiling should be two sections or"
+    " repeats the bio.",
     target="length",
 )
 
@@ -3240,9 +3222,9 @@ _SECTION_BODY_SCHEMA = _capped_bilingual_schema(
 # (실각 1964 · 자연사). The death year is stripped automatically on save.
 _FATE_LABEL_SCHEMA = _capped_bilingual_schema(
     "fate_label",
-    " Cause of death only, no death year (실각 1964 · 자연사 / Removed 1964 · "
-    "natural causes). Execution=처형/Executed; natural=자연사/Natural causes; "
-    "place with ' · '. The death year is dropped automatically on save.",
+    " Cause of death only, no death year (dropped on save): 실각 1964 · 자연사 / "
+    "Removed 1964 · natural causes. Execution=처형/Executed; natural=자연사/Natural "
+    "causes; place after ' · '.",
     # A badge, not prose: there is no sentence to count.
     target="length",
 )
@@ -3266,12 +3248,9 @@ _NATIONAL_ORIGIN_SCHEMA = {
     "properties": {**_NATIONALITY_SCHEMA["properties"],
         "code": {"type": "string", "enum": sorted(_NATIONAL_ORIGIN_CODES)}},
     "description": _NATIONALITY_POLICY["originGuidance"] + (
-        "National or ethnic background, not birthplace and not place of death. "
-        "For example Radek=Poland although born in present-day Ukraine; "
-        "Yezhov=Russia although born in Lithuania (an ethnic Russian). The "
-        "other direction matters just as much: a Soviet official OF a "
-        "non-Russian nationality keeps that nation (Sillari=estonia, "
-        "Gumbaridze=georgia), never a blanket 'russia'."
+        " Not place of death either. Examples: Radek=Poland (born in Ukraine); "
+        "Yezhov=Russia (ethnic Russian born in Lithuania); a non-Russian Soviet "
+        "official keeps that nation (Sillari=estonia, Gumbaridze=georgia)."
     ),
 }
 
@@ -3279,10 +3258,10 @@ _COMMULINGO_FIELD_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
     "description": (
-        "Canonical patch. Scalar fields stay strings; bilingual fields are {ko,en}. "
-        "For person create include givenName/familyName (or legacy name), bio, epithet, "
-        "groupId, role, years, aliases, career, and native-script name fields. "
-        "Empty object is only for delete."
+        "Canonical patch. Scalar fields are strings; bilingual fields are {ko,en}. "
+        "Person create includes givenName/familyName (or legacy name), bio, epithet, "
+        "groupId, role, years, aliases, career and native-script name fields. "
+        "Empty object only for delete."
     ),
     "properties": {
         "id": {"type": "string"},
@@ -3298,16 +3277,14 @@ _COMMULINGO_FIELD_SCHEMA = {
             "description": "Explicit position. Omit or null to append after the current last row.",
         },
         "cyrillic": {"type": "string", "description": (
-            "Native-script name line (the column name is legacy): the person's name in "
-            "THEIR OWN script per citizenship — 김무정, 彭德怀, 'Võ Nguyên Giáp', "
-            "'Kádár János', 'Владимир Ленин'. Never a Russian transliteration of a "
-            "non-Russian name, and never omitted because the right script is not "
-            "Cyrillic: for Latin-script nations this line carries the native Latin "
-            "spelling with its diacritics."
+            "Native-script name (legacy column name) in the person's own script per "
+            "citizenship: 김무정, 彭德怀, 'Võ Nguyên Giáp', 'Kádár János', 'Владимир Ленин'. "
+            "Never a Russian transliteration of a non-Russian name; Latin-script nations "
+            "use the native Latin spelling with diacritics. Never omit it."
         )},
         "cyrillicPatronymic": {"type": "string"},
         "years": {"type": "string", "pattern": _LIFE_YEARS_PATTERN, "description": (
-                "Life years as the store accepts them: 1878–1943; 1987– for a living person; ?– living with unknown "
+                "Life years: 1878–1943; 1987– for a living person; ?– living with unknown "
                 "birth year; ?–? unknown; 1895?–1940 uncertain year; c. 1953–2001 approximate; 1917–1940 이후 when only "
                 "a last known year exists. Never 현재/present, no other words.")},
         "name": _BILINGUAL_TEXT_SCHEMA,
@@ -3327,18 +3304,17 @@ _COMMULINGO_FIELD_SCHEMA = {
             "properties": {"ko": {"type": "string"}, "en": {"type": "string"}},
             "description": (
                 "term: bilingual period label, e.g. {\"ko\": \"1930–1960\", \"en\": "
-                "\"1930–1960\"} or {\"ko\": \"1980년대–현재\", \"en\": \"1980s–present\"}. "
-                "Use {\"ko\": \"개념\", \"en\": \"Concept\"} for an undated concept. "
-                "One shared string leaks Korean onto the English page."
+                "\"1930–1960\"} or {\"ko\": \"1980년대–현재\", \"en\": \"1980s–present\"}; "
+                "{\"ko\": \"개념\", \"en\": \"Concept\"} for an undated concept. "
+                "Never one string for both languages."
             ),
         },
         "startYear": {
             "type": ["integer", "null"],
             "description": (
-                "term: first year of the period, for chronological sorting. Required "
-                "whenever the label names a year; null only for undated concepts. "
-                "A decade label resolves to the decade start (1980년대 -> 1980), a "
-                "century label to the century start (19세기 -> 1800)."
+                "term: first year of the period, for sorting. Required whenever the "
+                "label names a year; null only for undated concepts. Decades and "
+                "centuries resolve to their start (1980년대 -> 1980, 19세기 -> 1800)."
             ),
         },
         "endYear": {
@@ -3352,19 +3328,16 @@ _COMMULINGO_FIELD_SCHEMA = {
         "parentId": {
             "type": ["string", "null"],
             "description": (
-                "term: the id of the entry this one is a PART of, so it nests under it "
-                "(예조프시나 -> great-purge). Only for a component of the parent, never for "
-                "a merely adjacent concept — those belong in the flat related-terms list. "
-                "The glossary nests one level: a parent may not itself have a parent. "
-                "null detaches an entry."
+                "term: id of the entry this one is a part of (예조프시나 -> great-purge). "
+                "Only for a component, never an adjacent concept (those go in related "
+                "terms). One nesting level: a parent cannot have a parent. null detaches."
             ),
         },
         "definition": _capped_bilingual_schema(
             "definition",
-            " term: the card paragraph (2-3 sentences); depth goes to body (markdown)."
-            f" A dense sentence costs ~{DENSE_SENTENCE_CHARS[0]} Korean characters, so a"
-            " third sentence only fits when the first two stay tight — move the"
-            " qualifications and the historiography to body.",
+            " term: the card paragraph, 2-3 sentences"
+            f" (~{DENSE_SENTENCE_CHARS[0]} Korean characters each); a third fits only if"
+            " the first two are tight. Qualifications and historiography go to body.",
         ),
         # Terms accept null at the write boundary to mean "clear the body"; the
         # schema declaring only "object" made the model discover that by failing
@@ -3405,9 +3378,8 @@ _COMMULINGO_FIELD_SCHEMA = {
             "type": ["object", "null"], "additionalProperties": False,
             "minProperties": 1, "maxProperties": 1,
             "description": (
-                "Exactly ONE of officeId or category (categoryId is an alias for "
-                "category) — never both, never neither. Valid category ids come from "
-                "commulingo_people(action='list_categories'), office ids from "
+                "Exactly one of officeId or category (categoryId aliases category). "
+                "Category ids: commulingo_people(action='list_categories'); office ids: "
                 "action='list_offices'. null clears the role."
             ),
             "properties": {"officeId": {"type": "string"}, "category": {"type": "string"}, "categoryId": {"type": "string"}, "icon": {"type": "string"}},
@@ -3744,11 +3716,11 @@ _EVIDENCE_SCHEMA = {
     "items": {"type": "object", "additionalProperties": False,
         "properties": {**{key: {"type": "string"} for key in
             ("field", "claim", "source", "locator", "excerpt")},
-            "source_id": {"type": "string", "pattern": "^S[1-9][0-9]*$", "description": "S1 selects citations[0], S2 selects citations[1]. Prefer this over copying source text."},
+            "source_id": {"type": "string", "pattern": "^S[1-9][0-9]*$", "description": "S1=citations[0], S2=citations[1]."},
             "stance": {"type": "string", "enum": ["supports", "disputes"]}},
         "required": ["field", "claim", "locator"],
         "anyOf": [{"required": ["source_id"]}, {"required": ["source"]}]},
-    "description": "Prefer source_id: S1=citations[0], S2=citations[1]. Each supplied factual field needs its own claim and locator. Alternative source must equal the full citation string. Use stance=disputes for conflicting evidence.",
+    "description": "Prefer source_id over source text. Each supplied factual field needs its own claim and locator. A source must equal the full citation string. stance=disputes for conflicting evidence.",
 }
 _PAIR_SCHEMA = {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "string"}}
 _COLLECTION_SCHEMAS = {
@@ -3857,21 +3829,20 @@ def _person_write_tool(name: str, action: str) -> dict:
     return {
         "name": name,
         "description": (
-            f"{action.title()} one CommuLingo person card. This tool accepts person fields only; "
-            "citations are a separate top-level argument. Public text is bilingual {ko,en}. "
-            "Put evidence and reviewFlags INSIDE fields. expectedRevision and collection edits are update-only. "
-            "The runner classifies the card: group, role, and the citizenship/nationalOrigin/fate codes are assigned "
-            "automatically from the labels and text, so write labels only. "
-            "Read the record and reference lists first. On create, citizenship and "
-            "nationalOrigin require evidence; if unknown, research or defer registration, never guess. Soviet and Yugoslav codes are citizenship-only. Preserve mixed ancestry in labels. "
-            "nationalOrigin means national/ethnic "
-            "background, never birthplace. Russian-style names must research and include a "
-            "complete patronymic {ko,en} plus cyrillicPatronymic; omitted PATCH subfields are preserved. "
-            "Every supplied bio, moment, years, citizenship and nationalOrigin needs its own "
-            "fields.evidence item with that exact field name, claim, source and locator. "
-            "evidence.source must exactly equal a FULL citations entry including its description, not just the URL. "
-            "For updates send only changed fields; do not copy old evidence for omitted career or other fields. "
-            "Conflicting evidence or large deletions are staged for review. A successful call ends the run."
+            f"{action.title()} one CommuLingo person card. Person fields only; citations are a "
+            "separate top-level argument. Public text is bilingual {ko,en}. evidence and reviewFlags "
+            "go inside fields; expectedRevision and collection edits are update-only. The runner "
+            "assigns group, role and the citizenship/nationalOrigin/fate codes from labels and text: "
+            "write labels only. Read the record and reference lists first. On create, citizenship "
+            "and nationalOrigin need evidence; if unknown, research or defer, never guess. Soviet "
+            "and Yugoslav codes are citizenship-only. nationalOrigin is national/ethnic background, "
+            "never birthplace; preserve mixed ancestry in labels. Russian-style names need a "
+            "researched complete patronymic {ko,en} plus cyrillicPatronymic; omitted PATCH subfields "
+            "are preserved. Every supplied bio, moment, years, citizenship and nationalOrigin needs "
+            "its own fields.evidence item (that field name, claim, source, locator); evidence.source "
+            "must equal a full citations entry including its description, not just the URL. Updates "
+            "send only changed fields and no evidence for omitted fields. Conflicting evidence or "
+            "large deletions are staged for review. A successful call ends the run."
         ),
         "input_schema": {
             "type": "object",
@@ -3904,11 +3875,10 @@ COMMULINGO_SECTION_SAVE_TOOL = {
             "heading": _BILINGUAL_TEXT_SCHEMA,
             "body": _SECTION_BODY_SCHEMA,
             "start_year": {"type": ["integer", "null"], "minimum": -3000, "maximum": 2100, "description": (
-                "Year the period this section covers opens on (1898 for '1898-1918'). Sections "
-                "render in this order, so a life story reads front to back no matter which one "
-                "was written first. For a theme without one period, use the year it begins "
-                "(legacy: the year of death). null only when no year applies: create appends "
-                "after the last section, update keeps the current position."
+                "Year the section's period opens (1898 for '1898-1918'); sections render in this "
+                "order. For a theme, the year it begins (legacy: the year of death). null only "
+                "when no year applies: create appends after the last section, update keeps the "
+                "current position."
             )},
             "start_month": {"type": ["integer", "null"], "minimum": 1, "maximum": 12,
                             "description": "Month within start_year when the source gives it; otherwise omit."},
@@ -3958,27 +3928,26 @@ COMMULINGO_OFFICE_ROW_SAVE_TOOL = {
 _EVENT_QUESTION_SCHEMA = _capped_bilingual_schema(
     "event_question",
     extra=(
-        " The question the page answers, written as a question. It is the line under"
-        " the title, not a summary."
+        " The question the page answers, phrased as a question: the line under the"
+        " title, not a summary."
     ),
 )
 _EVENT_SUMMARY_SCHEMA = _capped_bilingual_schema(
     "event_summary",
-    extra=" What happened, for a reader who knows nothing about the period yet.",
+    extra=" What happened, for a reader new to the period.",
     target="short paragraph",
 )
 _EVENT_OUTCOME_SCHEMA = _capped_bilingual_schema(
     "event_outcome",
-    extra=" What it left behind — the consequences the rest of the site refers back to.",
+    extra=" Its consequences, which the rest of the site refers back to.",
     target="short paragraph",
 )
 _EVENT_SECTION_BODY_SCHEMA = _capped_bilingual_schema(
     "event_section_body",
     extra=(
-        f" Markdown. Write to {EVENT_SECTION_TARGET[0]}-{EVENT_SECTION_TARGET[1]} Korean"
-        " characters: one part of the story, told with the dates, names and figures a"
-        " reader would otherwise have to look up. No `#` or `##` headings inside the"
-        " body — the heading argument supplies the only one."
+        " Markdown: one part of the story with the dates, names and figures a reader"
+        " would otherwise look up. No `#` or `##` headings inside; the heading argument"
+        " supplies it."
     ),
     target=f"{EVENT_SECTION_TARGET[0]}-{EVENT_SECTION_TARGET[1]} Korean characters",
 )
@@ -3986,12 +3955,11 @@ _EVENT_SECTION_BODY_SCHEMA = _capped_bilingual_schema(
 COMMULINGO_EVENT_UPDATE_TOOL = {
     "name": "commulingo_event_update",
     "description": (
-        "Update one history event's card fields: the question it answers, the summary, "
-        "the outcome, the timeline, the source list. The long-form body is NOT written "
-        "here — use commulingo_event_section_save for that. Read the event with "
-        "commulingo_people(action='get_event') first. Sending timeline or sources "
-        "replaces the stored list whole, so include the entries that are already there. "
-        "A successful call ends the run."
+        "Update one history event's card fields: question, summary, outcome, timeline, "
+        "sources. The long-form body goes through commulingo_event_section_save. Read the "
+        "event with commulingo_people(action='get_event') first. timeline and sources "
+        "replace the stored lists whole, so include existing entries. A successful call "
+        "ends the run."
     ),
     "input_schema": {
         "type": "object", "additionalProperties": False,
@@ -4007,9 +3975,8 @@ COMMULINGO_EVENT_UPDATE_TOOL = {
                         "type": "array",
                         "minItems": 1,
                         "description": (
-                            "The whole timeline, in chronological order. Every entry the "
-                            "event already has plus the ones being added — an omitted "
-                            "entry is a deleted entry."
+                            "The whole timeline in chronological order: existing entries "
+                            "plus new ones; an omitted entry is deleted."
                         ),
                         "items": {
                             "type": "object", "additionalProperties": False,
@@ -4024,8 +3991,8 @@ COMMULINGO_EVENT_UPDATE_TOOL = {
                     "sources": {
                         "type": "array", "minItems": 1, "items": {"type": "string"},
                         "description": (
-                            "The whole source list: author, title, publisher, year for a "
-                            "book; a URL for a document. Replaces the stored list."
+                            "The whole source list (book: author, title, publisher, year; "
+                            "document: URL). Replaces the stored list."
                         ),
                     },
                 },
@@ -4040,13 +4007,12 @@ COMMULINGO_EVENT_UPDATE_TOOL = {
 COMMULINGO_EVENT_SECTION_SAVE_TOOL = {
     "name": "commulingo_event_section_save",
     "description": (
-        "Write one `## ` section of a history event's long-form body. The body is built "
-        "one section per run, the way a person's detail sections are, so this call sends "
-        "ONLY the new part — never the whole body. 'create' adds a section, 'update' "
-        "rewrites the one whose heading matches. The heading must be a real heading, not "
-        "a label: '무기보다 먼저 온 것들' tells a reader what the part is about, "
-        "'배경 3' does not. Read the event with commulingo_people(action='get_event') "
-        "first to see which sections exist. A successful call ends the run."
+        "Write one `## ` section of a history event's long-form body; send only this "
+        "section, never the whole body. 'create' adds a section, 'update' rewrites the one "
+        "with the matching heading. The heading must say what the part is about "
+        "('무기보다 먼저 온 것들'), not label it ('배경 3'). Read the event with "
+        "commulingo_people(action='get_event') first to see existing sections. A "
+        "successful call ends the run."
     ),
     "input_schema": {
         "type": "object", "additionalProperties": False,
@@ -4058,9 +4024,8 @@ COMMULINGO_EVENT_SECTION_SAVE_TOOL = {
             "after": {
                 **_BILINGUAL_TEXT_SCHEMA,
                 "description": (
-                    "On create: the existing heading this section goes after, per "
-                    "language. Omit to append at the end, which is right whenever the "
-                    "body is being written front to back."
+                    "On create: the existing heading (per language) this section "
+                    "follows. Omit to append at the end."
                 ),
             },
             "citations": _CITATIONS_SCHEMA,
@@ -4205,25 +4170,19 @@ async def _exec_commulingo_event_section_save(
 COMMULINGO_GAP_REPORT_TOOL = {
     "name": "commulingo_gap_report",
     "description": (
-        "File what the event text you just wrote needed and the site does not have: a "
-        "person with no card, a term with no glossary entry, a document worth publishing "
-        "in full. The people and glossary lanes work from this queue, so a gap filed here "
-        "becomes a card, and the link in your section resolves. File only what the "
-        "narrative actually leans on — a name mentioned once in passing is not a gap. "
-        "Reading tools first: a card that already exists is not a gap unless it is too "
-        "thin to carry the weight the event puts on it, in which case send its target_id. "
-        "A 'person' gap is for HISTORICAL ACTORS of the events — file a scholar or "
-        "journalist only when the section's historiography discussion treats that person "
-        "as a subject in their own right, never merely because you cited their book. "
-        "A 'doc' gap has a HIGHER bar than the others: the reference library republishes "
-        "PRIMARY sources in full — a decree, treaty, speech, resolution, letter, or short "
-        "set of minutes a reader should be able to read whole. Never file the scholarship "
-        "you researched from (monographs, journal articles, memoirs, press pieces — those "
-        "belong in your sources and nowhere else), never a book-length record (trial "
-        "transcripts, plenum stenograms, commission reports), and never a document the "
-        "library already carries. On 2026-08-17 the queue held 175 doc rows and a third "
-        "were copyrighted secondary literature, one was a novel; every one of those rows "
-        "wasted a human triage pass."
+        "File what the event text you just wrote needs and the site lacks: a person with "
+        "no card, a term with no glossary entry, a document worth publishing in full. The "
+        "people and glossary lanes work from this queue. File only what the narrative "
+        "leans on; a name mentioned once in passing is not a gap. Check the reading tools "
+        "first: an existing card is a gap only when too thin for its weight in the event "
+        "(send its target_id). 'person' is for historical actors of the events; a scholar "
+        "or journalist only when the section's historiography treats them as a subject, "
+        "never because you cited their book. 'doc' has a higher bar: only primary sources "
+        "a reader should read whole (decree, treaty, speech, resolution, letter, short "
+        "minutes). Never the scholarship you researched from (monographs, articles, "
+        "memoirs, press; those belong in your sources), never book-length records (trial "
+        "transcripts, plenum stenograms, commission reports), never a document the library "
+        "already carries."
     ),
     "input_schema": {
         "type": "object", "additionalProperties": False,
@@ -4241,24 +4200,23 @@ COMMULINGO_GAP_REPORT_TOOL = {
                         "target_id": {
                             "type": ["string", "null"],
                             "description": (
-                                "The existing entry id when the gap is 'this card is too "
-                                "thin'. Null when nothing exists yet."
+                                "Existing entry id when the card is too thin; null when "
+                                "nothing exists."
                             ),
                         },
                         "reason": {
                             "type": "string",
                             "description": (
-                                "What the event narrative needs from it. This is the brief "
-                                "the next lane writes from, so name the specific role, not "
-                                "'important figure'."
+                                "What the event narrative needs from it; the next lane writes "
+                                "from this brief, so name the specific role, not 'important "
+                                "figure'."
                             ),
                         },
                         "priority": {
                             "type": "integer", "minimum": 0, "maximum": 10,
                             "description": (
-                                "How load-bearing it is in the section just written: 8-10 "
-                                "the reader cannot follow the section without it, 4-7 it "
-                                "deepens the section, 0-3 it is adjacent."
+                                "Load-bearing in the section just written: 8-10 unreadable "
+                                "without it, 4-7 deepens it, 0-3 adjacent."
                             ),
                         },
                     },

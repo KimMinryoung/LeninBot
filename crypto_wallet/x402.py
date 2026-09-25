@@ -574,39 +574,34 @@ async def pay_and_fetch(
 PAY_AND_FETCH_TOOL = {
     "name": "pay_and_fetch",
     "description": (
-        "Fetch an x402-paywalled URL (GET/POST). Auto-signs USDC on 402 "
-        "response and retries. Hard-capped $0.05/call by default. Returns body "
-        "+ settlement details. Demo: http://localhost:8000/x402-demo/quote "
-        "(self-loop, default 0.05 USDC) — use this when asked for an x402 demo with "
-        "no specific target."
+        "Fetch an x402-paywalled URL: signs USDC on a 402 and retries, capped by "
+        "max_usdc. Returns the body and settlement. For an x402 demo with no target use "
+        "http://localhost:8000/x402-demo/quote."
     ),
     "input_schema": {
         "type": "object",
         "properties": {
             "url": {
                 "type": "string",
-                "description": "URL to fetch (must support x402 / return 402 with PaymentRequirements).",
+                "description": "x402 URL (returns 402 with PaymentRequirements).",
             },
             "method": {
                 "type": "string",
                 "enum": ["GET", "POST"],
                 "description": (
-                    "HTTP method. Default GET. IMPORTANT: Most external x402 services "
-                    "require POST — a GET often returns free metadata instead of triggering "
-                    "the 402 paywall. When the user says 'POST' or the target is an external "
-                    "x402 API, always set method to POST."
+                    "Use POST for external x402 APIs or when the user says POST: a GET "
+                    "usually returns free metadata instead of the paywall."
                 ),
                 "default": "GET",
             },
             "body": {
                 "type": "object",
-                "description": "JSON request body for POST requests (e.g. {\"query\": \"...\", \"maxResults\": 5}).",
+                "description": "JSON body for POST.",
             },
             "max_usdc": {
                 "type": "number",
                 "description": (
-                    "Hard cap on the payment amount in USDC. Defaults to 0.05. "
-                    "Anything larger is rejected without signing."
+                    "Payment cap in USDC; larger requests are rejected unsigned."
                 ),
                 "default": 0.05,
             },

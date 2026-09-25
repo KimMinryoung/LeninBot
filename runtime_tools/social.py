@@ -14,24 +14,10 @@ from tool_gateway.results import ToolFailure
 MOLTBOOK_TOOL = {
     "name": "moltbook",
     "description": (
-        "Run Moltbook operations via the Razvedchik agent script.\n"
-        "Actions:\n"
-        "- home: One-call Moltbook dashboard; do this first during check-ins\n"
-        "- scan: Read-only feed scan — gather posts without interacting\n"
-        "- feed: Read personalized feed or submolt/global posts\n"
-        "- search: Semantic search across posts/comments\n"
-        "- comments: Read comments on a post\n"
-        "- patrol: Full patrol loop — scan + comment + post (default for general activity)\n"
-        "- post: Write a new post to Moltbook\n"
-        "- comment: Comment on a post or reply to a comment\n"
-        "- verify: Submit a Moltbook verification answer after the scout solves the challenge\n"
-        "- upvote/downvote: Vote on a post; upvote_comment votes on a comment\n"
-        "- follow/unfollow: Follow or unfollow another molty\n"
-        "- submolts: List available submolts\n"
-        "- delete: Delete one of your posts\n"
-        "- read_notifications: Mark notifications read\n"
-        "- status: Check agent claim status\n"
-        "- profile: View agent profile"
+        "Moltbook operations via the Razvedchik script. home: dashboard, call first on "
+        "check-ins. scan: read-only feed scan. patrol: scan + comment + post (default for "
+        "general activity). verify: submit the solved verification answer. status: agent "
+        "claim status. Other actions are named for what they do."
     ),
     "input_schema": {
         "type": "object",
@@ -63,11 +49,11 @@ MOLTBOOK_TOOL = {
             },
             "topic": {
                 "type": "string",
-                "description": "Post title (for 'post' action). If omitted, auto-generated.",
+                "description": "Post title; auto-generated if omitted.",
             },
             "content": {
                 "type": "string",
-                "description": "Post body (for 'post' action). If omitted, auto-generated.",
+                "description": "Post body; auto-generated if omitted.",
             },
             "submolt": {
                 "type": "string",
@@ -126,7 +112,7 @@ MOLTBOOK_TOOL = {
             },
             "answer": {
                 "type": "string",
-                "description": "The scout's solved verification answer, formatted as required by Moltbook (usually two decimals).",
+                "description": "Solved verification answer in Moltbook's format (usually two decimals).",
             },
         },
         "required": ["action"],
@@ -136,21 +122,11 @@ MOLTBOOK_TOOL = {
 MERSOOM_TOOL = {
     "name": "mersoom",
     "description": (
-        "Run Mersoom.com operations for the scout agent. Mersoom is a Korean "
-        "anonymous AI-agent social network; write in 음슴체, no emoji, no markdown.\n"
-        "Actions:\n"
-        "- auth: Show configured razvedchikov credential status without leaking secrets\n"
-        "- register: Register the configured auth_id if needed\n"
-        "- feed: Read recent posts\n"
-        "- post: Write a new Mersoom post\n"
-        "- comments: Read comments on a post\n"
-        "- comment: Comment on a post\n"
-        "- arena_status: Read current arena phase/topic/stats\n"
-        "- arena_candidates: Read proposed arena topics\n"
-        "- arena_posts: Read arena battle posts for a date\n"
-        "- arena_vote: Vote up/down on an arena candidate or battle post\n"
-        "- arena_comment: Comment on an arena battle post\n"
-        "- arena_propose: Propose an arena topic"
+        "Mersoom.com (Korean anonymous AI-agent social network) operations. Write in "
+        "음슴체, no emoji, no markdown. auth: credential status (no secrets). register: "
+        "register auth_id if needed. arena_status: phase/topic/stats; arena_candidates: "
+        "proposed topics; arena_posts: battle posts for a date; arena_vote: vote on a "
+        "candidate or battle post."
     ),
     "input_schema": {
         "type": "object",

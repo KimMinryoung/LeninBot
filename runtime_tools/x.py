@@ -20,11 +20,9 @@ logger = logging.getLogger(__name__)
 X_POST_TOOL = {
     "name": "fetch_x_post",
     "description": (
-        "Fetch public X/Twitter content using the X API. For a status URL or numeric post ID, "
-        "fetches that single post. For a profile URL, @username, or user=<username>, fetches "
-        "that user's latest public posts in reverse chronological order. Use this instead of "
-        "fetch_url or web_search for x.com/twitter.com content, because normal web fetches hit "
-        "login walls and search engines often return stale indexed status URLs."
+        "Fetch public X/Twitter content via the X API; use instead of fetch_url/web_search "
+        "for x.com. A status URL or post ID returns that post; a profile URL, @username or "
+        "user=<username> returns the user's latest posts, newest first."
     ),
     "input_schema": {
         "type": "object",
@@ -35,35 +33,34 @@ X_POST_TOOL = {
             },
             "user": {
                 "type": "string",
-                "description": "Optional @username/plain username. When provided, fetch latest posts from this user.",
+                "description": "Username whose latest posts to fetch.",
             },
             "max_results": {
                 "type": "integer",
-                "description": "For user timeline mode: number of posts to fetch. X API accepts 5-100; default 10.",
+                "description": "Timeline mode: posts to fetch (5-100).",
                 "default": 10,
             },
             "exclude_replies": {
                 "type": "boolean",
-                "description": "For user timeline mode: exclude replies. Default true.",
+                "description": "Timeline mode: exclude replies.",
                 "default": True,
             },
             "exclude_retweets": {
                 "type": "boolean",
-                "description": "For user timeline mode: exclude retweets/reposts. Default true.",
+                "description": "Timeline mode: exclude reposts.",
                 "default": True,
             },
             "include_metrics": {
                 "type": "boolean",
                 "description": (
-                    "Include public metrics such as views/impressions, likes, reposts, replies, quotes, "
-                    "bookmarks, user follower counts, and video view counts. Default false because X bills "
-                    "metrics separately from basic post lookup."
+                    "Include public metrics (views, likes, reposts, replies, quotes, bookmarks, "
+                    "follower and video view counts). Billed separately by X; request only when needed."
                 ),
                 "default": False,
             },
             "include_raw": {
                 "type": "boolean",
-                "description": "Include compact raw API JSON for debugging. Default false.",
+                "description": "Include compact raw API JSON for debugging.",
                 "default": False,
             },
         },

@@ -125,12 +125,9 @@ def _unique_slug(base: str, table: str) -> str:
 PUBLISH_HUB_CURATION_TOOL = {
     "name": "publish_hub_curation",
     "description": (
-        "Publish a hub curation entry. Hub entries "
-        "link to external progressive writing that the agent judges "
-        "as excellent, with a selection rationale and context tying it into other "
-        "debates. Use ONLY for pieces that meet the curation criteria "
-        "(theoretical depth, on-the-ground specifics, "
-        "real-world fit) — do not flood with marginal material."
+        "Publish a hub curation entry linking excellent external progressive writing, "
+        "with a selection rationale and context. Only for pieces meeting the criteria "
+        "(theoretical depth, on-the-ground specifics, real-world fit); no marginal material."
     ),
     "input_schema": {
         "type": "object",
@@ -138,10 +135,8 @@ PUBLISH_HUB_CURATION_TOOL = {
             "title": {
                 "type": "string",
                 "description": (
-                    "Your framing title for this curation entry — a plain headline stating "
-                    "the piece's core point or angle. NO meta prefixes ('왜 이 글이 지금 "
-                    "중요한가:', '큐레이션 #N:', etc.) — why it matters belongs in "
-                    "selection_rationale, not the title."
+                    "Plain headline stating the piece's core point or angle. No meta prefixes "
+                    "('왜 이 글이 지금 중요한가:', '큐레이션 #N:'); why it matters goes in selection_rationale."
                 ),
             },
             "source_url": {
@@ -383,14 +378,10 @@ def _ensure_static_page_table() -> None:
 PUBLISH_STATIC_PAGE_TOOL = {
     "name": "publish_static_page",
     "description": (
-        "Write a standalone custom HTML/static page. "
-        "The frontend wraps your HTML body inside the site's common layout (nav, "
-        "footer, CSS) — you only provide the inner content. Use for pages that "
-        "need custom formatting beyond markdown (layouts, visual structure, embedded "
-        "media). Do not use for markdown research documents, task reports, diary "
-        "entries, hub curations, or blog posts. Slug must be alphanumeric + dashes "
-        "(lowercase). Writes overwrite existing static pages with the same slug "
-        "(useful for iterating a draft)."
+        "Write a standalone custom HTML page; the site layout (nav, footer, CSS) wraps "
+        "your inner content. For formatting beyond markdown (layouts, visual structure, "
+        "embedded media), not for research documents, task reports, diary, hub curations "
+        "or blog posts. Overwrites an existing page with the same slug."
     ),
     "input_schema": {
         "type": "object",
@@ -406,9 +397,8 @@ PUBLISH_STATIC_PAGE_TOOL = {
             "html_body": {
                 "type": "string",
                 "description": (
-                    "HTML inner body. Do NOT include <html>, <head>, <body>, or <nav> — "
-                    "the site layout wraps these. Use semantic tags (<article>, <section>, "
-                    "<h2>, <p>, <figure>, etc.)."
+                    "HTML inner body without <html>, <head>, <body> or <nav>. Use semantic "
+                    "tags (<article>, <section>, <h2>, <p>, <figure>)."
                 ),
             },
             "summary": {
@@ -422,8 +412,7 @@ PUBLISH_STATIC_PAGE_TOOL = {
             "html_body_en": {
                 "type": "string",
                 "description": (
-                    "Optional English translation of html_body. Inner body only; same restrictions "
-                    "as html_body. If omitted, English readers fall back to the Korean body."
+                    "Optional English html_body, same restrictions. English readers otherwise get the Korean body."
                 ),
             },
             "summary_en": {
@@ -647,10 +636,8 @@ async def _exec_publish_static_page(
 PUBLISH_STATIC_PAGE_TRANSLATION_TOOL = {
     "name": "publish_static_page_translation",
     "description": (
-        "Attach or update the English translation for an existing static page. "
-        "This updates title_en/summary_en/html_body_en only and never sends a Telegram "
-        "channel broadcast. English readers fall back to the Korean page when no "
-        "translation exists."
+        "Attach or update the English translation (title_en/summary_en/html_body_en) of an "
+        "existing static page. Never broadcasts to Telegram."
     ),
     "input_schema": {
         "type": "object",
@@ -731,24 +718,17 @@ async def _exec_publish_static_page_translation(
 PUBLISH_COMIC_TOOL = {
     "name": "publish_comic",
     "description": (
-        "Publish a 4-panel political comic as a static page. "
-        "You author the scene SVG for each panel; the composer renders the panel "
-        "frame and the speech balloon so those stay visually consistent. "
-        "Panel viewBox is 960×320 (landscape, 4 panels stack vertically). The speech "
-        "balloon occupies the rectangle (40, 28)–(420, 136) inside each panel — keep "
-        "your scene content clear of that area. "
-        "Visual vocabulary: reuse named-object templates from `assets/comic_icons/` "
-        "(tv_news, missile_alert, chart_up/down, vault, goldbar_stack, dollar_bill, "
-        "sanctions_stamp, torn_paper, speaker_head). Each icon is a 100×100 viewBox; "
-        "copy its inner children and wrap in `<g transform=\"translate(x,y) scale(s)\">`. "
-        "Recolor/relabel as needed. "
-        "Content rule: each panel contains ONLY imagery and one short speech line. No "
-        "captions, headings, subtext, transcripts, or analysis. Visual elements must be "
-        "recognizable named objects — abstract rectangles/triangles/dashed circles "
-        "without meaning are banned. A reader must parse each panel in ≤2 seconds. "
-        "scene_svg is sanitized server-side (<script>, <style>, <iframe>, "
-        "<foreignObject>, on* event handlers, javascript:/data: hrefs stripped); don't "
-        "rely on them. Overwrites existing pages with the same slug — useful for iteration."
+        "Publish a 4-panel political comic as a static page. You write each panel's scene "
+        "SVG; the composer draws the frame and speech balloon. Panel viewBox 960×320; keep "
+        "scenes clear of the balloon at (40, 28)–(420, 136). Reuse icons from "
+        "`assets/comic_icons/` (tv_news, missile_alert, chart_up/down, vault, goldbar_stack, "
+        "dollar_bill, sanctions_stamp, torn_paper, speaker_head): each is a 100×100 viewBox; "
+        "copy its children into `<g transform=\"translate(x,y) scale(s)\">`, recolor/relabel "
+        "as needed. Each panel holds only imagery and one short speech line: no captions, "
+        "headings or analysis. Use recognizable named objects, not meaningless abstract "
+        "shapes; each panel must read in ≤2 seconds. <script>, <style>, <iframe>, "
+        "<foreignObject>, on* handlers and javascript:/data: hrefs are stripped. Overwrites "
+        "the page with the same slug."
     ),
     "input_schema": {
         "type": "object",
@@ -772,16 +752,14 @@ PUBLISH_COMIC_TOOL = {
                         "scene_svg": {
                             "type": "string",
                             "description": (
-                                "Raw SVG children for the panel interior (no outer <svg> tag). "
-                                "Typically a few `<g transform=\"translate(x, y) scale(s)\">…icon children…</g>` "
-                                "groups arranging named-object icons. Avoid the balloon area at top-left."
+                                "Raw SVG children for the panel interior (no outer <svg>), typically "
+                                "`<g transform=\"translate(x, y) scale(s)\">` icon groups. Avoid the top-left balloon area."
                             ),
                         },
                         "speech": {
                             "type": "string",
                             "description": (
-                                "One short Korean line that appears inside the speech balloon. Wraps to at "
-                                "most 3 lines at ~22 chars per line — keep punchy. Empty string renders no balloon."
+                                "One short Korean balloon line; at most 3 lines of ~22 chars. Empty string: no balloon."
                             ),
                         },
                     },

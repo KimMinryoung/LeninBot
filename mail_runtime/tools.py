@@ -243,26 +243,26 @@ async def exec_send_email(
 CHECK_INBOX_TOOL = {
     "name": "check_inbox",
     "description": (
-        "Read lenin@cyber-lenin.com mail — INBOX + Junk together by default, or "
-        "one of them via folder. Returns subject, sender, date, folder, read "
-        "status, cached body text, links and delivery history as JSON. Delegated tasks default to unbriefed mail, independently of IMAP read flags. Use mail_id for cached pagination."
+        "Read lenin@cyber-lenin.com mail (INBOX and Junk unless folder is set) as JSON: "
+        "subject, sender, date, folder, read status, body, links, delivery history. "
+        "Delegated tasks default to unbriefed mail regardless of IMAP read flags."
     ),
     "input_schema": {
         "type": "object",
         "properties": {
             "mail_id": {"type": "integer", "description": "Stored mail ID: read cached content without IMAP. Follow next for body pagination."},
-            "unbriefed_only": {"type": "boolean", "description": "Only mail received within the new-mail window (MAIL_BRIEFING_WINDOW_DAYS, reported as new_mail_window_days) without a delivery receipt for this audience. Default true in delegated tasks unless unread_only=true. Set false to browse history."},
+            "unbriefed_only": {"type": "boolean", "description": "Only mail within the new-mail window (new_mail_window_days) not yet delivered to this audience. Default true in delegated tasks unless unread_only=true; false browses history."},
             "sender_filter": {
                 "type": "string",
-                "description": "Filter by sender address or domain (e.g. 'substack.com', 'platformer'). Optional.",
+                "description": "Sender address or domain, e.g. 'substack.com'.",
             },
             "subject_filter": {
                 "type": "string",
-                "description": "Filter by subject keyword (e.g. 'confirm', 'verify', 'sign in'). Optional.",
+                "description": "Subject keyword, e.g. 'verify'.",
             },
             "unread_only": {
                 "type": "boolean",
-                "description": "If true, return only unread emails. Default: false.",
+                "description": "Only unread emails.",
                 "default": False,
             },
             "limit": {
@@ -272,17 +272,17 @@ CHECK_INBOX_TOOL = {
             },
             "include_body": {
                 "type": "boolean",
-                "description": "If true, include extracted body text. Default: true.",
+                "description": "Include body text.",
                 "default": True,
             },
             "body_max_chars": {
                 "type": "integer",
-                "description": "Maximum body characters per email (default/max 12000). Continue via cached mail_id.",
+                "description": "Body characters per email (max 12000); continue via mail_id.",
                 "default": 12000,
             },
             "body_offset": {
                 "type": "integer",
-                "description": "Character offset into a single email body with mail_id or uid. Default 0.",
+                "description": "Body offset for a single email (mail_id or uid).",
                 "default": 0,
             },
             # The default must stay "" and not "INBOX": _apply_top_level_defaults
@@ -300,7 +300,7 @@ CHECK_INBOX_TOOL = {
             },
             "uid": {
                 "type": "string",
-                "description": "IMAP UID from a previous check_inbox result. When provided, read that single email and paginate its body with body_offset/body_max_chars.",
+                "description": "IMAP UID from a previous result: read that one email.",
             },
         },
         "required": [],

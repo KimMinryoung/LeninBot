@@ -83,24 +83,14 @@ _KIND_CONFIG: dict[str, dict[str, Any]] = {
 EDIT_CONTENT_TOOL = {
     "name": "edit_content",
     "description": (
-        "Edit an already-published diary, task report, blog post, hub curation, "
-        "or static/custom HTML page, and delete/unpublish diary entries, AND "
-        "invalidate Redis plus Cloudflare caches in one step. "
-        "Use this instead of query_db when correcting already-published content; "
-        "a raw UPDATE leaves readers seeing stale cached content. "
-        "content_type='diary' for diary entries; content_type='task_report' for completed "
-        "Telegram task reports; content_type='blog_post' for blog posts; "
-        "content_type='hub_curation' for hub curation entries; "
-        "content_type='static_page' for /p/{slug} custom HTML pages. "
-        "Do NOT use this for research documents; use research_document. "
-        "Provide id for diary/task_report/blog_post, or slug for hub_curation/static_page, "
-        "plus at least one field for the chosen kind. For a narrow correction, pass "
-        "`field`, `replace_old`, and `replace_new`; the tool reads the current field, "
-        "shows matching snippets with about 10 characters of surrounding context, and "
-        "updates only when the match is unambiguous unless `replace_all=true`. "
-        "For diary deletion or unpublishing, pass action=delete or action=unpublish, "
-        "id, and confirm=true; because ai_diary has no private status column, "
-        "unpublish removes the row from the public diary table."
+        "Edit published diary, task report (completed Telegram tasks), blog post, hub "
+        "curation or static page (/p/{slug}) content, or delete/unpublish a diary entry, "
+        "and invalidate Redis and Cloudflare caches. Use this, not query_db, to correct "
+        "published content. Not for research documents (use research_document). Give id "
+        "(diary/task_report/blog_post) or slug (hub_curation/static_page) plus at least one "
+        "field. For a narrow correction pass field, replace_old and replace_new: it edits "
+        "only an unambiguous match unless replace_all=true, otherwise it shows the matches. "
+        "Diary delete/unpublish: action, id and confirm=true; unpublish removes the row."
     ),
     "input_schema": {
         "type": "object",
@@ -108,7 +98,7 @@ EDIT_CONTENT_TOOL = {
             "content_type": {
                 "type": "string",
                 "enum": ["diary", "task_report", "blog_post", "hub_curation", "static_page"],
-                "description": "Content type: diary entry, task report, blog post, hub curation, or static page.",
+                "description": "Content type.",
             },
             "id": {
                 "type": "integer",
@@ -122,8 +112,7 @@ EDIT_CONTENT_TOOL = {
                 "type": "string",
                 "enum": ["edit", "delete", "unpublish"],
                 "description": (
-                    "Default edit. delete/unpublish are supported only for content_type='diary' "
-                    "and remove the diary row from public ai_diary storage."
+                    "Default edit. delete/unpublish only for diary; both remove the row."
                 ),
             },
             "confirm": {
@@ -156,9 +145,8 @@ EDIT_CONTENT_TOOL = {
             "html_body": {
                 "type": "string",
                 "description": (
-                    "New static page Korean HTML inner body. Valid for static_page only; "
-                    "must not include <html>, <head>, <body>, <script>, <iframe>, "
-                    "inline event handlers, or javascript:/data: URLs."
+                    "New Korean HTML inner body (static_page only), without <html>, <head>, <body>, "
+                    "<script>, <iframe>, inline event handlers or javascript:/data: URLs."
                 ),
             },
             "title_en": {
@@ -199,8 +187,7 @@ EDIT_CONTENT_TOOL = {
             "replace_all": {
                 "type": "boolean",
                 "description": (
-                    "Surgical mode only. Default false. If replace_old appears multiple times, "
-                    "false returns contextual match snippets without editing; true replaces every match."
+                    "Surgical mode only. Default false: several matches return snippets without editing; true replaces all."
                 ),
             },
         },

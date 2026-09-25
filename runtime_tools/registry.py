@@ -27,13 +27,9 @@ TOOLS = [
     {
         "name": "vector_search",
         "description": (
-            "Search Marxist-Leninist document DB (pgvector). Returns excerpts with "
-            "author/year/title. MATCH YOUR QUERY LANGUAGE TO THE LAYER: "
-            "core_theory is English-language classics (Marx, Engels, Lenin, Mao, "
-            "Trotsky translations) → query in English. modern_analysis is Korean "
-            "analysis/commentary → query in Korean. self_produced_analysis is your "
-            "own high-quality saved analysis → query in the language used when saved. "
-            "Cross-language queries return near-empty results due to embedding-space separation."
+            "Search the Marxist-Leninist document DB (pgvector); returns excerpts with "
+            "author/year/title. Query in the layer's language: cross-language queries "
+            "return almost nothing."
         ),
         "input_schema": {
             "type": "object",
@@ -41,10 +37,7 @@ TOOLS = [
                 "query": {
                     "type": "string",
                     "description": (
-                        "Search query. Use English for layer=core_theory, Korean for "
-                        "layer=modern_analysis. For self_produced_analysis, use the "
-                        "same language as the saved analysis. Mismatching language "
-                        "to layer degrades recall sharply."
+                        "Search query, in the layer's language (see layer)."
                     ),
                 },
                 "num_results": {"type": "integer", "description": "Results count (1-10).", "default": 5},
@@ -52,24 +45,21 @@ TOOLS = [
                     "type": "string",
                     "enum": ["core_theory", "modern_analysis", "self_produced_analysis"],
                     "description": (
-                        "core_theory: English-language Marxist-Leninist classics. "
-                        "modern_analysis: Korean-language contemporary analysis/commentary. "
-                        "self_produced_analysis: your own actively saved analytical outputs. "
-                        "Omit to search all layers (not recommended — mixes languages)."
+                        "core_theory: English classics (Marx, Engels, Lenin, Mao, Trotsky), query in English. "
+                        "modern_analysis: Korean commentary, query in Korean. self_produced_analysis: "
+                        "your saved analyses, query in their language. Omitting mixes languages."
                     ),
                 },
                 "author": {
                     "type": "string",
                     "description": (
-                        "Optional metadata filter. Use canonical author names such as "
-                        "Stalin, Lenin, Mao, Rosa Luxemburg, Trotsky, Gramsci."
+                        "Canonical author name, e.g. Stalin, Rosa Luxemburg, Gramsci."
                     ),
                 },
                 "title": {
                     "type": "string",
                     "description": (
-                        "Optional title/source metadata substring filter, e.g. "
-                        "'National Question' or 'Chinese Revolution'."
+                        "Title/source substring, e.g. 'National Question'."
                     ),
                 },
                 "year": {
@@ -79,8 +69,7 @@ TOOLS = [
                 "keywords": {
                     "type": "string",
                     "description": (
-                        "Optional exact keyword/phrase filter against chunk text or title. "
-                        "Use this when vector similarity alone returns adjacent authors."
+                        "Exact keyword/phrase in chunk text or title; use when similarity returns adjacent authors."
                     ),
                 },
             },
@@ -91,15 +80,10 @@ TOOLS = [
         "name": "knowledge_graph_search",
         "description": (
             "Search the knowledge graph (Neo4j): people, organizations, events, concepts, "
-            "policies and documents across current affairs, the CommuLingo Soviet-history "
-            "dictionary (people/terms/events, Korean canonical names) and published research/"
-            "archival documents. Facts come back as 'Subject —Predicate→ Object: fact' with "
-            "validity dates, trust tier and source. When the query consists of one unambiguous entity name the "
-            "result is that entity's full neighbourhood (aliases, external ids, active and "
-            "expired facts). Do not invent English names for Korean organizations/publications; "
-            "prefer canonical names already used in KG, e.g. '디아마트 (DiaMat)' and "
-            "'웹진 반란(Uprising)'. Preserve Korean person names such as '신현준' or '니키타 흐루쇼프' "
-            "instead of romanizing them."
+            "policies and documents from current affairs, the CommuLingo Soviet-history "
+            "dictionary (Korean canonical names) and published research/archival documents. "
+            "Facts return as 'Subject —Predicate→ Object: fact' with validity dates, trust tier "
+            "and source. A lone unambiguous entity name returns its full neighbourhood."
         ),
         "input_schema": {
             "type": "object",
@@ -107,19 +91,16 @@ TOOLS = [
                 "query": {
                     "type": "string",
                     "description": (
-                        "What entities/relations to find. Preserve proper nouns in "
-                        "their known canonical language/name; do not translate or "
-                        "romanize Korean organization names unless that spelling is "
-                        "part of the canonical name. For Korean people, use the "
-                        "Korean name if known."
+                        "Entities/relations to find. Use canonical names as stored: do not "
+                        "translate or romanize Korean names (e.g. '디아마트 (DiaMat)', '신현준', "
+                        "'니키타 흐루쇼프')."
                     ),
                 },
                 "num_results": {"type": "integer", "description": "Maximum returned entity/fact items (1-20).", "default": 10},
                 "entity": {
                     "type": "string",
                     "description": (
-                        "Optional exact entity name or alias (e.g. '니키타 흐루쇼프', 'Nikita Khrushchev'). "
-                        "Returns that entity's neighbourhood instead of a semantic search."
+                        "Exact entity name or alias (e.g. 'Nikita Khrushchev'); returns its neighbourhood."
                     ),
                 },
                 "mode": {

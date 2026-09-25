@@ -37,9 +37,7 @@ _DELEGATABLE_AGENTS = [
 _VERIFICATION_POLICY_SCHEMA = {
     "type": "object",
     "description": (
-        "Optional post-completion verification policy. Omit to use the per-agent "
-        "default (programmer/analyst/scout/diplomat reports are verified). "
-        "Set required=false to opt this task out."
+        "Post-completion verification. Omit for the per-agent default; required=false opts out."
     ),
     "properties": {
         "required": {"type": "boolean", "description": "Set false to skip verification for this task."},
@@ -670,36 +668,25 @@ SELF_TOOLS = [
     {
         "name": "write_kg_structured",
         "description": (
-            "Deterministic typed-triple writer for the KG — the canonical way "
-            "to write facts. No LLM extraction — you pick every subject_type / "
-            "predicate / object_type from the enums. Use for precise single-fact "
-            "asserts, analyst conclusions, news facts, KG corrections. "
-            "Existing entities are matched by exact name; unknown names create "
-            "new nodes with your declared type. `fact` must be self-contained "
-            "(e.g. 'Anthropic announced Claude Opus 4.6 on 2026-04-11'), "
-            "because it is what gets embedded for vector search.\n\n"
-            "PREDICATE RULES — pick by (subject_type → object_type) pair. "
-            "Writes are rejected if the pair doesn't allow the predicate:\n"
+            "Canonical KG fact writer: typed triples, no LLM extraction. Entities match "
+            "by exact name; unknown names become new nodes of the declared type. `fact` "
+            "must be self-contained (e.g. 'Anthropic announced Claude Opus 4.6 on "
+            "2026-04-11'); it is the embedded search text.\n\n"
+            "PREDICATE RULES by (subject_type → object_type); other pairs are rejected:\n"
             "  • Affiliation: Person→Org, Person→Role, Role→Org, Org→Industry\n"
             "  • PersonalRelation: Person→Person\n"
             "  • OrgRelation: Org→Org ONLY (not Org→Asset, not Org→Concept)\n"
             "  • Funding: any→any (wildcard)\n"
             "  • AssetTransfer: any→any (wildcard). Org→Asset uses this, NOT OrgRelation.\n"
             "  • ThreatAction: Person→Org, Org→Org, Org→Person, Campaign→Org, Campaign→Asset, Campaign→Industry\n"
-            "  • Involvement: subject→Incident or subject→Campaign ONLY. "
-            "Do NOT use for 'X is involved in Concept/Policy' — use Causation or flip direction.\n"
+            "  • Involvement: subject→Incident or subject→Campaign ONLY\n"
             "  • Presence: any→Location (Person/Org/Role/Incident/Campaign/Industry → Location)\n"
             "  • PolicyEffect: Policy→any (Policy MUST be subject), or Org→Policy (org enforces it), or Campaign→Policy\n"
             "  • Participation: Person→Campaign, Org→Campaign\n"
-            "  • Statement: any→any (wildcard). For 'X said/announced/criticized Y'.\n"
-            "  • Causation: any→any (wildcard). For explicit 'X caused Y'. Direction = cause→effect.\n\n"
-            "DECISION SHORTCUT: if your pair isn't in the lists above, "
-            "use a wildcard (Funding / AssetTransfer / Statement / Causation) "
-            "or flip the direction (e.g. Org sanctioned by Policy → subject=Policy, predicate=PolicyEffect).\n\n"
-            "COMMON MISTAKES TO AVOID:\n"
-            "  ✗ Org→Concept with Involvement  → use Causation or Statement\n"
-            "  ✗ Org→Asset with OrgRelation    → use AssetTransfer\n"
-            "  ✗ Org→Policy with Involvement   → flip to Policy→Org with PolicyEffect"
+            "  • Statement: any→any (wildcard). 'X said/announced/criticized Y'.\n"
+            "  • Causation: any→any (wildcard). Explicit 'X caused Y', cause→effect.\n\n"
+            "Pair not listed: use a wildcard or flip direction (Org sanctioned by Policy → "
+            "Policy PolicyEffect Org). Org→Concept: Causation or Statement, not Involvement."
         ),
         "input_schema": {
             "type": "object",
@@ -707,7 +694,7 @@ SELF_TOOLS = [
                 "facts": {
                     "type": "array",
                     "minItems": 1,
-                    "description": "List of structured facts to write in one call. Invalid facts are rejected individually; valid facts are still stored. The result reports written_fact_indices and rejected_facts with original input index, reason, and fact so you can retry only the failed entries.",
+                    "description": "Facts to write. Invalid ones are rejected individually and the rest stored; retry only rejected_facts (reported with input index and reason).",
                     "items": {
                         "type": "object",
                         "properties": {
@@ -725,7 +712,7 @@ SELF_TOOLS = [
                                          "Funding", "AssetTransfer", "ThreatAction",
                                          "Involvement", "Presence", "PolicyEffect", "Participation",
                                          "Statement", "Causation"],
-                                "description": "Must match the (subject_type → object_type) pair — see tool-level PREDICATE RULES. Wildcards (any→any): Funding, AssetTransfer, Statement, Causation.",
+                                "description": "Must match the (subject_type → object_type) pair per PREDICATE RULES.",
                             },
                             "object_name": {"type": "string", "description": "Canonical English name of the object entity."},
                             "object_type": {
@@ -737,7 +724,7 @@ SELF_TOOLS = [
                             },
                             "fact": {
                                 "type": "string",
-                                "description": "Self-contained natural-language statement of the fact. Used as the edge's searchable text.",
+                                "description": "Self-contained statement of the fact; the edge's searchable text.",
                             },
                             "valid_at": {
                                 "type": "string",
@@ -761,15 +748,12 @@ SELF_TOOLS = [
     {
         "name": "delegate",
         "description": (
-            "Dispatch an async task to one delegatable specialist agent. Allowed agents: "
-            "analyst, programmer, scout, visualizer, browser, diplomat, diary. Stasova is "
-            "not a general delegation target. When routing is unclear, call route_task or "
-            "list_agent_tools first. Always pass `context` and prefer explicit "
-            "success_criteria/target_identifiers so the worker does not infer the wrong content type. "
-            "For analysis, distinguish user requirements from your hypotheses: commission questions "
-            "and evidence checks, and allow the analyst to reject unsupported premises or conclusions. "
-            "Completed tasks are independently verified by default (programmer/analyst/scout/diplomat); "
-            "pass `verification` to tune checks or opt out."
+            "Dispatch an async task to one specialist agent. If routing is unclear, call "
+            "route_task or list_agent_tools first. Always pass `context`; give "
+            "success_criteria/target_identifiers so the worker does not guess the content type. "
+            "For analysis, separate user requirements from your hypotheses and let the analyst "
+            "reject unsupported premises. Programmer/analyst/scout/diplomat results are verified "
+            "by default; `verification` tunes or disables that."
         ),
         "input_schema": {
             "type": "object",
@@ -777,26 +761,24 @@ SELF_TOOLS = [
                 "agent": {
                     "type": "string",
                     "enum": _DELEGATABLE_AGENTS,
-                    "description": "Which delegatable specialist agent to use. Stasova is intentionally excluded.",
+                    "description": "Specialist agent to use.",
                 },
                 "task": {
                     "type": "string",
                     "description": (
-                        "Specific instructions for the agent. Include the user's goal, symptoms, "
-                        "requirements, constraints, expected outcome, and any user-provided public URL, "
-                        "slug, post_id, or DB document identifier. Do not invent or pass filesystem paths; "
-                        "agents that need code context can inspect the repository themselves."
+                        "Instructions: the user's goal, symptoms, requirements, constraints, expected "
+                        "outcome, and any user-provided URL, slug, post_id or DB document identifier. "
+                        "Do not invent or pass filesystem paths."
                     ),
                 },
                 "context": {
                     "type": "string",
-                    "description": "Delegation context: summarize the conversation that led to this delegation, "
-                    "the user's original request, any discoveries or tool results so far, and why you chose this agent. "
-                    "This helps the agent understand the full picture.",
+                    "description": "Summary of the conversation leading here: the user's original request, "
+                    "findings or tool results so far, and why this agent.",
                 },
                 "success_criteria": {
                     "type": "string",
-                    "description": "Concrete done condition for the worker, e.g. 'correct the named research document and verify the typo is gone'.",
+                    "description": "Concrete done condition, e.g. 'correct the named research document and verify the typo is gone'.",
                 },
                 "required_capabilities": {
                     "type": "array",
@@ -825,14 +807,9 @@ SELF_TOOLS = [
     {
         "name": "multi_delegate",
         "description": (
-            "Delegate multiple tasks with automatic result synthesis.\n"
-            "By default all subtasks run concurrently; a task may declare `depends_on` (earlier "
-            "task indices) to run only after those finish, with their results auto-injected as "
-            "<dependency-results> — use this for staged missions (research → analyze → publish). "
-            "After all subtasks complete, a synthesis task combines results.\n"
-            "Use when you need multiple agents working on different aspects of the same request.\n"
-            "For single-agent tasks, use `delegate` instead. Allowed agents exclude Stasova. "
-            "Max 8 tasks per plan."
+            "Delegate 2-8 tasks to several agents; a synthesis task combines the results. "
+            "Subtasks run concurrently unless `depends_on` stages them (research → analyze → "
+            "publish). For one agent use `delegate`."
         ),
         "input_schema": {
             "type": "object",
@@ -876,11 +853,9 @@ SELF_TOOLS = [
                                 "type": "array",
                                 "items": {"type": "integer"},
                                 "description": (
-                                    "0-based indices of EARLIER tasks in this list that must "
-                                    "finish before this one starts (forward references are "
-                                    "rejected — order stages accordingly). The dependencies' "
-                                    "results are auto-injected into this task's prompt as "
-                                    "<dependency-results>. Omit for parallel execution."
+                                    "0-based indices of EARLIER tasks that must finish first; "
+                                    "their results are injected as <dependency-results>. "
+                                    "Omit to run in parallel."
                                 ),
                             },
                         },
@@ -889,8 +864,7 @@ SELF_TOOLS = [
                     "minItems": 2,
                     "maxItems": 8,
                     "description": (
-                        "List of subtasks. Independent tasks run in parallel; tasks with "
-                        "depends_on wait for their dependencies."
+                        "Subtasks."
                     ),
                 },
                 "synthesis_instructions": {
@@ -904,12 +878,10 @@ SELF_TOOLS = [
     {
         "name": "route_task",
         "description": (
-            "Advisory routing helper for the orchestrator. It returns the recommended "
-            "delegatable agent plus strict content-type guidance for diary, task report, "
-            "research document, private research document, static page, blog post, and hub curation. "
-            "Use before delegate when the request mentions research/report/static_page/private research document "
-            "or when tool ownership is unclear. Public URLs, if present, are only parsed as "
-            "hints to infer content type and identifier. This tool does not create a task."
+            "Recommend an agent and content-type boundaries (diary, task report, research or "
+            "private research document, static page, blog post, hub curation) without creating a "
+            "task. Use before delegate for research/report/static page requests or unclear tool "
+            "ownership. URLs are only hints for content type and identifier."
         ),
         "input_schema": {
             "type": "object",
@@ -918,7 +890,7 @@ SELF_TOOLS = [
                 "candidates": {
                     "type": "array",
                     "items": {"type": "string", "enum": _DELEGATABLE_AGENTS},
-                    "description": "Optional candidate agents to compare. Stasova is intentionally excluded.",
+                    "description": "Optional candidate agents to compare.",
                 },
                 "include_store_guide": {
                     "type": "boolean",
