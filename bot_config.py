@@ -450,14 +450,40 @@ def resolve_agent_tool_loop(spec, policy) -> AgentLoopBinding:
             _resolve_openai_model(spec.model or "gpt6luna"), "openai", reasoning,
         )
     if provider == "deepseek":
-        from llm.claude_loop import chat_with_tools
-        if _deepseek_anthropic_client is None:
+        model = _resolve_deepseek_model(spec.model or "deepseek_flash")
+        # DeepSeek's Anthropic-compatible endpoint returned input {} for long
+        # tool arguments (2,600-2,900 output tokens, 2026-09-25) and gives no
+        # raw text to recover. The OpenAI-compatible endpoint is the default;
+        # DEEPSEEK_TOOL_LOOP_PROTOCOL=anthropic restores the old path.
+        protocol = (os.getenv("DEEPSEEK_TOOL_LOOP_PROTOCOL", "openai") or "openai").strip().lower()
+        if protocol == "anthropic":
+            from llm.claude_loop import chat_with_tools
+            if _deepseek_anthropic_client is None:
+                raise RuntimeError("DEEPSEEK_API_KEY is not configured")
+            return AgentLoopBinding(chat_with_tools, _deepseek_anthropic_client, model, "deepseek", reasoning)
+        from llm.openai_tool_loop import chat_with_tools
+        if _deepseek_client is None:
             raise RuntimeError("DEEPSEEK_API_KEY is not configured")
-        return AgentLoopBinding(
-            chat_with_tools, _deepseek_anthropic_client,
-            _resolve_deepseek_model(spec.model or "deepseek_flash"), "deepseek", reasoning,
-        )
+        return AgentLoopBinding(chat_with_tools, _deepseek_client, model, "deepseek",
+                                _deepseek_openai_loop_options(reasoning))
     raise ValueError(f"unsupported tool-loop provider for {spec.name}: {provider!r}")
+
+
+def _deepseek_openai_loop_options(reasoning: dict) -> dict:
+    """Map Anthropic-style DeepSeek thinking controls onto the OpenAI-compatible loop."""
+    thinking = reasoning.get("thinking") or {"type": "disabled"}
+    extra_body: dict = {"thinking": thinking}
+    effort = (reasoning.get("output_config") or {}).get("effort")
+    if thinking.get("type") == "enabled" and effort:
+        extra_body["reasoning_effort"] = effort
+    return {
+        "extra_body": extra_body,
+        "sdk_max_token_param": "max_tokens",
+        "include_parallel_tool_calls": False,
+        "provider_label": "deepseek-openai",
+        # Thinking-mode tool rounds must replay reasoning_content.
+        "preserve_reasoning_content": thinking.get("type") == "enabled",
+    }
 
 
 def _get_deepseek_thinking_params() -> dict:
