@@ -19,6 +19,8 @@ from .source_session import Sources
 from .editor_context import RepairReads, prose_budgets, work_status
 from .decisions import Decisions
 
+EDITOR_MAX_ROUNDS = 24
+
 INSTRUCTIONS = """Edit only the commissioned issues with the smallest supported bilingual patch.
 Use the input as follows:
 - issues: scope and completion criteria. Address required review corrections; optional suggestions are not obligations.
@@ -397,9 +399,13 @@ class Editor:
                       'original_proposal':(job.get('payload') or {}).get('original_proposal'),
                       'source_cache':session.context(),'saved_draft':repair.view(),
                       'previous_patch':previous_patch if not repair.draft else None,'review_feedback':previous_review}))
-        spec = replace(COMMULINGO_CURATOR, prompt_ir=SystemPrompt(identity=EDITOR_POLICY+INSTRUCTIONS))
+        # 12 rounds ended 27 of 32 failed attempts and capped 80 of 257
+        # successes (2026-09-22..25) while a run cost $0.0135 on average
+        # against the $0.20 stage budget; split submissions add rounds too.
+        spec = replace(COMMULINGO_CURATOR, prompt_ir=SystemPrompt(identity=EDITOR_POLICY+INSTRUCTIONS),
+                       max_rounds=EDITOR_MAX_ROUNDS)
         await model_call(spec=spec,prompt=prompt,tool=repair.submit_tool,handler=finish,reads=READS,
-            usage=usage,budget=budget,read_wrap=reads.wrap,max_rounds=12,
+            usage=usage,budget=budget,read_wrap=reads.wrap,max_rounds=EDITOR_MAX_ROUNDS,
             local_tools=[(repair.no_edit_tool,no_edit,True),session.cached_tool(on_read=save_checkpoint),(context_tool,read_context,False),
                          reads.tool(field_schema['properties'],usage,on_reopen=save_checkpoint)],
             scope_id=f'commulingo_pipeline:{job["id"]}:editor',job=job)

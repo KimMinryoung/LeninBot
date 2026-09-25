@@ -465,6 +465,20 @@ class EditorTests(EditorCase):
             result = await Editor(store)(JOB,[],Usage(),.2)
         self.assertEqual(result.next_stage,'review')
 
+    async def test_editor_gets_its_own_round_limit_above_the_shared_curator_policy(self):
+        from agents.commulingo_curator import COMMULINGO_CURATOR
+        from commulingo.pipeline.editor import EDITOR_MAX_ROUNDS
+        from tool_gateway.inference import resolve_agent_inference_policy
+        seen = {}
+        async def model(**kwargs):
+            seen.update(rounds=kwargs['max_rounds'], policy=resolve_agent_inference_policy(kwargs['spec']).max_rounds)
+            raise RuntimeError('stop')
+        with patch('commulingo.pipeline.service.call',return_value=CURRENT), patch('commulingo.pipeline.stages.model_call',side_effect=model):
+            with self.assertRaisesRegex(RuntimeError,'stop'):
+                await Editor(store_mock())(JOB,[],Usage(),.2)
+        self.assertEqual(seen, {'rounds': EDITOR_MAX_ROUNDS, 'policy': EDITOR_MAX_ROUNDS})
+        self.assertGreater(EDITOR_MAX_ROUNDS, COMMULINGO_CURATOR.max_rounds)
+
     async def test_missing_outcomes_and_evidence_reported_together(self):
         async def model(**kwargs):
             from commulingo.pipeline.stages import StageContinues
