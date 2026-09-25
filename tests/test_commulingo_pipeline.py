@@ -404,13 +404,13 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertAlmostEqual(usage.tracker['total_cost'],.0101)
         self.assertEqual(saved,[{'reason':'A sourced conclusion'}])
 
-    async def test_repair_tool_is_a_terminal_including_forced_finalization(self):
+    async def test_local_tool_is_a_terminal_including_forced_finalization(self):
         from commulingo.pipeline.stages import model_call, result_tool
         from commulingo.pipeline.prompts import spec
         from commulingo.pipeline.engine import Usage
         from tool_gateway.dispatcher import execute_tool
         tool = result_tool({'type':'object','properties':{}})
-        repair = {'name':'commulingo_pipeline_repair','input_schema':{
+        repair = {'name':'commulingo_pipeline_no_edit','input_schema':{
             'type':'object','additionalProperties':False,'properties':{'repairs':{'type':'array'}},'required':['repairs']}}
         saved = []
         async def edit(repairs):

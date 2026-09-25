@@ -12,6 +12,12 @@ from jsonschema import Draft202012Validator
 from .draft_repair import DraftRepair, RepairProtocolError
 from .evidence import MAX_PASSAGES, PASSAGE_PATTERN
 
+SUBMIT_TOOL = 'commulingo_pipeline_submit_draft'
+FIRST_SUBMISSION = ('The first submission must include changes, reason and a decision for every commissioned issue; '
+                    'later submissions send only what changes.')
+LEGACY_REPLACEMENT = ('The saved legacy draft is malformed and cannot be merged; send a complete replacement with '
+                      'changes, reason and a decision for every commissioned issue. History is retained.')
+
 
 def obj(properties, required=()):
     return {'type': 'object', 'additionalProperties': False,
@@ -58,32 +64,35 @@ class AuthorDraft(DraftRepair):
         properties = {'changes': changes, 'issues': outcomes,
                       'reason': {'type': 'string', 'minLength': 20},
                       'notes': {'type': 'string', 'maxLength': 4000}}
-        submit = obj(deepcopy(properties), ['changes', 'issues', 'reason'])
-        submit['properties']['changes']['minProperties'] = 1
-        submit['properties']['changes']['required'] = fields.get('required', [])
-        submit['properties']['issues']['required'] = self.issue_ids
-        update = obj(deepcopy(properties))
-        update['minProperties'] = 1
+        # The first submission must be complete; later calls to the same tool
+        # replace only what they name. The server checks which case applies, so
+        # the author never has to pick between a submit and a repair tool.
+        full = obj(deepcopy(properties), ['changes', 'issues', 'reason'])
+        full['properties']['changes']['minProperties'] = 1
+        full['properties']['changes']['required'] = fields.get('required', [])
+        full['properties']['issues']['required'] = self.issue_ids
+        self.full_schema = full
+        submit = obj(deepcopy(properties))
+        submit['minProperties'] = 1
         saved = (self.draft or {}).get('args', {})
         removable = set(self.field_names)
         if structured_args(saved):
             removable.update(saved.get('fields', {}))
             removable.update(c['field'] for c in saved.get('claims', []))
-        update['properties']['remove_fields'] = {'type': 'array', 'minItems': 1, 'uniqueItems': True,
+        submit['properties']['remove_fields'] = {'type': 'array', 'minItems': 1, 'uniqueItems': True,
             'items': {'type': 'string', 'enum': sorted(removable)},
-            'description': 'Withdraw fields from this draft, including their evidence. Does not delete stored content.'}
+            'description': 'Withdraw fields from the saved draft, including their evidence. Does not delete stored content.'}
         no_edit = obj({'status': {'type': 'string', 'enum': ['complete', 'not_applicable', 'sources_unavailable']},
                        'reason': deepcopy(properties['reason']),
                        'issues': deepcopy(outcomes)}, ['status', 'reason', 'issues'])
         no_edit['properties']['issues']['required'] = self.issue_ids
-        self.submit_tool = {'name': self.name, 'description':
-            'Submit a complete private edit. Each change contains its typed value and evidence. '
-            'Report each commissioned issue explicitly. Use repair for later changes or no_edit to finish without edits.',
-            'input_schema': submit}
-        self.update_tool = {'name': 'commulingo_pipeline_repair', 'description':
-            'Revise saved work with the same changes structure. Each supplied field replaces its whole draft value '
-            'AND evidence; omitted fields and issue decisions remain saved. Arrays replace the whole list. '
-            'Use remove_fields to withdraw a draft field. All validations run again.', 'input_schema': update}
+        self.submit_tool = {'name': SUBMIT_TOOL, 'description':
+            'Submit the edit for validation and independent review. Each change carries its typed value and evidence. '
+            'Without a saved draft (work_status.draft_saved=false) send changes, reason and a decision for every '
+            'commissioned issue. With a saved draft send only what changes: each supplied field replaces its whole '
+            'value AND evidence, omitted fields, issue decisions, reason and notes stay saved, arrays replace the '
+            'whole list and remove_fields withdraws a field. All validations run again on the complete draft. '
+            'Use commulingo_pipeline_no_edit to finish without edits.', 'input_schema': submit}
         self.no_edit_tool = {'name': 'commulingo_pipeline_no_edit', 'description':
             'Finish without a public edit. Explain the decision and each commissioned issue. '
             'Any saved draft remains in history; do not remove its fields first.', 'input_schema': no_edit}
@@ -95,13 +104,19 @@ class AuthorDraft(DraftRepair):
                 f"{'/'.join(str(p) for p in error.absolute_path) or 'arguments'}: {error.message[:300]}"
                 for error in errors[:4]))
 
-    def submission(self, value, *, update=False):
-        self.validate_call(value, self.update_tool if update else self.submit_tool)
-        if update and not self.draft:
-            raise RepairProtocolError('No saved draft. Submit a complete edit first.')
-        if update and not structured_args(self.draft['args']):
-            raise RepairProtocolError('Legacy draft has malformed containers. Use commulingo_pipeline_result '
-                                      'to submit a complete replacement, or commulingo_pipeline_no_edit. History is retained.')
+    def submission(self, value):
+        self.validate_call(value, self.submit_tool)
+        # A malformed legacy draft cannot be merged into, so it is replaced by a
+        # complete submission. It stays in checkpoint history.
+        update = bool(self.draft) and structured_args(self.draft['args'])
+        if not update:
+            required = (LEGACY_REPLACEMENT if self.draft else FIRST_SUBMISSION)
+            if 'remove_fields' in value:
+                raise RepairProtocolError('No mergeable saved draft to withdraw fields from. ' + required)
+            try:
+                self.validate_call(value, {'input_schema': self.full_schema})
+            except RepairProtocolError as exc:
+                raise RepairProtocolError(f'{exc}. {required}') from exc
         if update and not any(value.get(key) for key in ('changes', 'issues', 'remove_fields')) and not any(
                 key in value for key in ('reason', 'notes')):
             raise RepairProtocolError('Supply changed fields, issue decisions, notes or a reason.')
@@ -132,8 +147,8 @@ class AuthorDraft(DraftRepair):
         args = self.draft['args']
         if not structured_args(args):
             return {'needs_full_submission': True, 'legacy_draft': deepcopy(args),
-                    'instruction': 'Use commulingo_pipeline_result to replace this malformed legacy draft, '
-                                   'or commulingo_pipeline_no_edit to finish without edits.'}
+                    'instruction': f'Replace this malformed legacy draft with a complete {SUBMIT_TOOL} call, '
+                                   'or use commulingo_pipeline_no_edit to finish without edits.'}
         claims = args.get('claims') or []
         return {'changes': {field: {'value': value, 'evidence': [
                     {key: val for key, val in c.items() if key != 'field'}
@@ -160,7 +175,7 @@ class AuthorDraft(DraftRepair):
 
     def feedback(self, message):
         message = self.author_error(message)
-        if not self.draft or '"submission_tool": "commulingo_pipeline_repair"' in message:
+        if not self.draft or f'"submission_tool": "{SUBMIT_TOOL}"' in message:
             return message
         errors = []
         for error in Draft202012Validator(self.canonical).iter_errors(self.draft['args']):
@@ -168,6 +183,6 @@ class AuthorDraft(DraftRepair):
             errors.append({'path': self.author_error(path), 'rule': error.validator,
                            'message': self.author_error(error.message[:300])})
         return message + '\n' + json.dumps({'errors': errors[:12],
-            'submission_tool': 'commulingo_pipeline_repair',
+            'submission_tool': SUBMIT_TOOL,
             'instruction': 'Resend each affected change with its complete value and evidence. Omitted changes remain saved. '
                            'Use commulingo_pipeline_no_edit to finish without edits.'}, ensure_ascii=False)

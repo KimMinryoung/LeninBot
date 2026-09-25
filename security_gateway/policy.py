@@ -108,7 +108,7 @@ TOOL_RISK_CLASS: dict[str, str] = {
     "commulingo_review_decision": "state",  # runner-local decision, applied by the review worker
     "commulingo_pipeline_result": "state",  # runner-local artifact; no dictionary write
     "commulingo_pipeline_no_edit": "state",  # records a private no-edit decision
-    "commulingo_pipeline_repair": "state",  # edits the private runner-local draft
+    "commulingo_pipeline_submit_draft": "state",  # saves/merges the private runner-local draft
     "commulingo_pipeline_cached_passages": "read",
     "commulingo_pipeline_context": "read",
     "commulingo_pipeline_review_context": "read",
@@ -198,7 +198,7 @@ OWNER_REQUIRED_RISK_CLASSES = frozenset({"pay", "send", "execute", "admin"})
 OWNER_REQUIRED_TOOLS = frozenset({
     "commulingo_pipeline_result",
     "commulingo_pipeline_no_edit",
-    "commulingo_pipeline_repair",
+    "commulingo_pipeline_submit_draft",
     "commulingo_pipeline_cached_passages",
     "commulingo_pipeline_context",
     "commulingo_pipeline_review_context",
@@ -236,7 +236,7 @@ TOOL_CALLER_ALLOWLIST: dict[str, frozenset[str]] = {
     "commulingo_review_decision": frozenset({"commulingo_reviewer"}),
     "commulingo_pipeline_result": frozenset({"commulingo_curator"}),
     "commulingo_pipeline_no_edit": frozenset({"commulingo_curator"}),
-    "commulingo_pipeline_repair": frozenset({"commulingo_curator"}),
+    "commulingo_pipeline_submit_draft": frozenset({"commulingo_curator"}),
     "commulingo_pipeline_cached_passages": frozenset({"commulingo_curator"}),
     "commulingo_pipeline_context": frozenset({"commulingo_curator"}),
     "commulingo_pipeline_review_context": frozenset({"commulingo_reviewer"}),

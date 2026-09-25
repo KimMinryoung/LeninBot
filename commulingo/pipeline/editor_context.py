@@ -2,6 +2,8 @@
 import json
 from tool_gateway.results import ToolRejection
 
+from .author_draft import SUBMIT_TOOL
+
 
 def work_status(issues, draft, reads, *, error='', error_kind=''):
     """Describe actual runtime state without treating saved claims as approved."""
@@ -21,7 +23,7 @@ def work_status(issues, draft, reads, *, error='', error_kind=''):
         action = ('Resubmit each affected change with its complete value and evidence; omitted changes remain saved. '
                   'Repair prose/schema errors from saved text without new research. '
                   'If a fact needs investigation, follow research_access.')
-        next_tool = 'commulingo_pipeline_repair'
+        next_tool = SUBMIT_TOOL
     else:
         action = ('Read the target context and available originals for the commissioned issues. '
                   'Fetch relevant originals if the cache is empty or insufficient, then submit a full draft. '
@@ -42,7 +44,7 @@ def work_status(issues, draft, reads, *, error='', error_kind=''):
         'error_kind': error_kind or None, 'last_error': error or None,
         'next_tool': next_tool, 'next_action': action,
         'no_edit_tool': 'commulingo_pipeline_no_edit',
-        'submission_tool': 'commulingo_pipeline_repair' if draft else 'commulingo_pipeline_result',
+        'submission_tool': SUBMIT_TOOL,
     }
 
 

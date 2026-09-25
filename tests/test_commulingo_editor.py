@@ -45,9 +45,8 @@ def submission(value):
 
 
 async def repair_call(kwargs, value):
-    edit = next(handler for tool, handler, _ in kwargs['local_tools']
-                if tool['name'] == 'commulingo_pipeline_repair')
-    return await edit(changes=submission(value)['changes'])
+    # A later submission to the same tool sends only the changes.
+    return await kwargs['handler']({'changes': submission(value)['changes']})
 
 
 def store_mock():
@@ -226,7 +225,7 @@ class EditorTests(EditorCase):
             self.assertEqual(state['mode'], 'format_repair')
             self.assertTrue(state['draft_saved'])
             self.assertEqual(state['saved_fields'], ['body'])
-            self.assertEqual(state['next_tool'], 'commulingo_pipeline_repair')
+            self.assertEqual(state['next_tool'], 'commulingo_pipeline_submit_draft')
             raise RuntimeError('disconnect')
         with patch('commulingo.pipeline.service.call', return_value=CURRENT), \
              patch('commulingo.pipeline.stages.model_call', side_effect=first):
@@ -290,7 +289,7 @@ class EditorTests(EditorCase):
             self.assertEqual(state['error_kind'], 'citation')
             self.assertEqual(state['mode'], 'research_allowed')
             self.assertEqual(state['next_tool'], 'commulingo_pipeline_cached_passages')
-            self.assertEqual(state['submission_tool'], 'commulingo_pipeline_repair')
+            self.assertEqual(state['submission_tool'], 'commulingo_pipeline_submit_draft')
             self.assertEqual(state['saved_claim_count'], 1)
             self.assertEqual(store.save_editor_checkpoint.call_args.args[1]['draft']['args']['fields'], value['fields'])
             self.jev.side_effect = citation_result
@@ -440,14 +439,13 @@ class EditorTests(EditorCase):
                 response, failed = await execute_tool(kwargs['tool']['name'],submission(value),
                     {kwargs['tool']['name']:terminal},tool_schema=kwargs['tool'])
                 self.assertTrue(failed)
-                self.assertIn('commulingo_pipeline_repair',response)
+                self.assertIn('commulingo_pipeline_submit_draft',response)
                 saved = store.save_editor_checkpoint.call_args.args[1]
                 self.assertEqual(saved['draft']['args']['claims'],candidate()['claims'])
                 self.assertEqual(saved['draft']['args']['fields']['body']['en'], 'A clause — another clause.')
-                edit_tool = kwargs['local_tools'][0][0]
-                response, failed = await execute_tool(edit_tool['name'],
+                response, failed = await execute_tool(kwargs['tool']['name'],
                     {'changes':submission(candidate())['changes']},
-                    {edit_tool['name']:kwargs['local_tools'][0][1]},tool_schema=edit_tool)
+                    {kwargs['tool']['name']:terminal},tool_schema=kwargs['tool'])
                 self.assertFalse(failed,response)
         with patch('commulingo.pipeline.service.call',return_value=CURRENT), patch('commulingo.pipeline.stages.model_call',side_effect=model):
             result = await Editor(store)(JOB,[],Usage(),.2)
@@ -474,10 +472,9 @@ class EditorTests(EditorCase):
             value = candidate(); value['claims'] = []
             with self.assertRaises(ValueError):
                 await kwargs['handler'](submission(value))
-            edit = kwargs['local_tools'][0][1]
             for _ in range(3):
                 with self.assertRaises(ValueError):
-                    await edit(changes=submission(candidate())['changes'], unexpected=True)
+                    await kwargs['handler']({'changes':submission(candidate())['changes'], 'unexpected':True})
                 with self.assertRaises(ValueError):
                     await kwargs['handler']({})
                 self.assertEqual(store.save_editor_checkpoint.call_args.args[1]['draft']['args'], value)

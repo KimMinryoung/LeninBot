@@ -312,7 +312,7 @@ class Store:
         # No transcripts/source text. A complete-cost receipt permits recovery;
         # the budget ledger remains the authority for settled spend.
         terminal_calls = sum(isinstance(line,str) and any('] '+name+'(' in line for name in
-                             ('commulingo_pipeline_result','commulingo_pipeline_repair'))
+                             ('commulingo_pipeline_result','commulingo_pipeline_submit_draft'))
                              for line in metrics.get('tool_work_details',[]))
         metrics = {k:v for k,v in metrics.items() if k in {
             'rounds_used','input_tokens','output_tokens','model_calls','pipeline_cache_hits',

@@ -77,15 +77,18 @@ Jev에 질의한다. 질문별 판정은 독립적이므로 후속 질의 state�
 
 | 세션 내부 도구 | 역할 |
 |---|---|
-| `commulingo_pipeline_result` | `changes`, `issues`, `reason`, 선택적 `notes`로 전체 초안 제출 |
-| `commulingo_pipeline_repair` | 같은 형식으로 변경한 필드만 다시 제출; 해당 필드의 값과 근거를 함께 교체 |
+| `commulingo_pipeline_submit_draft` | 초안 제출. 저장된 초안이 없으면 `changes`, `issues`(모든 과제), `reason`, 선택적 `notes`로 전체 제출; 있으면 바뀐 것만 보내 병합 |
 | `commulingo_pipeline_no_edit` | `status`, `reason`, 모든 과제의 `issues`로 무편집 판단 제출; 기존 초안은 이력에 보존 |
 | `commulingo_pipeline_cached_passages` | 캐시 목록 및 원문을 네트워크 없이 조회 |
 | `commulingo_pipeline_context` | 추가 현재 값과 이번 작업에서 편집 가능한 필드의 schema 조회 |
 | `commulingo_pipeline_research` | 필드와 이유를 명시해 사실 조사 재개 |
 
 예를 들어 `missing:body` 과제를 처리하는 최초 제출은 다음 형태다. P 라벨은 실제 조회한
-원문에 있어야 한다. 동일한 `changes.body` 객체를 repair에 보내면 body만 고친다.
+원문에 있어야 한다. 초안이 저장된 뒤 `changes.body`만 다시 보내면 body만 고친다.
+2026-09-25 전에는 최초 제출(`commulingo_pipeline_result`)과 부분 수정(`commulingo_pipeline_repair`)이
+별도 도구여서, 모델이 초안 유무에 맞춰 도구를 골라야 했다. 지금은 한 도구이고 서버가 저장된 초안
+유무로 전체 제출/병합을 판정한다. 병합할 수 없는 구형 초안이 있으면 최초 제출과 같이 전체 교체를 요구한다.
+다른 단계(발견·조사 등)의 `commulingo_pipeline_result`는 그대로 단계 결과 저장 도구다.
 
 ```json
 {
@@ -116,8 +119,8 @@ resolved/deferred와 사유를 요구하며, 필드를 채웠다는 이유만으
 저장 시 `sortOrder` 근거로 옮겨, 공개 패치에 없는 필드의 근거가 남지 않게 한다.
 제목 속 연도는 해석하지 않는다(제목에 연도를 넣으라는 지시가 없고 실제로 37%만 연도를 담는다).
 공유 저장소는 값이 없으면 0을 써 절이 맨 앞으로 갔다(2026-09-22~24 편집기 절 156건).
-repair의 `issues`는 명시한 과제 판단만 교체한다. `notes`와 `reason`도 생략하면 보존한다.
-repair의 `remove_fields`는 해당 필드와 근거를 초안에서 철회하며 저장된 공개 데이터를
+초안 저장 후 제출의 `issues`는 명시한 과제 판단만 교체한다. `notes`와 `reason`도 생략하면 보존한다.
+초안 저장 후 제출의 `remove_fields`는 해당 필드와 근거를 초안에서 철회하며 저장된 공개 데이터를
 삭제하지 않는다. 동일 호출에서 같은 필드를 교체하고 철회할 수 없다.
 배열은 해당 목록 전체를 교체한다. 새 작업에는 aliasEdits/careerEdits/sceneEdits와
 전체 목록 교체 방식을 동시에 노출하지 않으며, 구 체크포인트의 수정 필드는 복구를 위해 유지한다.

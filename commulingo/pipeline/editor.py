@@ -160,7 +160,7 @@ class Editor:
         def status():
             state = work_status(issues, repair.draft, reads, error=last_error, error_kind=error_kind)
             if repair.draft and not structured_args(repair.draft['args']):
-                state.update(submission_tool='commulingo_pipeline_result', next_tool='commulingo_pipeline_result',
+                state.update(draft_saved=False,
                              next_action='Submit a complete replacement for the malformed legacy draft, or use the no-edit tool. History is retained.')
             return state
         reads.status = status
@@ -176,11 +176,11 @@ class Editor:
                     'classification_cache':decisions.cache,
                     'section_slug_cache':section_slug_cache})
 
-        async def finish(value, *, update=False):
+        async def finish(value):
             nonlocal error_kind, last_error
             error_kind = 'schema'
             try:
-                value = repair.prepare(repair.submission(value, update=update))
+                value = repair.prepare(repair.submission(value))
                 error_kind = 'validation'
                 await save_checkpoint()
                 if is_probe(value['reason']) or any(is_probe(c['claim']) for c in value.get('claims',[])):
@@ -323,9 +323,6 @@ class Editor:
                     return 'Held: identical failed patch repeated; retained for diagnosis.'
                 raise ValueError(reads.with_status(repair.feedback(str(exc)))) from exc
 
-        async def edit(**value):
-            return await finish(value, update=True)
-
         async def no_edit(**value):
             try:
                 repair.validate_call(value, repair.no_edit_tool)
@@ -386,7 +383,7 @@ class Editor:
         spec = replace(COMMULINGO_CURATOR, prompt_ir=SystemPrompt(identity=EDITOR_POLICY+INSTRUCTIONS))
         await model_call(spec=spec,prompt=prompt,tool=repair.submit_tool,handler=finish,reads=READS,
             usage=usage,budget=budget,read_wrap=reads.wrap,max_rounds=12,
-            local_tools=[(repair.update_tool,edit,True),(repair.no_edit_tool,no_edit,True),session.cached_tool(on_read=save_checkpoint),(context_tool,read_context,False),
+            local_tools=[(repair.no_edit_tool,no_edit,True),session.cached_tool(on_read=save_checkpoint),(context_tool,read_context,False),
                          reads.tool(field_schema['properties'],usage,on_reopen=save_checkpoint)],
             scope_id=f'commulingo_pipeline:{job["id"]}:editor',job=job)
         if box.get('rebase'):

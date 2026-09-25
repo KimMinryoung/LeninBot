@@ -4,8 +4,6 @@ import re
 
 from commulingo.pipeline.write_session import draft_id, prepare_write, repair_schema
 from tool_gateway.results import ToolRejection
-from jsonschema import Draft202012Validator
-import json
 
 
 class RepairProtocolError(ValueError):
@@ -18,7 +16,6 @@ class DraftRepair:
         self.canonical = deepcopy(tool['input_schema'])
         self.draft = None
         self.overlength = {}
-        self.separate_tools = False
         self.tool = deepcopy(tool)
         self.tool['input_schema'] = repair_schema(self.canonical)
         # Let overlength prose reach the local scratchpad so a rejected full
@@ -59,11 +56,8 @@ class DraftRepair:
         if not value:
             # An empty/undecodable call is not a replacement editorial draft.
             # Preserve the scratchpad and keep it out of stagnation counting.
-            instruction = ('Use commulingo_pipeline_repair with only repairs.'
-                           if self.separate_tools and self.draft else
-                           'Resend the intended arguments as valid JSON.')
             raise RepairProtocolError(self.feedback(
-                'Empty arguments do not replace the saved draft. ' + instruction))
+                'Empty arguments do not replace the saved draft. Resend the intended arguments as valid JSON.'))
         try:
             prepared = prepare_write(self.name,value,self.draft,schema=self.canonical)
             self.draft = {'tool':self.name, 'args':deepcopy(prepared)}
@@ -76,21 +70,7 @@ class DraftRepair:
             raise error(self.feedback(str(exc))) from exc
 
     def feedback(self, message):
-        if self.draft and 'Saved draft_id=' not in message and '"submission_tool": "commulingo_pipeline_repair"' not in message:
-            if self.separate_tools:
-                errors = []
-                for error in Draft202012Validator(self.canonical).iter_errors(self.draft['args']):
-                    path = '/' + '/'.join(str(p).replace('~','~0').replace('/','~1') for p in error.absolute_path)
-                    if error.validator=='additionalProperties' and isinstance(error.instance,dict):
-                        for key in error.instance.keys()-error.schema.get('properties',{}).keys():
-                            errors.append({'path':path+'/'+key.replace('~','~0').replace('/','~1'),
-                                           'rule':'additionalProperties','repair':'remove'})
-                        continue
-                    errors.append({'path':path,'rule':error.validator,'expected':error.validator_value,
-                                   'current':str(error.instance)[:240],'message':error.message[:350]})
-                return message + '\n' + json.dumps({'draft_id':draft_id(self.draft),
-                    'errors':errors[:12], 'submission_tool':'commulingo_pipeline_repair',
-                    'instruction':'Send only repairs. The draft and all untouched claims are retained.'},ensure_ascii=False)
+        if self.draft and 'Saved draft_id=' not in message:
             example = '/fields/bio/ko' if self.capture_invalid else '/fields/bio/ko/2'
             message += (f'\nSaved draft_id={draft_id(self.draft)}. Send only repairs (JSON pointers such as '
                 f'{example}) to replace or remove the rejected parts; unchanged fields remain saved. '

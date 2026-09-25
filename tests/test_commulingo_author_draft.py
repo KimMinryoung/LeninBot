@@ -38,11 +38,23 @@ class AuthorDraftTests(unittest.TestCase):
         draft.prepare(draft.submission(edit()))
         patch = {'changes': {'bio': {'value': {'ko':'자료로 확인한 인물이다.', 'en':'A revised biography.'},
                                      'evidence':[{'claim':'A revised claim.', 'passages':['P3']}]}}}
-        result = draft.prepare(draft.submission(patch, update=True))
+        result = draft.prepare(draft.submission(patch))
         self.assertEqual(result['fields']['years'], '1900–1980')
         self.assertEqual([(c['field'], c['passages']) for c in result['claims']], [('years',['P2']), ('bio',['P3'])])
         self.assertEqual(result['issue_results'][0]['id'], 'missing:bio')
         self.assertEqual(draft.view()['changes']['bio'], patch['changes']['bio'])
+
+    def test_one_tool_requires_a_complete_first_submission_then_merges(self):
+        draft = session()
+        partial = {'changes': {'bio': edit()['changes']['bio']}}
+        for value in (partial, {'remove_fields': ['years']}):
+            with self.subTest(value=value), self.assertRaisesRegex(RepairProtocolError, 'first submission'):
+                draft.submission(value)
+        self.assertIsNone(draft.draft)
+        draft.prepare(draft.submission(edit()))
+        result = draft.prepare(draft.submission(partial))
+        self.assertEqual(result['fields']['years'], '1900–1980')
+        self.assertEqual(draft.submit_tool['name'], 'commulingo_pipeline_submit_draft')
 
     def test_invalid_typed_update_never_corrupts_saved_draft(self):
         draft = session()
@@ -53,7 +65,7 @@ class AuthorDraftTests(unittest.TestCase):
                       {'repairs':[{'path':'/fields/bio', 'op':'remove'}]},
                       {}, {'changes':{}}, {'issues':{}}):
             with self.subTest(patch=patch), self.assertRaises(RepairProtocolError):
-                draft.submission(patch, update=True)
+                draft.submission(patch)
             self.assertEqual(draft.draft, saved)
 
     def test_overlength_value_is_saved_and_repaired_as_one_field(self):
@@ -64,17 +76,17 @@ class AuthorDraftTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'changes.bio.value.en'):
             draft.prepare(draft.submission(value))
         self.assertEqual(draft.view()['changes']['bio']['value']['en'], 'x' * 41)
-        result = draft.prepare(draft.submission({'changes':{'bio':edit()['changes']['bio']}}, update=True))
+        result = draft.prepare(draft.submission({'changes':{'bio':edit()['changes']['bio']}}))
         self.assertEqual(result['fields']['bio']['en'], 'A documented person.')
 
     def test_withdrawal_removes_only_draft_field_and_its_evidence(self):
         draft = session()
         draft.prepare(draft.submission(edit()))
-        result = draft.prepare(draft.submission({'remove_fields':['years']}, update=True))
+        result = draft.prepare(draft.submission({'remove_fields':['years']}))
         self.assertNotIn('years', result['fields'])
         self.assertEqual([c['field'] for c in result['claims']], ['bio'])
         with self.assertRaisesRegex(RepairProtocolError, 'same call'):
-            draft.submission({'changes':{'bio':edit()['changes']['bio']}, 'remove_fields':['bio']}, update=True)
+            draft.submission({'changes':{'bio':edit()['changes']['bio']}, 'remove_fields':['bio']})
 
     def test_outcomes_are_explicit_and_ids_cannot_be_invented(self):
         draft = session()
@@ -84,7 +96,7 @@ class AuthorDraftTests(unittest.TestCase):
                 draft.submission(value)
         draft.prepare(draft.submission(edit()))
         result = draft.prepare(draft.submission({'issues':{'missing:bio':{
-            'status':'deferred','reason':'A conflicting source needs checking.'}}}, update=True))
+            'status':'deferred','reason':'A conflicting source needs checking.'}}}))
         self.assertEqual(result['issue_results'][0]['status'], 'deferred')
         self.assertEqual(result['fields']['bio'], edit()['changes']['bio']['value'])
 
@@ -97,7 +109,7 @@ class AuthorDraftTests(unittest.TestCase):
                       {'field':'bio','claim':'Previous claim','passages':['P27']}],
             'issue_results':[{'id':'missing:bio','status':'resolved','reason':'A previously supported explanation.'}]}}
         self.assertEqual(draft.view()['changes']['bio']['evidence'][0]['passages'], ['P27'])
-        result = draft.prepare(draft.submission({'changes':{'bio':edit()['changes']['bio']}}, update=True))
+        result = draft.prepare(draft.submission({'changes':{'bio':edit()['changes']['bio']}}))
         self.assertEqual(result['claims'][0]['passages'], ['P18'])
         self.assertEqual(draft.author_error('/claims/1/passages'), '/changes/bio/evidence/0/passages')
 
@@ -108,7 +120,7 @@ class AuthorDraftTests(unittest.TestCase):
         saved = deepcopy(draft.draft)
         self.assertTrue(draft.view()['needs_full_submission'])
         with self.assertRaisesRegex(RepairProtocolError, 'complete replacement'):
-            draft.submission({'changes':{'bio':edit()['changes']['bio']}}, update=True)
+            draft.submission({'changes':{'bio':edit()['changes']['bio']}})
         self.assertEqual(draft.draft, saved)
         draft.prepare(draft.submission(edit()))
         self.assertEqual(draft.view()['changes']['bio'], edit()['changes']['bio'])
@@ -121,7 +133,7 @@ class AuthorDraftTests(unittest.TestCase):
         for extra in ('fields', 'changes', 'claims', 'repairs'):
             with self.assertRaises(RepairProtocolError):
                 draft.validate_call({**good, extra:{}}, draft.no_edit_tool)
-        for tool in (draft.submit_tool, draft.update_tool, draft.no_edit_tool):
+        for tool in (draft.submit_tool, draft.no_edit_tool):
             self.assertFalse(set(tool['input_schema']) & {'not','oneOf','anyOf','allOf','enum','const'})
             Draft202012Validator.check_schema(tool['input_schema'])
 

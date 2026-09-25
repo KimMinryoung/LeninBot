@@ -11,7 +11,6 @@ class DraftRepairTests(unittest.IsolatedAsyncioTestCase):
     def test_empty_calls_preserve_rejected_draft_for_repair(self):
         original = self.session()
         session = DraftRepair({'name':original.name,'input_schema':original.canonical}, capture_invalid=True)
-        session.separate_tools = True
         with self.assertRaises(RepairProtocolError):
             session.prepare({})
         self.assertIsNone(session.draft)
@@ -20,7 +19,7 @@ class DraftRepairTests(unittest.IsolatedAsyncioTestCase):
             session.prepare(bad)
         saved_id = draft_id(session.draft)
         for empty in ({}, {'draft_id':saved_id}):
-            with self.assertRaisesRegex(RepairProtocolError, 'commulingo_pipeline_repair'):
+            with self.assertRaisesRegex(RepairProtocolError, 'Send only repairs'):
                 session.prepare(empty)
             self.assertEqual(session.draft['args'], bad)
             self.assertEqual(draft_id(session.draft), saved_id)
