@@ -808,13 +808,25 @@ class EditorContractTests(EditorCase):
             await fetch_fixture(kwargs)
             await kwargs['handler'](submission({'status':'ready','reason':'The decree and the award record document this section.',
                 'fields':{'heading':{'ko':'1941년의 말소','en':'Erasure in 1941'},'body':prose,'startYear':1937},
-                'claims':[{'field':'body','claim':'The awards and their removal are documented.','passages':['P1']}],
+                'claims':[{'field':'body','claim':'The awards and their removal are documented.','passages':['P1']},
+                          {'field':'startYear','claim':'The award was given in 1937.','passages':['P1']}],
                 'issue_results':[{'id':'requested','status':'resolved','reason':'Added one documented section.'}]}))
         with patch('commulingo.pipeline.service.call',return_value=current), \
              patch('commulingo.pipeline.stages.model_call',side_effect=model), \
              patch('commulingo.section_slug.generate_section_slug',return_value='cult-and-erasure'):
             result = await Editor(store_mock())(job,[],Usage(),.2)
         self.assertEqual(result.value['draft']['fields']['sortOrder'],193700)
+        self.assertEqual({item['field'] for item in result.value['draft']['fields']['evidence']},
+                         {'body', 'sortOrder'})
+        self.assertNotIn('startYear', {item['field'] for item in result.value['draft']['fields']['evidence']})
+
+    def test_section_start_year_accepts_explicit_unknown_date(self):
+        from commulingo.pipeline.patches import schema_for
+        job = {**JOB, 'kind':'person', 'action':'update',
+               'payload':{'topics':['sections']}}
+        fields = schema_for(job, {'sections':[]})
+        self.assertIn('null', fields['properties']['startYear']['type'])
+        self.assertIn('startYear', fields['required'])
 
 
 class ReviewAndPublishTests(EditorCase):

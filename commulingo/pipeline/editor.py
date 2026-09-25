@@ -242,7 +242,15 @@ class Editor:
                     reads.repair_only = False
                     error_kind = 'citation'
                     raise
-                evidence = compile_evidence(claims, session.sources, set(fields))
+                # Section dates are authored as startYear/startMonth but stored
+                # as sortOrder. Keep their cited source attached to the stored
+                # field, which is the only one the editorial RPC accepts.
+                if section:
+                    claims = [{**claim, 'field': 'sortOrder'}
+                              if claim['field'] in {'startYear', 'startMonth'} else claim
+                              for claim in claims]
+                evidence = compile_evidence(claims, session.sources,
+                                            set(fields) | ({'sortOrder'} if section else set()))
                 if not evidence:
                     raise ValueError('ready requires original-text evidence for the proposed change')
                 resolved = {r['id'] for r in outcomes if r['status']=='resolved'}
@@ -362,7 +370,8 @@ class Editor:
         prompt = ('Complete the commissioned edit using the task data below. '
                   'Use commulingo_pipeline_context for additional current values. Editable changes are defined by the tools.\n'
                   + ('For a person section, submit changes.heading, changes.body and changes.startYear '
-                     '(startMonth when known). The server generates the section topic slug; do not supply it. Write one distinct documented phase or theme '
+                     '(use null if no year applies; startMonth only when known). Cite a passage for a factual year. '
+                     'The server generates the section topic slug; do not supply it. Write one distinct documented phase or theme '
                      'that the current sections do not cover. Give it a specific bilingual heading and a '
                      'substantive bilingual body with original evidence. If sources do not support a useful '
                      'section, submit a reasoned no-edit decision; length and section count are not targets.\n'

@@ -43,9 +43,8 @@ def schema_for(job, current, catalogs=None):
         props = COMMULINGO_SECTION_SAVE_TOOL['input_schema']['properties']
         # The server generates the slug and encodes sortOrder from the period start,
         # after the author submits heading/body/startYear. The reviewed patch holds both.
-        start_year = {**props['start_year'], 'type':'integer',
-                      'description':props['start_year']['description'].split(' null only')[0]}
-        start_month = {**props['start_month'], 'type':'integer'}
+        start_year = deepcopy(props['start_year'])
+        start_month = deepcopy(props['start_month'])
         return {'type':'object','additionalProperties':False,
                 'properties':{**{k:deepcopy(props[k]) for k in ('heading','body')},
                               'startYear':start_year, 'startMonth':start_month},

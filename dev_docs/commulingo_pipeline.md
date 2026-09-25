@@ -110,8 +110,10 @@ resolved/deferred와 사유를 요구하며, 필드를 채웠다는 이유만으
 포함하며 체크포인트에 보존해 같은 제목의 형식 수정에서 재호출하지 않는다.
 기존 제안 수정은 원래 절 slug를 유지하고 경량 모델을 부르지 않는다. 생성 실패는 영문 제목의
 결정적 slug로 대체하고(`section_slug_fallbacks` 집계) 기존 절과 같은 제목만 작성 오류로 돌려준다.
-절 작성 API는 인코딩된 `sortOrder` 대신 시기 시작 `startYear`(필수)와 `startMonth`(선택)를 받는다.
-서버의 `section_sort_order`가 YYYYMM(월 모름=00)으로 바꿔 검토·해시 전에 `sortOrder`로 넣는다.
+절 작성 API는 인코딩된 `sortOrder` 대신 시기 시작 `startYear`(필수, 해당 연도가 없으면 `null`)와
+`startMonth`(선택)를 받는다. 서버의 `section_sort_order`가 YYYYMM(월 모름=00)으로 바꿔
+검토·해시 전에 `sortOrder`로 넣는다. 작성자가 `startYear`나 `startMonth`에 붙인 근거도
+저장 시 `sortOrder` 근거로 옮겨, 공개 패치에 없는 필드의 근거가 남지 않게 한다.
 제목 속 연도는 해석하지 않는다(제목에 연도를 넣으라는 지시가 없고 실제로 37%만 연도를 담는다).
 공유 저장소는 값이 없으면 0을 써 절이 맨 앞으로 갔다(2026-09-22~24 편집기 절 156건).
 repair의 `issues`는 명시한 과제 판단만 교체한다. `notes`와 `reason`도 생략하면 보존한다.
