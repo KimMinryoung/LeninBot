@@ -65,7 +65,13 @@ curl -s "https://leninbot-watchdog.minryoung93.workers.dev/status/$(cat .watchdo
 
 15분 주기인 이유: 스탠바이가 떨어져 나가는 순간부터 슬롯이 primary의 WAL을 붙잡는다. 일일 잡으로는 8 GB 예산을 다 쓴 뒤에 알게 된다.
 
-### 3. VM 안의 기존 알림 잡
+### 3. 서비스 생존 — `leninbot-service-health.timer` (5분)
+
+`scripts/check_service_health.py`. enabled 상태인 `leninbot-*.service` 전부의 `is-active`와 API `/health`(`API_HEALTH_URL`, 기본 `http://172.17.0.1:8000/health`)를 본다. 문제는 **연속 두 번** 보여야 알리고(배포 재시작은 조용하다), 풀리면 한 번 복구를 알린다. 상태는 `data/service_health_state.json`에 둔다.
+
+2026-09-23 PG 장애 때 `leninbot-neo4j`(Docker DB 스택)의 첫 시작이 실패하자, 이것을 `Requires=`로 건 `leninbot-api`·`leninbot-a2a-api`의 시작 작업이 의존성 실패로 취소됐다. `Restart=always`는 프로세스 종료에만 반응하므로 스택이 12:21에 복구된 뒤에도 두 서비스는 2026-09-25 수동 시작 때까지 죽어 있었고 웹 채팅(`/api/proxy/chat`)이 그동안 실패했다. 외부 워치독은 200을 주던 frontend만 봐서 잡지 못했다. 재발 방지로 두 유닛은 `Wants=`+`After=`로 바꿨고(DB 접근은 지연 연결이라 스택 복구 후 요청이 다시 성공한다), 이 점검을 추가했다. 2026-09-25에 systemd 경유 복구 알림 전송까지 확인했다.
+
+### 4. VM 안의 기존 알림 잡
 
 | 유닛 | 주기 | 내용 |
 |---|---|---|

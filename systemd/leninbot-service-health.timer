@@ -1,0 +1,11 @@
+[Unit]
+Description=LeninBot service liveness check timer
+
+[Timer]
+# Every 5 minutes; a problem alerts after two consecutive runs (~10 min), so a
+# deploy restart stays quiet.
+OnCalendar=*:0/5
+Persistent=true
+
+[Install]
+WantedBy=timers.target

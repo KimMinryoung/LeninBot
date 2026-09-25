@@ -1,0 +1,12 @@
+[Unit]
+Description=LeninBot service liveness check (enabled services + API /health)
+After=network.target
+
+[Service]
+Type=oneshot
+User=grass
+WorkingDirectory=/home/grass/leninbot
+EnvironmentFile=/home/grass/leninbot/.env
+LoadCredentialEncrypted=telegram_bot_token:/etc/credstore.encrypted/telegram_bot_token.cred
+ExecStart=/home/grass/leninbot/venv/bin/python scripts/check_service_health.py --notify
+TimeoutStartSec=120
