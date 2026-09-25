@@ -847,6 +847,12 @@ def _build_persona_tools(persona_or_allowed_tools) -> tuple[list[dict], dict]:
 _WEB_ALLOWED_TOOLS = set(CYBER_LENIN_TOOLS) - {"read_self"}
 _web_tools, _web_handlers = _build_persona_tools(get_persona(DEFAULT_PERSONA_ID))
 
+
+def default_persona_toolset() -> tuple[list, dict]:
+    """(tools, handlers) the default web-chat persona runs with; read-only view
+    for introspection such as read_self's runtime manifest."""
+    return _web_tools, _web_handlers
+
 # ── SSE helpers ──────────────────────────────────────────────────────
 
 def _format_sse(data: dict) -> str:

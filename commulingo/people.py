@@ -413,10 +413,10 @@ _name_norm_mtime: float = -1.0
 
 # Spans inside these quote pairs keep their original spelling (direct
 # quotations of period documents and speech).
-_QUOTED_SPAN_RE = re.compile(r'"[^"]*"|“[^”]*”|‘[^’]*’|「[^」]*」|『[^』]*』|《[^》]*》')
+QUOTED_SPAN_RE = re.compile(r'"[^"]*"|“[^”]*”|‘[^’]*’|「[^」]*」|『[^』]*』|《[^》]*》')
 
 
-def _name_normalization() -> dict:
+def name_normalization() -> dict:
     """{'ko': {variant: canonical}, 'en': {...}, 'blocked': {'ko': [...], 'en': [...]}}.
 
     'blocked' strings merely contain a variant (시베리아 ⊃ 베리아) and are
@@ -510,12 +510,12 @@ def find_spelling_variants_in_text(text: str, lang: str) -> dict[str, str]:
     Shared with the research-document writer (runtime_tools/research.py) so
     reports spell dictionary people and glossary terms the way their cards do.
     """
-    norm = _name_normalization()
+    norm = name_normalization()
     table = norm.get(lang) or {}
     hits: dict[str, str] = {}
     if not table or not text:
         return hits
-    scannable = _QUOTED_SPAN_RE.sub(" ", str(text))
+    scannable = QUOTED_SPAN_RE.sub(" ", str(text))
     for blocked in norm["blocked"].get(lang) or []:
         scannable = scannable.replace(blocked, " ")
     for variant, canonical in table.items():
@@ -531,7 +531,7 @@ def normalize_spellings_in_text(text: str, lang: str) -> tuple[str, dict]:
     are masked and restored untouched. Returns (fixed_text, {variant: canonical}
     applied).
     """
-    norm = _name_normalization()
+    norm = name_normalization()
     table = norm.get(lang) or {}
     if not table or not text:
         return str(text or ""), {}
@@ -542,7 +542,7 @@ def normalize_spellings_in_text(text: str, lang: str) -> tuple[str, dict]:
         placeholders[key] = match.group(0)
         return key
 
-    masked = _QUOTED_SPAN_RE.sub(_stash, str(text))
+    masked = QUOTED_SPAN_RE.sub(_stash, str(text))
     blocked = norm["blocked"].get(lang) or []
     for index, compound in enumerate(blocked):
         masked = masked.replace(compound, f"\x00B{index}\x00")
@@ -1271,7 +1271,7 @@ def _em_dash_problem(patch: dict) -> str | None:
     for _lang, text in strings:
         if "—" not in text:
             continue
-        if "—" in _QUOTED_SPAN_RE.sub("", text):
+        if "—" in QUOTED_SPAN_RE.sub("", text):
             excerpt = text[max(0, text.find("—") - 40):text.find("—") + 40]
             return (
                 "Error: Korean and English copy do not use the em dash (—). Rewrite the "

@@ -2207,14 +2207,15 @@ def get_agent_tool_manifest(
 
     def web_chat_manifest() -> dict:
         try:
-            from services.web_chat import _web_tools, _web_handlers
-            tools = _dedupe_tools(list(_web_tools))
+            from services.web_chat import default_persona_toolset
+            web_tools, web_handlers = default_persona_toolset()
+            tools = _dedupe_tools(list(web_tools))
             return {
                 "runtime": "web_chat",
                 "available": True,
                 "provider": None,
                 "tool_count": len(tools),
-                "handler_count": len(_web_handlers),
+                "handler_count": len(web_handlers),
                 "note": (
                     "web chat is not an AgentSpec. It uses services/web_chat.py _WEB_ALLOWED_TOOLS "
                     "plus a web-safe read_self override."

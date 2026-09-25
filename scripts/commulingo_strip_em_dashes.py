@@ -47,7 +47,7 @@ os.environ.setdefault("COMMULINGO_SUGGESTED_BY", "commulingo-em-dash-sweep")
 from bot_config import _deepseek_anthropic_client, _resolve_deepseek_model  # noqa: E402
 from db import query as db_query, get_conn  # noqa: E402
 from psycopg2.extras import RealDictCursor  # noqa: E402
-from commulingo.people import _QUOTED_SPAN_RE, _write_revision  # noqa: E402
+from commulingo.people import QUOTED_SPAN_RE, _write_revision  # noqa: E402
 
 logger = logging.getLogger("commulingo_strip_em_dashes")
 LOCK_PATH = Path("/tmp/leninbot-commulingo-em-dash-sweep.lock")
@@ -113,7 +113,7 @@ ITEMS:
 
 
 def violating(text: str | None) -> bool:
-    return bool(text) and "—" in _QUOTED_SPAN_RE.sub("", text)
+    return bool(text) and "—" in QUOTED_SPAN_RE.sub("", text)
 
 
 def fetch_rows(target: str, limit: int) -> list[dict]:

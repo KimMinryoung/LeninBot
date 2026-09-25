@@ -248,10 +248,10 @@ def _mechanical_spelling_pass(content: str) -> dict | None:
     one-shot proofread) can revert individual corrections. Returns a pending
     state dict, or None when nothing needed correcting.
     """
-    from commulingo.people import _name_normalization, _QUOTED_SPAN_RE
+    from commulingo.people import QUOTED_SPAN_RE, name_normalization
 
     text = str(content or "")
-    norm = _name_normalization()
+    norm = name_normalization()
     placeholders: dict[str, str] = {}
 
     def _stash(match):
@@ -259,7 +259,7 @@ def _mechanical_spelling_pass(content: str) -> dict | None:
         placeholders[key] = match.group(0)
         return key
 
-    masked = _QUOTED_SPAN_RE.sub(_stash, text)
+    masked = QUOTED_SPAN_RE.sub(_stash, text)
     blocked_tokens: list[tuple[str, str]] = []
     for lang in ("ko", "en"):
         for index, compound in enumerate(norm["blocked"].get(lang) or []):
