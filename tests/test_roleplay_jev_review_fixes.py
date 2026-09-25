@@ -5,8 +5,8 @@ import unittest
 from unittest.mock import patch
 
 from llm.call_registry import Decision, DecisionResult
-from runtime_tools import roleplay_jev as jev
-from runtime_tools.roleplay_pacing import policy_for, turn_time_scope
+from roleplay import jev
+from roleplay.pacing import policy_for, turn_time_scope
 from test_roleplay_jev import initial, verdict
 
 

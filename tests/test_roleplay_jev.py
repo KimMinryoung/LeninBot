@@ -6,10 +6,10 @@ from pathlib import Path
 from unittest.mock import patch
 
 from llm.call_registry import Decision, DecisionResult, GenerationResult
-from runtime_tools import roleplay_memory as memory
-from runtime_tools import roleplay_jev as jev
-from runtime_tools.roleplay_dynamics import with_defaults
-from runtime_tools.roleplay_pacing import policy_for, turn_time_scope
+from roleplay import memory
+from roleplay import jev
+from roleplay.dynamics import with_defaults
+from roleplay.pacing import policy_for, turn_time_scope
 from tool_gateway.security import caller_scope, new_run_context
 
 

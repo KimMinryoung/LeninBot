@@ -7,9 +7,9 @@ from copy import deepcopy
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from runtime_tools import roleplay_jev as jev, roleplay_turn as turn
-from runtime_tools.roleplay_decisions import pending_important, settle_general, DraftOutOfScope
-from runtime_tools.roleplay_actor import actor_state_view
+from roleplay import jev, turn
+from roleplay.decisions import pending_important, settle_general, DraftOutOfScope
+from roleplay.actor import actor_state_view
 from test_roleplay_holdouts import initial, held
 
 
@@ -146,7 +146,7 @@ class ConsequenceTests(unittest.TestCase):
 
 class TelegramDecisionTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        from telegram import roleplay_bot as bot
+        from roleplay import bot
         self.bot = bot
         bot.PENDING_CHOICES.clear()
         bot.TURN_LOCKS.clear()

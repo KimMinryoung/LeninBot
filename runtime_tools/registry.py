@@ -1579,15 +1579,15 @@ TOOLS.append(PREPARE_MAIL_BRIEFING_TOOL)
 TOOL_HANDLERS["prepare_mail_briefing"] = prepare_mail_briefing
 
 # Private standalone roleplay notes; handler also enforces caller isolation.
-from runtime_tools.roleplay_memory import ROLEPLAY_MEMORY_TOOL, roleplay_memory
+from roleplay.memory import ROLEPLAY_MEMORY_TOOL, roleplay_memory
 TOOLS.append(ROLEPLAY_MEMORY_TOOL)
 TOOL_HANDLERS["roleplay_memory"] = roleplay_memory
 
-from runtime_tools.roleplay_memory import ROLEPLAY_STATE_TOOL, roleplay_state
+from roleplay.memory import ROLEPLAY_STATE_TOOL, roleplay_state
 TOOLS.append(ROLEPLAY_STATE_TOOL)
 TOOL_HANDLERS["roleplay_state"] = roleplay_state
 
-from runtime_tools.roleplay_memory import ROLEPLAY_PERSON_TOOL, roleplay_person
+from roleplay.memory import ROLEPLAY_PERSON_TOOL, roleplay_person
 TOOLS.append(ROLEPLAY_PERSON_TOOL)
 TOOL_HANDLERS["roleplay_person"] = roleplay_person
 

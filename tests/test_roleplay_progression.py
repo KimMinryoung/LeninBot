@@ -5,9 +5,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from runtime_tools import roleplay_memory as memory
-from runtime_tools.roleplay_dynamics import METRICS, advance, with_defaults
-from runtime_tools.roleplay_story import apply_story_updates
+from roleplay import memory
+from roleplay.dynamics import METRICS, advance, with_defaults
+from roleplay.story import apply_story_updates
 from tool_gateway.security import caller_scope, new_run_context
 
 

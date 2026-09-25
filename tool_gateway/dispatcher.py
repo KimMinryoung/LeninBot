@@ -80,7 +80,7 @@ def _roleplay_snapshot_call(name: str, args: dict) -> bool:
         return False
     if args.get('action') in {'read', 'history', 'list', 'search'}:
         return True
-    from runtime_tools.roleplay_memory import MEMORY_OVERRIDE
+    from roleplay.memory import MEMORY_OVERRIDE
     return MEMORY_OVERRIDE.get() is not None
 
 

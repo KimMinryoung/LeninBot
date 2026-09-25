@@ -59,7 +59,7 @@ The gateway is a facade, not a wholesale policy rewrite. These modules still own
 | Specialist agent allow-lists | `agents/*.py` `AgentSpec.tools` | `AgentSpec.filter_tools()` delegates to `tool_gateway.selection.filter_agent_tools` |
 | Web chat persona tool set | `tool_gateway.profiles.WEB_*_TOOLS` | `services/web_personas.py` aliases profile values; `services/web_chat.py` uses `tool_gateway.selection.build_toolset` before injecting web-only safe tools |
 | A2A skill tool sets | `tool_gateway.profiles.A2A_*_TOOLS` | `services/a2a_handler.py` aliases profile values and uses `tool_gateway.selection.build_toolset` |
-| Roleplay Telegram tool set | `tool_gateway.profiles.ROLEPLAY_TELEGRAM_TOOLS` | `telegram/roleplay_bot.py` uses `tool_gateway.selection.build_toolset` and `tool_gateway.security` caller attribution |
+| Roleplay Telegram tool set | `tool_gateway.profiles.ROLEPLAY_TELEGRAM_TOOLS` | `roleplay/bot.py` uses `tool_gateway.selection.build_toolset` and `tool_gateway.security` caller attribution |
 | MCP profile allow-lists | `tool_gateway.profiles.MCP_*` | `mcp_gateway/policy.py` keeps compatibility aliases; MCP remains a separate inbound surface; `list_runtime_tool_profiles` exposes runtime allow-list inspection through MCP |
 | Execution authorization, atomic rate limits, durable idempotency, and audit | `security_gateway/` | Called from `tool_gateway.dispatcher.execute_tool()` before and after every executed tool |
 | Delegated-agent inference envelope | `tool_gateway.inference` + `config/agent_runtime.json` | Resolves one policy before task provider dispatch; all normal provider loops and the scheduled CommuLingo curator receive the same input/output/continuation/thinking settings |

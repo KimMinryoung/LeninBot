@@ -6,8 +6,8 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from llm.call_registry import Decision, DecisionResult, GenerationResult
-from runtime_tools import roleplay_jev as jev, roleplay_turn as turn
-from runtime_tools.roleplay_pacing import policy_for, turn_time_scope
+from roleplay import jev, turn
+from roleplay.pacing import policy_for, turn_time_scope
 from test_roleplay_holdouts import initial, held
 
 
@@ -73,7 +73,7 @@ class RecordContractTests(unittest.TestCase):
 class SnapshotGatewayTests(unittest.TestCase):
     def test_reads_fresh_and_discarded_writes_have_no_durable_receipts(self):
         from tool_gateway.dispatcher import _roleplay_snapshot_call
-        from runtime_tools.roleplay_memory import MEMORY_OVERRIDE
+        from roleplay.memory import MEMORY_OVERRIDE
         self.assertTrue(_roleplay_snapshot_call('roleplay_state', {'action': 'read'}))
         self.assertFalse(_roleplay_snapshot_call('roleplay_state', {'action': 'update'}))
         token = MEMORY_OVERRIDE.set('/tmp/disposable-test.sqlite3')
@@ -89,7 +89,7 @@ class SnapshotDispatchIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def test_reads_refresh_and_same_write_runs_in_each_disposable_draft(self):
         import tempfile
         from pathlib import Path
-        from runtime_tools import roleplay_memory as memory
+        from roleplay import memory
         from tool_gateway.dispatcher import execute_tool
         from tool_gateway.security import caller_scope, new_run_context
         decision = SimpleNamespace(denied=False, risk_class='write')
@@ -117,7 +117,7 @@ class SnapshotDispatchIntegrationTests(unittest.IsolatedAsyncioTestCase):
 class StatusRepairTests(unittest.IsolatedAsyncioTestCase):
     async def test_status_replies_with_incomplete_time_audit(self):
         from unittest.mock import AsyncMock
-        from telegram import roleplay_bot as bot
+        from roleplay import bot
         async def inline_thread(func, *args):
             return func(*args)
         for interpretation, expected in (({'operation': 'repair', 'interpretation': '확정 장면 기준 시계 복구'}, '확정 장면 기준 시계 복구'),

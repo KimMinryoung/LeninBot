@@ -5,8 +5,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from runtime_tools import roleplay_memory as memory
-from runtime_tools.roleplay_dynamics import advance, with_defaults
+from roleplay import memory
+from roleplay.dynamics import advance, with_defaults
 from tool_gateway.security import caller_scope, new_run_context
 
 
@@ -82,7 +82,7 @@ class DynamicsTests(unittest.TestCase):
         self.assertEqual(advance({**alone, 'threat': 'immediate', 'activity': 'rest'}, 60, '혼자 휴식')['threat'], 'uncertain')
 
     def test_resolve_event_table(self):
-        from runtime_tools.roleplay_dynamics import resolve_event_delta
+        from roleplay.dynamics import resolve_event_delta
         calm = self.initial(pain=20, fatigue=10, resolve=60, scene_minute=600)
         self.assertEqual(resolve_event_delta(calm, 'beating', 2)[0], -10)
         self.assertEqual(resolve_event_delta(calm, 'beating', 1)[0], -5)
@@ -106,7 +106,7 @@ class DynamicsTests(unittest.TestCase):
                 resolve_event_delta(calm, *bad)
 
     def test_pain_floor_and_healing_timeline(self):
-        from runtime_tools.roleplay_dynamics import injury_pain_floor, progress_injuries, carry_injury_progress
+        from roleplay.dynamics import injury_pain_floor, progress_injuries, carry_injury_progress
         burn = {'id': 'burn', 'description': '화상', 'severity': 3, 'trend': 'recovering', 'treated': True}
         cut = {'id': 'cut', 'description': '열상', 'severity': 2, 'trend': 'stable', 'treated': False}
         self.assertEqual(injury_pain_floor([burn, cut]), 17.66)  # 10.5 and 8, noisy-or
@@ -143,7 +143,7 @@ class DynamicsTests(unittest.TestCase):
         # Records saved before the clock existed carry no progress_minutes at all.
         legacy = {'id': 'old', 'description': '옛 기록', 'severity': 2, 'trend': 'recovering', 'treated': True}
         self.assertEqual(carry_injury_progress([legacy], [dict(legacy)])[0]['progress_minutes'], 0)
-        from runtime_tools.roleplay_dynamics import reconcile_injuries
+        from roleplay.dynamics import reconcile_injuries
         self.assertEqual(reconcile_injuries([legacy], [dict(legacy)], [dict(legacy)])[0]['progress_minutes'], 0)
         # A model-sent list keeps the server clock for unchanged trends and restarts it on a change.
         carried = carry_injury_progress([{**burn, 'progress_minutes': 700}, {**cut, 'progress_minutes': 300}],
@@ -151,7 +151,7 @@ class DynamicsTests(unittest.TestCase):
         self.assertEqual([i['progress_minutes'] for i in carried], [700, 0, 0])
 
     def test_tension_eases_with_calm_resolve_sleep_and_rises_with_pain(self):
-        from runtime_tools.roleplay_dynamics import tension_target
+        from roleplay.dynamics import tension_target
         base = self.initial(threat='uncertain', tension=40)
         self.assertEqual(tension_target(base), 40)
         self.assertEqual(tension_target({**base, 'calm_minutes': 8 * 60}), 32)
@@ -174,7 +174,7 @@ class DynamicsTests(unittest.TestCase):
         self.assertGreater(shaken['tension'], state['tension'])
 
     def test_isolation_stages_and_contact(self):
-        from runtime_tools.roleplay_dynamics import isolation_stage, isolation_after, tension_target, mental_rates
+        from roleplay.dynamics import isolation_stage, isolation_after, tension_target, mental_rates
         self.assertIsNone(isolation_stage(23 * 60))
         self.assertEqual([isolation_stage(h * 60)['label'] for h in (24, 72, 168)], ['단절', '침식', '왜곡'])
         alone = self.initial(threat='uncertain', resolve=60, clarity=60, humiliation=40)
@@ -214,7 +214,7 @@ class DynamicsTests(unittest.TestCase):
         self.assertEqual(coerced['clarity'], 49)  # only the immediate threat clouds the mind; fatigue and moderate pain do not
         self.assertEqual(coerced['humiliation'], 50)
         # Clarity erodes for few reasons: sleep deprivation, severe pain, fever, immediate threat, isolation.
-        from runtime_tools.roleplay_dynamics import clarity_drain_rate
+        from roleplay.dynamics import clarity_drain_rate
         base = self.initial(threat='uncertain', activity='light', **mental)
         self.assertEqual(clarity_drain_rate({**base, 'fatigue': 95, 'pain': 70}), 0)
         self.assertEqual(clarity_drain_rate({**base, 'wakefulness_minutes': 16 * 60}), -1)

@@ -4,8 +4,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from runtime_tools import roleplay_memory as memory
-from runtime_tools.roleplay_pacing import policy_for, turn_time_scope
+from roleplay import memory
+from roleplay.pacing import policy_for, turn_time_scope
 from tool_gateway.security import caller_scope, new_run_context
 
 
@@ -116,7 +116,7 @@ class PacingTests(unittest.TestCase):
             conn.execute('INSERT INTO history_exclusions VALUES (?, ?, ?)', ('1', 976, '사용자가 철회한 턴'))
         self.assertEqual(memory.excluded_history_ids(1), [976])
         self.assertEqual(memory.excluded_history_ids(2), [])
-        from telegram import roleplay_bot as bot
+        from roleplay import bot
         with patch.object(bot, '_clear_after_id', return_value=0), \
              patch.object(bot, '_query', side_effect=[[{'n': 1}], [{'role': 'user', 'content': '유효한 대화'}]]) as query:
             self.assertEqual(bot.load_history(1), [{'role': 'user', 'content': '유효한 대화'}])

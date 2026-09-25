@@ -6,10 +6,10 @@ from pathlib import Path
 from unittest.mock import patch
 
 from llm.call_registry import Decision, DecisionResult
-from runtime_tools import roleplay_illness as illness, roleplay_jev as jev, roleplay_memory as memory
-from runtime_tools.roleplay_actor import actor_state_view
-from runtime_tools.roleplay_dynamics import advance, with_defaults
-from runtime_tools.roleplay_pacing import policy_for, turn_time_scope
+from roleplay import illness, jev, memory
+from roleplay.actor import actor_state_view
+from roleplay.dynamics import advance, with_defaults
+from roleplay.pacing import policy_for, turn_time_scope
 from tool_gateway.security import caller_scope, new_run_context
 from test_roleplay_jev import initial, verdict
 
@@ -87,7 +87,7 @@ class IllnessTests(unittest.TestCase):
         self.assertEqual(illness.settle(before['illnesses'], classified['labels'], '장면', '1')[0], before['illnesses'])
 
     def test_scheduled_interruption_does_not_apply_later_diagnosis(self):
-        from runtime_tools.roleplay_story import apply_story_updates
+        from roleplay.story import apply_story_updates
         before = apply_story_updates(initial(), [{'op': 'schedule', 'id': 'visit', 'title': '방문',
                                                    'source': '예약', 'due_minute': 5}])
         text = '20분 쉬어'

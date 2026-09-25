@@ -1,7 +1,7 @@
 """Deterministic fictional state progression; rates are game tuning, not medicine."""
 from copy import deepcopy
-from runtime_tools.roleplay_clock import clock_defaults
-from runtime_tools import roleplay_illness as illness
+from roleplay.clock import clock_defaults
+from roleplay import illness
 
 PHYSICAL_METRICS = ("hunger", "fatigue", "pain", "tension")
 # Mental axes: resolve/clarity read 100 = strong/lucid, humiliation reads 100 = extreme.

@@ -120,7 +120,7 @@ Telegram은 prepare_result의 pending 데이터를 처리하며 중요한 결과
 
 ## 연기 에이전트의 문맥
 
-`roleplay_actor.py`는 내부 수치를 연기용 문장으로 변환한다. Telegram의 character_state와
+`roleplay/actor.py`는 내부 수치를 연기용 문장으로 변환한다. Telegram의 character_state와
 roleplay_state read/history/update 결과는 이 허용 목록 뷰를 사용한다. 수치·변화량·계수·계산 이력·
 부상 진행 분·시간 예산·판정 신뢰도·모델 정보는 연기 에이전트에 전달하지 않는다.
 revision은 서술 저장의 동시성 토큰으로, 장면 날짜/시각은 연속성 정보로 유지한다.

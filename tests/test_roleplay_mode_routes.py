@@ -3,8 +3,8 @@ from copy import deepcopy
 from unittest import TestCase
 from unittest.mock import patch
 
-from runtime_tools import roleplay_turn as turn, roleplay_jev as jev
-from runtime_tools.roleplay_time import validate_appointment
+from roleplay import turn, jev
+from roleplay.timing import validate_appointment
 from test_roleplay_jev import initial, verdict
 
 

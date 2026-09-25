@@ -19,13 +19,13 @@ IMPORTANT_EVENTS = {'coerced_confession', 'implicating_others', 'betrayal'}
 
 
 def describe_important(item):
-    from runtime_tools.roleplay_jev import EVENT_LABELS
+    from roleplay.jev import EVENT_LABELS
     names = {'lost': '넘김', 'paid': '값 치름', 'kept': '이행', 'broken': '파기', 'keep': '변화 없음'}
     return item['title'] + ' → ' + names.get(item['label'], EVENT_LABELS.get(item['label'], item['label']))
 
 
 def important_candidates(state, people, verdict):
-    from runtime_tools import roleplay_jev as jev
+    from roleplay import jev
     labels = verdict['labels']
     questions = jev.build_questions(state, people)
     result = []
@@ -80,7 +80,7 @@ def pending_important(state, people, verdict):
 
 def settle_general(state, people, verdict):
     """Fill all ordinary gaps once; consequential gaps remain for the director."""
-    from runtime_tools import roleplay_jev as jev
+    from roleplay import jev
     result = deepcopy(verdict)
     labels = result['labels']
     picks = result.setdefault('auto_settled', {})

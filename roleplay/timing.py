@@ -3,8 +3,8 @@ import json
 import math
 
 from llm.call_registry import generate_detailed, resolve
-from runtime_tools.roleplay_dynamics import METRICS
-from runtime_tools.roleplay_pacing import MAX_EXPLICIT_MINUTES
+from roleplay.dynamics import METRICS
+from roleplay.pacing import MAX_EXPLICIT_MINUTES
 
 FEATURE = 'roleplay_time_authorization'
 LABELS = {

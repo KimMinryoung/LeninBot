@@ -13,10 +13,10 @@ from contextvars import ContextVar
 from pathlib import Path
 
 from tool_gateway.security import get_caller
-from runtime_tools.roleplay_pacing import check_time_request, check_time_result, check_reset_request
-from runtime_tools.roleplay_story import STORY_UPDATES_SCHEMA, apply_story_updates, advance_to_event, blocking_events
-from runtime_tools.roleplay_clock import TEMPORAL_SCHEMA, interpret_clock, validate_temporal
-from runtime_tools.roleplay_dynamics import (METRICS, CONDITION_SCHEMA, REQUIRED_CONDITIONS, RESOLVE_EVENT_KINDS, RESOLVE_INTENSITY,
+from roleplay.pacing import check_time_request, check_time_result, check_reset_request
+from roleplay.story import STORY_UPDATES_SCHEMA, apply_story_updates, advance_to_event, blocking_events
+from roleplay.clock import TEMPORAL_SCHEMA, interpret_clock, validate_temporal
+from roleplay.dynamics import (METRICS, CONDITION_SCHEMA, REQUIRED_CONDITIONS, RESOLVE_EVENT_KINDS, RESOLVE_INTENSITY,
                                              RESOLVE_EVENT_HISTORY, MAX_HOLDOUTS, HOLDOUT_TITLE_MAX, MAX_BARGAINS, BARGAIN_TEXT_MAX,
                                              MAX_ROUTINE, WORLD_SETTINGS, open_bargains, with_defaults, validate_conditions, advance,
                                              carry_injury_progress, injury_pain_floor, reconcile_injuries,
@@ -609,7 +609,7 @@ def roleplay_state(action: str, changes: dict | None = None, reason: str = "", *
                    resolve_event: dict | None = None, story_updates: list | None = None, **extra) -> str:
     caller = get_caller()
     user_id = _owner_id()
-    from runtime_tools.roleplay_actor import actor_state_view
+    from roleplay.actor import actor_state_view
     view_state = actor_state_view if caller.scope_type == "telegram_message" else state_view
     if action == "read":
         return json.dumps(view_state(load_state(user_id)), ensure_ascii=False)

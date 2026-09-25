@@ -4,7 +4,7 @@ from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from telegram import roleplay_bot as bot
+from roleplay import bot
 
 
 class TestReplyPersistence(unittest.IsolatedAsyncioTestCase):
@@ -77,7 +77,7 @@ class TestReplyPersistence(unittest.IsolatedAsyncioTestCase):
         await progress.flush()
         telegram.send_message.assert_not_awaited()
         message = SimpleNamespace(from_user=SimpleNamespace(id=1), answer=AsyncMock())
-        from runtime_tools.roleplay_memory import STATE_DEFAULTS
+        from roleplay.memory import STATE_DEFAULTS
         with patch.object(bot.asyncio, "to_thread", new=AsyncMock(return_value={**STATE_DEFAULTS, "hunger": 50})):
             await bot.cmd_status(message)
         self.assertIn("허기: 50", message.answer.call_args.args[0])

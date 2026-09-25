@@ -13,14 +13,14 @@ import tempfile
 from pathlib import Path
 
 from llm.call_registry import decide_detailed, generate_detailed, resolve, resolve_provider_connection
-from runtime_tools.roleplay_decisions import (AdjudicationUnavailable, DraftOutOfScope, StateConflict,
+from roleplay.decisions import (AdjudicationUnavailable, DraftOutOfScope, StateConflict,
     pending_important, settle_general, important_candidates, describe_important)
-from runtime_tools import roleplay_memory as memory, roleplay_jev as jev
-from runtime_tools.roleplay_actor import actor_state_view
-from runtime_tools.roleplay_review import REVIEW_RULES, screen_reply, validate_review
-from runtime_tools.roleplay_clock import interpret_clock
-from runtime_tools.roleplay_story import blocking_events
-from runtime_tools.roleplay_pacing import policy_for, turn_time_scope, check_time_request, check_time_result
+from roleplay import memory, jev
+from roleplay.actor import actor_state_view
+from roleplay.review import REVIEW_RULES, screen_reply, validate_review
+from roleplay.clock import interpret_clock
+from roleplay.story import blocking_events
+from roleplay.pacing import policy_for, turn_time_scope, check_time_request, check_time_result
 
 
 def decide(label, payload, questions, defaults=None):
@@ -65,7 +65,7 @@ def decide(label, payload, questions, defaults=None):
 
 
 def authorize(user_text, state, history):
-    from runtime_tools.roleplay_time import authorize_time
+    from roleplay.timing import authorize_time
     return authorize_time(user_text, state, history)
 
 
@@ -89,7 +89,7 @@ def direction(authorization, state=None):
         location = state.get('location') or '미확인'
         text += (f" 현재 위치는 \"{location}\"이며, 사용자가 이동을 지시하지 않았으면 사건은 그 자리에서 일어난다. 감방으로 돌아가는 길·계단·다른 방을 지어내지 않는다."
                  " 초안은 이 사건 하나와 그 직후의 반응까지다. 한두 문단이면 충분하고, 그 뒤의 식사·수면·다음 방문·다음 날은 쓰지 않는다.")
-        from runtime_tools.roleplay_story import blocking_events
+        from roleplay.story import blocking_events
         ready = blocking_events(state, 0)
         if ready:
             text += (' 이미 도래한 예정 사건: ' + ', '.join(event['title'] for event in ready)
@@ -110,8 +110,8 @@ def expected_stop(authorization, state):
     """The first clock-stopping beat an explicit passage will cross: a registered routine
     item or a scheduled event. Told to the actor before drafting, so the settled stop and
     the written scene agree."""
-    from runtime_tools.roleplay_dynamics import routine_occurrences
-    from runtime_tools.roleplay_story import blocking_events
+    from roleplay.dynamics import routine_occurrences
+    from roleplay.story import blocking_events
     policy = policy_for_authorization(authorization)
     if authorization['labels'].get('transition', 'current') != 'current' or not policy.explicit_passage or policy.calendar_skip:
         return None
@@ -182,7 +182,7 @@ def prepare(user_text, before, people, history, scope_id, draft, authorization, 
                    'answers': {}, 'calls': {}, 'rules_version': jev.RULES_VERSION,
                    'classification_skipped': 'non_scene', 'draft': draft, 'authorization': authorization}
         if mode == 'plan':
-            from runtime_tools.roleplay_time import validate_appointment
+            from roleplay.timing import validate_appointment
             validate_appointment(authorization.get('appointment'), mode, authorization.get('duration_minutes'))
             verdict['labels']['plan_action'] = 'schedule'
     elif verdict is None:
@@ -371,7 +371,7 @@ def review_reply(draft, before, projected, stage=None, *, applied=None):
 
 def feedback_line(outcome, state=None):
     """One line telling the director what the engine believed happened. No numbers, no thresholds."""
-    from runtime_tools.roleplay_dynamics import RESOLVE_EVENT_KINDS
+    from roleplay.dynamics import RESOLVE_EVENT_KINDS
     status = outcome.get('status')
     applied = outcome.get('applied') or {}
     if status == 'unchanged' or applied.get('no_change'):
@@ -407,7 +407,7 @@ def feedback_line(outcome, state=None):
     elif applied.get('delayed_reaction') == 'released':
         parts.append('미뤄 둔 반응 해소')
     if applied.get('illness_changes'):
-        from runtime_tools.roleplay_illness import KINDS, STATUSES
+        from roleplay.illness import KINDS, STATUSES
         parts.append('질병 갱신: ' + ', '.join(KINDS[i['kind']] + ' ' + STATUSES[i['status']] for i in applied['illness_changes']))
     if applied.get('narrative_only'):
         parts.append('기록만 갱신')

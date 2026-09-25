@@ -3,8 +3,8 @@ story events, so the director can see where the played story sits against the re
 Dates follow the owner's saved source notes; the game does not verify them further."""
 from datetime import date
 
-from runtime_tools.roleplay_dynamics import clock_minute_of_day
-from runtime_tools.roleplay_story import apply_story_updates
+from roleplay.dynamics import clock_minute_of_day
+from roleplay.story import apply_story_updates
 
 TRACK_KIND = "track"
 TRACK_SOURCE = "실존 연표(사용자 사료 메모 기반)"

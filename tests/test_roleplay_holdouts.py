@@ -8,11 +8,11 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from runtime_tools import roleplay_memory as memory, roleplay_jev as jev, roleplay_turn as turn
-from runtime_tools.roleplay_actor import actor_state_view, actor_outcome_view
-from runtime_tools.roleplay_dynamics import with_defaults, advance
-from runtime_tools.roleplay_pacing import policy_for, turn_time_scope
-from runtime_tools.roleplay_story import apply_story_updates
+from roleplay import memory, jev, turn
+from roleplay.actor import actor_state_view, actor_outcome_view
+from roleplay.dynamics import with_defaults, advance
+from roleplay.pacing import policy_for, turn_time_scope
+from roleplay.story import apply_story_updates
 from tool_gateway.security import caller_scope, new_run_context
 
 
@@ -131,7 +131,7 @@ class DelayedReactionTests(unittest.TestCase):
         self.assertEqual(state['story_events'], [])
         scheduled = apply_story_updates(initial(participants=[]), [{'op': 'schedule', 'id': 'delayed-reaction-x', 'title': '반응', 'source': '포화', 'when_alone': True}])
         self.assertEqual(scheduled['story_events'][0]['status'], 'ready')
-        from runtime_tools.roleplay_story import advance_to_event
+        from roleplay.story import advance_to_event
         late = advance_to_event({**scheduled, 'activity': 'rest'}, 1440, '하루', advance)
         self.assertEqual(late['story_events'][0]['status'], 'cancelled')
         self.assertIsNone(late['story_interrupt'])
@@ -197,7 +197,7 @@ class PlayerChoiceTests(unittest.TestCase):
 
 class BotChoiceFlowTests(unittest.IsolatedAsyncioTestCase):
     async def test_pending_choice_offers_buttons_then_settles_the_same_draft(self):
-        from telegram import roleplay_bot as bot
+        from roleplay import bot
         message = SimpleNamespace(from_user=SimpleNamespace(id=1), text='심문해', message_id=5, chat=SimpleNamespace(id=1),
                                   answer=AsyncMock(), bot=SimpleNamespace(send_chat_action=AsyncMock()))
         progress = SimpleNamespace(flush=AsyncMock())
@@ -247,7 +247,7 @@ class BotChoiceFlowTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(stale.answer.await_args.kwargs.get('show_alert'))
 
     async def test_status_lists_holdouts(self):
-        from telegram import roleplay_bot as bot
+        from roleplay import bot
         message = SimpleNamespace(from_user=SimpleNamespace(id=1), text='/status', answer=AsyncMock())
         state = {**memory.STATE_DEFAULTS, 'hunger': 50, 'holdouts': held('빈 두 줄', lost=['이름 낭독 거부'])}
         with patch.object(bot.asyncio, 'to_thread', new=AsyncMock(return_value=state)):
@@ -302,7 +302,7 @@ class AuthorizeToleranceTests(unittest.TestCase):
 
 class BotAuthorizeChoiceTests(unittest.IsolatedAsyncioTestCase):
     async def test_mode_choice_runs_the_turn_with_the_players_answer(self):
-        from telegram import roleplay_bot as bot
+        from roleplay import bot
         message = SimpleNamespace(from_user=SimpleNamespace(id=1), text='의사 재방문', message_id=8, chat=SimpleNamespace(id=1),
                                   answer=AsyncMock(), bot=SimpleNamespace(send_chat_action=AsyncMock()))
         async def inline_thread(func, *args, **kwargs):
@@ -332,7 +332,7 @@ class BotAuthorizeChoiceTests(unittest.IsolatedAsyncioTestCase):
 
 class AutoSettleTests(unittest.IsolatedAsyncioTestCase):
     async def test_unsure_mode_plays_the_scene_when_buttons_are_off(self):
-        from telegram import roleplay_bot as bot
+        from roleplay import bot
         message = SimpleNamespace(from_user=SimpleNamespace(id=1), text='(맘대로 쉬어라)', message_id=4, chat=SimpleNamespace(id=1),
                                   answer=AsyncMock(), bot=SimpleNamespace(send_chat_action=AsyncMock()))
         async def inline_thread(func, *args, **kwargs):
@@ -353,7 +353,7 @@ class AutoSettleTests(unittest.IsolatedAsyncioTestCase):
         message.answer.assert_not_awaited()
 
     async def test_buttons_off_takes_the_most_probable_value_and_says_so(self):
-        from telegram import roleplay_bot as bot
+        from roleplay import bot
         message = SimpleNamespace(from_user=SimpleNamespace(id=1), text='죽을 건넸다', message_id=9, chat=SimpleNamespace(id=1),
                                   answer=AsyncMock(), bot=SimpleNamespace(send_chat_action=AsyncMock()))
         async def inline_thread(func, *args, **kwargs):

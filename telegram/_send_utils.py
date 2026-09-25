@@ -1,4 +1,4 @@
-"""Shared Telegram send helpers used by bot.py and roleplay_bot.py.
+"""Shared Telegram send helpers used by telegram/bot.py and roleplay/bot.py.
 
 No aiogram import — the bot object is duck-typed (anything with an async
 send_message(chat_id=..., text=..., parse_mode=...)), so this module stays

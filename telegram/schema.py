@@ -343,7 +343,7 @@ def ensure_telegram_tables() -> None:
 
 
 def ensure_roleplay_tables() -> None:
-    """Create tables owned by the standalone roleplay bot (telegram/roleplay_bot.py).
+    """Create tables owned by the standalone roleplay bot (roleplay/bot.py).
 
     Kept isolated from the Cyber-Lenin chat tables so the two bots' sessions
     never share history. Applied via scripts/schema_migrations.py, not at

@@ -1,6 +1,6 @@
 import unittest
-from runtime_tools.roleplay_clock import interpret_clock, validate_temporal
-from runtime_tools.roleplay_dynamics import with_defaults, advance
+from roleplay.clock import interpret_clock, validate_temporal
+from roleplay.dynamics import with_defaults, advance
 
 
 class ClockTests(unittest.TestCase):

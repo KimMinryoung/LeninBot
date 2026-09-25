@@ -6,21 +6,21 @@ Code owns arithmetic, chronology and persistence.
 """
 from copy import deepcopy
 from datetime import datetime
-from runtime_tools import roleplay_illness as illness
+from roleplay import illness
 import json
 import math
 import time
-from runtime_tools.roleplay_decisions import AdjudicationUnavailable, DraftOutOfScope, important_candidates
+from roleplay.decisions import AdjudicationUnavailable, DraftOutOfScope, important_candidates
 
 from llm.call_registry import decide_detailed, generate_detailed, resolve
-from runtime_tools.roleplay_dynamics import (METRICS, THREAT_TARGETS,
+from roleplay.dynamics import (METRICS, THREAT_TARGETS,
     RESOLVE_EVENT_KINDS, NON_EVENT_KINDS, HOLDOUT_LOSS_KIND, HOLDOUT_LOSS_DELTAS,
     HUMILIATION_SATURATION, DELAYED_REACTION_PREFIX, DELAYED_REACTION_RELEASE,
     BARGAIN_KEPT_KIND, BARGAIN_KEPT_DELTAS, WORLD_SETTINGS,
     with_defaults, advance, carry_injury_progress, event_repeat_scale, open_bargains, routine_occurrences)
-from runtime_tools.roleplay_story import advance_to_event, apply_story_updates, refresh_events, blocking_events
-from runtime_tools.roleplay_clock import interpret_clock
-from runtime_tools.roleplay_pacing import (policy_for, duration_minutes, check_time_request, check_time_result,
+from roleplay.story import advance_to_event, apply_story_updates, refresh_events, blocking_events
+from roleplay.clock import interpret_clock
+from roleplay.pacing import (policy_for, duration_minutes, check_time_request, check_time_result,
                                          check_reset_request)
 
 FEATURE = 'roleplay_scene_adjudication'
@@ -489,7 +489,7 @@ def project(before, user_text, people, verdict, scope_id):
         title = user_text[:150]
         authorization = verdict.get('authorization')
         if authorization is not None:
-            from runtime_tools.roleplay_time import validate_appointment
+            from roleplay.timing import validate_appointment
             if authorization.get('user_text') != user_text or authorization['labels']['mode'] != 'plan':
                 raise ValueError('이번 입력의 예약 판정 없음')
             duration = authorization.get('duration_minutes')
@@ -502,12 +502,12 @@ def project(before, user_text, people, verdict, scope_id):
         return state, {'mode': mode, 'scheduled': f'jev-plan-{scope_id}'}
     if mode == 'reset':
         check_reset_request()
-        from runtime_tools.roleplay_memory import STATE_DEFAULTS
+        from roleplay.memory import STATE_DEFAULTS
         fresh = with_defaults(dict(STATE_DEFAULTS))
         fresh.update({k: deepcopy(before.get(k)) for k in WORLD_SETTINGS})
         return fresh, {'mode': 'reset'}
     if mode == 'correction':
-        from runtime_tools.roleplay_time import validate_corrections
+        from roleplay.timing import validate_corrections
         authorization = verdict.get('authorization') or {}
         if (not policy_for(user_text).correction or authorization.get('user_text') != user_text
                 or (authorization.get('labels') or {}).get('mode') != 'correction'):
@@ -689,7 +689,7 @@ def project(before, user_text, people, verdict, scope_id):
                          'severity': INTENSITY[labels['new_severity']], 'trend': 'stable', 'treated': False, 'progress_minutes': 0})
     state['injuries'] = injuries
     intensity_scale = {1: .5, 2: 1, 3: 1.5}[INTENSITY.get(labels.get('intensity'), 2)]
-    from runtime_tools.roleplay_memory import _apply_resolve_event
+    from roleplay.memory import _apply_resolve_event
     for index, each in enumerate(events):
         event_intensity = 2 if fixed_intensity(each) else INTENSITY.get(labels.get('intensity'), 2)
         magnitude = 1 if fixed_intensity(each) else intensity_scale
@@ -762,7 +762,7 @@ def schedule_routine(state, span_minutes):
 
 def _settle_bargains(state, before, labels, scope_id, user_text):
     """paid marks the price given; kept rewards the honored request; broken is a betrayal."""
-    from runtime_tools.roleplay_memory import _apply_resolve_event
+    from roleplay.memory import _apply_resolve_event
     settled = {}
     for i, bargain in enumerate(before.get('bargains', [])):
         action = labels.get(f'bargain_{i}', 'keep')
@@ -811,7 +811,7 @@ def _lose_holdouts(state, before, labels, scope_id, user_text):
                 state[metric] = _clamp(state[metric] + effect)
                 state.setdefault('metric_remainders', {}).pop(metric, None)
         if state['resolve'] is not None:
-            from runtime_tools.roleplay_memory import _apply_resolve_event
+            from roleplay.memory import _apply_resolve_event
             _apply_resolve_event(state, {'kind': HOLDOUT_LOSS_KIND, 'intensity': 2, 'note': f'{holdout["title"]}: {user_text[:200]}'},
                                  event_id=f'jev-{scope_id}-holdout-{holdout["id"]}', reason='지키던 것을 넘김')
     return lost
@@ -819,7 +819,7 @@ def _lose_holdouts(state, before, labels, scope_id, user_text):
 
 def adjudicate_turn(user_id, user_text, history, scope_id, *, prepared=None):
     """Call Jev once, then compare-and-commit an audited projection exactly once."""
-    from runtime_tools import roleplay_memory as memory
+    from roleplay import memory
     uid, scope_id = str(user_id), str(scope_id)
     with memory._connection() as conn:
         saved = conn.execute('SELECT payload FROM automatic_turns WHERE user_id=? AND scope_id=?', (uid, scope_id)).fetchone()
@@ -861,7 +861,7 @@ def adjudicate_turn(user_id, user_text, history, scope_id, *, prepared=None):
             projected = None
             outcome = {'status': 'deferred', 'reason': '분류 중 상태가 바뀌어 저장하지 않음', 'reason_kind': 'state_conflict', 'rules_version': RULES_VERSION}
         if prepared is not None and prepared.get('stage') is not None and outcome['status'] in {'applied','unchanged'}:
-            from runtime_tools.roleplay_turn import check_staged, commit_staged
+            from roleplay.turn import check_staged, commit_staged
             check_staged(conn, uid, prepared['stage'])
             commit_staged(conn, uid, prepared['stage'])
         if projected is not None and outcome['status'] == 'applied':

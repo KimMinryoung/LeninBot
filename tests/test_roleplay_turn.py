@@ -7,8 +7,8 @@ from unittest.mock import patch
 from types import SimpleNamespace
 from llm.call_registry import Decision, DecisionResult
 
-from runtime_tools import roleplay_memory as memory, roleplay_turn as turn, roleplay_jev as jev
-from runtime_tools.roleplay_dynamics import with_defaults
+from roleplay import memory, turn, jev
+from roleplay.dynamics import with_defaults
 from tool_gateway.security import caller_scope, new_run_context
 
 
@@ -104,7 +104,7 @@ class PostDraftTests(unittest.TestCase):
         self.assertEqual(committed['reply'], '초안')
 
     def test_ready_narrative_cue_does_not_block_short_scene_or_next_morning(self):
-        from runtime_tools.roleplay_story import apply_story_updates
+        from roleplay.story import apply_story_updates
         before = apply_story_updates({**self.before, 'participants': []}, [{
             'op': 'schedule', 'id': 'delayed-reaction-1565', 'when_alone': True,
             'title': '혼자 있을 때 반응', 'source': '포화'}])

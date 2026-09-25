@@ -4,9 +4,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from runtime_tools import roleplay_memory as memory
-from runtime_tools.roleplay_actor import actor_state_view, actor_outcome_view
-from runtime_tools.roleplay_dynamics import with_defaults
+from roleplay import memory
+from roleplay.actor import actor_state_view, actor_outcome_view
+from roleplay.dynamics import with_defaults
 from tool_gateway.security import caller_scope, new_run_context
 
 

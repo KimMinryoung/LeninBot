@@ -84,6 +84,7 @@
 | `llm/` | provider adapter, 공용 tool-loop engine, gateway, model/runtime profile |
 | `translation_runtime/` | 사료·사이트 번역 공통 실행, 구조 검증, 원자적 파일 저장 |
 | `telegram/`, `agents/`, `runtime_tools/` | Telegram orchestration, agent specs, runtime tool implementations |
+| `roleplay/` | 별도 정체성의 역할극 봇(`roleplay.bot`, `leninbot-roleplay.service`)과 게임 상태·판정·기억 모듈 |
 | `scripts/`, `deploy/`, `systemd/` | 운영·검증 스크립트, 배포 자산, unit 원본 |
 
-프로젝트 루트에는 저장소 메타데이터, 환경·dependency 예제, 배포 진입 스크립트와 아직 별도 도메인 패키지가 없는 공용 compatibility module만 둔다.
+프로젝트 루트에는 저장소 메타데이터, 환경·dependency 예제, 배포 진입 스크립트와 공용 기반 모듈(`bot_config`, `db`, `secrets_loader`, `shared`)만 둔다. 도메인 코드는 패키지에 둔다.

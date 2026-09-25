@@ -4,9 +4,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from runtime_tools import roleplay_memory as memory
+from roleplay import memory
 from tool_gateway.security import caller_scope, new_run_context
-from telegram.roleplay_bot import repeated_phrases
+from roleplay.bot import repeated_phrases
 
 
 class RoleplayMemoryTests(unittest.TestCase):

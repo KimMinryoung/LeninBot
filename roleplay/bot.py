@@ -1,4 +1,4 @@
-"""roleplay_bot.py — Standalone DeepSeek roleplay companion (independent of Cyber-Lenin).
+"""roleplay/bot.py — Standalone DeepSeek roleplay companion (independent of Cyber-Lenin).
 
 A lightweight second Telegram bot for free-form character roleplay. It deliberately
 reuses only the verified low-level building blocks — DB pool, secret loading, the
@@ -9,7 +9,7 @@ autonomous loop, KG writes, identity prompt).
 Sessions live in their own tables (``roleplay_chat_history`` / ``roleplay_clear_markers``)
 so this bot's conversation is fully isolated from the Cyber-Lenin Telegram bot.
 
-Run: ``python -m telegram.roleplay_bot`` (see systemd/leninbot-roleplay.service).
+Run: ``python -m roleplay.bot`` (see systemd/leninbot-roleplay.service).
 """
 
 from __future__ import annotations
@@ -32,16 +32,16 @@ from db import query as _query, execute as _execute
 from bot_config import _deepseek_anthropic_client, _resolve_deepseek_model
 from llm.claude_loop import chat_with_tools
 from llm.tool_loop_common import EMPTY_RESPONSE_FALLBACK
-from runtime_tools.roleplay_jev import adjudicate_turn, PendingChoice
-from runtime_tools.roleplay_decisions import AdjudicationUnavailable, DraftOutOfScope, StateConflict, describe_important
-from runtime_tools.roleplay_actor import actor_state_view
-from runtime_tools import roleplay_turn
-from runtime_tools.roleplay_time import TimeAuthorizationUnavailable
-from runtime_tools.roleplay_dynamics import with_defaults, holdout_titles, open_bargains, routine_occurrences
-from runtime_tools.roleplay_pacing import policy_for, turn_time_scope
-from runtime_tools.roleplay_memory import (load_notes, load_state, load_people, people_context, excluded_history_ids,
+from roleplay.jev import adjudicate_turn, PendingChoice
+from roleplay.decisions import AdjudicationUnavailable, DraftOutOfScope, StateConflict, describe_important
+from roleplay.actor import actor_state_view
+from roleplay import turn as roleplay_turn
+from roleplay.timing import TimeAuthorizationUnavailable
+from roleplay.dynamics import with_defaults, holdout_titles, open_bargains, routine_occurrences
+from roleplay.pacing import policy_for, turn_time_scope
+from roleplay.memory import (load_notes, load_state, load_people, people_context, excluded_history_ids,
                                            get_preference, set_preference, mutate_state, set_routine, exclude_history_message)
-from runtime_tools import roleplay_track
+from roleplay import track as roleplay_track
 from runtime_tools.registry import TOOLS, TOOL_HANDLERS
 from tool_gateway.profiles import ROLEPLAY_TELEGRAM_TOOLS
 from tool_gateway.security import caller_scope, new_run_context
@@ -389,7 +389,7 @@ async def cmd_status(message: Message) -> None:
     names = {p["person_id"]: p["name"] for p in people.get("index", [])}
     state["participants"] = ", ".join(names.get(pid, pid) for pid in state.get("participants", [])) or "아직 지정되지 않음"
     state["saved_people"] = f"{len(names)}명 — /people로 확인"
-    from runtime_tools.roleplay_illness import display as illness_display
+    from roleplay.illness import display as illness_display
     state["illness_display"] = illness_display(state.get("illnesses", []))
     activities = {"rest": "휴식", "light": "가벼운 활동", "moderate": "보통 활동", "strenuous": "격한 활동", "sleep": "수면", "restrained": "억제·동결 상태", "self_care": "자기 돌봄", "focused_work": "목적 있는 작업"}
     threats = {"safe": "안전", "uncertain": "불확실", "threatening": "위협 지속", "immediate": "즉각적 위협"}
@@ -397,9 +397,9 @@ async def cmd_status(message: Message) -> None:
     state["threat"] = threats.get(state.get("threat"), "미설정")
     state["sleep_quality"] = {"poor": "나쁨", "normal": "보통", "good": "좋음"}.get(state.get("sleep_quality"), "미설정")
     trends = {"stable": "유지", "worsening": "악화 중", "recovering": "회복 중"}
-    from runtime_tools.roleplay_dynamics import injury_pain_floor
+    from roleplay.dynamics import injury_pain_floor
     state["pain_floor"] = f"{injury_pain_floor(state.get('injuries', [])):g}"
-    from runtime_tools.roleplay_dynamics import isolation_stage
+    from roleplay.dynamics import isolation_stage
     stage = isolation_stage(state.get("isolation_minutes", 0))
     state["isolation"] = f"{state.get('isolation_minutes', 0) / 60:g}시간" + (f" — {stage['label']}: {stage['description']}" if stage else "")
     state["calm"] = f"{state.get('calm_minutes', 0) / 60:g}시간"
@@ -430,11 +430,11 @@ async def cmd_status(message: Message) -> None:
     state["injuries"] = "\n".join(f"• {i['description']}\n  심각도 {i['severity']}/3 · {trends[i['trend']]} · {'처치함' if i['treated'] else '미처치'}" for i in state.get("injuries", [])) or "등록 없음"
     if not state.get("conditions_initialized"):
         state["injuries"] += " — 시간 계산 조건 미확인"
-    from runtime_tools.roleplay_dynamics import METRICS
+    from roleplay.dynamics import METRICS
     for key in METRICS:
         if isinstance(state.get(key), (int, float)):
             state[key] = round(state[key], 1)
-    from runtime_tools.roleplay_clock import clock_defaults
+    from roleplay.clock import clock_defaults
     clock = clock_defaults(state.get("clock"))
     dayparts = {"unknown": "시간대 미상", "dawn": "새벽", "morning": "아침", "afternoon": "오후", "evening": "저녁", "night": "밤"}
     day = clock["date"] or (f"{clock['year']}년 날짜 미상" if clock["year"] else "날짜 미상")
@@ -828,7 +828,7 @@ async def on_choice(query: CallbackQuery) -> None:
                 confirmed.append({k: item[k] for k in ('key', 'label', 'target_id')})
                 verdict['labels'][item['key']] = item['label']
             # Refresh the composite event; an old primary event must not override the pick.
-            from runtime_tools.roleplay_jev import FAMILY_KEYS, resolve_events
+            from roleplay.jev import FAMILY_KEYS, resolve_events
             if any(k in verdict['labels'] for k in FAMILY_KEYS):
                 verdict['labels'].pop('event', None)
                 events, unresolved = resolve_events(verdict['labels'])

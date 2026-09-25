@@ -1,6 +1,6 @@
 # 역할극 초안 사후 정산
 
-구현: `runtime_tools/roleplay_turn.py`, `telegram/roleplay_bot.py`.
+구현: `roleplay/turn.py`, `roleplay/bot.py`.
 현재 서술 검토는 비활성이다. 사건·시간 정산 후 초안을 바로 확정하며 Jev 서술 선별과 상세 검토를 호출하지 않는다.
 선택적으로 `roleplay_scene_consistency.enabled=true`로 다시 활성화할 수 있다.
 
@@ -18,7 +18,7 @@
 상세 검토 비활성화는 `approved=null/status=skipped/reason=disabled`로 기록하며 검토 지적·미완료 안내를 붙이지 않는다.
 활성화된 검토의 잘못된 JSON·잘린 응답·통신 오류는 검토 미완료로 기록하고 이미 정산된 턴은 확정한다. approved=null, status=unavailable로 남기며 승인으로 위장하지 않는다.
 
-비용 선별은 `runtime_tools/roleplay_review.py`의 `roleplay_consistency_screen`(TypeSafe Jev)이다.
+비용 선별은 `roleplay/review.py`의 `roleplay_consistency_screen`(TypeSafe Jev)이다.
 `roleplay_scene_consistency.jev_precheck=true`일 때 같은 최소 문맥으로 consistent/contradiction/uncertain을 한 번 묻는다.
 consistent 신뢰도 0.9 이상만 생성 검토를 생략한다. 문턱값은 0.9~1 범위에서 높일 수 있다.
 저신뢰·모순·불확실·판정 장애·선별 비활성화는 기존 상세 검토로 진행하며 Jev 선별은 재시도하지 않는다.
@@ -140,7 +140,7 @@ JEV는 pressure 축에서 동일 장면의 가장 구체적인 결과 1건을 �
 원문에 숫자+기간이 있다는 이유만으로 explicit으로 승격하지 않는다. 숫자 파싱은 허가된 기간의 환산에 쓴다.
 재판정 뒤에도 미확정이면 후보 순위는 최초 답변이 아닌 최신 재판정 확률을 사용한다.
 
-시간 판정 구현은 `runtime_tools/roleplay_time.py`다. `roleplay_time_authorization`은 thinking을 끈 DeepSeek 원샷이며
+시간 판정 구현은 `roleplay/timing.py`다. `roleplay_time_authorization`은 thinking을 끈 DeepSeek 원샷이며
 기존 초안 전 Jev 허가 호출을 대체한다. 반환값과 근거·모델·지연은 verdict.authorization에 보존한다.
 기간을 명시한 턴은 허가된 분을 정산에 재사용한다. 모든 scene 초안에서 범위·시각 검사를 호출하되,
 기간이 없는 턴만 그 호출의 소요 추정값을 정산 분으로 사용한다.

@@ -13,7 +13,7 @@ Tool visibility is intentionally split by execution surface. There is no single 
 | Specialist agents | `agents/*.py` | `AgentSpec.tools` per agent |
 | Agent runtime overlay | `config/agent_runtime.json` | provider/model/budget/finalization/terminal overrides, not normal tools |
 | Public web chat | `services/web_chat.py` | persona-specific allowed tools plus web-only `WEB_READ_SELF_TOOL` / `WEB_PERSONA_CONTEXT_TOOL` |
-| Roleplay bot | `telegram/roleplay_bot.py` | `_TOOL_NAMES` — retrieval plus private memory/state, independent of the orchestrator |
+| Roleplay bot | `roleplay/bot.py` | `_TOOL_NAMES` — retrieval plus private memory/state, independent of the orchestrator |
 | Inbound MCP gateway | `mcp_gateway/policy.py` | profile-based allow-lists for developer/operator MCP clients |
 | Runtime tool gateway | `tool_gateway/` | named surface profiles, shared visibility filtering, batch dispatch, and security/audit integration |
 
@@ -197,7 +197,7 @@ execution time even if profile selection or provider output is misconfigured.
 
 ## Roleplay Bot
 
-`leninbot-roleplay.service` (`telegram/roleplay_bot.py`) is a separate identity. `_TOOL_NAMES` aliases `tool_gateway.profiles.ROLEPLAY_TELEGRAM_TOOLS`: `vector_search`, `knowledge_graph_search`, `web_search`, `fetch_url`, `commulingo_people`, `roleplay_memory`, `roleplay_state`, and `roleplay_person`. The latter three persist only the current roleplay owner's private notes, character state, and person records; their handlers require the Telegram roleplay owner context even outside gateway enforcement. No task execution, KG writes, general filesystem/code, email/A2A, or publication tools are exposed. Memory/state storage and reset semantics are documented in `roleplay_persona_design.md`.
+`leninbot-roleplay.service` (`roleplay/bot.py`) is a separate identity. `_TOOL_NAMES` aliases `tool_gateway.profiles.ROLEPLAY_TELEGRAM_TOOLS`: `vector_search`, `knowledge_graph_search`, `web_search`, `fetch_url`, `commulingo_people`, `roleplay_memory`, `roleplay_state`, and `roleplay_person`. The latter three persist only the current roleplay owner's private notes, character state, and person records; their handlers require the Telegram roleplay owner context even outside gateway enforcement. No task execution, KG writes, general filesystem/code, email/A2A, or publication tools are exposed. Memory/state storage and reset semantics are documented in `roleplay_persona_design.md`.
 
 ## Inbound MCP Gateway
 
@@ -214,7 +214,7 @@ When changing MCP tools or profiles, update `mcp_gateway/policy.py` and run `scr
 
 ## Runtime Tool Gateway
 
-`tool_gateway` is the internal runtime facade for tool selection and dispatch. `tool_gateway.profiles` owns reusable surface allow-lists for the Telegram orchestrator, web personas, A2A skills, the standalone roleplay bot, and MCP profiles. The MCP `list_runtime_tool_profiles` inspection tool reports those profiles plus specialist `AgentSpec.tools` for humans and developer agents. `runtime_tools/allowlists.py`, `services/web_personas.py`, `services/a2a_handler.py`, `telegram/roleplay_bot.py`, and `mcp_gateway/policy.py` keep compatibility aliases where needed. `AgentSpec.tools` remains agent-local. Provider loops import `execute_tools_batch()` through `tool_gateway.dispatcher`, whose `execute_tool()` implementation runs `security_gateway.authorize()` and audit per call.
+`tool_gateway` is the internal runtime facade for tool selection and dispatch. `tool_gateway.profiles` owns reusable surface allow-lists for the Telegram orchestrator, web personas, A2A skills, the standalone roleplay bot, and MCP profiles. The MCP `list_runtime_tool_profiles` inspection tool reports those profiles plus specialist `AgentSpec.tools` for humans and developer agents. `runtime_tools/allowlists.py`, `services/web_personas.py`, `services/a2a_handler.py`, `roleplay/bot.py`, and `mcp_gateway/policy.py` keep compatibility aliases where needed. `AgentSpec.tools` remains agent-local. Provider loops import `execute_tools_batch()` through `tool_gateway.dispatcher`, whose `execute_tool()` implementation runs `security_gateway.authorize()` and audit per call.
 
 Audit attribution is cross-surface rather than web-session-specific. Every
 annotated LLM/tool loop has a unique `request_id`; nested loops use

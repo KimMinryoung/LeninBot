@@ -1,8 +1,8 @@
 import unittest
-from runtime_tools import roleplay_jev as jev
-from runtime_tools.roleplay_dynamics import with_defaults, advance, resolve_event_delta
-from runtime_tools.roleplay_memory import STATE_DEFAULTS
-from runtime_tools.roleplay_pacing import policy_for, turn_time_scope
+from roleplay import jev
+from roleplay.dynamics import with_defaults, advance, resolve_event_delta
+from roleplay.memory import STATE_DEFAULTS
+from roleplay.pacing import policy_for, turn_time_scope
 
 
 def initial(**values):

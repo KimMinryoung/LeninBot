@@ -94,7 +94,7 @@ CommuLingo DB와 자료 원문은 이번 작업에서 수정하지 않는다.
 
 ## 지속 메모·상태표·반복 억제
 
-`runtime_tools/roleplay_memory.py`는 `output/roleplay_memory.sqlite3`에 사용자별 메모와
+`roleplay/memory.py`는 `output/roleplay_memory.sqlite3`에 사용자별 메모와
 인물 상태를 저장한다. Cyber-Lenin 기억이나 공개 웹 역할극과 공유하지 않는다. 이 파일은
 운영 백업에 별도로 포함해야 하며 PostgreSQL 백업에 들어가지 않는다.
 `roleplay_memory`는 list/save/delete, 주제 key별 교체, 최대 30개·각 800자를 지원한다.
@@ -139,7 +139,7 @@ observed/reported/inferred로 직접 관찰·출처 있는 전언·추측을 나
 
 ### 장면 시간에 따른 상태 계산
 
-`runtime_tools/roleplay_dynamics.py`는 고정 게임 규칙을 적용한다. 모델은 장면에서 지난 시간과
+`roleplay/dynamics.py`는 고정 게임 규칙을 적용한다. 모델은 장면에서 지난 시간과
 활동·부상 조건을 해석하지만, 지속 효과의 수치 연산은 코드가 한다. 현실 시계나 메시지 수는 사용하지 않는다.
 기존 저장 상태는 보존하고 그 시점을 상대 시간 0분으로 삼는다. 과거의 밤샘을 소급 계산하지 않는다.
 
@@ -282,7 +282,7 @@ threatening으로 넘겨 의지가 −2.5/h로 0까지 소모됐다. 다음 규�
 
 ### 날짜·시각과 시간 표현의 해석
 
-`runtime_tools/roleplay_clock.py`는 `clock`에 date/year/time/daypart, 상대 일자,
+`roleplay/clock.py`는 `clock`에 date/year/time/daypart, 상대 일자,
 certainty, 미계산 시간 공백, 마지막 시간 해석을 관리한다. 초기값은 미상이다.
 Telegram 자동 판정기가 검증한 경과량으로 temporal을 구성한다. 내부 API의 필수 필드는
 source_quote/interpretation/relation(current,past,plan)/certainty(explicit,estimated,unknown)/operation.
@@ -391,7 +391,7 @@ reset+초기 장면, 부상 병합과 `tests/test_roleplay_memory.py`의 ID 정�
 
 성적 가해의 현재 세부 분류와 restrained 활동은 `roleplay_jev.md`를 따른다. 구형 sexual_coercion을 새 사건에 선택하지 않는다.
 
-연기 에이전트에는 `roleplay_actor.py`의 질적 acting_cues와 scene_direction만 전달한다. 수치 임계값은 코드에서 지침으로 변환하며 시스템 프롬프트에 나열하지 않는다. 아래/기존 수치 설명은 내부 계산·사용자 상태 표시의 계약이며 연기 모델에 보내는 필드 목록이 아니다.
+연기 에이전트에는 `roleplay/actor.py`의 질적 acting_cues와 scene_direction만 전달한다. 수치 임계값은 코드에서 지침으로 변환하며 시스템 프롬프트에 나열하지 않는다. 아래/기존 수치 설명은 내부 계산·사용자 상태 표시의 계약이며 연기 모델에 보내는 필드 목록이 아니다.
 
 현재 사건·활동 밸런스와 극단값 완화, 지키는 것(holdouts)·미뤄 둔 반응·명료함 감소 원인은 `roleplay_game_balance.md`를 따른다. 과거 수치표와 충돌하면 해당 문서 및 현재 코드를 기준으로 한다.
 

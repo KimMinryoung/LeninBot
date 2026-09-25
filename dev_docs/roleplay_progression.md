@@ -2,8 +2,8 @@
 
 현재 Telegram 상태 판정은 [roleplay_jev.md](roleplay_jev.md)가 기준이다. JEV가 분류하고 별도 LLM이 단일 사건의 소요 분만 추정하며 코드가 수치를 계산한다. 아래 time/update의 수치·조건·사건 인자는 내부 유지보수 API이며 연기 모델에 노출하지 않는다.
 
-현재 소유자는 `runtime_tools/roleplay_dynamics.py`(계산), `roleplay_clock.py`(달력),
-`roleplay_story.py`(예정 사건), `roleplay_pacing.py`(사용자 메시지별 진행 경계), `roleplay_memory.py`(트랜잭션·도구), `telegram/roleplay_bot.py`(문맥·표시),
+현재 소유자는 `roleplay/dynamics.py`(계산), `roleplay/clock.py`(달력),
+`roleplay/story.py`(예정 사건), `roleplay/pacing.py`(사용자 메시지별 진행 경계), `roleplay/memory.py`(트랜잭션·도구), `roleplay/bot.py`(문맥·표시),
 `identity/roleplay_persona.md`(행동 지침)다. 모든 진행은 장면 시간으로 이루어지며 현실 타이머는 없다.
 
 ## 접촉과 고립
@@ -94,7 +94,7 @@ Python·도구 스키마 변경은 `leninbot-roleplay.service` 재시작 후 적
 
 ## 사용자 지시의 사건 경계와 시간 근거
 
-`telegram.roleplay_bot.handle_message`는 실제 사용자 원문에서 `TurnTimePolicy`를 만들고 ContextVar로
+`roleplay.bot.handle_message`는 실제 사용자 원문에서 `TurnTimePolicy`를 만들고 ContextVar로
 도구 실행까지 전달한다. 모델이 도구 인자로 허가 범위를 확장할 수 없다. runtime context에도 같은 정책을 표시한다.
 
 기본은 **사용자가 지시한 하나의 사건을 완료하고 그 장면에서 멈춤**이다. "감방으로 보내" 뒤에는 도착 장면만

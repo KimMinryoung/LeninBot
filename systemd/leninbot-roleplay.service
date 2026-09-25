@@ -7,7 +7,7 @@ Wants=leninbot-neo4j.service leninbot-embedding.service leninbot-llm-proxy.servi
 User=grass
 WorkingDirectory=/home/grass/leninbot
 EnvironmentFile=/home/grass/leninbot/.env
-ExecStart=/home/grass/leninbot/venv/bin/python -m telegram.roleplay_bot
+ExecStart=/home/grass/leninbot/venv/bin/python -m roleplay.bot
 Restart=always
 RestartSec=5
 

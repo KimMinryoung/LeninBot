@@ -4,8 +4,8 @@ from copy import deepcopy
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from runtime_tools import roleplay_time as timing, roleplay_turn as turn, roleplay_jev as jev
-from runtime_tools.roleplay_pacing import duration_minutes, turn_time_scope
+from roleplay import timing, turn, jev
+from roleplay.pacing import duration_minutes, turn_time_scope
 from test_roleplay_jev import initial
 from llm.call_registry import Decision, DecisionResult
 

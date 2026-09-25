@@ -6,10 +6,10 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from runtime_tools import roleplay_memory as memory, roleplay_jev as jev, roleplay_turn as turn, roleplay_track as track
-from runtime_tools.roleplay_actor import actor_state_view
-from runtime_tools.roleplay_dynamics import with_defaults, routine_occurrences
-from runtime_tools.roleplay_pacing import policy_for, turn_time_scope
+from roleplay import memory, jev, turn, track
+from roleplay.actor import actor_state_view
+from roleplay.dynamics import with_defaults, routine_occurrences
+from roleplay.pacing import policy_for, turn_time_scope
 from tool_gateway.security import caller_scope, new_run_context
 
 
@@ -89,7 +89,7 @@ class EventAxesTests(unittest.TestCase):
         self.assertEqual(state['humiliation'], 47)
         self.assertEqual([e['kind'] for e in state['resolve_events']], ['kindness'])
         self.assertEqual(turn.feedback_line({'status': 'applied', 'applied': applied}, state).split(' · ')[0], '⚙ 확정: 배려·양보 + 식사')
-        from runtime_tools.roleplay_actor import actor_outcome_view
+        from roleplay.actor import actor_outcome_view
         self.assertEqual(actor_outcome_view({'status': 'applied', 'applied': applied})['confirmed_event'], '배려·양보')
 
     def test_unsettled_family_becomes_the_players_choice_and_a_pick_settles_the_rest(self):
@@ -199,7 +199,7 @@ class TrackTests(unittest.TestCase):
             track.enable(state)  # already registered
         # The played story diverges from or matches the record through ordinary Jev story labels.
         ready = {**state, 'scene_minute': events[0]['due_minute']}
-        from runtime_tools.roleplay_story import refresh_events
+        from roleplay.story import refresh_events
         refresh_events(ready)
         index = [i for i, e in enumerate(ready['story_events']) if e['id'] == events[0]['id']][0]
         self.assertIn('실존 연표', jev.build_questions(ready, [])[f'story_{index}']['instructions'])
@@ -214,14 +214,14 @@ class TrackTests(unittest.TestCase):
         state = track.enable(initial(participants=[]))
         skipped, _ = project('다음 날 아침이 되었다', state, time_scope='day_skip', elapsed='explicit', activity='rest')
         self.assertEqual(skipped['clock']['date'], '1939-04-29')
-        from telegram import roleplay_bot as bot
+        from roleplay import bot
         self.assertIn('다음: 1939-04-30 조서: 음모 가담자 66명 지목 (1일 뒤)', bot._track_display(state))
         self.assertEqual(bot._track_display(initial()), '')
 
 
 class BotWorldCommandTests(unittest.IsolatedAsyncioTestCase):
     async def test_routine_and_track_commands_mutate_one_audited_revision(self):
-        from telegram import roleplay_bot as bot
+        from roleplay import bot
         async def inline_thread(func, *args, **kwargs):
             return func(*args, **kwargs)
         with tempfile.TemporaryDirectory() as tmp, patch.object(memory, 'MEMORY_PATH', Path(tmp) / 'm.sqlite3'), patch.object(bot.asyncio, 'to_thread', side_effect=inline_thread):

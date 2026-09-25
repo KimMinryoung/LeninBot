@@ -4,9 +4,9 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from llm.call_registry import Decision, DecisionResult
-from runtime_tools import roleplay_review as review, roleplay_turn as turn
-from runtime_tools.roleplay_memory import STATE_DEFAULTS
-from runtime_tools.roleplay_dynamics import with_defaults
+from roleplay import review, turn
+from roleplay.memory import STATE_DEFAULTS
+from roleplay.dynamics import with_defaults
 
 
 class ReviewScreenTests(unittest.TestCase):
