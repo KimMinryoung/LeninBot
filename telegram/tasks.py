@@ -1174,8 +1174,8 @@ async def _maybe_redelegate_after_verification_failure(bot: Bot, task: dict, ver
             return {"status": "error", "message": child.get("error", "failed to create restart verification task")}
         child_id = child["task_id"]
         try:
-            from runtime_tools.registry import _exec_restart_service
-            response = await _exec_restart_service(service="telegram")
+            from runtime_tools.restart_service import restart_service
+            response = await restart_service(service="telegram")
             if "✅ leninbot-telegram: restarted" not in str(response):
                 raise RuntimeError(str(response))
         except Exception as e:

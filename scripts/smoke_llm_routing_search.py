@@ -27,10 +27,10 @@ class _Doc:
 
 async def _assert_vector_translation_fallbacks() -> None:
     import corpus.store as store
-    import runtime_tools.registry as registry
+    import runtime_tools.vector_search as registry
 
     original_similarity = store.similarity_search
-    original_translate = registry._llm_translate_search_query
+    original_translate = registry.llm_translate_search_query
     calls: list[tuple[str, int, str | None]] = []
 
     def fake_similarity(query: str, k: int = 5, layer: str | None = None):
@@ -43,26 +43,26 @@ async def _assert_vector_translation_fallbacks() -> None:
         async def no_translation(*_args, **_kwargs):
             return None
 
-        registry._llm_translate_search_query = no_translation
-        docs = await registry._search_corpus_multilingual("국가와 혁명", 3, "core_theory")
+        registry.llm_translate_search_query = no_translation
+        docs = await registry.search_corpus_multilingual("국가와 혁명", 3, "core_theory")
         assert len(docs) == 1
         assert calls == [("국가와 혁명", 3, "core_theory")]
 
         calls.clear()
-        docs = await registry._search_corpus_multilingual("imperialism finance capital", 3, "modern_analysis")
+        docs = await registry.search_corpus_multilingual("imperialism finance capital", 3, "modern_analysis")
         assert len(docs) == 1
         assert calls == [("imperialism finance capital", 3, "modern_analysis")]
     finally:
         store.similarity_search = original_similarity
-        registry._llm_translate_search_query = original_translate
+        registry.llm_translate_search_query = original_translate
 
 
 async def _assert_vector_translation_parallel_merge() -> None:
     import corpus.store as store
-    import runtime_tools.registry as registry
+    import runtime_tools.vector_search as registry
 
     original_similarity = store.similarity_search
-    original_translate = registry._llm_translate_search_query
+    original_translate = registry.llm_translate_search_query
     calls: list[tuple[str, int, str | None]] = []
 
     def fake_similarity(query: str, k: int = 5, layer: str | None = None):
@@ -77,8 +77,8 @@ async def _assert_vector_translation_parallel_merge() -> None:
 
     try:
         store.similarity_search = fake_similarity
-        registry._llm_translate_search_query = translate
-        docs = await registry._search_corpus_multilingual("국가와 혁명", 4, "core_theory")
+        registry.llm_translate_search_query = translate
+        docs = await registry.search_corpus_multilingual("국가와 혁명", 4, "core_theory")
         assert calls == [
             ("국가와 혁명", 8, "core_theory"),
             ("state and revolution", 8, "core_theory"),
@@ -86,15 +86,15 @@ async def _assert_vector_translation_parallel_merge() -> None:
         assert len(docs) == 3, "shared source+chunk should be deduped"
     finally:
         store.similarity_search = original_similarity
-        registry._llm_translate_search_query = original_translate
+        registry.llm_translate_search_query = original_translate
 
 
 async def _assert_vector_metadata_filter_inference() -> None:
     import corpus.store as store
-    import runtime_tools.registry as registry
+    import runtime_tools.vector_search as registry
 
     original_similarity = store.similarity_search
-    original_translate = registry._llm_translate_search_query
+    original_translate = registry.llm_translate_search_query
     calls: list[dict] = []
 
     def fake_similarity(
@@ -114,8 +114,8 @@ async def _assert_vector_metadata_filter_inference() -> None:
         async def no_translation(*_args, **_kwargs):
             return None
 
-        registry._llm_translate_search_query = no_translation
-        docs = await registry._search_corpus_multilingual("1913년 스탈린 민족 문제 문헌", 3, "core_theory")
+        registry.llm_translate_search_query = no_translation
+        docs = await registry.search_corpus_multilingual("1913년 스탈린 민족 문제 문헌", 3, "core_theory")
         assert len(docs) == 1
         assert calls[0]["author"] == "Stalin"
         assert calls[0]["title"] == "National Question"
@@ -125,7 +125,7 @@ async def _assert_vector_metadata_filter_inference() -> None:
         assert "year" not in calls[1]
     finally:
         store.similarity_search = original_similarity
-        registry._llm_translate_search_query = original_translate
+        registry.llm_translate_search_query = original_translate
 
 
 async def _assert_route_task_fallbacks() -> None:

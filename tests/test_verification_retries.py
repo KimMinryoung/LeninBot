@@ -36,7 +36,7 @@ class RetryTests(unittest.IsolatedAsyncioTestCase):
             return {"status": "ok", "task_id": task_id}
 
         self.create = self.enterContext(patch("telegram.task_store.create_task_in_db", side_effect=create))
-        self.restart = self.enterContext(patch("runtime_tools.registry._exec_restart_service", new_callable=AsyncMock,
+        self.restart = self.enterContext(patch("runtime_tools.restart_service.restart_service", new_callable=AsyncMock,
                                               return_value="✅ leninbot-telegram: restarted"))
         self.persist_restart = self.enterContext(patch.object(tasks, "persist_task_restart_state"))
 

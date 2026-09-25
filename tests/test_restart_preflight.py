@@ -11,7 +11,7 @@ Run from repo root:  venv/bin/python -m unittest discover tests -v
 import os
 import unittest
 
-from runtime_tools.registry import RESTART_PREFLIGHT_ENTRY_POINTS
+from runtime_tools.restart_service import RESTART_PREFLIGHT_ENTRY_POINTS
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 

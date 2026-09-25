@@ -1,11 +1,7 @@
 """Global runtime tool registry and execution handlers."""
 
-import os
-import sys
-import json
 import asyncio
 import logging
-import re
 
 from runtime_tools.a2a import A2A_TOOL_HANDLERS, A2A_TOOLS
 from runtime_tools.fetch import FETCH_TOOL_HANDLERS, FETCH_TOOLS
@@ -20,214 +16,11 @@ logger = logging.getLogger(__name__)
 # restart_service import-preflight targets. Dotted module names — the systemd
 # units run dotted package entrypoints; stale flat module names make the
 # preflight silently skip services via its isfile guard.
-RESTART_PREFLIGHT_ENTRY_POINTS = {
-    "telegram": "telegram.bot",
-    "api": "services.api",
-    "browser": "browser.worker",
-}
+from runtime_tools.restart_service import RESTART_SERVICE_TOOL, restart_service
 
 
-def _looks_korean(text: str) -> bool:
-    return bool(re.search(r"[\uac00-\ud7af]", text or ""))
+from runtime_tools.vector_search import exec_vector_search
 
-
-def _looks_english(text: str) -> bool:
-    return bool(re.search(r"[A-Za-z]", text or "")) and not _looks_korean(text)
-
-
-from llm.json_utils import extract_json_object as _extract_json_object
-
-
-async def _llm_translate_search_query(query: str, target_language: str, layer: str) -> str | None:
-    """Best-effort query translation for cross-language corpus recall.
-
-    Model/options: config/llm_call_sites.json ("vector_query_translation")."""
-    try:
-        from llm.call_registry import generate as _registry_generate
-
-        system = (
-            "Translate a vector-search query for Marxist/political document retrieval. "
-            "Return only JSON with key translated_query. Preserve names and technical terms."
-        )
-        user = {
-            "query": query,
-            "target_language": target_language,
-            "target_corpus_layer": layer,
-        }
-        content = await _registry_generate(
-            "vector_query_translation",
-            json.dumps(user, ensure_ascii=False),
-            system=system,
-        )
-        if not content:
-            return None
-        parsed = _extract_json_object(content)
-        translated = str((parsed or {}).get("translated_query") or "").strip()
-        if translated and translated.lower() != query.lower():
-            return translated
-    except Exception as e:
-        logger.info("vector_search query translation unavailable: %s", e)
-    return None
-
-
-def _doc_dedupe_key(doc) -> tuple[str, str]:
-    meta = getattr(doc, "metadata", {}) or {}
-    source = str(meta.get("source") or meta.get("public_url") or meta.get("source_url") or meta.get("title") or "")
-    chunk = str(meta.get("chunk_index", ""))
-    if source:
-        return (source, chunk)
-    return ("content", str(hash(getattr(doc, "page_content", "") or "")))
-
-
-def _merge_docs_by_similarity(docs: list, k: int) -> list:
-    """Order docs merged from parallel searches by their cosine similarity.
-
-    Scores from the original and translated queries live in the same
-    normalized embedding space, so cross-language mismatches (e.g. a Korean
-    query against the English corpus) score low and sink naturally.
-    """
-    def score(doc) -> float:
-        try:
-            return float((getattr(doc, "metadata", {}) or {}).get("similarity") or 0.0)
-        except (TypeError, ValueError):
-            return 0.0
-
-    return sorted(docs, key=score, reverse=True)[:k]
-
-
-_AUTHOR_ALIASES = [
-    ("joseph stalin", "Stalin"),
-    ("j. v. stalin", "Stalin"),
-    ("stalin", "Stalin"),
-    ("스탈린", "Stalin"),
-    ("마오쩌둥", "Mao"),
-    ("mao", "Mao"),
-    ("마오", "Mao"),
-    ("lenin", "Lenin"),
-    ("레닌", "Lenin"),
-    ("luxemburg", "Rosa Luxemburg"),
-    ("룩셈부르크", "Rosa Luxemburg"),
-    ("trotsky", "Trotsky"),
-    ("트로츠키", "Trotsky"),
-    ("gramsci", "Gramsci"),
-    ("그람시", "Gramsci"),
-]
-
-_TITLE_HINTS = [
-    (("national question", "민족 문제", "민족문제"), "National Question"),
-    (("chinese revolution", "중국 혁명", "중국혁명"), "Chinese Revolution"),
-    (("leninism", "레닌주의"), "Leninism"),
-    (("trotskyism", "트로츠키주의"), "Trotskyism"),
-]
-
-
-def _infer_corpus_filters(query: str) -> dict:
-    lowered = (query or "").lower()
-    filters: dict = {}
-    for alias, author in _AUTHOR_ALIASES:
-        if _looks_korean(alias):
-            found = alias in lowered
-        else:
-            found = bool(re.search(rf"(?<![a-z]){re.escape(alias)}(?![a-z])", lowered))
-        if found:
-            filters["author"] = author
-            break
-    year_match = re.search(r"(?<!\d)(18|19|20)\d{2}(?!\d)", query or "")
-    if year_match:
-        filters["year"] = int(year_match.group(0))
-    for hints, title in _TITLE_HINTS:
-        if any(hint in lowered for hint in hints):
-            filters["title"] = title
-            break
-    return filters
-
-
-async def _search_corpus_multilingual(
-    query: str,
-    num_results: int,
-    layer: str | None,
-    *,
-    author: str | None = None,
-    title: str | None = None,
-    year: int | str | None = None,
-    keywords: str | list[str] | None = None,
-) -> list:
-    from corpus.store import similarity_search
-
-    k = max(1, min(int(num_results or 5), 10))
-    filters = _infer_corpus_filters(query)
-    relaxable_filters = set(filters)
-    if author:
-        filters["author"] = author
-        relaxable_filters.discard("author")
-    if title:
-        filters["title"] = title
-        relaxable_filters.discard("title")
-    if year:
-        filters["year"] = year
-        relaxable_filters.discard("year")
-    if keywords:
-        filters["keywords"] = keywords
-        relaxable_filters.discard("keywords")
-    searches: list[tuple[str, str, str | None]] = [("original", query, layer)]
-    if _looks_korean(query) and layer in (None, "core_theory"):
-        translated = await _llm_translate_search_query(query, "English", "core_theory")
-        if translated:
-            searches.append(("translated_en", translated, "core_theory"))
-    elif _looks_english(query) and layer == "modern_analysis":
-        translated = await _llm_translate_search_query(query, "Korean", "modern_analysis")
-        if translated:
-            searches.append(("translated_ko", translated, "modern_analysis"))
-
-    async def run_with(search_filters: dict) -> list:
-        if len(searches) == 1:
-            return await asyncio.to_thread(
-                similarity_search,
-                query,
-                k,
-                layer,
-                **search_filters,
-            )
-
-        tasks = [
-            asyncio.to_thread(
-                similarity_search,
-                q,
-                k * 2,
-                search_layer,
-                **search_filters,
-            )
-            for _label, q, search_layer in searches
-        ]
-        batches = await asyncio.gather(*tasks, return_exceptions=True)
-        merged = []
-        seen: set[tuple[str, str]] = set()
-        for batch in batches:
-            if isinstance(batch, Exception):
-                logger.info("vector_search parallel query failed: %s", batch)
-                continue
-            for doc in batch:
-                key = _doc_dedupe_key(doc)
-                if key in seen:
-                    continue
-                seen.add(key)
-                merged.append(doc)
-        return _merge_docs_by_similarity(merged, k)
-
-    docs = await run_with(filters)
-    if docs:
-        return docs
-
-    relaxed = dict(filters)
-    for key in ("year", "title"):
-        if key not in relaxable_filters:
-            continue
-        relaxed.pop(key, None)
-        docs = await run_with(relaxed)
-        if docs:
-            logger.info("vector_search relaxed inferred %s filter after empty result", key)
-            return docs
-    return []
 
 # ── Tool Definitions (Anthropic API format) ──────────────────────────
 TOOLS = [
@@ -407,62 +200,6 @@ TOOLS = [
 
 # ── Tool Execution Functions ─────────────────────────────────────────
 
-async def _exec_vector_search(
-    query: str,
-    num_results: int = 5,
-    layer: str | None = None,
-    author: str | None = None,
-    title: str | None = None,
-    year: int | str | None = None,
-    keywords: str | None = None,
-) -> str:
-    """Execute vector similarity search via chatbot module."""
-    try:
-        from corpus.store import fetch_corpus_source_context
-        docs = await _search_corpus_multilingual(
-            query,
-            num_results,
-            layer,
-            author=author,
-            title=title,
-            year=year,
-            keywords=keywords,
-        )
-        if not docs:
-            return "No documents found."
-        results = []
-        for i, doc in enumerate(docs, 1):
-            meta = doc.metadata
-            header = f"[{i}] {meta.get('title', 'Untitled')} — {meta.get('author', 'Unknown')}"
-            if meta.get("year"):
-                header += f" ({meta['year']})"
-            if meta.get("public_url"):
-                header += f"\nURL: {meta['public_url']}"
-            if meta.get("chunk_count", 1) and int(meta.get("chunk_count", 1)) > 1:
-                idx = int(meta.get("chunk_index", 0)) + 1
-                header += f"\nChunk: {idx}/{meta.get('chunk_count')}"
-            body = doc.page_content
-            if (
-                meta.get("layer") == "self_produced_analysis"
-                and int(meta.get("chunk_count", 1)) > 1
-                and meta.get("source")
-            ):
-                expanded = await asyncio.to_thread(
-                    fetch_corpus_source_context,
-                    meta.get("source"),
-                    center_index=int(meta.get("chunk_index", 0)),
-                    window=1,
-                    max_chars=9000,
-                )
-                if expanded and len(expanded) > len(body):
-                    body = expanded
-                    header += "\nContext: expanded with adjacent chunks from the same public document"
-            results.append(f"{header}\n{body}")
-        return "\n\n".join(results)
-    except Exception as e:
-        logger.error("vector_search error: %s", e)
-        return ToolFailure(f"Vector search failed: {e}")
-
 
 async def _exec_kg_search(query: str = "", num_results: int = 10, entity: str | None = None,
                           mode: str = "auto") -> str:
@@ -488,7 +225,6 @@ async def _exec_kg_search(query: str = "", num_results: int = 10, entity: str | 
 
 # ── Research publish/edit/unpublish tools live in runtime_tools.research ──
 # They are registered into TOOLS / TOOL_HANDLERS at the bottom of this file.
-
 
 
 # ── Mission Tool ──────────────────────────────────────────────────────
@@ -564,198 +300,6 @@ async def _exec_web_search(
 
 # ── Restart Service Tool ─────────────────────────────────────────────
 
-RESTART_SERVICE_TOOL = {
-    "name": "restart_service",
-    "description": (
-        "Restart a leninbot service with pre-flight syntax + import checks. "
-        "Use instead of execute_python+subprocess. "
-        "File→service mapping (and detailed procedure) lives in the programmer agent prompt."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "service": {
-                "type": "string",
-                "enum": ["telegram", "api", "browser", "all"],
-                "description": "telegram=bot+agents, api=web+a2a, browser=browser worker, all=multi-service code. Default: telegram.",
-            },
-        },
-        "required": [],
-    },
-}
-
-
-async def _exec_restart_service(service: str = "telegram") -> str:
-    """Safely restart service with pre-flight validation."""
-    import ast
-    import subprocess
-
-    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-    try:
-        from llm.runtime_context import current_task_ctx
-        from telegram.tasks import persist_task_restart_state
-        ctx = current_task_ctx.get()
-        current_task_id = ctx["task_id"] if ctx else None
-    except Exception:
-        current_task_id = None
-        persist_task_restart_state = None
-
-    if service not in ("telegram", "api", "browser", "all"):
-        return f"❌ Unknown service: {service}. Use: telegram, api, browser, all"
-
-    # 1. Find .py files with uncommitted changes (staged + unstaged)
-    try:
-        diff_result = await asyncio.to_thread(
-            subprocess.run,
-            ["git", "diff", "--name-only", "HEAD", "--diff-filter=ACMR"],
-            capture_output=True, text=True, cwd=project_root, timeout=10,
-        )
-        # Also include untracked .py files that might be new
-        untracked = await asyncio.to_thread(
-            subprocess.run,
-            ["git", "ls-files", "--others", "--exclude-standard"],
-            capture_output=True, text=True, cwd=project_root, timeout=10,
-        )
-        changed_files = set()
-        for line in (diff_result.stdout + "\n" + untracked.stdout).strip().split("\n"):
-            line = line.strip()
-            if line.endswith(".py"):
-                changed_files.add(line)
-    except Exception as e:
-        return ToolFailure(f"❌ Failed to detect changed files: {e}")
-
-    errors = []
-
-    # 2. Syntax check all changed .py files
-    for rel_path in sorted(changed_files):
-        abs_path = os.path.join(project_root, rel_path)
-        if not os.path.isfile(abs_path):
-            continue
-        try:
-            with open(abs_path, "r", encoding="utf-8") as f:
-                source = f.read()
-            ast.parse(source, filename=rel_path)
-        except SyntaxError as e:
-            errors.append(f"SyntaxError in {rel_path}:{e.lineno} — {e.msg}")
-
-    if errors:
-        return "❌ Restart blocked — syntax errors found:\n" + "\n".join(errors)
-
-    # 3. Import-level validation: try importing the entry points in a subprocess
-    targets = ["telegram", "api", "browser"] if service == "all" else [service]
-
-    for target in targets:
-        module = RESTART_PREFLIGHT_ENTRY_POINTS[target]
-        module_path = os.path.join(project_root, module.replace(".", os.sep) + ".py")
-        if not os.path.isfile(module_path):
-            # A missing entry file means the map rotted (this exact guard
-            # silently skipped telegram/browser for months when the flat
-            # telegram_bot.py/browser_worker.py modules became packages).
-            logger.warning(
-                "restart_service preflight: entry module %s not found at %s — import check skipped",
-                module, module_path,
-            )
-            continue
-        try:
-            # Run a quick import check in isolated subprocess
-            check_code = (
-                f"import sys; sys.path.insert(0, {project_root!r}); "
-                f"import importlib; importlib.import_module({module!r})"
-            )
-            result = await asyncio.to_thread(
-                subprocess.run,
-                [sys.executable, "-c", check_code],
-                capture_output=True, text=True, timeout=30,
-                cwd=project_root,
-                env={**os.environ, "PREFLIGHT_CHECK": "1"},
-            )
-            if result.returncode != 0:
-                stderr = result.stderr.strip()
-                # Extract the last meaningful error line
-                err_lines = [l for l in stderr.split("\n") if l.strip()]
-                last_err = err_lines[-1] if err_lines else "unknown error"
-                errors.append(f"Import check failed for {module}.py: {last_err}")
-        except subprocess.TimeoutExpired:
-            errors.append(f"Import check timed out for {module}.py (>30s)")
-        except Exception as e:
-            errors.append(f"Import check error for {module}.py: {e}")
-
-    if errors:
-        return "❌ Restart blocked — import errors found:\n" + "\n".join(errors)
-
-    if current_task_id and persist_task_restart_state:
-        try:
-            persist_task_restart_state(
-                current_task_id,
-                service=service,
-                phase="requested",
-                mark_completed=False,
-            )
-        except Exception as e:
-            return ToolFailure(f"❌ Restart blocked — failed to persist durable restart state: {e}")
-
-    # 4. All checks passed — daemon-reload (picks up any unit file changes), then restart
-    try:
-        await asyncio.to_thread(
-            subprocess.run,
-            ["sudo", "-n", "systemctl", "daemon-reload"],
-            capture_output=True, text=True, timeout=10,
-        )
-    except Exception:
-        pass  # non-fatal: restart will still use previous unit config
-
-    svc_map = {
-        "telegram": ["leninbot-telegram"],
-        "api": ["leninbot-api"],
-        "browser": ["leninbot-browser"],
-        "all": ["leninbot-api", "leninbot-browser", "leninbot-telegram"],  # API first, browser second, telegram last
-    }
-    results = []
-    restart_failed = False
-    for svc in svc_map[service]:
-        try:
-            proc = await asyncio.to_thread(
-                subprocess.run,
-                ["sudo", "-n", "systemctl", "restart", svc],
-                capture_output=True, text=True, timeout=15,
-                start_new_session=True,
-            )
-            if proc.returncode == 0:
-                results.append(f"✅ {svc}: restarted")
-            else:
-                restart_failed = True
-                results.append(f"❌ {svc}: {proc.stderr.strip()}")
-        except subprocess.TimeoutExpired:
-            restart_failed = True
-            results.append(f"⏱ {svc}: timeout")
-        except Exception as e:
-            restart_failed = True
-            results.append(f"❌ {svc}: {e}")
-
-    if current_task_id and persist_task_restart_state:
-        try:
-            persist_task_restart_state(
-                current_task_id,
-                service=service,
-                phase="verification" if not restart_failed else "requested",
-                mark_completed=not restart_failed,
-                resumed_after_restart=not restart_failed,
-                reentry_reason=(
-                    "restart completed; next step is post-restart verification"
-                    if not restart_failed
-                    else "restart command failed; restart branch may retry after fix"
-                ),
-            )
-        except Exception as e:
-            results.append(f"⚠️ durable restart completion state update failed: {e}")
-
-    checked_files = ", ".join(sorted(changed_files)[:10]) if changed_files else "(none)"
-    return (
-        f"Pre-flight checks passed (syntax + import OK, changed: {checked_files})\n"
-        + "\n".join(results)
-    )
-
 
 # ── Handler Registry ─────────────────────────────────────────────────
 
@@ -784,102 +328,23 @@ def dedupe_tool_registry(tools: list[dict]) -> list[dict]:
 
 
 TOOL_HANDLERS = {
-    "vector_search": _exec_vector_search,
+    "vector_search": exec_vector_search,
     "knowledge_graph_search": _exec_kg_search,
     "web_search": _exec_web_search,
     **FETCH_TOOL_HANDLERS,
     **FILESYSTEM_TOOL_HANDLERS,
-    "restart_service": _exec_restart_service,
+    "restart_service": restart_service,
 }
 
 # ── Restart service tool ──────────────────────────────────────────────
 TOOLS.append(RESTART_SERVICE_TOOL)
 
 # ── R2 Upload + File Registry ────────────────────────────────────────
-UPLOAD_TO_R2_TOOL = {
-    "name": "upload_to_r2",
-    "description": (
-        "Upload a local file to Cloudflare R2 and get a public URL. "
-        "Automatically registers the file in the file_registry DB table so other agents can find it. "
-        "Use for images, documents, or any file that needs a public URL (e.g. email attachments, web assets)."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "local_path": {"type": "string", "description": "Absolute path to the local file."},
-            "key": {"type": "string", "description": "Object key/path in R2 bucket (e.g. 'email-assets/logo.png'). Defaults to filename."},
-            "description": {"type": "string", "description": "What this file is / what it's for."},
-            "category": {
-                "type": "string",
-                "enum": ["email-asset", "image", "document", "research", "general"],
-                "description": "File category for search. Default: general.",
-            },
-        },
-        "required": ["local_path"],
-    },
-}
-
-
-async def _exec_upload_to_r2(
-    local_path: str, key: str | None = None, description: str = "", category: str = "general",
-) -> str:
-    from shared import upload_to_r2
-    from db import execute as db_execute, query as db_query
-    import mimetypes
-
-    path = os.path.abspath(local_path)
-    if not os.path.isfile(path):
-        return f"File not found: {local_path}"
-
-    filename = os.path.basename(path)
-    file_size = os.path.getsize(path)
-    content_type = mimetypes.guess_type(path)[0] or "application/octet-stream"
-
-    if key is None:
-        key = f"{category}/{filename}" if category != "general" else filename
-
-    # Check if already registered by local_path or R2 key
-    existing = await asyncio.to_thread(
-        db_query,
-        "SELECT id, public_url FROM file_registry WHERE local_path = %s OR public_url LIKE %s LIMIT 1",
-        (path, f"%/{key}"),
-    )
-    if existing:
-        return f"Already registered: {existing[0]['public_url']}\n(file_registry id: {existing[0]['id']})"
-
-    url = await asyncio.to_thread(upload_to_r2, path, key, content_type)
-    if not url:
-        return "R2 upload failed. Check R2 env config."
-
-    # Get current task context for tracking
-    task_id = None
-    agent_type = None
-    try:
-        from llm.runtime_context import current_task_ctx
-        ctx = current_task_ctx.get()
-        task_id = ctx["task_id"] if ctx else None
-    except Exception:
-        pass
-
-    # Register in file_registry
-    registry_id = None
-    try:
-        reg_rows = await asyncio.to_thread(
-            db_query,
-            "INSERT INTO file_registry (local_path, public_url, filename, content_type, description, category, file_size, created_by_task_id, created_by_agent) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
-            (path, url, filename, content_type, description or filename, category, file_size, task_id, agent_type),
-        )
-        registry_id = reg_rows[0]["id"] if reg_rows else None
-    except Exception as e:
-        logger.warning("file_registry insert failed: %s", e)
-
-    reg_line = f"\nfile_registry id: {registry_id}" if registry_id else "\n(file_registry registration failed)"
-    return f"Uploaded: {url}\nLocal: {path}\nSize: {file_size} bytes\nCategory: {category}{reg_line}"
+from runtime_tools.r2_upload import UPLOAD_TO_R2_TOOL, upload_to_r2_tool
 
 
 TOOLS.append(UPLOAD_TO_R2_TOOL)
-TOOL_HANDLERS["upload_to_r2"] = _exec_upload_to_r2
+TOOL_HANDLERS["upload_to_r2"] = upload_to_r2_tool
 
 # ── Send Email Tool (implementation: mail_runtime/tools.py) ─────────
 from mail_runtime.tools import SEND_EMAIL_TOOL, exec_send_email
@@ -986,96 +451,17 @@ TOOLS.append(ALLOWLIST_SENDER_TOOL)
 TOOL_HANDLERS["allowlist_sender"] = exec_allowlist_sender
 
 # ── Diary Writer Tool ─────────────────────────────────────────────────
-SAVE_DIARY_TOOL = {
-    "name": "save_diary",
-    "description": "Save a diary entry to the ai_diary table. Used by the diary agent to persist generated diary entries.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "title": {"type": "string", "description": "One-line title/summary of the diary entry (Korean)."},
-            "content": {"type": "string", "description": "Full diary body text (Korean, 2+ paragraphs)."},
-        },
-        "required": ["title", "content"],
-    },
-}
-
-
-def _check_diary_publication_risks(title: str, content: str) -> list[str]:
-    """Return advisory risk reasons for diary content.
-
-    This intentionally checks only secret-like technical material. Editorial,
-    political, reputational, or current-usefulness judgment belongs to the LLM
-    review path, not substring or regex policy.
-    """
-    text = f"{title or ''}\n{content or ''}"
-    reasons: list[str] = []
-
-    secret_patterns = [
-        (r"sk-[A-Za-z0-9_-]{20,}", "possible API key"),
-        (r"-----BEGIN [A-Z ]*PRIVATE KEY-----", "private key block"),
-        (r"\b(seed phrase|mnemonic|private key|api key|access token|refresh token)\b", "secret-bearing phrase"),
-        (r"\b[A-Za-z0-9+/]{40,}={0,2}\b", "long token-like string"),
-    ]
-    for pattern, label in secret_patterns:
-        if re.search(pattern, text, flags=re.IGNORECASE):
-            reasons.append(label)
-
-    return reasons
-
-
-async def _exec_save_diary(title: str, content: str) -> str:
-    from db import query_one as db_query_one
-    try:
-        risk_reasons = _check_diary_publication_risks(title, content)
-        if risk_reasons:
-            logger.warning(
-                "save_diary publication risk advisory: %s",
-                "; ".join(dict.fromkeys(risk_reasons)),
-            )
-        row = await asyncio.to_thread(
-            db_query_one,
-            "INSERT INTO ai_diary (title, content) VALUES (%s, %s) RETURNING id",
-            (title, content),
-        )
-        diary_id = row.get("id") if row else None
-        broadcast_note = ""
-        try:
-            from telegram.channel_broadcast import should_broadcast_diary, send_broadcast
-            if should_broadcast_diary():
-                preview = re.sub(r"\s+", " ", (content or "").strip())
-                if len(preview) > 500:
-                    cut = preview[:501]
-                    split_at = max(cut.rfind(" "), cut.rfind("."), cut.rfind("。"), cut.rfind("!"), cut.rfind("?"))
-                    if split_at < 250:
-                        split_at = 500
-                    preview = cut[:split_at].rstrip(" ,;:") + "..."
-                public_url = f"https://cyber-lenin.com/ai-diary/{diary_id}" if diary_id else "https://cyber-lenin.com/ai-diary"
-                result = await send_broadcast(
-                    title=f"사이버-레닌 일기: {title}",
-                    summary=preview,
-                    url=public_url,
-                )
-                broadcast_note = f" / Telegram channel: {'sent' if result.ok else result.message}"
-        except Exception as e:
-            broadcast_note = f" / Telegram channel failed: {e}"
-        risk_note = ""
-        if risk_reasons:
-            risk_note = " / publication guard: advisory warning logged"
-        return f"Diary saved: {title}{broadcast_note}{risk_note}"
-    except Exception as e:
-        return ToolFailure(f"Failed to save diary: {e}")
+from runtime_tools.diary import SAVE_DIARY_TOOL, save_diary
 
 
 TOOLS.append(SAVE_DIARY_TOOL)
-TOOL_HANDLERS["save_diary"] = _exec_save_diary
+TOOL_HANDLERS["save_diary"] = save_diary
 
 TOOLS.extend(SOCIAL_TOOLS)
 TOOL_HANDLERS.update(SOCIAL_TOOL_HANDLERS)
 
 TOOLS.extend(A2A_TOOLS)
 TOOL_HANDLERS.update(A2A_TOOL_HANDLERS)
-
-
 
 
 from mail_runtime.inbox import PREPARE_MAIL_BRIEFING_TOOL, prepare_mail_briefing
