@@ -13,7 +13,7 @@ agentskills.io 오픈 표준 기반의 외부 스킬을 leninbot의 `skills/` �
 | `research-report` | 리서치·보고서 출처 형식. `services/a2a_handler.py`가 A2A 프롬프트에 직접 로드 |
 | `kg-maintenance` | KG 관리 지침과 운영 스크립트. 하위 `scripts/`는 MCP 관리 도구와 KG 백업에서도 참조 |
 
-`telegram/bot.py`는 `llm.skills_loader.build_skills_prompt()`로 이름·설명 목록을
+`telegram/chat_runtime.py`는 `llm.skills_loader.build_skills_prompt()`로 이름·설명 목록을
 orchestrator 프롬프트에 넣는다. 본문은 필요할 때 `read_file`로 읽도록 안내한다.
 전문 에이전트에 이 목록이 자동 주입되는 것은 아니다.
 

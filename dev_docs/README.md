@@ -67,7 +67,7 @@
 
 ## 문서 유지 원칙
 
-- 코드의 현재 ownership을 먼저 확인한다. 주요 진입점은 `services/api.py`, `telegram/bot.py`, `telegram/tasks.py`, `agents/`, `runtime_tools/`, `bot_config.py`, `jobs/autonomous_project.py`, `kg_runtime/`, `graph_memory/`이다.
+- 코드의 현재 ownership을 먼저 확인한다. 주요 진입점은 `services/api.py`, `telegram/bot.py`, `telegram/chat_runtime.py`, `telegram/tasks.py`, `agents/`, `runtime_tools/registry.py`, `bot_config.py`, `jobs/autonomous_project.py`, `kg_runtime/`, `graph_memory/`이고, 도메인 코드는 `commulingo/`, `publishing/`, `roleplay/`, `translation_runtime/`, `mail_runtime/`에 있다.
 - 계획 문서는 구현이 끝나면 완료 기록으로 남기지 말고, 해당 주제의 현재 설계 문서에 흡수한다. 미완료 작업도 별도 로드맵보다 해당 경계의 문서에 둔다.
 - 날짜가 붙은 handoff 문서는 장기 보존하지 않는다. 필요한 운영 지식만 주제별 문서로 옮긴다.
 - 메모리는 사용자 선호·현재 미완료 작업·문서 진입점만 간결하게 유지한다. 완료 배포 로그와 코드에서 조회할 모델·요율·행수는 중복 저장하지 않는다.

@@ -71,9 +71,11 @@ def upload_to_r2(local_path: str, key: str | None = None, content_type: str | No
 # Module architecture description — static, for bot self-awareness
 MODULE_ARCHITECTURE = """\
 ## Architecture
-Modules: telegram/bot.py (multi-agent orchestrator), telegram/tasks.py (background task worker), \
-agents/ (AgentSpec registry), runtime_tools/ (tool registry), services/api.py (FastAPI), \
-services/web_chat.py (web chat pipeline), kg_runtime/ + graph_memory/ (Neo4j KG), llm/ (provider loops and gateway).
+Modules: telegram/bot.py (multi-agent orchestrator; chat loop in telegram/chat_runtime.py), telegram/tasks.py (background task worker), \
+agents/ (AgentSpec registry), runtime_tools/ (tool registry and general tools), services/api.py (FastAPI), \
+services/web_chat.py (web chat pipeline), kg_runtime/ + graph_memory/ (Neo4j KG), llm/ (provider loops and gateway), \
+commulingo/ (CommuLingo dictionary tools and editorial pipeline), publishing/ (research reports, static pages, publication review), \
+translation_runtime/ (archival and site translation), mail_runtime/ (mail tools and state), roleplay/ (separate roleplay bot).
 Data: PostgreSQL (local Docker, leninbot-pg), Neo4j (local Docker), Redis (live state).
 ## Infrastructure
 Server: Hetzner VPS (Ubuntu 24.04, 16 GB RAM), HTTPS via Nginx + Cloudflare Origin Certificate (cyber-lenin.com). \

@@ -97,7 +97,8 @@ Validate with `venv/bin/python -m unittest discover -s tests -p 'test_web_search
 - `runtime_tools/media.py`: image generation and browser automation tools
 - `runtime_tools/social.py`: social/platform tools
 - `runtime_tools/a2a.py`: A2A client tool
-- additional self, DB, research, private-report, post-edit, crypto, and broadcast tools are imported into the final registry in the lower part of `runtime_tools/registry.py`
+- `runtime_tools/vector_search.py`, `restart_service.py`, `r2_upload.py`, `diary.py`: implementations of the core tools whose schemas sit in the registry's initial list or are appended after it
+- domain packages own their tools and the registry imports them in its lower part: `publishing/` (research, site publishing, post edit, private reports, broadcast), `commulingo/people.py`, `mail_runtime/tools.py` (send_email, check_inbox, allowlist_sender), `self_runtime/tools.py`, `crypto_wallet/`; the order of `TOOLS` is part of the provider-facing contract, so keep it when moving code
 
 A tool is callable only if both its definition and handler are present after filtering.
 

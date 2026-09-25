@@ -48,7 +48,7 @@ leninbot-a2a-api (:8003, FastAPI)
 Telegram
         |
         v
-telegram/bot.py orchestrator
+telegram/bot.py orchestrator (chat loop: telegram/chat_runtime.py)
         |-- runtime_tools/ registry and allow-lists
         |-- telegram/tasks.py background task worker
         |-- agents/* AgentSpec registry
@@ -105,7 +105,7 @@ Nginx·프런트엔드의 역방향 HTTP 프록시와 내부 서비스 게이트
 | `leninbot-autonomous.service` | `venv/bin/python -m jobs.autonomous_project` | one autonomous project tick |
 | `leninbot-experience.service` | `jobs/experience_writer.py` | daily experience memory write |
 | `leninbot-kg-integrity.service` | `scripts/check_kg_integrity.py` | KG maintenance check |
-| `leninbot-kg-sync.service` | `python -m jobs.kg_sync --source commulingo,documents --limit 40` | nightly 04:00 KST — CommuLingo·발행 문서를 KG로 미러 (증분, 7일마다 전체) |
+| `leninbot-kg-sync.service` | `python -m jobs.kg_sync --source commulingo,documents --documents-limit 40 --notify-on-error` | nightly 04:00 KST — CommuLingo·발행 문서를 KG로 미러 (증분, 7일마다 전체) |
 | `leninbot-kg-report.service` | `scripts/kg_weekly_report.py --notify` | Mon 09:30 KST — KG 건강 리포트 (성장·중복·동기화 지연·검색 사용량) |
 | `leninbot-commulingo-review.service` | `scripts/commulingo_person_reviewer.py` | 독립 timer는 비활성. pipeline이 공통 검토 함수를 사용하며 `/commulingo_review`는 수동 조회·처리용 |
 | `leninbot-commulingo-pipeline.service` | `scripts/commulingo_pipeline.py tick` | 대상별 보강 묶음과 최대 12단계 연속 실행; live 반영(건수 제한 없음)·일일 공용 예산은 `config/commulingo_pipeline.json` |
@@ -164,7 +164,7 @@ Current default chunking for new corpus ingestion is language-specific in `corpu
 | LLM provider config | `bot_config.py`, `llm/agent_loop.py` (shared loop engine), `llm/claude_loop.py`, `llm/openai_tool_loop.py`, `llm/client.py` |
 | Personal fiction workspace | `writer/` package (store/documents/models/prompts/tools/runs/stream), `writer/static/writer.html`, `/writer/*` routes in `api_routes/writer.py`, `services/novel_writer_api.py` |
 | Agents | `agents/*.py`, `config/agent_runtime.json`, `api_routes/task_reports.py` |
-| Tools | `runtime_tools/*`, `self_runtime/tools.py`, `crypto_wallet/*` |
+| Tools | `runtime_tools/registry.py` (global schemas and registration), general tools in `runtime_tools/*`, domain tools in their packages (`commulingo/people.py`, `publishing/*`, `mail_runtime/tools.py`, `roleplay/memory.py`), `self_runtime/tools.py`, `crypto_wallet/*` |
 | KG facade | `kg_runtime/search.py`, `kg_runtime/writes.py`, `kg_runtime/admin.py`, `kg_runtime/service_runtime.py` |
 | KG implementation | `graph_memory/service.py`, `graph_memory/entities.py`, `graph_memory/edges.py`, `graph_memory/structured_writer.py` |
 | Public content | `publishing/research_store.py`, `publishing/site_publishing.py`, `publishing/publication_records.py`, `publishing/research.py`, `publishing/post_edit.py`, `api_routes/private_reports.py` (JSON), frontend `/admin/private-reports` shell |
@@ -183,7 +183,10 @@ Current default chunking for new corpus ingestion is language-specific in `corpu
 
 ## Operational Entry Points
 
-- Service status: `systemctl status leninbot-api.service novel-writer-api.service leninbot-email-api.service leninbot-a2a-api.service leninbot-telegram.service leninbot-browser.service`
+- Service status: `systemctl status leninbot-api.service novel-writer-api.service leninbot-email-api.service leninbot-a2a-api.service leninbot-telegram.service leninbot-browser.service leninbot-roleplay.service`
+- Deploy: `deploy.sh` → `scripts/svc deploy [--api|--telegram|--frontend|--all] [--restart]` (Telegram `/deploy`). It pulls `main`, runs `pip install` only when `requirements*` changed, runs `daemon-reload` when `systemd/` changed, then restarts `api` and `telegram` through `scripts/restart_guard.py` (refuses while work is active), `browser` if active, and hands the frontend to the frontend repository's `scripts/deploy`. It does **not** copy unit files into `/etc/systemd/system/` (do `sudo cp systemd/<unit> /etc/systemd/system/` + `daemon-reload` yourself) and does **not** restart `leninbot-roleplay`, `leninbot-a2a-api`, `novel-writer-api`, `leninbot-email-api`, `leninbot-llm-proxy` or `leninbot-web-gateway`.
+- Restart after moving or renaming a module: running processes keep old code and fail at their next function-level import of the old path, so restart every long-running service that imports the package (usually telegram, roleplay, api, a2a-api, novel-writer-api, browser, email-api), after `restart_guard.py` for telegram/api. Check that `systemctl show <unit> -p MainPID` changed. `scripts/svc restart <name>` stops rather than kills when sudo does not allow `systemctl kill` (as for `grass`); `sudo -n systemctl restart <unit>` is allowed directly.
+- Service liveness alerting: `leninbot-service-health.timer` (see `monitoring.md`).
 - Logs: `journalctl -u <unit> -f`
 - Telegram connectivity watchdog: `telegram/bot.py` probes `get_me()` every `TELEGRAM_CONNECTIVITY_WATCHDOG_SECONDS` seconds, using `TELEGRAM_CONNECTIVITY_PROBE_TIMEOUT_SECONDS` as the per-probe timeout. Owner-facing degraded/restored notifications are emitted only after `TELEGRAM_CONNECTIVITY_NOTIFY_AFTER_FAILURES` consecutive failures.
 - Static page smoke tests: `scripts/smoke_static_pages.py`
@@ -199,7 +202,7 @@ Current default chunking for new corpus ingestion is language-specific in `corpu
 
 ## Design Notes
 
-- **도메인 모듈 위치 (2026-09-24 이전, 2026-09-25 shim 제거)**: `site_publishing`, `research_store`, `publication_records`, `commulingo_run`, `commulingo_research_memory`는 `runtime_tools/`, `task_store`는 `telegram/`, `redis_state`는 `memory_store/`, `prompt_context`·`skills_loader`는 `llm/`, `audit_sink`는 `ops/`, `self_modification_core`는 `self_runtime/`에 있다. 옛 루트·`scripts/` 경로의 호환 shim은 없으므로 import와 patch 대상은 패키지 경로를 쓴다. 루트에 남은 Python 모듈은 `bot_config`, `db`, `secrets_loader`, `shared`뿐이다. 라이브러리 패키지는 `scripts/`를 import하지 않는다.
+- **도메인 패키지 (2026-09-25 정리)**: CommuLingo 코드는 `commulingo/`(편집 도구·레인·조사 기억·`pipeline/`), 공개 콘텐츠는 `publishing/`(보고서 저장소·게시·검토, 정적 페이지, 게시물 편집, 비공개 보고서, 게시 기록, 자율 게시 통제, Cloudflare 퍼지, 채널 방송), 역할극 봇은 `roleplay/`, 사료 번역과 번역 메모리는 `translation_runtime/`, 메일 도구는 `mail_runtime/`에 있다. `runtime_tools/`는 전역 도구 등록(`registry.py`)과 도메인에 속하지 않는 범용 도구만 둔다. 소유자 채팅 루프는 `telegram/chat_runtime.py`이며, 라이브러리 코드는 `telegram.bot` 진입점을 import하지 않는다. 그 밖에 `task_store`는 `telegram/`, `redis_state`는 `memory_store/`, `prompt_context`·`skills_loader`는 `llm/`, `audit_sink`는 `ops/`, `self_modification_core`는 `self_runtime/`에 있다. 옛 경로의 호환 shim은 없으므로 import와 patch 대상은 패키지 경로를 쓴다. 루트에 남은 Python 모듈은 `bot_config`, `db`, `secrets_loader`, `shared`뿐이다. 라이브러리 패키지는 `scripts/`를 import하지 않는다.
 - **알고 유지하는 것**: `bot_config.ANTHROPIC_CLIENT_KEY`/`MOONSHOT_CLIENT_KEY`는 쓰는 곳이 없지만 OPENAI/DEEPSEEK 쪽과 모양을 맞추려고 둔다. `bot_config.set_gateway_enforce_mode`는 코드 호출부가 없지만 `security_gateway.md`의 운영 진입점이다. `_slice_text`(`self_runtime/tools.py`, `mcp_gateway/tools.py`)는 offset이 길이를 넘을 때 반환 위치가 달라 합치지 않았다. standby 백업·복원 스크립트(`scripts/backup_*_to_r2.py`, `scripts/restore_db.py`)는 독립 실행을 위해 `KST`를 자체 정의한다.
 - Telegram is the only full orchestrator path. Web chat has a narrower tool set and separate webchat provider settings.
 - **Hub 큐레이션 `/curate` (2026-09-06)**: 소유자가 Telegram 봇 DM에 `/curate <url> [메모]`를 보내면 `telegram/curate.py`가 SSRF 검사·`hub_curations` 중복 검사(추적 파라미터·www·끝 슬래시 정규화) 후 `telegram_tasks`에 `agent_type="hub_curator"` 행을 넣는다. 일반 태스크 워커가 `agents/hub_curator.py`(DeepSeek V4.1 Flash, terminal=`publish_hub_curation`)를 실행하고, 완료 시 오케스트레이터 LLM 보고 대신 DB 행 존재 여부로 판정한 결정적 DM(`report_curation_outcome`)을 보낸다. 자유 대화 오케스트레이터에는 publish 툴을 노출하지 않고 `/curate`로 안내만 한다. 발행 시 `maybe_broadcast_autonomous_publication`이 그대로 동작하므로 `TELEGRAM_BROADCAST_SITE_ENABLED`가 켜져 있으면 확성기 채널에도 알림이 나간다.

@@ -73,7 +73,7 @@ Per-turn volatile state such as current time, current model, task content, missi
 
 Restart the owning service when changing:
 
-- Python files in `agents/`, `telegram/`, `runtime_tools/`, `llm/`, `kg_runtime/`, `graph_memory/`, or API modules
+- Python files in any package a running service imports (`agents/`, `telegram/`, `runtime_tools/`, `commulingo/`, `publishing/`, `roleplay/`, `mail_runtime/`, `translation_runtime/`, `llm/`, `kg_runtime/`, `graph_memory/`, `services/`, `api_routes/`). Moving or renaming a module also breaks function-level imports in processes started before the change, so restart every long-running service that imports it
 - `config/agent_runtime.json` if the running path does not call the registry reload point before use
 - systemd unit files or credentials
 - third-party SDK/env configuration read at process startup
