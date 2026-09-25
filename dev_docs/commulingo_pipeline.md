@@ -77,7 +77,7 @@ Jev에 질의한다. 질문별 판정은 독립적이므로 후속 질의 state�
 
 | 세션 내부 도구 | 역할 |
 |---|---|
-| `commulingo_pipeline_submit_draft` | 초안 제출. 저장된 초안이 없으면 `changes`, `issues`(모든 과제), `reason`, 선택적 `notes`로 전체 제출; 있으면 바뀐 것만 보내 병합 |
+| `commulingo_pipeline_submit_draft` | 초안 제출. 호출마다 저장된 초안에 병합하며, 필수 필드·모든 과제의 `issues`·`reason`이 모이면 전체 검증을 돌린다. 큰 편집은 여러 번에 나눠 보낼 수 있다 |
 | `commulingo_pipeline_no_edit` | `status`, `reason`, 모든 과제의 `issues`, 선택적 `notes`로 무편집 판단 제출; 기존 초안은 이력에 보존 |
 | `commulingo_pipeline_cached_passages` | 캐시 목록 및 원문을 네트워크 없이 조회. 라벨은 한 번에 8개까지 보여 주고 나머지 라벨을 응답에 적는다. `passages`와 `source_id`가 함께 오면 라벨이 모두 알려진 경우 라벨을, 아니면 페이지를 연다 |
 | `commulingo_pipeline_context` | 추가 현재 값과 이번 작업에서 편집 가능한 필드의 schema 조회 |
@@ -121,6 +121,9 @@ resolved/deferred와 사유를 요구하며, 필드를 채웠다는 이유만으
 제목 속 연도는 해석하지 않는다(제목에 연도를 넣으라는 지시가 없고 실제로 37%만 연도를 담는다).
 공유 저장소는 값이 없으면 0을 써 절이 맨 앞으로 갔다(2026-09-22~24 편집기 절 156건).
 초안 저장 후 제출의 `issues`는 명시한 과제 판단만 교체한다. `notes`와 `reason`도 생략하면 보존한다.
+아직 빠진 부분이 있는 제출은 거절이 아니다. 초안에 저장하고 `Still needed before validation: …`을 돌려주며
+단계를 끝내지 않는다(`stages.StageContinues`, `rejections`에 세지 않음). `work_status.missing_before_validation`이
+남은 항목을 알려 준다. 긴 인자 한 번에 DeepSeek이 `{}`를 보내는 경우를 줄이려고 2026-09-25에 도입했다.
 초안 저장 후 제출에서 `evidence`를 생략한 필드는 값만 바꾸고 저장된 근거를 유지한다(인용 검사는 다시 돈다).
 게이트웨이는 스키마 검증 전에 제출 인자의 뜻이 분명한 구조 실수를 바로잡는다
 (`author_draft.repair_submission_shape`, `tool_gateway.validation.register_argument_shape_repair`):

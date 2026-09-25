@@ -467,10 +467,11 @@ class EditorTests(EditorCase):
 
     async def test_missing_outcomes_and_evidence_reported_together(self):
         async def model(**kwargs):
+            from commulingo.pipeline.stages import StageContinues
             value = candidate(); del value['issue_results']; del value['claims']
-            with self.assertRaises(ValueError) as failure:
+            with self.assertRaises(StageContinues) as progress:
                 await kwargs['handler'](submission(value))
-            self.assertIn('issues',str(failure.exception))
+            self.assertIn('Still needed before validation: issues.',str(progress.exception))
             value['issue_results'] = candidate()['issue_results']
             with self.assertRaisesRegex(ValueError, 'evidence required for body'):
                 await kwargs['handler'](submission(value))

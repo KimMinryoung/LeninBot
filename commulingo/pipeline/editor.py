@@ -62,7 +62,7 @@ class Editor:
 
     async def __call__(self, job, artifacts, usage, budget):
         from .stages import (current_artifacts, latest, model_call, result_tool, stage_evidence,
-                             write_request, prose_problem, is_probe,
+                             write_request, prose_problem, is_probe, StageContinues,
                              drop_unchanged_term_facts, READS)
         from .prompts import EDITOR_POLICY
         from agents.commulingo_curator import COMMULINGO_CURATOR
@@ -159,9 +159,14 @@ class Editor:
         last_error = repair.author_error(checkpoint.get('error', '') or '')
         def status():
             state = work_status(issues, repair.draft, reads, error=last_error, error_kind=error_kind)
+            missing = repair.missing(repair.draft['args']) if repair.draft and structured_args(repair.draft['args']) else []
+            if missing and not last_error:
+                state.update(missing_before_validation=missing,
+                             next_action='Send the remaining parts; the draft is validated once they are present: '
+                                         + ', '.join(missing) + '.')
             if repair.draft and not structured_args(repair.draft['args']):
                 state.update(draft_saved=False,
-                             next_action='Submit a complete replacement for the malformed legacy draft, or use the no-edit tool. History is retained.')
+                             next_action='Replace the malformed legacy draft with a new submission, or use the no-edit tool. History is retained.')
             return state
         reads.status = status
 
@@ -180,7 +185,17 @@ class Editor:
             nonlocal error_kind, last_error
             error_kind = 'schema'
             try:
-                value = repair.prepare(repair.submission(value))
+                merged = repair.submission(value)
+                missing = repair.missing(merged)
+                if missing:
+                    # A split submission: keep the part and ask for the rest
+                    # without counting a rejection or ending the stage.
+                    repair.draft = {'tool': repair.name, 'args': deepcopy(merged)}
+                    error_kind, last_error = '', ''
+                    await save_checkpoint()
+                    raise StageContinues(reads.with_status(
+                        'Saved to the draft. Still needed before validation: ' + ', '.join(missing) + '.'))
+                value = repair.prepare(merged)
                 error_kind = 'validation'
                 await save_checkpoint()
                 if is_probe(value['reason']) or any(is_probe(c['claim']) for c in value.get('claims',[])):

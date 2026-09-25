@@ -44,16 +44,19 @@ class AuthorDraftTests(unittest.TestCase):
         self.assertEqual(result['issue_results'][0]['id'], 'missing:bio')
         self.assertEqual(draft.view()['changes']['bio'], patch['changes']['bio'])
 
-    def test_one_tool_requires_a_complete_first_submission_then_merges(self):
+    def test_split_submissions_accumulate_until_the_draft_is_complete(self):
         draft = session()
-        partial = {'changes': {'bio': edit()['changes']['bio']}}
-        for value in (partial, {'remove_fields': ['years']}):
-            with self.subTest(value=value), self.assertRaisesRegex(RepairProtocolError, 'first submission'):
-                draft.submission(value)
-        self.assertIsNone(draft.draft)
-        draft.prepare(draft.submission(edit()))
-        result = draft.prepare(draft.submission(partial))
-        self.assertEqual(result['fields']['years'], '1900–1980')
+        with self.assertRaisesRegex(RepairProtocolError, 'No saved draft'):
+            draft.submission({'remove_fields': ['years']})
+        part = draft.submission({'changes': {'bio': edit()['changes']['bio']}})
+        self.assertEqual(draft.missing(part), ['issues.missing:bio', 'reason'])
+        draft.draft = {'tool': draft.name, 'args': part}
+        rest = {k: v for k, v in edit().items() if k != 'changes'}
+        rest['changes'] = {'years': edit()['changes']['years']}
+        whole = draft.submission(rest)
+        self.assertEqual(draft.missing(whole), [])
+        result = draft.prepare(whole)
+        self.assertEqual(set(result['fields']), {'bio', 'years'})
         self.assertEqual(draft.submit_tool['name'], 'commulingo_pipeline_submit_draft')
 
     def test_invalid_typed_update_never_corrupts_saved_draft(self):
@@ -105,10 +108,11 @@ class AuthorDraftTests(unittest.TestCase):
 
     def test_outcomes_are_explicit_and_ids_cannot_be_invented(self):
         draft = session()
-        for outcomes in ({}, {'invented': {'status':'resolved','reason':'Claiming completion is insufficient.'}}):
-            value = edit(); value['issues'] = outcomes
-            with self.assertRaises(RepairProtocolError):
-                draft.submission(value)
+        value = edit(); value['issues'] = {'invented': {'status':'resolved','reason':'Claiming completion is insufficient.'}}
+        with self.assertRaises(RepairProtocolError):
+            draft.submission(value)
+        value['issues'] = {}
+        self.assertEqual(draft.missing(draft.submission(value)), ['issues.missing:bio'])
         draft.prepare(draft.submission(edit()))
         result = draft.prepare(draft.submission({'issues':{'missing:bio':{
             'status':'deferred','reason':'A conflicting source needs checking.'}}}))
@@ -134,8 +138,10 @@ class AuthorDraftTests(unittest.TestCase):
             'claims':'bad container', 'issue_results':None, 'reason':'Saved before typed intake.'}}
         saved = deepcopy(draft.draft)
         self.assertTrue(draft.view()['needs_full_submission'])
-        with self.assertRaisesRegex(RepairProtocolError, 'complete replacement'):
-            draft.submission({'changes':{'bio':edit()['changes']['bio']}})
+        # A new submission starts over instead of merging into malformed containers.
+        fresh = draft.submission({'changes':{'bio':edit()['changes']['bio']}})
+        self.assertEqual(set(fresh['fields']), {'bio'})
+        self.assertEqual(draft.missing(fresh), ['issues.missing:bio', 'reason'])
         self.assertEqual(draft.draft, saved)
         draft.prepare(draft.submission(edit()))
         self.assertEqual(draft.view()['changes']['bio'], edit()['changes']['bio'])

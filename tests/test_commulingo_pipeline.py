@@ -429,6 +429,36 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
                 reads=set(),usage=Usage(),budget=.2,local_tools=[(repair,edit,True)])
         self.assertEqual(saved,['fixture'])
 
+    async def test_partial_submission_saves_progress_without_ending_the_stage(self):
+        from commulingo.pipeline.stages import model_call, result_tool, StageContinues
+        from commulingo.pipeline.prompts import spec
+        from commulingo.pipeline.engine import Usage
+        from tool_gateway.dispatcher import execute_tool
+        tool = result_tool({'type':'object','properties':{'part':{'type':'string'}}})
+        calls = []
+        async def handler(value):
+            calls.append(value['part'])
+            if value['part'] == 'first':
+                raise StageContinues('Saved to the draft. Still needed before validation: reason.')
+            return 'OK: validated'
+        usage = Usage()
+        async def chat(*args, **kwargs):
+            with patch('tool_gateway.security.audit'):
+                first, failed = await execute_tool(tool['name'], {'part':'first'}, kwargs['tool_handlers'], tool_schema=tool)
+                self.assertFalse(failed, first)
+                self.assertIn('Still needed', first)
+                second, failed = await execute_tool(tool['name'], {'part':'second'}, kwargs['tool_handlers'], tool_schema=tool)
+                self.assertFalse(failed, second)
+                third, failed = await execute_tool(tool['name'], {'part':'third'}, kwargs['tool_handlers'], tool_schema=tool)
+                self.assertTrue(failed)
+                self.assertIn('stage already completed', third)
+        binding = SimpleNamespace(chat=chat,client=None,model='fixture',render_provider='deepseek',reasoning={})
+        with patch('bot_config.resolve_agent_tool_loop',return_value=binding):
+            await model_call(spec=spec('research'),prompt='Fixture',tool=tool,handler=handler,
+                reads=set(),usage=usage,budget=.2)
+        self.assertEqual(calls, ['first', 'second'])
+        self.assertNotIn('rejections', usage.tracker)
+
     async def test_model_stage_reruns_on_gpt_when_deepseek_refuses_content(self):
         from commulingo.pipeline.stages import model_call, result_tool
         from commulingo.pipeline.prompts import spec

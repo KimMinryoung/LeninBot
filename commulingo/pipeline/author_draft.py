@@ -14,10 +14,6 @@ from .draft_repair import DraftRepair, RepairProtocolError
 from .evidence import MAX_PASSAGES, PASSAGE_PATTERN
 
 SUBMIT_TOOL = 'commulingo_pipeline_submit_draft'
-FIRST_SUBMISSION = ('The first submission must include changes, reason and a decision for every commissioned issue; '
-                    'later submissions send only what changes.')
-LEGACY_REPLACEMENT = ('The saved legacy draft is malformed and cannot be merged; send a complete replacement with '
-                      'changes, reason and a decision for every commissioned issue. History is retained.')
 
 
 def obj(properties, required=()):
@@ -152,9 +148,9 @@ class AuthorDraft(DraftRepair):
         no_edit['properties']['issues']['required'] = self.issue_ids
         self.submit_tool = {'name': SUBMIT_TOOL, 'description':
             'Submit the edit for review. Each change is {value, evidence}. Top-level keys only: changes, issues, '
-            'reason, notes, remove_fields. First submission: changes, reason, every issue. With a saved draft send '
-            'only what changes; the rest stays saved. Omit evidence to keep saved evidence. Arrays replace the whole '
-            'list. No edit: commulingo_pipeline_no_edit.', 'input_schema': submit}
+            'reason, notes, remove_fields. Calls merge into one saved draft, so a large edit may be sent a few '
+            'fields per call; it is validated once it holds the required fields, reason and every issue. Omit '
+            'evidence to keep saved evidence. Arrays replace the whole list. No edit: commulingo_pipeline_no_edit.', 'input_schema': submit}
         self.no_edit_tool = {'name': 'commulingo_pipeline_no_edit', 'description':
             'Finish without a public edit. Explain the decision and each commissioned issue. '
             'Any saved draft remains in history; do not remove its fields first.', 'input_schema': no_edit}
@@ -171,15 +167,9 @@ class AuthorDraft(DraftRepair):
         # A malformed legacy draft cannot be merged into, so it is replaced by a
         # complete submission. It stays in checkpoint history.
         update = bool(self.draft) and structured_args(self.draft['args'])
-        if not update:
-            required = (LEGACY_REPLACEMENT if self.draft else FIRST_SUBMISSION)
-            if 'remove_fields' in value:
-                raise RepairProtocolError('No mergeable saved draft to withdraw fields from. ' + required)
-            try:
-                self.validate_call(value, {'input_schema': self.full_schema})
-            except RepairProtocolError as exc:
-                raise RepairProtocolError(f'{exc}. {required}') from exc
-        if update and not any(value.get(key) for key in ('changes', 'issues', 'remove_fields')) and not any(
+        if not update and 'remove_fields' in value:
+            raise RepairProtocolError('No saved draft to withdraw fields from.')
+        if not any(value.get(key) for key in ('changes', 'issues', 'remove_fields')) and not any(
                 key in value for key in ('reason', 'notes')):
             raise RepairProtocolError('Supply changed fields, issue decisions, notes or a reason.')
         if set(value.get('changes', {})) & set(value.get('remove_fields', [])):
@@ -204,14 +194,31 @@ class AuthorDraft(DraftRepair):
                 result[key] = value[key]
         return result
 
+    def missing(self, result):
+        """What a merged draft still lacks before full validation can run.
+
+        Large edits may arrive over several calls; a draft is validated only
+        once it holds the required fields, every issue decision and a reason.
+        """
+        fields = result.get('fields') or {}
+        required = self.full_schema['properties']['changes'].get('required', [])
+        decided = {item.get('id') for item in result.get('issue_results') or []}
+        missing = [f'changes.{field}' for field in required if field not in fields]
+        if not fields and not required:
+            missing.append('changes (at least one field)')
+        missing += [f'issues.{issue}' for issue in self.issue_ids if issue not in decided]
+        if not result.get('reason'):
+            missing.append('reason')
+        return missing
+
     def view(self):
         if not self.draft:
             return None
         args = self.draft['args']
         if not structured_args(args):
             return {'needs_full_submission': True, 'legacy_draft': deepcopy(args),
-                    'instruction': f'Replace this malformed legacy draft with a complete {SUBMIT_TOOL} call, '
-                                   'or use commulingo_pipeline_no_edit to finish without edits.'}
+                    'instruction': f'Replace this malformed legacy draft through {SUBMIT_TOOL} '
+                                   '(it may take several calls), or use commulingo_pipeline_no_edit.'}
         claims = args.get('claims') or []
         return {'changes': {field: {'value': value, 'evidence': [
                     {key: val for key, val in c.items() if key != 'field'}

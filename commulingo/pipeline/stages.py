@@ -80,6 +80,13 @@ PROBE_RE = re.compile(r'\W*(placeholder|probe|test|testing|checking|investigatin
                       r'todo|tbd|dummy|lorem)\b', re.I)
 
 
+class StageContinues(Exception):
+    """A terminal tool call that saved progress without finishing the stage.
+
+    Not a rejection: the author split a large submission across calls.
+    """
+
+
 def is_probe(text):
     return bool(PROBE_RE.match(str(text or ''))) or 'not a real submission' in str(text or '').lower()
 
@@ -126,6 +133,8 @@ async def model_call(*, spec, prompt, tool, handler, reads, usage, budget, read_
             raise ToolRejection('stage already completed')
         try:
             result = await handler(value)
+        except StageContinues as progress:
+            return str(progress)
         except ValueError as exc:
             rejections.append(str(exc))
             usage.tracker.setdefault('rejections', []).append(str(exc)[:500])
