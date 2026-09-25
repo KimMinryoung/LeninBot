@@ -12,12 +12,12 @@
   ],
   "source": {
     "format": "marxists",
-    "path": "/home/grass/frontend/docs/stalin-1928-siberia-marxists.html",
+    "path": "${FRONTEND_DIR}/docs/stalin-1928-siberia-marxists.html",
     "sha256": "5da76f227ed6bdd0c96ee57d7fc57289f47a3aa291d8da71a42bf953068618bb"
   },
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "хлебозаготовки": "곡물 조달",
       "хлебный баланс": "곡물 수급",
@@ -40,7 +40,7 @@
       "кулацкое хозяйство": "쿨라크 경영"
     }
   },
-  "output": "/home/grass/frontend/data/commulingo/docs/stalin-1928-grain-siberia.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/stalin-1928-grain-siberia.html",
   "allowedCyrillic": [],
   "postEdits": {
     " [c.1]": "",

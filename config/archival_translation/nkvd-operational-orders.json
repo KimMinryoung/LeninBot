@@ -12,8 +12,8 @@
     "번역 저본: 러시아어 원문 전사본 — 제00439·00447·00485·00593호 러시아어 위키문헌, 제00606호 stalinism.ru, 제00486호 하르키우주 내무부 관리국 문서보관소 소장본, 제49990호 РГАНИ Ф. 6. Оп. 13. Д. 4, 제50215호 ЦХСД 시베르니크 위원회 문서 Д. 4"
   ],
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "НКВД": "내무인민위원부",
       "Наркомвнудел": "내무인민위원부",
@@ -41,7 +41,7 @@
       "особое совещание": "특별협의회"
     }
   },
-  "output": "/home/grass/frontend/data/commulingo/docs/nkvd-operational-orders.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/nkvd-operational-orders.html",
   "allowedCyrillic": [
     "ПОВ",
     "КН",
@@ -58,7 +58,7 @@
       "register": "한다체. 조항으로 구성된 명령서다. '~한다/~이다'로 옮기고, 구어체나 경어체를 쓰지 않는다.",
       "source": {
         "format": "wikisource",
-        "path": "/home/grass/frontend/docs/nkvd-order-00439-wikisource.html",
+        "path": "${FRONTEND_DIR}/docs/nkvd-order-00439-wikisource.html",
         "sha256": "c2e9b1d59bff3fdee6f01869a1e3e0614515c55c12538e2be41522e3a2dc27fd"
       },
       "blocks": [
@@ -80,7 +80,7 @@
       },
       "source": {
         "format": "wikisource",
-        "path": "/home/grass/frontend/docs/nkvd-order-00447-wikisource.html",
+        "path": "${FRONTEND_DIR}/docs/nkvd-order-00447-wikisource.html",
         "sha256": "2e8af71d975758d64917702606bd28ceba50d70a6c139ab1df0e59112fd70a32"
       },
       "blocks": [
@@ -98,7 +98,7 @@
       "register": "한다체. 조항으로 구성된 명령서다. '~한다/~이다'로 옮기고, 구어체나 경어체를 쓰지 않는다.",
       "source": {
         "format": "wikisource",
-        "path": "/home/grass/frontend/docs/nkvd-order-00485-wikisource.html",
+        "path": "${FRONTEND_DIR}/docs/nkvd-order-00485-wikisource.html",
         "sha256": "4e351cd471cd238c65ceb4be54ddfd2e07b1e1fd37616d92e988e5d9cce55f14"
       },
       "blocks": [
@@ -116,7 +116,7 @@
       "register": "한다체. 조항으로 구성된 명령서다. '~한다/~이다'로 옮기고, 구어체나 경어체를 쓰지 않는다.",
       "source": {
         "format": "militera",
-        "path": "/home/grass/frontend/docs/ВОЕННАЯ ЛИТЕРАТУРА --[ Биографии ]-- Полянский А. И. Ежов. История «железного» сталинского наркома.html",
+        "path": "${FRONTEND_DIR}/docs/ВОЕННАЯ ЛИТЕРАТУРА --[ Биографии ]-- Полянский А. И. Ежов. История «железного» сталинского наркома.html",
         "sha256": "1ad4cd0a090414093475083c30f5137ff49a130a630490c23449fff8da991e09",
         "anchor": "Приложения"
       },
@@ -135,7 +135,7 @@
       "register": "한다체. 조항으로 구성된 명령서다. '~한다/~이다'로 옮기고, 구어체나 경어체를 쓰지 않는다.",
       "source": {
         "format": "wikisource",
-        "path": "/home/grass/frontend/docs/nkvd-order-00593-wikisource.html",
+        "path": "${FRONTEND_DIR}/docs/nkvd-order-00593-wikisource.html",
         "sha256": "750211c0ea382eac91d31d686f8d3cfc5d428de1ed31772cee993ce2a4cdee5d"
       },
       "blocks": [
@@ -153,7 +153,7 @@
       "register": "한다체. 조항으로 구성된 명령서다. '~한다/~이다'로 옮기고, 구어체나 경어체를 쓰지 않는다.",
       "source": {
         "format": "stalinism",
-        "path": "/home/grass/frontend/docs/nkvd-order-00606-stalinism.html",
+        "path": "${FRONTEND_DIR}/docs/nkvd-order-00606-stalinism.html",
         "sha256": "0cf706ea7f8c97100eba9fc359cb4cbeb535e57379cc7c488a42477c40b94481"
       },
       "blocks": [

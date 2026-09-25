@@ -11,10 +11,10 @@
     "번역 저본: bibliotecafascista(normattiva 대조)·이탈리아어 위키문헌·위키백과. 법령·포고는 저작권 보호 대상이 아니고 그란디 결의안은 저작권 검토 중"
   ],
   "sourceLang": "it",
-  "output": "/home/grass/frontend/data/commulingo/docs/gran-consiglio-documents-1928-1943.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/gran-consiglio-documents-1928-1943.html",
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "Gran Consiglio del Fascismo": "파시즘 대평의회",
       "Gran Consiglio": "대평의회",
@@ -73,7 +73,7 @@
       "source": {
         "format": "html",
         "selector": "div.post-body",
-        "path": "/home/grass/frontend/docs/legge-gran-consiglio-1928-bibliotecafascista.html",
+        "path": "${FRONTEND_DIR}/docs/legge-gran-consiglio-1928-bibliotecafascista.html",
         "sha256": "50aad54b19849e021ad6cd95e84172b8ed7764beeaee1408051f66a66eef800e"
       },
       "blocks": [
@@ -92,7 +92,7 @@
       "source": {
         "format": "html",
         "selector": "#box_esterno",
-        "path": "/home/grass/frontend/docs/ordine-del-giorno-grandi-1943-wikisource.html",
+        "path": "${FRONTEND_DIR}/docs/ordine-del-giorno-grandi-1943-wikisource.html",
         "sha256": "18b12cb07a2d5ef0324123da7c036b6ab2df81813b1df519425b934afc0dc04e"
       },
       "blocks": [
@@ -111,7 +111,7 @@
       "source": {
         "format": "html",
         "selector": "div.itwiki-template-citazione-singola",
-        "path": "/home/grass/frontend/docs/badoglio-proclama-1943-09-08-wikipedia.html",
+        "path": "${FRONTEND_DIR}/docs/badoglio-proclama-1943-09-08-wikipedia.html",
         "sha256": "2d8fc356ab97045aeb745646b392fb0c6b07649b17dae3b0287a947412787dd7"
       },
       "blocks": [

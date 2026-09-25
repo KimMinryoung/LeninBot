@@ -62,7 +62,7 @@ venv/bin/python scripts/translate_archival_documents.py --spec <spec-id>
 venv/bin/python scripts/translate_archival_documents.py --spec <spec-id> --reassemble
 ```
 
-- `--plan`/`--dry-run`은 저본 슬라이싱·용어집·청킹·견적만 계산하며 모델을 호출하지 않는다. 스펙은 `config/archival_translation/<id>.json`이다.
+- `--plan`/`--dry-run`은 저본 슬라이싱·용어집·청킹·견적만 계산하며 모델을 호출하지 않는다. 스펙은 `config/archival_translation/<id>.json`이다. 스펙의 파일 경로(`path`, `output`, `glossary.people/terms`)는 `${FRONTEND_DIR}/…` 또는 `${PROJECT_ROOT}/…`로 쓰고, `load_spec()`/`list_specs()`가 `ops.paths.expand_path_tokens()`로 실제 경로로 푼다. 절대경로를 새로 넣지 않는다. 저본(`frontend/docs/`)은 frontend 저장소에서도 gitignore라서, frontend가 없는 checkout에서는 스펙 편집과 단위 테스트만 가능하고 번역 실행은 할 수 없다.
 - 기본 동시성은 5, `--retries`는 총 시도 수다. `--limit-chunks N`은 앞 N청크만 처리하고 최종 fragment은 쓰지 않는다.
 - `--compare 'provider/model,provider/model'`은 같은 청크를 비교한다. `+think`, `+effort=high` 변형과 `--compare-chunk-ids 2,3`을 지원한다. 번호는 현재 청킹의 0 기반 인덱스이므로 재현 가능한 평가는 아래 고정 평가셋을 사용한다.
 - 키 주입은 LLM 프록시가 맡는다. 사료 번역을 위해 provider 실키를 CLI에 전달하거나 DB 자격증명을 마운트할 필요는 없다.

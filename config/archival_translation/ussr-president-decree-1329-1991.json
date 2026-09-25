@@ -12,12 +12,12 @@
   ],
   "source": {
     "format": "wikisource",
-    "path": "/home/grass/frontend/docs/ussr-president-decree-1329-1991-wikisource.html",
+    "path": "${FRONTEND_DIR}/docs/ussr-president-decree-1329-1991-wikisource.html",
     "sha256": "f4efc3b45b4a19bbde8afbd5ca324f45847a216169edbe30c876d77ca8c98e7d"
   },
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "Кабинет Министров СССР": "소련 각료회의",
       "Кабинета Министров СССР": "소련 각료회의",
@@ -39,7 +39,7 @@
       "сберегательный банк": "저축은행"
     }
   },
-  "output": "/home/grass/frontend/data/commulingo/docs/ussr-president-decree-1329-1991.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/ussr-president-decree-1329-1991.html",
   "allowedCyrillic": [
     "УП"
   ],

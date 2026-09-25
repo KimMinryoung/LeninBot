@@ -11,10 +11,10 @@
     "원제: Conference on Security and Co-operation in Europe, Final Act, Helsinki, 1 August 1975 — 「Questions relating to Security in Europe」 부문 전문(Declaration on Principles Guiding Relations between Participating States; Document on confidence-building measures and certain aspects of security and disarmament)",
     "번역 저본: 영어 위키문헌 전사본(미국 정부 간행 텍스트로 저작권 보호 대상이 아니다). OSCE 공식 영어·러시아어본(osce.org)과 대조 가능"
   ],
-  "output": "/home/grass/frontend/data/commulingo/docs/helsinki-final-act-1975.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/helsinki-final-act-1975.html",
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "exclude": [
       "First",
       "Soviet",
@@ -72,7 +72,7 @@
       "source": {
         "format": "html",
         "selector": "div#doc",
-        "path": "/home/grass/frontend/docs/helsinki-final-act-1975-prepared.html",
+        "path": "${FRONTEND_DIR}/docs/helsinki-final-act-1975-prepared.html",
         "sha256": "552080b45cc50cf2edef8a0cdfd2e3881d043f4ebb6ae2f6f073d2adb01aeea8"
       },
       "blocks": [

@@ -17,12 +17,12 @@
   ],
   "source": {
     "format": "wikisource",
-    "path": "/home/grass/frontend/docs/supreme-commander-order-20-1945-wikisource.html",
+    "path": "${FRONTEND_DIR}/docs/supreme-commander-order-20-1945-wikisource.html",
     "sha256": "1981433ff6080f235d5e0e0c8601c4cc8d9a592fbec90e53b322c63deb485841"
   },
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "Верховный Главнокомандующий": "최고사령관",
       "Красная Армия": "붉은 군대",
@@ -44,7 +44,7 @@
       "гитлеровской Германии": "히틀러 독일"
     }
   },
-  "output": "/home/grass/frontend/data/commulingo/docs/supreme-commander-order-20-1945.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/supreme-commander-order-20-1945.html",
   "allowedCyrillic": [],
   "postEdits": {},
   "documents": [

@@ -14,13 +14,13 @@
   "source": {
     "format": "html",
     "selector": "div#doc",
-    "path": "/home/grass/frontend/docs/bukharin-1926-character-prepared.html",
+    "path": "${FRONTEND_DIR}/docs/bukharin-1926-character-prepared.html",
     "sha256": "8ca9ef89f13b8246e38a1a5edf00e2c0bea07ca9f796f6828c0d34d61ef9bab1"
   },
-  "output": "/home/grass/frontend/data/commulingo/docs/bukharin-1926-character-of-our-revolution.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/bukharin-1926-character-of-our-revolution.html",
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "Троцкий": "트로츠키",
       "Троцкого": "트로츠키",
@@ -95,7 +95,7 @@
       "source": {
         "format": "html",
         "selector": "div#notes",
-        "path": "/home/grass/frontend/docs/bukharin-1926-character-prepared.html",
+        "path": "${FRONTEND_DIR}/docs/bukharin-1926-character-prepared.html",
         "sha256": "8ca9ef89f13b8246e38a1a5edf00e2c0bea07ca9f796f6828c0d34d61ef9bab1"
       },
       "blocks": [

@@ -11,10 +11,10 @@
     "원제: Constitution de la République française du 5 fructidor an III (22 août 1795); Constitution du 22 frimaire an VIII (13 décembre 1799).",
     "번역 저본: 프랑스 대통령실(Élysée) 「Les textes fondateurs」의 프랑스어 전문. 2026-09-13 고정 스냅샷."
   ],
-  "output": "/home/grass/frontend/data/commulingo/docs/france-directoire-consulat-1795-1799.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/france-directoire-consulat-1795-1799.html",
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "exclude": [],
     "extra": {
       "Directoire exécutif": "행정총재정부",
@@ -46,7 +46,7 @@
       "source": {
         "format": "html",
         "selector": "main",
-        "path": "/home/grass/frontend/docs/france-constitution-an-iii-1795-fr.html",
+        "path": "${FRONTEND_DIR}/docs/france-constitution-an-iii-1795-fr.html",
         "sha256": "b80e5c8113ab27febb5b1bcf97cc4d29b88882239a06077e0200080886a2c371"
       },
       "blocks": [
@@ -68,7 +68,7 @@
       "source": {
         "format": "html",
         "selector": "main",
-        "path": "/home/grass/frontend/docs/france-constitution-an-viii-1799-fr.html",
+        "path": "${FRONTEND_DIR}/docs/france-constitution-an-viii-1799-fr.html",
         "sha256": "4716cbf95b0d98a6d03ca5527ed03ed3a8dc4f0b78ebf4d5bdc4212ff2d8dde5"
       },
       "blocks": [

@@ -11,10 +11,10 @@
     "번역 저본: 미국 국무부 역사국(Office of the Historian) FRUS 전자판. 미국 정부 저작물로 저작권 보호 대상이 아니다"
   ],
   "sourceLang": "en",
-  "output": "/home/grass/leninbot/output/archival_translations/merge-staging/carter-byrd-letter-1980.html",
+  "output": "${PROJECT_ROOT}/output/archival_translations/merge-staging/carter-byrd-letter-1980.html",
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "Senator Byrd": "버드 상원의원",
       "Byrd": "버드",
@@ -44,7 +44,7 @@
           "a.tei-pb1",
           "a.note"
         ],
-        "path": "/home/grass/frontend/docs/carter-byrd-letter-1980-01-03-frus.html",
+        "path": "${FRONTEND_DIR}/docs/carter-byrd-letter-1980-01-03-frus.html",
         "sha256": "1b1783140eeb2d916c4582811958c089abd0ded2e5d9f246af0f79b857d7e2ea"
       },
       "blocks": [

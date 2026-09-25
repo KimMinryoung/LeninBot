@@ -17,8 +17,8 @@
     "중국 인명은 중국어 발음으로 옮기고 처음 나올 때만 한자를 병기했다. 러시아어·유럽 인명은 중국어 음역을 되돌려 원어 발음으로 옮겼다(赫鲁晓夫 → 흐루쇼프)"
   ],
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "赫鲁晓夫": "흐루쇼프",
       "斯大林": "스탈린",
@@ -164,7 +164,7 @@
       "裁军": "군축"
     }
   },
-  "output": "/home/grass/frontend/data/commulingo/docs/nine-commentaries.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/nine-commentaries.html",
   "allowedCyrillic": [
     "关于国际共产主义运动总路线的论战"
   ],
@@ -210,7 +210,7 @@
       "endsWith": "一九六三年九月六日",
       "source": {
         "format": "wikisource",
-        "path": "/home/grass/frontend/docs/nine-commentaries-1-zhwikisource.html",
+        "path": "${FRONTEND_DIR}/docs/nine-commentaries-1-zhwikisource.html",
         "sha256": "f70938032e531501894f009d96b2d198e37217d75a2b385d24bc695ba8d5d118"
       },
       "register": "한다체. 당 기관지 편집부 명의로 발표된 논쟁문이다. '~이다/~한다'로 옮기고 경어체를 쓰지 않는다. 다만 「우리는 …라고 생각한다」처럼 필자가 스스로를 가리키는 1인칭 복수는 그대로 살린다. 표기 규칙: (1) 인용문에는 굽은 따옴표(“…”)를 쓰고, 신문·잡지·단행본 이름은 겹화살괄호(《인민일보》)로, 사설·논문·문건·성명의 이름은 홑낫표(「소련공산당 중앙위원회 공개서한」)로 옮긴다. (2) 원문의 동그라미 숫자와 （注一）같은 주 번호는 그 자리에 그대로 둔다. (3) 인용한 마르크스·레닌 저작의 권수와 쪽수는 원문 그대로 옮긴다. (4) 중국 인명은 처음 나올 때만 괄호에 한자를 병기하고, 러시아어·유럽 인명에는 한자를 병기하지 않는다."
@@ -227,7 +227,7 @@
       "endsWith": "义将发出更加灿烂的光辉，国际无产阶级和全世界人民的革命事业将取得更加伟大的胜利。",
       "source": {
         "format": "wikisource",
-        "path": "/home/grass/frontend/docs/nine-commentaries-1-zhwikisource.html",
+        "path": "${FRONTEND_DIR}/docs/nine-commentaries-1-zhwikisource.html",
         "sha256": "f70938032e531501894f009d96b2d198e37217d75a2b385d24bc695ba8d5d118"
       },
       "register": "한다체. 당 기관지 편집부 명의로 발표된 논쟁문이다. '~이다/~한다'로 옮기고 경어체를 쓰지 않는다. 다만 「우리는 …라고 생각한다」처럼 필자가 스스로를 가리키는 1인칭 복수는 그대로 살린다. 표기 규칙: (1) 인용문에는 굽은 따옴표(“…”)를 쓰고, 신문·잡지·단행본 이름은 겹화살괄호(《인민일보》)로, 사설·논문·문건·성명의 이름은 홑낫표(「소련공산당 중앙위원회 공개서한」)로 옮긴다. (2) 원문의 동그라미 숫자와 （注一）같은 주 번호는 그 자리에 그대로 둔다. (3) 인용한 마르크스·레닌 저작의 권수와 쪽수는 원문 그대로 옮긴다. (4) 중국 인명은 처음 나올 때만 괄호에 한자를 병기하고, 러시아어·유럽 인명에는 한자를 병기하지 않는다."
@@ -244,7 +244,7 @@
       "endsWith": "马克思、恩格斯、列宁、斯大林的伟大革命学说万岁！",
       "source": {
         "format": "wikisource",
-        "path": "/home/grass/frontend/docs/nine-commentaries-2-zhwikisource.html",
+        "path": "${FRONTEND_DIR}/docs/nine-commentaries-2-zhwikisource.html",
         "sha256": "79b154cf9a80b911ed9019fe3b0ea0ecd50df2a93f2cb10299f9eaec0dae8db8"
       },
       "register": "한다체. 당 기관지 편집부 명의로 발표된 논쟁문이다. '~이다/~한다'로 옮기고 경어체를 쓰지 않는다. 다만 「우리는 …라고 생각한다」처럼 필자가 스스로를 가리키는 1인칭 복수는 그대로 살린다. 표기 규칙: (1) 인용문에는 굽은 따옴표(“…”)를 쓰고, 신문·잡지·단행본 이름은 겹화살괄호(《인민일보》)로, 사설·논문·문건·성명의 이름은 홑낫표(「소련공산당 중앙위원회 공개서한」)로 옮긴다. (2) 원문의 동그라미 숫자와 （注一）같은 주 번호는 그 자리에 그대로 둔다. (3) 인용한 마르크스·레닌 저작의 권수와 쪽수는 원문 그대로 옮긴다. (4) 중국 인명은 처음 나올 때만 괄호에 한자를 병기하고, 러시아어·유럽 인명에는 한자를 병기하지 않는다."
@@ -261,7 +261,7 @@
       "endsWith": "夫的投资拨款》。见《集体经济年鉴》，一九五九年四月——十一月号，贝尔格莱德印行。",
       "source": {
         "format": "wikisource",
-        "path": "/home/grass/frontend/docs/nine-commentaries-3-zhwikisource.html",
+        "path": "${FRONTEND_DIR}/docs/nine-commentaries-3-zhwikisource.html",
         "sha256": "bf33abeeb68c58ad75e396d386b79dc5a6c746a7d7a18ff2374baf36091df5c1"
       },
       "register": "한다체. 당 기관지 편집부 명의로 발표된 논쟁문이다. '~이다/~한다'로 옮기고 경어체를 쓰지 않는다. 다만 「우리는 …라고 생각한다」처럼 필자가 스스로를 가리키는 1인칭 복수는 그대로 살린다. 표기 규칙: (1) 인용문에는 굽은 따옴표(“…”)를 쓰고, 신문·잡지·단행본 이름은 겹화살괄호(《인민일보》)로, 사설·논문·문건·성명의 이름은 홑낫표(「소련공산당 중앙위원회 공개서한」)로 옮긴다. (2) 원문의 동그라미 숫자와 （注一）같은 주 번호는 그 자리에 그대로 둔다. (3) 인용한 마르크스·레닌 저작의 권수와 쪽수는 원문 그대로 옮긴다. (4) 중국 인명은 처음 나올 때만 괄호에 한자를 병기하고, 러시아어·유럽 인명에는 한자를 병기하지 않는다."
@@ -278,7 +278,7 @@
       "endsWith": "全世界无产者同被压迫民族联合起来！",
       "source": {
         "format": "wikisource",
-        "path": "/home/grass/frontend/docs/nine-commentaries-4-zhwikisource.html",
+        "path": "${FRONTEND_DIR}/docs/nine-commentaries-4-zhwikisource.html",
         "sha256": "f4fa8fd7836487964296f1284576efd0a08644eba8677fbb71c61cf9bf716f2b"
       },
       "register": "한다체. 당 기관지 편집부 명의로 발표된 논쟁문이다. '~이다/~한다'로 옮기고 경어체를 쓰지 않는다. 다만 「우리는 …라고 생각한다」처럼 필자가 스스로를 가리키는 1인칭 복수는 그대로 살린다. 표기 규칙: (1) 인용문에는 굽은 따옴표(“…”)를 쓰고, 신문·잡지·단행본 이름은 겹화살괄호(《인민일보》)로, 사설·논문·문건·성명의 이름은 홑낫표(「소련공산당 중앙위원회 공개서한」)로 옮긴다. (2) 원문의 동그라미 숫자와 （注一）같은 주 번호는 그 자리에 그대로 둔다. (3) 인용한 마르크스·레닌 저작의 권수와 쪽수는 원문 그대로 옮긴다. (4) 중국 인명은 처음 나올 때만 괄호에 한자를 병기하고, 러시아어·유럽 인명에는 한자를 병기하지 않는다."
@@ -295,7 +295,7 @@
       "endsWith": "（注十四）考茨基：《社会主义者和战争》。",
       "source": {
         "format": "wikisource",
-        "path": "/home/grass/frontend/docs/nine-commentaries-5-zhwikisource.html",
+        "path": "${FRONTEND_DIR}/docs/nine-commentaries-5-zhwikisource.html",
         "sha256": "9a98a60584d83a28f2926dbcfba48e0e895eb0bd399a085ecbb998409927ca75"
       },
       "register": "한다체. 당 기관지 편집부 명의로 발표된 논쟁문이다. '~이다/~한다'로 옮기고 경어체를 쓰지 않는다. 다만 「우리는 …라고 생각한다」처럼 필자가 스스로를 가리키는 1인칭 복수는 그대로 살린다. 표기 규칙: (1) 인용문에는 굽은 따옴표(“…”)를 쓰고, 신문·잡지·단행본 이름은 겹화살괄호(《인민일보》)로, 사설·논문·문건·성명의 이름은 홑낫표(「소련공산당 중앙위원회 공개서한」)로 옮긴다. (2) 원문의 동그라미 숫자와 （注一）같은 주 번호는 그 자리에 그대로 둔다. (3) 인용한 마르크스·레닌 저작의 권수와 쪽수는 원문 그대로 옮긴다. (4) 중국 인명은 처음 나올 때만 괄호에 한자를 병기하고, 러시아어·유럽 인명에는 한자를 병기하지 않는다."
@@ -312,7 +312,7 @@
       "endsWith": "（44）苏联《消息报》一九六三年八月二十一日评论员文章。",
       "source": {
         "format": "wikisource",
-        "path": "/home/grass/frontend/docs/nine-commentaries-6-zhwikisource.html",
+        "path": "${FRONTEND_DIR}/docs/nine-commentaries-6-zhwikisource.html",
         "sha256": "400df1c9941a28e5c37fad3b9bd5713319960672625342ded3b8c5af9842de93"
       },
       "register": "한다체. 당 기관지 편집부 명의로 발표된 논쟁문이다. '~이다/~한다'로 옮기고 경어체를 쓰지 않는다. 다만 「우리는 …라고 생각한다」처럼 필자가 스스로를 가리키는 1인칭 복수는 그대로 살린다. 표기 규칙: (1) 인용문에는 굽은 따옴표(“…”)를 쓰고, 신문·잡지·단행본 이름은 겹화살괄호(《인민일보》)로, 사설·논문·문건·성명의 이름은 홑낫표(「소련공산당 중앙위원회 공개서한」)로 옮긴다. (2) 원문의 동그라미 숫자와 （注一）같은 주 번호는 그 자리에 그대로 둔다. (3) 인용한 마르크스·레닌 저작의 권수와 쪽수는 원문 그대로 옮긴다. (4) 중국 인명은 처음 나올 때만 괄호에 한자를 병기하고, 러시아어·유럽 인명에는 한자를 병기하지 않는다."
@@ -329,7 +329,7 @@
       "endsWith": "㉑ 苏联《真理报》一九六一年十一月四日社论：《列宁主义的党的历史性代表大会》。",
       "source": {
         "format": "wikisource",
-        "path": "/home/grass/frontend/docs/nine-commentaries-7-zhwikisource.html",
+        "path": "${FRONTEND_DIR}/docs/nine-commentaries-7-zhwikisource.html",
         "sha256": "08135e31033ce22af77716821fd957c694bf08eb8a9ff130994cb6e95ac727fc"
       },
       "register": "한다체. 당 기관지 편집부 명의로 발표된 논쟁문이다. '~이다/~한다'로 옮기고 경어체를 쓰지 않는다. 다만 「우리는 …라고 생각한다」처럼 필자가 스스로를 가리키는 1인칭 복수는 그대로 살린다. 표기 규칙: (1) 인용문에는 굽은 따옴표(“…”)를 쓰고, 신문·잡지·단행본 이름은 겹화살괄호(《인민일보》)로, 사설·논문·문건·성명의 이름은 홑낫표(「소련공산당 중앙위원회 공개서한」)로 옮긴다. (2) 원문의 동그라미 숫자와 （注一）같은 주 번호는 그 자리에 그대로 둔다. (3) 인용한 마르크스·레닌 저작의 권수와 쪽수는 원문 그대로 옮긴다. (4) 중국 인명은 처음 나올 때만 괄호에 한자를 병기하고, 러시아어·유럽 인명에는 한자를 병기하지 않는다."
@@ -346,7 +346,7 @@
       "endsWith": "㊻ 赫鲁晓夫一九六三年八月二十八日在南斯拉夫布里俄尼岛对外国记者的谈话。",
       "source": {
         "format": "wikisource",
-        "path": "/home/grass/frontend/docs/nine-commentaries-8-zhwikisource.html",
+        "path": "${FRONTEND_DIR}/docs/nine-commentaries-8-zhwikisource.html",
         "sha256": "9cb2bfd29b370e372c20f8630e58440864c6650e78ad17bd5e294326de4bc49f"
       },
       "register": "한다체. 당 기관지 편집부 명의로 발표된 논쟁문이다. '~이다/~한다'로 옮기고 경어체를 쓰지 않는다. 다만 「우리는 …라고 생각한다」처럼 필자가 스스로를 가리키는 1인칭 복수는 그대로 살린다. 표기 규칙: (1) 인용문에는 굽은 따옴표(“…”)를 쓰고, 신문·잡지·단행본 이름은 겹화살괄호(《인민일보》)로, 사설·논문·문건·성명의 이름은 홑낫표(「소련공산당 중앙위원회 공개서한」)로 옮긴다. (2) 원문의 동그라미 숫자와 （注一）같은 주 번호는 그 자리에 그대로 둔다. (3) 인용한 마르크스·레닌 저작의 권수와 쪽수는 원문 그대로 옮긴다. (4) 중국 인명은 처음 나올 때만 괄호에 한자를 병기하고, 러시아어·유럽 인명에는 한자를 병기하지 않는다."
@@ -363,7 +363,7 @@
       "endsWith": "⑦⑩ 毛泽东：一九六三年五月九日对《浙江省七个关于干部参加劳动的好材料》的批语。",
       "source": {
         "format": "wikisource",
-        "path": "/home/grass/frontend/docs/nine-commentaries-9-zhwikisource.html",
+        "path": "${FRONTEND_DIR}/docs/nine-commentaries-9-zhwikisource.html",
         "sha256": "495cabdf8e00142f6970e327f085dabe5541de484fc86ba53af1a77c98e1d9fe"
       },
       "register": "한다체. 당 기관지 편집부 명의로 발표된 논쟁문이다. '~이다/~한다'로 옮기고 경어체를 쓰지 않는다. 다만 「우리는 …라고 생각한다」처럼 필자가 스스로를 가리키는 1인칭 복수는 그대로 살린다. 표기 규칙: (1) 인용문에는 굽은 따옴표(“…”)를 쓰고, 신문·잡지·단행본 이름은 겹화살괄호(《인민일보》)로, 사설·논문·문건·성명의 이름은 홑낫표(「소련공산당 중앙위원회 공개서한」)로 옮긴다. (2) 원문의 동그라미 숫자와 （注一）같은 주 번호는 그 자리에 그대로 둔다. (3) 인용한 마르크스·레닌 저작의 권수와 쪽수는 원문 그대로 옮긴다. (4) 중국 인명은 처음 나올 때만 괄호에 한자를 병기하고, 러시아어·유럽 인명에는 한자를 병기하지 않는다."

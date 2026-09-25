@@ -11,10 +11,10 @@
     "번역 저본: 국무부 역사국(history.state.gov) 전자판"
   ],
   "sourceLang": "en",
-  "output": "/home/grass/frontend/data/commulingo/docs/berlin-wall-1961-us-documents.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/berlin-wall-1961-us-documents.html",
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "exclude": [
       "First",
       "Soviet"
@@ -113,7 +113,7 @@
           "a.tei-pb1",
           "a.note"
         ],
-        "path": "/home/grass/frontend/docs/frus-xiv-berlin-doc105.html",
+        "path": "${FRONTEND_DIR}/docs/frus-xiv-berlin-doc105.html",
         "sha256": "621d8f967786a3d959c3a2770909eb1ea320c07294008ce300b5e8858986d278"
       },
       "blocks": [
@@ -139,7 +139,7 @@
           "a.tei-pb1",
           "a.note"
         ],
-        "path": "/home/grass/frontend/docs/frus-xiv-berlin-doc194.html",
+        "path": "${FRONTEND_DIR}/docs/frus-xiv-berlin-doc194.html",
         "sha256": "b6758247b42f12520a22ac0b28f80cd96efb6e0bf61ca3ec0720063290c4e13f"
       },
       "blocks": [
@@ -165,7 +165,7 @@
           "a.tei-pb1",
           "a.note"
         ],
-        "path": "/home/grass/frontend/docs/frus-xiv-berlin-doc195.html",
+        "path": "${FRONTEND_DIR}/docs/frus-xiv-berlin-doc195.html",
         "sha256": "8ece073cea907a1f57f7e888fa0b8698693bc7213e1a0cfd328f47f35a2dddea"
       },
       "blocks": [
@@ -191,7 +191,7 @@
           "a.tei-pb1",
           "a.note"
         ],
-        "path": "/home/grass/frontend/docs/frus-xiv-berlin-doc197.html",
+        "path": "${FRONTEND_DIR}/docs/frus-xiv-berlin-doc197.html",
         "sha256": "d6207e3474cb4c1979577c2f29efdf6d840ac72aad157bbc98e460e509132ce5"
       },
       "blocks": [

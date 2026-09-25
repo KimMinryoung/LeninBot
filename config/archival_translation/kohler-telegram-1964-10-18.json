@@ -11,10 +11,10 @@
     "번역 저본: 국무부 역사국(history.state.gov) 전자판. 미국 정부 저작물로 퍼블릭 도메인이다"
   ],
   "sourceLang": "en",
-  "output": "/home/grass/frontend/data/commulingo/docs/kohler-telegram-1964-10-18.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/kohler-telegram-1964-10-18.html",
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "Khrushchev": "흐루쇼프",
       "Brezhnev": "브레즈네프",
@@ -72,7 +72,7 @@
           "a.tei-pb1",
           "a.note"
         ],
-        "path": "/home/grass/frontend/docs/kohler-cable-1964-10-18-frus.html",
+        "path": "${FRONTEND_DIR}/docs/kohler-cable-1964-10-18-frus.html",
         "sha256": "e7af161c3db9b66fbd2029e068be88e5edbf36e053555fe6665c40f9e815b3a5"
       },
       "blocks": [

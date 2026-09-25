@@ -11,8 +11,8 @@
     "번역 저본: docs.cntd.ru 전자판. 국가 간 조약으로 저작권 보호 대상이 아니다"
   ],
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "стратегические наступательные вооружения": "전략 공격 무기",
       "стратегических наступательных вооружений": "전략 공격 무기",
@@ -53,7 +53,7 @@
       "source": {
         "format": "html",
         "selector": "#textContainer1",
-        "path": "/home/grass/frontend/docs/salt1-interim-1972-cntd-webarchive.html",
+        "path": "${FRONTEND_DIR}/docs/salt1-interim-1972-cntd-webarchive.html",
         "sha256": "738db2d78fb5992cfd53a7591933a858d76cdd7ee099dff8ec4d3af96a89a3be"
       },
       "blocks": [
@@ -76,7 +76,7 @@
       "source": {
         "format": "html",
         "selector": "#textContainer1",
-        "path": "/home/grass/frontend/docs/pnw-agreement-1973-cntd-webarchive.html",
+        "path": "${FRONTEND_DIR}/docs/pnw-agreement-1973-cntd-webarchive.html",
         "sha256": "96ccfd95b84037e54568e7b164e1c0ba2a26af4f4d298046bb58ff64a0c96150"
       },
       "blocks": [
@@ -92,7 +92,7 @@
       }
     }
   ],
-  "output": "/home/grass/frontend/data/commulingo/docs/detente-agreements-1972-1973.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/detente-agreements-1972-1973.html",
   "quotes": "curly",
   "frozen": "2026-09-01 카터-버드 서한(1980)이 merge-staging에서 HTML로 병합돼 있어 run()/--reassemble 모두 발행본에서 그 절을 날린다. 손질은 HTML 직접 편집으로."
 }

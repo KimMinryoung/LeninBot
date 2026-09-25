@@ -11,10 +11,10 @@
     "원제: CLNAI–Comando generale del CVL, «Arrendersi o perire!» (19 aprile 1945); CLNAI, Direttive per l'insurrezione nazionale, n. 1 (21 aprile 1945); Appello radiofonico di Sandro Pertini, Radio Milano Libertà (25 aprile 1945)",
     "번역 저본: 지침은 Centro studi della Resistenza(storiaxxisecolo.it) 전자판, 포고와 방송은 이탈리아어 위키백과 「Arrendersi o perire!」 항목의 인용 전문. 민족해방위원회의 공개 포고·지침으로 저작권 보호 대상이 아니다"
   ],
-  "output": "/home/grass/frontend/data/commulingo/docs/clnai-insurrection-documents-1945.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/clnai-insurrection-documents-1945.html",
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "exclude": [],
     "extra": {
       "Comitato di liberazione nazionale Alta Italia": "북이탈리아 민족해방위원회",
@@ -82,7 +82,7 @@
       "source": {
         "format": "html",
         "selector": "div#doc",
-        "path": "/home/grass/frontend/docs/clnai-insurrection-documents-1945-prepared.html",
+        "path": "${FRONTEND_DIR}/docs/clnai-insurrection-documents-1945-prepared.html",
         "sha256": "3b24d5964df1ae14bd1ab99e360ac250a614f0cca4d93604b5df6c1cbe419a76"
       },
       "blocks": [
@@ -104,7 +104,7 @@
       "source": {
         "format": "html",
         "selector": "div#doc",
-        "path": "/home/grass/frontend/docs/clnai-insurrection-documents-1945-prepared.html",
+        "path": "${FRONTEND_DIR}/docs/clnai-insurrection-documents-1945-prepared.html",
         "sha256": "3b24d5964df1ae14bd1ab99e360ac250a614f0cca4d93604b5df6c1cbe419a76"
       },
       "blocks": [
@@ -126,7 +126,7 @@
       "source": {
         "format": "html",
         "selector": "div#doc",
-        "path": "/home/grass/frontend/docs/clnai-insurrection-documents-1945-prepared.html",
+        "path": "${FRONTEND_DIR}/docs/clnai-insurrection-documents-1945-prepared.html",
         "sha256": "3b24d5964df1ae14bd1ab99e360ac250a614f0cca4d93604b5df6c1cbe419a76"
       },
       "blocks": [

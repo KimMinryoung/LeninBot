@@ -17,12 +17,12 @@
   ],
   "source": {
     "format": "wikisource",
-    "path": "/home/grass/frontend/docs/stavka-directive-170703-1942-wikisource.html",
+    "path": "${FRONTEND_DIR}/docs/stavka-directive-170703-1942-wikisource.html",
     "sha256": "16aa56c0499dbaa69ab6959e8df379c99f63628caca129a54cc9fcfea7e73408"
   },
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "Ставка Верховного Главнокомандования": "최고사령부",
       "Волховский фронт": "볼호프 방면군",
@@ -45,7 +45,7 @@
       "блокада Ленинграда": "레닌그라드 봉쇄"
     }
   },
-  "output": "/home/grass/frontend/data/commulingo/docs/stavka-directive-170703-1942.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/stavka-directive-170703-1942.html",
   "allowedCyrillic": [
     "ЦАМО"
   ],

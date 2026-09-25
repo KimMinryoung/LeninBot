@@ -13,8 +13,8 @@
     "번역 저본: documentarchiv.de 전자판. 헌법 조문으로 저작권 보호 대상이 아니다"
   ],
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "Grundgesetz": "기본법",
       "Grundgesetzes": "기본법",
@@ -152,7 +152,7 @@
     "게센": "헤센"
   },
   "quotes": "curly",
-  "output": "/home/grass/frontend/data/commulingo/docs/german-constitutions-1949.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/german-constitutions-1949.html",
   "documents": [
     {
       "id": "grundgesetz",
@@ -162,7 +162,7 @@
       "source": {
         "format": "html",
         "selector": "td",
-        "path": "/home/grass/frontend/docs/grundgesetz-1949-documentarchiv.html",
+        "path": "${FRONTEND_DIR}/docs/grundgesetz-1949-documentarchiv.html",
         "sha256": "173d68439ec86f61a74a51ebabcf1d5061bac95f4ea9a2ef4133edb7c51fc4c0",
         "nth": 2
       },
@@ -182,7 +182,7 @@
       "source": {
         "format": "html",
         "selector": "td",
-        "path": "/home/grass/frontend/docs/ddr-verfassung-1949-documentarchiv.html",
+        "path": "${FRONTEND_DIR}/docs/ddr-verfassung-1949-documentarchiv.html",
         "sha256": "60865577b147e87aa0b42760453b24b54794758769c389b179dfc6fe17de53c6",
         "nth": 2
       },
@@ -202,7 +202,7 @@
       "source": {
         "format": "html",
         "selector": "td",
-        "path": "/home/grass/frontend/docs/ddr-verfassung-1949-documentarchiv.html",
+        "path": "${FRONTEND_DIR}/docs/ddr-verfassung-1949-documentarchiv.html",
         "sha256": "60865577b147e87aa0b42760453b24b54794758769c389b179dfc6fe17de53c6",
         "nth": 2
       },

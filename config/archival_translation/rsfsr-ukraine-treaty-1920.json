@@ -18,12 +18,12 @@
   ],
   "source": {
     "format": "marxists",
-    "path": "/home/grass/frontend/docs/rsfsr-ukraine-1920-istmat.html",
+    "path": "${FRONTEND_DIR}/docs/rsfsr-ukraine-1920-istmat.html",
     "sha256": "240ec51a0fd7823f0df623370374e42ab8823c6c3b41f8b0c3dac28c01527ad5"
   },
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "Совет Народных Комиссаров": "인민위원회의",
       "Народный Комиссариат": "인민위원부",
@@ -37,7 +37,7 @@
       "уполномоченные": "전권대표"
     }
   },
-  "output": "/home/grass/frontend/data/commulingo/docs/rsfsr-ukraine-treaty-1920.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/rsfsr-ukraine-treaty-1920.html",
   "allowedCyrillic": [],
   "postEdits": {},
   "documents": [

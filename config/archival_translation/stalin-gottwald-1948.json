@@ -19,12 +19,12 @@
   "source": {
     "format": "html",
     "selector": "body",
-    "path": "/home/grass/frontend/docs/stalin-gottwald-1948-grachev62.html",
+    "path": "${FRONTEND_DIR}/docs/stalin-gottwald-1948-grachev62.html",
     "sha256": "6c443a66de0fcef0372ce8d50fac1efe1c69f9fb8588051007ff77c454c9c73d"
   },
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "Готвальд": "고트발트",
       "Готвальду": "고트발트",
@@ -43,7 +43,7 @@
       "Ред.": "편집자 주"
     }
   },
-  "output": "/home/grass/frontend/data/commulingo/docs/stalin-gottwald-1948.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/stalin-gottwald-1948.html",
   "allowedCyrillic": [],
   "postEdits": {},
   "documents": [

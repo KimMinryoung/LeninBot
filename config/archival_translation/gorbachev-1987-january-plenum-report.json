@@ -19,13 +19,13 @@
       "h4",
       "hr"
     ],
-    "path": "/home/grass/frontend/docs/gorbachev-plenum-1987-01-27-uaio.html",
+    "path": "${FRONTEND_DIR}/docs/gorbachev-plenum-1987-01-27-uaio.html",
     "sha256": "c8a0c54000e4c3ea1c3066a0bde97c353e3628eec2d792b908bc80590c7faaf8"
   },
-  "output": "/home/grass/frontend/data/commulingo/docs/gorbachev-1987-january-plenum-report.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/gorbachev-1987-january-plenum-report.html",
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "Горбачев": "고르바초프",
       "Горбачёв": "고르바초프",
@@ -154,7 +154,7 @@
       "source": {
         "format": "html",
         "selector": "div#notes",
-        "path": "/home/grass/frontend/docs/gorbachev-plenum-1987-notes-prepared.html",
+        "path": "${FRONTEND_DIR}/docs/gorbachev-plenum-1987-notes-prepared.html",
         "sha256": "afb6b75cea54a1205f381a46e1bfe83f4dfcbe3f34e223ab7fbeacabb2e9dfa4"
       },
       "blocks": [

@@ -17,13 +17,13 @@
   ],
   "source": {
     "format": "militera",
-    "path": "/home/grass/frontend/docs/ВОЕННАЯ ЛИТЕРАТУРА --[ Биографии ]-- Полянский А. И. Ежов. История «железного» сталинского наркома.html",
+    "path": "${FRONTEND_DIR}/docs/ВОЕННАЯ ЛИТЕРАТУРА --[ Биографии ]-- Полянский А. И. Ежов. История «железного» сталинского наркома.html",
     "sha256": "1ad4cd0a090414093475083c30f5137ff49a130a630490c23449fff8da991e09",
     "anchor": "Приложения"
   },
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "НКВД": "내무인민위원부",
       "Наркомвнудел": "내무인민위원부",
@@ -47,7 +47,7 @@
       "Польская организация войсковая": "폴란드 군사조직"
     }
   },
-  "output": "/home/grass/frontend/data/commulingo/docs/nkvd-1937-documents.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/nkvd-1937-documents.html",
   "allowedCyrillic": [
     "ПОВ",
     "КН"

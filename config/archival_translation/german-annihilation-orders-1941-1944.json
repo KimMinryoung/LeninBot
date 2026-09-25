@@ -12,8 +12,8 @@
     "번역 저본: 9월 22일 지령은 fluchschrift.de 「Deutsche Verbrechen」 페이지의 인용, 9월 29일 명령은 zeno.org 수록 뉘른베르크 국제군사재판 기소장(기소 항목 3 E)의 인용, 힘러 연설은 deutscheundpolen.de 전자판 발췌. 지령과 명령은 국가기관의 공문서로 저작권 보호 대상이 아니며, 힘러 연설은 짧은 발췌다"
   ],
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "exclude": [],
     "extra": {
       "Der Führer": "총통",
@@ -54,7 +54,7 @@
     "평지로 만들 계획이다": "지표면과 같게 만들 계획이다"
   },
   "quotes": "curly",
-  "output": "/home/grass/frontend/data/commulingo/docs/german-annihilation-orders-1941-1944.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/german-annihilation-orders-1941-1944.html",
   "documents": [
     {
       "id": "weisung-1941-09-22",
@@ -64,7 +64,7 @@
       "source": {
         "format": "html",
         "selector": "div#doc",
-        "path": "/home/grass/frontend/docs/german-annihilation-orders-1941-1944-prepared.html",
+        "path": "${FRONTEND_DIR}/docs/german-annihilation-orders-1941-1944-prepared.html",
         "sha256": "f2bd8b8c96773dad43fc017ebdc86350281f6d5b5f64437331590a35d346295c"
       },
       "blocks": [
@@ -86,7 +86,7 @@
       "source": {
         "format": "html",
         "selector": "div#doc",
-        "path": "/home/grass/frontend/docs/german-annihilation-orders-1941-1944-prepared.html",
+        "path": "${FRONTEND_DIR}/docs/german-annihilation-orders-1941-1944-prepared.html",
         "sha256": "f2bd8b8c96773dad43fc017ebdc86350281f6d5b5f64437331590a35d346295c"
       },
       "blocks": [
@@ -108,7 +108,7 @@
       "source": {
         "format": "html",
         "selector": "div#doc",
-        "path": "/home/grass/frontend/docs/german-annihilation-orders-1941-1944-prepared.html",
+        "path": "${FRONTEND_DIR}/docs/german-annihilation-orders-1941-1944-prepared.html",
         "sha256": "f2bd8b8c96773dad43fc017ebdc86350281f6d5b5f64437331590a35d346295c"
       },
       "blocks": [

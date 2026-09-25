@@ -18,12 +18,12 @@
   ],
   "source": {
     "format": "wikisource",
-    "path": "/home/grass/frontend/docs/amnesty-1953-wikisource.html",
+    "path": "${FRONTEND_DIR}/docs/amnesty-1953-wikisource.html",
     "sha256": "04bd08d6b60fd98056517bea40a07cb5d76f40c6e68d344d1310551e24780cc9"
   },
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "места заключения": "수용 시설",
       "лишение свободы": "자유형",
@@ -38,7 +38,7 @@
       "Министерство юстиции СССР": "소련 법무부"
     }
   },
-  "output": "/home/grass/frontend/data/commulingo/docs/amnesty-1953.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/amnesty-1953.html",
   "allowedCyrillic": [],
   "postEdits": {},
   "documents": [

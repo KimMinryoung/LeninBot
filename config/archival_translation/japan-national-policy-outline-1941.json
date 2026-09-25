@@ -13,8 +13,8 @@
   ],
   "output": "/tmp/claude-1000/-home-grass-leninbot/a8e48d95-d1f7-4303-bbf0-4ae42e60a612/scratchpad/japan-national-policy-outline-1941.html",
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "exclude": [
       "First",
       "Soviet",
@@ -56,7 +56,7 @@
       "source": {
         "format": "html",
         "selector": "blockquote",
-        "path": "/home/grass/frontend/docs/japan-national-policy-outline-1941-ibiblio.html",
+        "path": "${FRONTEND_DIR}/docs/japan-national-policy-outline-1941-ibiblio.html",
         "sha256": "51f8c91496976aa3e228afa64818f1e736918fb716e3f405da3a070637863369"
       },
       "blocks": [

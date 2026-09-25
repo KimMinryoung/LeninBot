@@ -11,10 +11,10 @@
     "번역 저본: 예일 로스쿨 아발론 프로젝트 전자판. 미국 정부 간행물로 저작권 보호 대상이 아니다"
   ],
   "sourceLang": "en",
-  "output": "/home/grass/frontend/data/commulingo/docs/italy-surrender-instruments-1943-1945.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/italy-surrender-instruments-1943-1945.html",
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "United Nations": "연합국",
       "the United Nations": "연합국",
@@ -93,7 +93,7 @@
       "source": {
         "format": "html",
         "selector": "div.text-properties",
-        "path": "/home/grass/frontend/docs/cassibile-armistice-1943-avalon.html",
+        "path": "${FRONTEND_DIR}/docs/cassibile-armistice-1943-avalon.html",
         "sha256": "63edf35ad67844882878b9d0f4659f1e91f7d11bc3a3467758a0c51a3841cffe"
       },
       "blocks": [
@@ -115,7 +115,7 @@
       "source": {
         "format": "html",
         "selector": "div.text-properties",
-        "path": "/home/grass/frontend/docs/cassibile-armistice-1943-long-avalon.html",
+        "path": "${FRONTEND_DIR}/docs/cassibile-armistice-1943-long-avalon.html",
         "sha256": "dce81b26bab8b94c664fffc8bca06e3a6d8ac452ff3f3e1877339199ecf73972"
       },
       "blocks": [
@@ -137,7 +137,7 @@
       "source": {
         "format": "html",
         "selector": "div.text-properties",
-        "path": "/home/grass/frontend/docs/caserta-surrender-1945-avalon.html",
+        "path": "${FRONTEND_DIR}/docs/caserta-surrender-1945-avalon.html",
         "sha256": "5cdeaf824b0d2a82c2d321494d57f4c4221b2aa659f28abac9991b500c550dc8",
         "drop": [
           "a[href=\"#b1\"]"
@@ -159,7 +159,7 @@
       "source": {
         "format": "html",
         "selector": "div.text-properties",
-        "path": "/home/grass/frontend/docs/caserta-surrender-1945-avalon.html",
+        "path": "${FRONTEND_DIR}/docs/caserta-surrender-1945-avalon.html",
         "sha256": "5cdeaf824b0d2a82c2d321494d57f4c4221b2aa659f28abac9991b500c550dc8",
         "drop": [
           "a[href=\"#b1\"]"

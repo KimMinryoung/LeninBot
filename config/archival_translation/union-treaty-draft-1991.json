@@ -16,13 +16,13 @@
   "source": {
     "format": "html",
     "selector": "article.publication__content",
-    "path": "/home/grass/frontend/docs/union-treaty-draft-1991-diletant.html",
+    "path": "${FRONTEND_DIR}/docs/union-treaty-draft-1991-diletant.html",
     "sha256": "de5ed306f6926c40a4609eecf8627d96432237a4bcce97d6cc4f1afabdd2403e"
   },
   "output": "/tmp/claude-1000/-home-grass-leninbot/36aa101b-8094-42b9-b410-8a35560af073/scratchpad/union-treaty-draft-1991.html",
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "Горбачев": "고르바초프",
       "Горбачёв": "고르바초프",

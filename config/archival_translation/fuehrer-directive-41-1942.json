@@ -12,8 +12,8 @@
     "번역 저본: der-fuehrer.org 전자판. 군 지령은 공문서로 저작권 보호 대상이 아니다"
   ],
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "Führerhauptquartier": "총통 사령부",
       "Der Führer und Oberste Befehlshaber der Wehrmacht": "총통 겸 국방군 최고사령관",
@@ -133,7 +133,7 @@
     "지령 Nr. 41": "지령 제41호"
   },
   "quotes": "curly",
-  "output": "/home/grass/frontend/data/commulingo/docs/fuehrer-directive-41-1942.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/fuehrer-directive-41-1942.html",
   "documents": [
     {
       "id": "weisung-41",
@@ -143,7 +143,7 @@
       "source": {
         "format": "html",
         "selector": "table#table1 td",
-        "path": "/home/grass/frontend/docs/weisung-41-1942-der-fuehrer.html",
+        "path": "${FRONTEND_DIR}/docs/weisung-41-1942-der-fuehrer.html",
         "sha256": "7f249deaa89fbc988a1a2177463ba606876d983b8d1fab462cd44b23ce4921aa"
       },
       "blocks": [

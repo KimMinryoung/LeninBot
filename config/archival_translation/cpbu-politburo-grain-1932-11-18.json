@@ -17,13 +17,13 @@
   ],
   "source": {
     "format": "wikisource",
-    "path": "/home/grass/frontend/docs/cpbu-politburo-1932-11-18-wikisource.html",
+    "path": "${FRONTEND_DIR}/docs/cpbu-politburo-1932-11-18-wikisource.html",
     "sha256": "6a4463c4b3de1f32e8914e632250e0d4048915077fe2be1b6d099f182e9f7a22"
   },
   "output": "/tmp/claude-1000/-home-grass-leninbot/36aa101b-8094-42b9-b410-8a35560af073/scratchpad/cpbu-politburo-grain-1932-11-18.html",
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "ЦК КП(б)У": "우크라이나 공산당(볼셰비키) 중앙위원회",
       "КП(б)У": "우크라이나 공산당(볼셰비키)",

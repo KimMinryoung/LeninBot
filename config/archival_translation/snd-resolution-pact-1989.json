@@ -17,12 +17,12 @@
   ],
   "source": {
     "format": "wikisource",
-    "path": "/home/grass/frontend/docs/snd-resolution-pact-1989-wikisource.html",
+    "path": "${FRONTEND_DIR}/docs/snd-resolution-pact-1989-wikisource.html",
     "sha256": "5af8e91246a04aa6a0986d1b933a4a20b4e2f777534d7408359b5010a93f2bd3"
   },
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "Съезд народных депутатов СССР": "소련 인민대표대회",
       "Съезда народных депутатов СССР": "소련 인민대표대회",
@@ -46,7 +46,7 @@
       "недействительными с момента их подписания": "서명한 순간부터 효력이 없는"
     }
   },
-  "output": "/home/grass/frontend/data/commulingo/docs/snd-resolution-pact-1989.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/snd-resolution-pact-1989.html",
   "allowedCyrillic": [],
   "postEdits": {
     "[ВТ 1]": "",

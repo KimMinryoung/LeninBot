@@ -11,10 +11,10 @@
     "원제: Treaty Between the United States of America and the Union of Soviet Socialist Republics on the Limitation of Strategic Offensive Arms, Together with Agreed Statements and Common Understandings Regarding the Treaty; Protocol to the Treaty; Joint Statement of Principles and Basic Guidelines for Subsequent Negotiations on the Limitation of Strategic Arms; Soviet Backfire Statement — Vienna, June 18, 1979 (U.S. Department of State)",
     "번역 저본: 미국과학자연맹(FAS) 전자판(nuke.fas.org/control/salt2/text). 미국 정부의 조약 공식 텍스트로 저작권 보호 대상이 아니다"
   ],
-  "output": "/home/grass/frontend/data/commulingo/docs/salt-ii-treaty-1979.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/salt-ii-treaty-1979.html",
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "exclude": [
       "First",
       "Soviet",
@@ -131,7 +131,7 @@
       "source": {
         "format": "html",
         "selector": "div#doc",
-        "path": "/home/grass/frontend/docs/salt-ii-1979-prepared.html",
+        "path": "${FRONTEND_DIR}/docs/salt-ii-1979-prepared.html",
         "sha256": "29d15e94ab8f7b9f623ab24d91a810435a5d0f763ad66064a191210f7d2fd26f"
       },
       "blocks": [
@@ -153,7 +153,7 @@
       "source": {
         "format": "html",
         "selector": "div#doc",
-        "path": "/home/grass/frontend/docs/salt-ii-1979-prepared.html",
+        "path": "${FRONTEND_DIR}/docs/salt-ii-1979-prepared.html",
         "sha256": "29d15e94ab8f7b9f623ab24d91a810435a5d0f763ad66064a191210f7d2fd26f"
       },
       "blocks": [
@@ -175,7 +175,7 @@
       "source": {
         "format": "html",
         "selector": "div#doc",
-        "path": "/home/grass/frontend/docs/salt-ii-1979-prepared.html",
+        "path": "${FRONTEND_DIR}/docs/salt-ii-1979-prepared.html",
         "sha256": "29d15e94ab8f7b9f623ab24d91a810435a5d0f763ad66064a191210f7d2fd26f"
       },
       "blocks": [
@@ -197,7 +197,7 @@
       "source": {
         "format": "html",
         "selector": "div#doc",
-        "path": "/home/grass/frontend/docs/salt-ii-1979-prepared.html",
+        "path": "${FRONTEND_DIR}/docs/salt-ii-1979-prepared.html",
         "sha256": "29d15e94ab8f7b9f623ab24d91a810435a5d0f763ad66064a191210f7d2fd26f"
       },
       "blocks": [

@@ -12,12 +12,12 @@
   ],
   "source": {
     "format": "wikisource",
-    "path": "/home/grass/frontend/docs/lenin-april-theses-wikisource.html",
+    "path": "${FRONTEND_DIR}/docs/lenin-april-theses-wikisource.html",
     "sha256": "1b6f785a168f39af7a5213ba687883bda09294f772e3fae8ff9fc158113f8960"
   },
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "Совет рабочих депутатов": "노동자 대표 소비에트",
       "С. Р. Д.": "노동자 대표 소비에트",
@@ -47,7 +47,7 @@
       "Русская Воля": "「루스카야 볼랴」"
     }
   },
-  "output": "/home/grass/frontend/data/commulingo/docs/lenin-april-theses.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/lenin-april-theses.html",
   "allowedCyrillic": [],
   "postEdits": {
     "↑ ": "",

@@ -16,12 +16,12 @@
   ],
   "source": {
     "format": "wikisource",
-    "path": "/home/grass/frontend/docs/comintern-21-conditions-wikisource.html",
+    "path": "${FRONTEND_DIR}/docs/comintern-21-conditions-wikisource.html",
     "sha256": "004b01a50e5db58ab468b8be3c72d8c0e4d091605b66c3ad4908f7b13b6c2d76"
   },
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "Коммунистический Интернационал": "공산주의 인터내셔널",
       "Коммунистического Интернационала": "공산주의 인터내셔널",
@@ -60,7 +60,7 @@
       "угнетенные национальности": "억압받는 민족"
     }
   },
-  "output": "/home/grass/frontend/data/commulingo/docs/comintern-21-conditions.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/comintern-21-conditions.html",
   "allowedCyrillic": [],
   "postEdits": {
     "개혁주의": "개량주의",

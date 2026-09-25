@@ -11,8 +11,8 @@
     "번역 저본: hrono.ru 「역사 사료」 전자판. 국가기관의 공식 기록으로 저작권 보호 대상이 아니다"
   ],
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "Президиум ЦК КПСС": "소련공산당 중앙위원회 간부회",
       "Президиум ЦК": "중앙위원회 간부회",
@@ -147,7 +147,7 @@
       "source": {
         "format": "html",
         "selector": "td[valign=\"top\"][align=\"left\"]",
-        "path": "/home/grass/frontend/docs/mikoyan-hungary-1956-07-14-prepared.html",
+        "path": "${FRONTEND_DIR}/docs/mikoyan-hungary-1956-07-14-prepared.html",
         "sha256": "286206487cd11fd21f8e20f93864647025e219ba32e4d0a6d18d9289d54b524d"
       },
       "blocks": [
@@ -171,7 +171,7 @@
       "source": {
         "format": "html",
         "selector": "td[valign=\"top\"][align=\"left\"]",
-        "path": "/home/grass/frontend/docs/presidium-1956-10-23-prepared.html",
+        "path": "${FRONTEND_DIR}/docs/presidium-1956-10-23-prepared.html",
         "sha256": "717dd2d2720f07c42156a17578a342649c8c593a420a20a3b59e76656f11759e"
       },
       "blocks": [
@@ -195,7 +195,7 @@
       "source": {
         "format": "html",
         "selector": "td[valign=\"top\"][align=\"left\"]",
-        "path": "/home/grass/frontend/docs/presidium-1956-10-30-prepared.html",
+        "path": "${FRONTEND_DIR}/docs/presidium-1956-10-30-prepared.html",
         "sha256": "437ba53669a08afd2100c9aea845d0ea716a3a8628839808879e5a4e6c098fbb"
       },
       "blocks": [
@@ -219,7 +219,7 @@
       "source": {
         "format": "html",
         "selector": "td[valign=\"top\"][align=\"left\"]",
-        "path": "/home/grass/frontend/docs/presidium-1956-10-31-prepared.html",
+        "path": "${FRONTEND_DIR}/docs/presidium-1956-10-31-prepared.html",
         "sha256": "d6a2587b8a756aba63c751f0cc2548c7cb0fb78cc35f1a6bb4496dfa216b87cf"
       },
       "blocks": [
@@ -243,7 +243,7 @@
       "source": {
         "format": "html",
         "selector": "td[valign=\"top\"][align=\"left\"]",
-        "path": "/home/grass/frontend/docs/presidium-resolution-1956-10-31-prepared.html",
+        "path": "${FRONTEND_DIR}/docs/presidium-resolution-1956-10-31-prepared.html",
         "sha256": "68a405cb786dd6104e064504fa56f31d73001681371570f009bd9e8cbc6ba382"
       },
       "blocks": [
@@ -267,7 +267,7 @@
       "source": {
         "format": "html",
         "selector": "td[valign=\"top\"][align=\"left\"]",
-        "path": "/home/grass/frontend/docs/presidium-1956-11-02-prepared.html",
+        "path": "${FRONTEND_DIR}/docs/presidium-1956-11-02-prepared.html",
         "sha256": "30b832c8c48c203f355a69b77f8f5b541d26f669c6afe789ae5c6369ecbae290"
       },
       "blocks": [
@@ -291,7 +291,7 @@
       "source": {
         "format": "html",
         "selector": "td[valign=\"top\"][align=\"left\"]",
-        "path": "/home/grass/frontend/docs/presidium-1956-11-03-prepared.html",
+        "path": "${FRONTEND_DIR}/docs/presidium-1956-11-03-prepared.html",
         "sha256": "7e213383dc184b0980162858428e421f6dabe5b3c36ae19aa6c160317e2ac0ca"
       },
       "blocks": [
@@ -309,6 +309,6 @@
       "band": 6
     }
   ],
-  "output": "/home/grass/frontend/data/commulingo/docs/hungary-1956-presidium-documents.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/hungary-1956-presidium-documents.html",
   "quotes": "curly"
 }

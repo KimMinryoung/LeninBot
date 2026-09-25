@@ -18,12 +18,12 @@
   "source": {
     "format": "html",
     "selector": "body",
-    "path": "/home/grass/frontend/docs/vedomosti-snd-1989-29.html",
+    "path": "${FRONTEND_DIR}/docs/vedomosti-snd-1989-29.html",
     "sha256": "d176be1ed7da33dd4db52ed1b85011c5a9b0cedea2459ae8f25ff7c08c5c86a8"
   },
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "Съезд народных депутатов СССР": "소련 인민대표대회",
       "Съезда народных депутатов": "인민대표대회",
@@ -46,7 +46,7 @@
       "ГОРБАЧЕВ": "고르바초프"
     }
   },
-  "output": "/home/grass/frontend/data/commulingo/docs/snd-resolution-afghanistan-1989.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/snd-resolution-afghanistan-1989.html",
   "allowedCyrillic": [],
   "postEdits": {},
   "documents": [

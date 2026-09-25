@@ -11,10 +11,10 @@
     "원본: Ведомости Верховного Совета СССР, 1988, № 26, ст. 425; 영어·러시아어 정본 동등",
     "번역 저본: ru.wikisource 전자판. 국가 간 공식 문서로 저작권 보호 대상이 아니다"
   ],
-  "output": "/home/grass/frontend/data/commulingo/docs/inf-treaty-1987.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/inf-treaty-1987.html",
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "ракеты средней дальности": "중거리 미사일",
       "ракет средней дальности": "중거리 미사일",
@@ -97,7 +97,7 @@
           "table",
           "#catlinks"
         ],
-        "path": "/home/grass/frontend/docs/inf-treaty-1987-ruwikisource.html",
+        "path": "${FRONTEND_DIR}/docs/inf-treaty-1987-ruwikisource.html",
         "sha256": "95c7a3eb7cfef0c03e3816bbff816ce360d718061aa981c797de9dff80c93314"
       },
       "blocks": [

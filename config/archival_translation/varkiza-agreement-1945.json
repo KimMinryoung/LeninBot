@@ -11,10 +11,10 @@
     "번역 저본: 국무부 역사국(history.state.gov) 전자판. 퍼블릭 도메인"
   ],
   "sourceLang": "en",
-  "output": "/home/grass/frontend/data/commulingo/docs/varkiza-agreement-1945.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/varkiza-agreement-1945.html",
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "EAM": "민족해방전선(EAM)",
       "ELAS": "그리스 인민해방군(ELAS)",
@@ -79,7 +79,7 @@
           "a.tei-pb1",
           "a.note"
         ],
-        "path": "/home/grass/frontend/docs/varkiza-agreement-1945-frus.html",
+        "path": "${FRONTEND_DIR}/docs/varkiza-agreement-1945-frus.html",
         "sha256": "b68319d85ddfb712350b997d5f5af097329e7755ed450b0fe9a79e24987f707a"
       },
       "blocks": [

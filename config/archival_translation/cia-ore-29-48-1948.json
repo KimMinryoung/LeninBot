@@ -11,10 +11,10 @@
     "번역 저본: archive.org 미러의 텍스트층. 미국 정부 저작물로 저작권 보호 대상이 아니다"
   ],
   "sourceLang": "en",
-  "output": "/home/grass/frontend/data/commulingo/docs/cia-ore-29-48-1948.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/cia-ore-29-48-1948.html",
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "USSR": "소련",
       "Soviet Union": "소련",
@@ -63,7 +63,7 @@
       "source": {
         "format": "html",
         "selector": "div#ore-29-48",
-        "path": "/home/grass/frontend/docs/cia-ore-29-48-prepared.html",
+        "path": "${FRONTEND_DIR}/docs/cia-ore-29-48-prepared.html",
         "sha256": "2376035a673589ba2143959305303f0f495a404e2b875f469eca93ad2f202ca4"
       },
       "blocks": [

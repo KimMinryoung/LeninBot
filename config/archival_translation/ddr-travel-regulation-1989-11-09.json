@@ -12,8 +12,8 @@
     "번역 저본: chronik-der-mauer.de 전자판. 공문서로 저작권 보호 대상이 아니다"
   ],
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "Ministerrat": "각료회의",
       "Ministerrates": "각료회의",
@@ -63,7 +63,7 @@
   "allowedCyrillic": [],
   "postEdits": {},
   "quotes": "curly",
-  "output": "/home/grass/frontend/data/commulingo/docs/ddr-travel-regulation-1989-11-09.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/ddr-travel-regulation-1989-11-09.html",
   "documents": [
     {
       "id": "regelung",
@@ -73,7 +73,7 @@
       "source": {
         "format": "html",
         "selector": "div#content > div.article",
-        "path": "/home/grass/frontend/docs/ddr-reiseregelung-1989-11-09-chronik-der-mauer.html",
+        "path": "${FRONTEND_DIR}/docs/ddr-reiseregelung-1989-11-09-chronik-der-mauer.html",
         "sha256": "77fcbd92e085be566684e313d00f80be191d44749de74223400a1c8834c93515"
       },
       "blocks": [

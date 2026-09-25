@@ -12,12 +12,12 @@
   ],
   "source": {
     "format": "wikisource",
-    "path": "/home/grass/frontend/docs/dimitrov-1935-report-wikisource.html",
+    "path": "${FRONTEND_DIR}/docs/dimitrov-1935-report-wikisource.html",
     "sha256": "3a0b25cc36ae2a56b3bd13b8b183674cae6a9c1e8f58d48fb54bc8903b0e0395"
   },
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "Коммунистический Интернационал": "공산주의 인터내셔널",
       "Коммунистического Интернационала": "공산주의 인터내셔널",
@@ -136,7 +136,7 @@
       "Красный Веддинг": "붉은 베딩"
     }
   },
-  "output": "/home/grass/frontend/data/commulingo/docs/dimitrov-7th-congress-1935.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/dimitrov-7th-congress-1935.html",
   "allowedCyrillic": [],
   "postEdits": {
     "혁명투사원호국제기구(MOPR, Международная организация помощи борцам революции)": "국제혁명투사구원회(모프르)",

@@ -11,10 +11,10 @@
     "번역 저본: 국무부 역사국 FRUS 전자판. 미국 정부 저작물로 저작권 보호 대상이 아니다"
   ],
   "sourceLang": "en",
-  "output": "/home/grass/frontend/data/commulingo/docs/marshall-plan-memoranda-1947.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/marshall-plan-memoranda-1947.html",
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "Policy Planning Staff": "정책기획실",
       "Planning Staff": "기획실",
@@ -96,7 +96,7 @@
           "a.tei-pb1",
           "a.note"
         ],
-        "path": "/home/grass/frontend/docs/kennan-pps1-1947-05-23-frus.html",
+        "path": "${FRONTEND_DIR}/docs/kennan-pps1-1947-05-23-frus.html",
         "sha256": "9e1d333a13ecab4bf07c08e9f8d6c76f645041ac9527e796c7d13b48b27720ea"
       },
       "blocks": [
@@ -122,7 +122,7 @@
           "a.tei-pb1",
           "a.note"
         ],
-        "path": "/home/grass/frontend/docs/clayton-memo-1947-05-27-frus.html",
+        "path": "${FRONTEND_DIR}/docs/clayton-memo-1947-05-27-frus.html",
         "sha256": "f4eef0eb43f8761faa9deaaf0da6355338b62d8d4e78e60d8f1beadc586165ea"
       },
       "blocks": [

@@ -13,12 +13,12 @@
   "source": {
     "format": "html",
     "selector": "td[valign=\"top\"][align=\"left\"]",
-    "path": "/home/grass/frontend/docs/provgov-journal-129-1917-hrono.html",
+    "path": "${FRONTEND_DIR}/docs/provgov-journal-129-1917-hrono.html",
     "sha256": "fcbc3bade29dcfe9346fe0fce6fc7b6000e5469d4fa4d1dc3c5f36406a7c3751"
   },
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "Временное правительство": "임시정부",
       "Временного правительства": "임시정부",
@@ -46,7 +46,7 @@
       "предварительное следствие": "예심"
     }
   },
-  "output": "/home/grass/frontend/data/commulingo/docs/provisional-government-death-penalty-1917.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/provisional-government-death-penalty-1917.html",
   "allowedCyrillic": [],
   "postEdits": {
     "제청4.": "제청.",

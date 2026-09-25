@@ -34,6 +34,25 @@ CONTRACT_FILES = (
 
 _warned_vendored = False
 
+# Checked-in configs name files under these roots as ``${NAME}/...`` so they
+# stay valid on any host; ``expand_path_tokens`` resolves them at load time.
+_PATH_TOKENS = {"${FRONTEND_DIR}": FRONTEND_DIR, "${PROJECT_ROOT}": PROJECT_ROOT}
+
+
+def expand_path_tokens(value):
+    """Resolve a leading ``${FRONTEND_DIR}``/``${PROJECT_ROOT}`` in every string of
+    ``value`` (recursing through dicts and lists)."""
+    if isinstance(value, str):
+        for token, root in _PATH_TOKENS.items():
+            if value == token or value.startswith(token + "/"):
+                return str(root) + value[len(token):]
+        return value
+    if isinstance(value, dict):
+        return {k: expand_path_tokens(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [expand_path_tokens(v) for v in value]
+    return value
+
 
 def commulingo_data_file(name: str, env_var: str | None = None) -> Path:
     """Path of a frontend-owned CommuLingo data file, honoring ``env_var``."""

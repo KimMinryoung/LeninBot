@@ -33,6 +33,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
+from ops.paths import expand_path_tokens
+
 from . import sources
 
 logger = logging.getLogger(__name__)
@@ -428,7 +430,7 @@ def spec_path(spec_id: str) -> Path:
 
 def load_spec(spec_id: str) -> dict:
     try:
-        spec = json.loads(spec_path(spec_id).read_text(encoding="utf-8"))
+        spec = expand_path_tokens(json.loads(spec_path(spec_id).read_text(encoding="utf-8")))
     except json.JSONDecodeError as e:
         raise SpecError(f"{spec_id}: malformed JSON ({e})") from e
     for key in ("id", "title", "documents", "glossary", "output"):
@@ -453,7 +455,7 @@ def list_specs() -> list[dict]:
     out = []
     for path in sorted(SPEC_DIR.glob("*.json")):
         try:
-            spec = json.loads(path.read_text(encoding="utf-8"))
+            spec = expand_path_tokens(json.loads(path.read_text(encoding="utf-8")))
         except Exception as e:  # a broken spec should not hide the healthy ones
             out.append({"id": path.stem, "error": str(e)})
             continue

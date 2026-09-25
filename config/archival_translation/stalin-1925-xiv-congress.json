@@ -13,12 +13,12 @@
   ],
   "source": {
     "format": "marxists",
-    "path": "/home/grass/frontend/docs/stalin-1925-xiv-political-report-marxists.html",
+    "path": "${FRONTEND_DIR}/docs/stalin-1925-xiv-political-report-marxists.html",
     "sha256": "0ffc64dc263748ae9e13edeeb1deb30d2626fb838d90e5539417b348d5218ea0"
   },
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "XIV съезд": "제14차 당대회",
       "XIV съезда": "제14차 당대회",
@@ -129,7 +129,7 @@
       "Ильич": "일리치"
     }
   },
-  "output": "/home/grass/frontend/data/commulingo/docs/stalin-1925-xiv-congress.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/stalin-1925-xiv-congress.html",
   "allowedCyrillic": [
     "Политический",
     "отчет",
@@ -462,7 +462,7 @@
       "band": 1,
       "source": {
         "format": "marxists",
-        "path": "/home/grass/frontend/docs/stalin-1925-xiv-final-word-marxists.html",
+        "path": "${FRONTEND_DIR}/docs/stalin-1925-xiv-final-word-marxists.html",
         "sha256": "5197363566a69ddd8f6ec751a7be7034b1e96f1fae1a72d90939941e8c2452ed"
       },
       "blocks": [

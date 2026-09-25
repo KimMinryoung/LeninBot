@@ -18,13 +18,13 @@
   "source": {
     "format": "html",
     "selector": "div#doc",
-    "path": "/home/grass/frontend/docs/geneva-accords-1988-un-s19835.html",
+    "path": "${FRONTEND_DIR}/docs/geneva-accords-1988-un-s19835.html",
     "sha256": "38780ba94a3734c6c399defe8087ddaea8ddd4a97731158f08d7a1cfca6ea2f3"
   },
   "output": "/tmp/claude-1000/-home-grass-leninbot/36aa101b-8094-42b9-b410-8a35560af073/scratchpad/geneva-accords-1988.html",
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "Республика Афганистан": "아프가니스탄 공화국",
       "Республики Афганистан": "아프가니스탄 공화국",

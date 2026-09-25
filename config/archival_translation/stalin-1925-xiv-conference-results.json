@@ -12,13 +12,13 @@
   ],
   "source": {
     "format": "marxists",
-    "path": "/home/grass/frontend/docs/stalin-1925-xiv-conference-marxists.html",
+    "path": "${FRONTEND_DIR}/docs/stalin-1925-xiv-conference-marxists.html",
     "sha256": "dab7fef75fdbed1b2b29555881171494b5131a94aec6b13fd7dc8ecd3a54a48b"
   },
-  "output": "/home/grass/frontend/data/commulingo/docs/stalin-1925-xiv-conference-results.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/stalin-1925-xiv-conference-results.html",
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "ленинизм": "레닌주의",
       "ленинизма": "레닌주의",
@@ -195,7 +195,7 @@
       "source": {
         "format": "html",
         "selector": "div#notes",
-        "path": "/home/grass/frontend/docs/stalin-1925-xiv-conference-notes-grachev62.html",
+        "path": "${FRONTEND_DIR}/docs/stalin-1925-xiv-conference-notes-grachev62.html",
         "sha256": "fa9c30dffed462d5205e8d05230a5cdbffdbe7ad547e550ad54d2e06dffe27a6"
       },
       "blocks": [

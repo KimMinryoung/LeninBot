@@ -18,12 +18,12 @@
   "source": {
     "format": "html",
     "selector": "td[valign=\"top\"][align=\"left\"]",
-    "path": "/home/grass/frontend/docs/sto-kronstadt-1921-hrono.html",
+    "path": "${FRONTEND_DIR}/docs/sto-kronstadt-1921-hrono.html",
     "sha256": "c84336e125ca243aaaac1fc77e50abb1ba5fe0989944cbe9a80cf1d976616f08"
   },
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "Совет Труда и Обороны": "노동국방회의",
       "Совета Труда и Обороны": "노동국방회의",
@@ -50,7 +50,7 @@
       "Учредительного собрания": "제헌의회"
     }
   },
-  "output": "/home/grass/frontend/data/commulingo/docs/sto-kronstadt-statement-1921.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/sto-kronstadt-statement-1921.html",
   "allowedCyrillic": [],
   "postEdits": {
     "흑백파·사회주의자혁명가당": "흑백인조·사회주의자혁명가당",

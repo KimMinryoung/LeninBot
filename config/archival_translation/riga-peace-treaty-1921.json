@@ -13,13 +13,13 @@
   "source": {
     "format": "html",
     "selector": "div.field-name-body",
-    "path": "/home/grass/frontend/docs/riga-treaty-1921-istmat.html",
+    "path": "${FRONTEND_DIR}/docs/riga-treaty-1921-istmat.html",
     "sha256": "3e53e797c5e0e8126a226645dc2688552d55539f62a948dde549051ad23127a3"
   },
-  "output": "/home/grass/frontend/data/commulingo/docs/riga-peace-treaty-1921.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/riga-peace-treaty-1921.html",
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "Российская Социалистическая Федеративная Советская Республика": "러시아 사회주의 연방 소비에트 공화국",
       "Украинская Социалистическая Советская Республика": "우크라이나 사회주의 소비에트 공화국",

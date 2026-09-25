@@ -18,12 +18,12 @@
   ],
   "source": {
     "format": "wikisource",
-    "path": "/home/grass/frontend/docs/lenin-1922-autonomisation-wikisource.html",
+    "path": "${FRONTEND_DIR}/docs/lenin-1922-autonomisation-wikisource.html",
     "sha256": "eeb32d028dd02c8216a52dd256c16fec8e95e2bcd92f0e7557ea1a6e07631f04"
   },
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "автономизация": "자치화",
       "«автономизации»": "「자치화」",
@@ -41,7 +41,7 @@
       "рабоче-крестьянская инспекция": "노농검사단"
     }
   },
-  "output": "/home/grass/frontend/data/commulingo/docs/lenin-1922-autonomisation.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/lenin-1922-autonomisation.html",
   "allowedCyrillic": [],
   "postEdits": {},
   "documents": [

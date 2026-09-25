@@ -19,12 +19,12 @@
   "source": {
     "format": "html",
     "selector": "div.field-name-body",
-    "path": "/home/grass/frontend/docs/politburo-grain-1933-istmat.html",
+    "path": "${FRONTEND_DIR}/docs/politburo-grain-1933-istmat.html",
     "sha256": "3de44fc50cb62b985a67c95c8590ffe61c45dc2b8f8829cf0ec35cd6565c2707"
   },
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "ЦК КП(б)У": "우크라이나 공산당(볼셰비키) 중앙위원회",
       "ЦК КП(б)": "우크라이나 공산당(볼셰비키) 중앙위원회",
@@ -47,7 +47,7 @@
       "Политбюро": "정치국"
     }
   },
-  "output": "/home/grass/frontend/data/commulingo/docs/politburo-hidden-grain-1933.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/politburo-hidden-grain-1933.html",
   "allowedCyrillic": [],
   "postEdits": {
     "48/281.": "48/28.",

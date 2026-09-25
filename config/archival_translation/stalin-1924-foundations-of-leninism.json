@@ -13,13 +13,13 @@
   ],
   "source": {
     "format": "marxists",
-    "path": "/home/grass/frontend/docs/stalin-1924-foundations-marxists.html",
+    "path": "${FRONTEND_DIR}/docs/stalin-1924-foundations-marxists.html",
     "sha256": "a8d7ef44c31a3e8078ae3a4e0e623e75887522b3307ae50468b30dcc3b32cfeb"
   },
-  "output": "/home/grass/frontend/data/commulingo/docs/stalin-1924-foundations-of-leninism.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/stalin-1924-foundations-of-leninism.html",
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "ленинизм": "레닌주의",
       "ленинизма": "레닌주의",
@@ -361,7 +361,7 @@
       "source": {
         "format": "html",
         "selector": "div#notes",
-        "path": "/home/grass/frontend/docs/stalin-1924-foundations-notes-grachev62.html",
+        "path": "${FRONTEND_DIR}/docs/stalin-1924-foundations-notes-grachev62.html",
         "sha256": "d1ec6974ca0c22f83618c38f0e5fef1a614de4b20eb3c110d89627804ffb3ee6"
       },
       "blocks": [

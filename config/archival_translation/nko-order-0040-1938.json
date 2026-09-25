@@ -12,12 +12,12 @@
   ],
   "source": {
     "format": "wikisource",
-    "path": "/home/grass/frontend/docs/nko-order-0040-1938-wikisource.html",
+    "path": "${FRONTEND_DIR}/docs/nko-order-0040-1938-wikisource.html",
     "sha256": "27dde657e5ff4b16bb91ff36a2a017f42f5931622a474e58d469d155ead9b458"
   },
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "Народный комиссар обороны": "국방인민위원",
       "Главный военный совет": "총군사평의회",
@@ -53,7 +53,7 @@
       "РККА": "노농적군"
     }
   },
-  "output": "/home/grass/frontend/data/commulingo/docs/nko-order-0040-1938.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/nko-order-0040-1938.html",
   "allowedCyrillic": [],
   "postEdits": {
     "[1]": "",

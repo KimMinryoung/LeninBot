@@ -12,8 +12,8 @@
     "번역 저본: 위 자료집 전자판. 조약 끝의 비준 기재 두 줄은 저본대로다"
   ],
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "Договаривающиеся Стороны": "체약 당사국",
       "Договаривающихся Сторон": "체약 당사국",
@@ -35,7 +35,7 @@
       "Виленская область": "빌노(빌뉴스) 지역"
     }
   },
-  "output": "/home/grass/frontend/data/commulingo/docs/molotov-ribbentrop-1939.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/molotov-ribbentrop-1939.html",
   "allowedCyrillic": [],
   "postEdits": {
     "빌렌스크 지역": "빌노(빌뉴스) 지역",
@@ -52,7 +52,7 @@
       "titleKo": "독일과 소비에트 연방 사이의 불가침조약",
       "source": {
         "format": "wikisource",
-        "path": "/home/grass/frontend/docs/molotov-ribbentrop-treaty-wikisource.html",
+        "path": "${FRONTEND_DIR}/docs/molotov-ribbentrop-treaty-wikisource.html",
         "sha256": "e9effa3872127619f74b0eac813ac27b57a06efd209fea1c1d7d9886200955dd"
       },
       "blocks": [
@@ -72,7 +72,7 @@
       "titleKo": "독일과 소비에트 연방 사이의 불가침조약에 대한 비밀 추가의정서",
       "source": {
         "format": "wikisource",
-        "path": "/home/grass/frontend/docs/molotov-ribbentrop-protocol-wikisource.html",
+        "path": "${FRONTEND_DIR}/docs/molotov-ribbentrop-protocol-wikisource.html",
         "sha256": "8dbf3e0a8fcb7e32a009430d78e8a50c9277cae0e2427ea734cabf80509faa93"
       },
       "blocks": [

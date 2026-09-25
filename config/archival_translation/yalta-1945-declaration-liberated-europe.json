@@ -17,12 +17,12 @@
   ],
   "source": {
     "format": "marxists",
-    "path": "/home/grass/frontend/docs/yalta-1945-declaration-hrono.html",
+    "path": "${FRONTEND_DIR}/docs/yalta-1945-declaration-hrono.html",
     "sha256": "b6996d90e32f1ee34297c44b3cf317a168ccfa0132e32d9317181e45fceea099"
   },
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "Объединенные Нации": "국제연합",
       "Атлантическая хартия": "대서양 헌장",
@@ -35,7 +35,7 @@
       "Крымская конференция": "크림 회담"
     }
   },
-  "output": "/home/grass/frontend/data/commulingo/docs/yalta-1945-declaration-liberated-europe.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/yalta-1945-declaration-liberated-europe.html",
   "allowedCyrillic": [
     "Декларация об освобожденной Европе",
     "Единство в организации мира, как и в ведении войны",

@@ -18,12 +18,12 @@
   "source": {
     "format": "html",
     "selector": "div#tab3 div.text-ru",
-    "path": "/home/grass/frontend/docs/politburo-a-1979-1000dokumente.html",
+    "path": "${FRONTEND_DIR}/docs/politburo-a-1979-1000dokumente.html",
     "sha256": "8f96a8d478f4c0c554a2a6284676c05474edf8caea22609d1b65f2b97059b60e"
   },
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "Политбюро ЦК": "중앙위원회 정치국",
       "Политбюро": "정치국",
@@ -51,7 +51,7 @@
       "РГАНИ": "러시아 국립현대사문서보관소"
     }
   },
-  "output": "/home/grass/frontend/data/commulingo/docs/politburo-afghanistan-decision-1979.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/politburo-afghanistan-decision-1979.html",
   "allowedCyrillic": [
     "РГАНИ"
   ],

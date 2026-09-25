@@ -26,14 +26,14 @@
 
 ## 서버에서 확인한 자료
 
-1. `/home/grass/frontend/data/commulingo/docs/yezhov-pavlyukov.html`
+1. `$FRONTEND_DIR/data/commulingo/docs/yezhov-pavlyukov.html`
    — А. Павлюков, *Ежов. Биография* (2007), 한국어 번역. 아래 장·주석 번호로 추적한다.
    [공개본](https://cyber-lenin.com/commulingo/docs/yezhov-pavlyukov.html).
-2. `/home/grass/frontend/data/commulingo/docs/ezhov-interrogations-1939.html`
+2. `$FRONTEND_DIR/data/commulingo/docs/ezhov-interrogations-1939.html`
    — 그로버 퍼 편집 신문·재판 자료의 번역. 문서 인용과 편자의 해설을 구분한다.
    「예조프 최후 진술 (1940년 2월 3일)」의 편집 주에는 공간된 세 판본이 서로 다르고
    어느 것도 전문이 아니라고 명시되어 있다. 파블류코프·폴랸스키 재인용은 독립 증거가 아니다.
-3. `/home/grass/frontend/data/commulingo/docs/naumov-zagovor-ezhova.html`
+3. `$FRONTEND_DIR/data/commulingo/docs/naumov-zagovor-ezhova.html`
    — Л. Наумов, *«Кровавый карлик» против Вождя народов. Заговор Ежова* (2009), 번역.
    머리말의 흘레브뉴크 해석과 예조프 보고서 초안 논의를 확인했다. 누구의 구상이 먼저였는지,
    예조프가 얼마나 독자적으로 행동했는지는 저자 간 논쟁으로 남긴다. 제목의 음모설을 canon으로 삼지 않는다.

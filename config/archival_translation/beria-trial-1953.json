@@ -17,8 +17,8 @@
     "번역 저본: 「역사 자료」 프로젝트(istmat.org) 전자판. 두 문서 모두 국가기관의 공식 문서로 저작권 보호 대상이 아니다"
   ],
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "Специальное Судебное Присутствие": "특별재판소",
       "Специального Судебного Присутствия": "특별재판소",
@@ -74,7 +74,7 @@
       "обжалованию не подлежит": "상소할 수 없다"
     }
   },
-  "output": "/home/grass/frontend/data/commulingo/docs/beria-trial-1953.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/beria-trial-1953.html",
   "allowedCyrillic": [],
   "postEdits": {
     "메시к": "메시크"
@@ -94,7 +94,7 @@
       "source": {
         "format": "html",
         "selector": "div.field-name-body",
-        "path": "/home/grass/frontend/docs/beria-trial-communique-1953-istmat.html",
+        "path": "${FRONTEND_DIR}/docs/beria-trial-communique-1953-istmat.html",
         "sha256": "51a0e63c3170f75c6ce3504ccdd8b262c5b34e05cfd07696d04f7a4462850c08"
       },
       "band": 0
@@ -113,7 +113,7 @@
       "source": {
         "format": "html",
         "selector": "div.field-name-body",
-        "path": "/home/grass/frontend/docs/beria-execution-act-1953-istmat.html",
+        "path": "${FRONTEND_DIR}/docs/beria-execution-act-1953-istmat.html",
         "sha256": "e82398817c9f6cb8850d1cd98c3ed37a67d850b15f4d6b674a6e98d889aaa6d5"
       },
       "band": 1

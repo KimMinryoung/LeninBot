@@ -13,13 +13,13 @@
   "source": {
     "format": "html",
     "selector": "td.txtCellMain1",
-    "path": "/home/grass/frontend/docs/politburo-1988-02-29-sumgait-info.html",
+    "path": "${FRONTEND_DIR}/docs/politburo-1988-02-29-sumgait-info.html",
     "sha256": "ef8e1a3e94a4fbed3be5b2b97c05fd041b02a62593d9b90fe1a6651137ca91bb"
   },
-  "output": "/home/grass/frontend/data/commulingo/docs/politburo-1988-02-29-sumgait.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/politburo-1988-02-29-sumgait.html",
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "Политбюро ЦК КПСС": "소련공산당 중앙위원회 정치국",
       "Политбюро": "정치국",

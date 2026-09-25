@@ -12,12 +12,12 @@
   ],
   "source": {
     "format": "wikisource",
-    "path": "/home/grass/frontend/docs/moscow-peace-treaty-1940-wikisource.html",
+    "path": "${FRONTEND_DIR}/docs/moscow-peace-treaty-1940-wikisource.html",
     "sha256": "b266d3838519d099d5464421c26f39b95c1c323c71e8a147b73ae3d83a245c2c"
   },
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "Финляндская Республика": "핀란드 공화국",
       "Финляндской Республики": "핀란드 공화국",
@@ -57,7 +57,7 @@
       "Кемиярви": "케미야르비"
     }
   },
-  "output": "/home/grass/frontend/data/commulingo/docs/moscow-peace-treaty-1940.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/moscow-peace-treaty-1940.html",
   "allowedCyrillic": [],
   "postEdits": {
     " [340]": "",

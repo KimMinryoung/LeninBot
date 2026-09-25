@@ -13,13 +13,13 @@
   "source": {
     "format": "html",
     "selector": "div.feature",
-    "path": "/home/grass/frontend/docs/cc-resolution-cult-1956-coldwar.html",
+    "path": "${FRONTEND_DIR}/docs/cc-resolution-cult-1956-coldwar.html",
     "sha256": "924f011446c2604924a0d409a165a343d79da1592f4e05476cd03d4ba585dd8f"
   },
-  "output": "/home/grass/frontend/data/commulingo/docs/cc-resolution-cult-1956.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/cc-resolution-cult-1956.html",
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "культ личности": "개인숭배",
       "культа личности": "개인숭배",

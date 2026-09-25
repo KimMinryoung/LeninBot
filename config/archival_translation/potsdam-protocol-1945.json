@@ -28,13 +28,13 @@
       "span.p",
       "hr"
     ],
-    "path": "/home/grass/frontend/docs/potsdam-protocol-1945-histmsu.html",
+    "path": "${FRONTEND_DIR}/docs/potsdam-protocol-1945-histmsu.html",
     "sha256": "3b0fd4c9ff5eaa24d3164ccabba8531f1695f6783f99e7a7a2a217e437056286"
   },
   "output": "/tmp/claude-1000/-home-grass-leninbot/36aa101b-8094-42b9-b410-8a35560af073/scratchpad/potsdam-protocol-1945.html",
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "Совет Министров Иностранных Дел": "외무장관회의",
       "Совета Министров Иностранных Дел": "외무장관회의",

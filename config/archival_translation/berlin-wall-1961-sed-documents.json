@@ -12,8 +12,8 @@
     "번역 저본: chronik-der-mauer.de 전자판. 공문서로 저작권 보호 대상이 아니다"
   ],
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "exclude": [
       "August",
       "Benjamin"
@@ -104,7 +104,7 @@
     "본 정부에 아이들의 반환": "본(Bonn) 정부에 아이들의 반환"
   },
   "quotes": "curly",
-  "output": "/home/grass/frontend/data/commulingo/docs/berlin-wall-1961-sed-documents.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/berlin-wall-1961-sed-documents.html",
   "documents": [
     {
       "id": "ulbricht-pk-1961-06-15",
@@ -114,7 +114,7 @@
       "source": {
         "format": "html",
         "selector": "div#content > div.article",
-        "path": "/home/grass/frontend/docs/ulbricht-pk-1961-06-15-chronik-der-mauer.html",
+        "path": "${FRONTEND_DIR}/docs/ulbricht-pk-1961-06-15-chronik-der-mauer.html",
         "sha256": "a4c8f72e4b20851d70a60f509ab3d629484ba24d5ac1ce3b8e487673420f519a"
       },
       "blocks": [
@@ -136,7 +136,7 @@
       "source": {
         "format": "html",
         "selector": "div#content > div.article",
-        "path": "/home/grass/frontend/docs/sed-politbuero-1961-08-07-chronik-der-mauer.html",
+        "path": "${FRONTEND_DIR}/docs/sed-politbuero-1961-08-07-chronik-der-mauer.html",
         "sha256": "1ac971ec4ca1fde867ec8137e21ef9df46dff76099fa6364a3a3aa03535699dc"
       },
       "blocks": [

@@ -17,12 +17,12 @@
   "source": {
     "format": "html",
     "selector": "div.reader_act_body",
-    "path": "/home/grass/frontend/docs/rf-decree-65-1994-kremlin.html",
+    "path": "${FRONTEND_DIR}/docs/rf-decree-65-1994-kremlin.html",
     "sha256": "7496ed68893817141e1e899d748cab1ed279b493ecd2c7c998c5153fb38d1d7c"
   },
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "Совет Труда и Обороны": "노동국방회의",
       "Совета Труда и Обороны": "노동국방회의",
@@ -39,7 +39,7 @@
       "вне закона": "법 밖에"
     }
   },
-  "output": "/home/grass/frontend/data/commulingo/docs/rf-decree-kronstadt-1994.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/rf-decree-kronstadt-1994.html",
   "allowedCyrillic": [],
   "postEdits": {
     "법령": "대통령령"

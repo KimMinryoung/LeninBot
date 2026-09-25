@@ -10,10 +10,10 @@
     "원본: 치헤이제 서한 — 하버드 대학 호턴 도서관 트로츠키 문서고 MS Russ 13 T-714 사본; 두 편지 모두 『Бюллетень оппозиции』 제28호(1932년 7월) 수록",
     "번역 저본: iskra-research.org 「Письмо Троцкого Чхеидзе」 전자판(웨이백 머신 2023년 12월 사본). 트로츠키 저작은 사후 70년이 지나 저작권 보호 대상이 아니다"
   ],
-  "output": "/home/grass/frontend/data/commulingo/docs/trotsky-letters-chkheidze-1913-olminsky-1921.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/trotsky-letters-chkheidze-1913-olminsky-1921.html",
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "Чхеидзе": "치헤이제",
       "Николай Семенович": "니콜라이 세묘노비치",
@@ -71,7 +71,7 @@
       "source": {
         "format": "html",
         "selector": "div#doc",
-        "path": "/home/grass/frontend/docs/trotsky-letters-1913-1921-prepared.html",
+        "path": "${FRONTEND_DIR}/docs/trotsky-letters-1913-1921-prepared.html",
         "sha256": "2c88fe2a4fcfc8d85b930173be64f616dc5f8f6bd4b99d6a56ce1dd77c027026"
       },
       "blocks": [
@@ -90,7 +90,7 @@
       "source": {
         "format": "html",
         "selector": "div#doc",
-        "path": "/home/grass/frontend/docs/trotsky-letters-1913-1921-prepared.html",
+        "path": "${FRONTEND_DIR}/docs/trotsky-letters-1913-1921-prepared.html",
         "sha256": "2c88fe2a4fcfc8d85b930173be64f616dc5f8f6bd4b99d6a56ce1dd77c027026"
       },
       "blocks": [

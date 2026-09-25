@@ -11,12 +11,12 @@
   ],
   "source": {
     "format": "wikisource",
-    "path": "/home/grass/frontend/docs/1924-constitution-wikisource.html",
+    "path": "${FRONTEND_DIR}/docs/1924-constitution-wikisource.html",
     "sha256": "e35fe940f3f1f485b50302cd2b7fae7f30134f291a31a9d8c2888a90c95dc037"
   },
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "Съезд Советов": "소비에트 대회",
       "Центральный Исполнительный Комитет": "중앙집행위원회",
@@ -65,7 +65,7 @@
       "Белорусская Социалистическая Советская Республика": "벨로루시야 사회주의 소비에트 공화국"
     }
   },
-  "output": "/home/grass/frontend/data/commulingo/docs/1924-soviet-constitution.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/1924-soviet-constitution.html",
   "allowedCyrillic": [
     "РСФСР",
     "ЗСФСР",

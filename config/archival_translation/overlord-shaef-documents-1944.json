@@ -11,10 +11,10 @@
     "원제: Directive by the Supreme Commander to U.S.S.T.A.F. and Bomber Command for support of 'Overlord' during the preparatory period, 17 April 1944 — C. Webster & N. Frankland, The Strategic Air Offensive against Germany 1939–1945, vol. IV, Appendix 8 (xxxviii), HMSO 1961, pp. 167–170; SCAF 48, Eisenhower to the Combined Chiefs of Staff, 8 June 1944 — Dwight D. Eisenhower Library, Pre-Presidential Papers",
     "번역 저본: 영국 공식 전사 제4권의 archive.org OCR 텍스트(왕실 저작권 만료, 지령 자체는 SHAEF 공문서)와 아이젠하워 도서관 스캔 이미지 전사본(미국 정부 기록으로 저작권 보호 대상이 아니다)"
   ],
-  "output": "/home/grass/frontend/data/commulingo/docs/overlord-shaef-documents-1944.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/overlord-shaef-documents-1944.html",
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "exclude": [
       "First",
       "Soviet",
@@ -123,7 +123,7 @@
       "source": {
         "format": "html",
         "selector": "div#doc",
-        "path": "/home/grass/frontend/docs/overlord-shaef-documents-1944-prepared.html",
+        "path": "${FRONTEND_DIR}/docs/overlord-shaef-documents-1944-prepared.html",
         "sha256": "8b7c71a1c744cabba4e55ed1a808ab25bcf7b1c5903dcdc4106f682f9564866a"
       },
       "blocks": [
@@ -145,7 +145,7 @@
       "source": {
         "format": "html",
         "selector": "div#doc",
-        "path": "/home/grass/frontend/docs/overlord-shaef-documents-1944-prepared.html",
+        "path": "${FRONTEND_DIR}/docs/overlord-shaef-documents-1944-prepared.html",
         "sha256": "8b7c71a1c744cabba4e55ed1a808ab25bcf7b1c5903dcdc4106f682f9564866a"
       },
       "blocks": [

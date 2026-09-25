@@ -17,8 +17,8 @@
     "번역 저본: 「역사 자료」 프로젝트(istmat.org) 전자판. 두 편지 모두 공직자가 직무로 쓴 공문서로 저작권 보호 대상이 아니다. 추바리 편지의 부록 표는 싣지 않았다"
   ],
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "Чубарь": "추바리",
       "Чубаря": "추바리",
@@ -71,7 +71,7 @@
       "Совершенно секретно": "극비"
     }
   },
-  "output": "/home/grass/frontend/data/commulingo/docs/chubar-petrovsky-letters-1932.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/chubar-petrovsky-letters-1932.html",
   "allowedCyrillic": [
     "МТС"
   ],
@@ -117,7 +117,7 @@
       "source": {
         "format": "html",
         "selector": "div.field-name-body",
-        "path": "/home/grass/frontend/docs/chubar-letter-1932-istmat.html",
+        "path": "${FRONTEND_DIR}/docs/chubar-letter-1932-istmat.html",
         "sha256": "b7cf3cd387d3b65839fd8a818e182fbfacbf6e4b6e4a67bb2be6894def4ac0b4"
       },
       "band": 0
@@ -140,7 +140,7 @@
       "source": {
         "format": "html",
         "selector": "div.field-name-body",
-        "path": "/home/grass/frontend/docs/petrovsky-letter-1932-istmat.html",
+        "path": "${FRONTEND_DIR}/docs/petrovsky-letter-1932-istmat.html",
         "sha256": "1342123cdaf53dcd24e00a100eddbfeb474d9d669b4070135d96b29b662b23a2"
       },
       "band": 1

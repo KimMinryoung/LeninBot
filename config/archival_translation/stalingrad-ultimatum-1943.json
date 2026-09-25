@@ -19,13 +19,13 @@
     "format": "html",
     "selector": "div.b > blockquote",
     "nth": 2,
-    "path": "/home/grass/frontend/docs/stalingrad-ultimatum-1943-militera.html",
+    "path": "${FRONTEND_DIR}/docs/stalingrad-ultimatum-1943-militera.html",
     "sha256": "10d2b7dd38d956a4e7f6bf0a0785efbe7fb33eb2b03b7c625ab7398774a56ecc"
   },
   "output": "/tmp/claude-1000/-home-grass-leninbot/36aa101b-8094-42b9-b410-8a35560af073/scratchpad/stalingrad-ultimatum-1943.html",
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "6-я германская армия": "독일 제6군",
       "4-й танковой армии": "제4기갑군",

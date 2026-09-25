@@ -12,12 +12,12 @@
   ],
   "source": {
     "format": "wikisource",
-    "path": "/home/grass/frontend/docs/financial-manifesto-1905-wikisource.html",
+    "path": "${FRONTEND_DIR}/docs/financial-manifesto-1905-wikisource.html",
     "sha256": "a06e007bc766ada884058d96c292e7eb606703e78636fba956b9aa3971f7e245"
   },
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "Совет Рабочих Депутатов": "노동자대표소비에트",
       "Совета Рабочих Депутатов": "노동자대표소비에트",
@@ -39,7 +39,7 @@
       "банкротство": "파산"
     }
   },
-  "output": "/home/grass/frontend/data/commulingo/docs/financial-manifesto-1905.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/financial-manifesto-1905.html",
   "allowedCyrillic": [],
   "postEdits": {},
   "documents": [

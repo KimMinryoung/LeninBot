@@ -17,12 +17,12 @@
   ],
   "source": {
     "format": "wikisource",
-    "path": "/home/grass/frontend/docs/bukharin-1928-notes-1000dokumente.html",
+    "path": "${FRONTEND_DIR}/docs/bukharin-1928-notes-1000dokumente.html",
     "sha256": "668aacb8b1d293d6120e85dce725a5a398b2b8aa01d36220afe4613d5325cf64"
   },
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "контрольные цифры": "통제숫자",
       "контрольных цифр": "통제숫자",
@@ -52,7 +52,7 @@
       "Итого": "합계"
     }
   },
-  "output": "/home/grass/frontend/data/commulingo/docs/bukharin-1928-notes-of-an-economist.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/bukharin-1928-notes-of-an-economist.html",
   "allowedCyrillic": [
     "ГУМП",
     "Заметки экономиста",

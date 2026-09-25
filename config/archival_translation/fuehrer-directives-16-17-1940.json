@@ -12,8 +12,8 @@
     "번역 저본: der-fuehrer.org 전자판. 군 지령은 공문서로 저작권 보호 대상이 아니다"
   ],
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "Führerhauptquartier": "총통 사령부",
       "Der Führer und Oberste Befehlshaber der Wehrmacht": "총통 겸 국방군 최고사령관",
@@ -104,7 +104,7 @@
   "allowedCyrillic": [],
   "postEdits": {},
   "quotes": "curly",
-  "output": "/home/grass/frontend/data/commulingo/docs/fuehrer-directives-16-17-1940.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/fuehrer-directives-16-17-1940.html",
   "documents": [
     {
       "id": "weisung-16",
@@ -114,7 +114,7 @@
       "source": {
         "format": "html",
         "selector": "table#table1 td",
-        "path": "/home/grass/frontend/docs/weisung-16-1940-der-fuehrer.html",
+        "path": "${FRONTEND_DIR}/docs/weisung-16-1940-der-fuehrer.html",
         "sha256": "3e1fef35989f9f8b8dace865f61ad28f3728ca48884e15afb48ebbb3b4458b60"
       },
       "blocks": [
@@ -133,7 +133,7 @@
       "source": {
         "format": "html",
         "selector": "table#table1 td",
-        "path": "/home/grass/frontend/docs/weisung-17-1940-der-fuehrer.html",
+        "path": "${FRONTEND_DIR}/docs/weisung-17-1940-der-fuehrer.html",
         "sha256": "c039b657b5dd3b490b9aa3f27bd42f5556fb42bdfc162d38ebf3dc408a983acc"
       },
       "blocks": [

@@ -12,8 +12,8 @@
     "번역 저본: marxists.org 러시아어·에스파냐어 문서고 전사본(러시아어 두 편은 러시아어에서, 에스파냐어 세 편은 에스파냐어에서 옮겼다). 여섯 글 모두 저자 사후 70년이 지나 퍼블릭 도메인이다"
   ],
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "ПОУМ": "POUM",
       "Народный фронт": "인민전선",
@@ -72,7 +72,7 @@
       "camaradas": "동무들"
     }
   },
-  "output": "/home/grass/frontend/data/commulingo/docs/spain-1936-two-lines.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/spain-1936-two-lines.html",
   "quotes": "curly",
   "allowedCyrillic": [
     "ГПУ"
@@ -119,7 +119,7 @@
       "register": "한다체. 짧은 공개 전문이다. '~한다/~이다'로 옮기고 경어체를 쓰지 않는다.",
       "source": {
         "format": "marxists",
-        "path": "/home/grass/leninbot/docs/spain-1936/stalin-diaz-1936.html",
+        "path": "${PROJECT_ROOT}/docs/spain-1936/stalin-diaz-1936.html",
         "sha256": "2c5d691154ee6eed7322def2dbb63c6af7043d0ec8838bf83276922a004a9671"
       },
       "blocks": [
@@ -137,7 +137,7 @@
       "register": "한다체. 공식 전보다. '~한다/~이다'로 옮기고 경어체를 쓰지 않는다.",
       "source": {
         "format": "marxists",
-        "path": "/home/grass/leninbot/docs/spain-1936/diaz-telegram-stalin-1936.html",
+        "path": "${PROJECT_ROOT}/docs/spain-1936/diaz-telegram-stalin-1936.html",
         "sha256": "855e27f0493d192fc24c23447483e633bf41e48ae3029edcf64afda05121625c"
       },
       "blocks": [
@@ -155,7 +155,7 @@
       "register": "한다체. 집회 연설이다. 청중을 부르는 대목은 그대로 살리되 '~한다/~이다'로 옮기고 경어체를 쓰지 않는다.",
       "source": {
         "format": "marxists",
-        "path": "/home/grass/leninbot/docs/spain-1936/diaz-regular-army-1937.html",
+        "path": "${PROJECT_ROOT}/docs/spain-1936/diaz-regular-army-1937.html",
         "sha256": "9cc686c52d354872b4ae215dacacda9f24ef8f2f73f1387f8539595182141cf3"
       },
       "blocks": [
@@ -176,7 +176,7 @@
       "register": "한다체. 극장에서 한 긴 강연이다. 절로 나뉘어 있으며 '~한다/~이다'로 옮기고 경어체를 쓰지 않는다.",
       "source": {
         "format": "marxists",
-        "path": "/home/grass/leninbot/docs/spain-1936/diaz-win-the-war-1937.html",
+        "path": "${PROJECT_ROOT}/docs/spain-1936/diaz-win-the-war-1937.html",
         "sha256": "2b98c59b117ac250e82f4c7e44ca08fd006fb8a7f291032413d0195aa13071da"
       },
       "blocks": [
@@ -197,7 +197,7 @@
       "register": "한다체. 논쟁적인 정치 논설이다. '~한다/~이다'로 옮기고 경어체를 쓰지 않는다.",
       "source": {
         "format": "marxists",
-        "path": "/home/grass/leninbot/docs/spain-1936/trotsky-nin-1937.html",
+        "path": "${PROJECT_ROOT}/docs/spain-1936/trotsky-nin-1937.html",
         "sha256": "edade1eab72ba6acef6fa0c328cb655fab92852e8db3e2a26c4956234b764b13"
       },
       "blocks": [
@@ -215,7 +215,7 @@
       "register": "한다체. 절로 나뉜 긴 정치 논설이다. '~한다/~이다'로 옮기고 경어체를 쓰지 않는다.",
       "source": {
         "format": "marxists",
-        "path": "/home/grass/leninbot/docs/spain-1936/trotsky-spanish-lesson-1937.html",
+        "path": "${PROJECT_ROOT}/docs/spain-1936/trotsky-spanish-lesson-1937.html",
         "sha256": "9f24fac7850ea148cf475aa2fe02b08c0b7f511cbbe9e100e505e84544be2c02"
       },
       "blocks": [

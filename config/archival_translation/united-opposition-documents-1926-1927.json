@@ -13,8 +13,8 @@
     "두 문서 모두 저작권 보호 대상이 아니다"
   ],
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "Троцкий": "트로츠키",
       "Троцкого": "트로츠키",
@@ -133,7 +133,7 @@
       "source": {
         "format": "html",
         "selector": "div.field-name-body div.field-item",
-        "path": "/home/grass/frontend/docs/declaration-13-1926-istmat.html",
+        "path": "${FRONTEND_DIR}/docs/declaration-13-1926-istmat.html",
         "sha256": "a349877ef726d1d096e7b5a39adbaa1e444ff1a8e0e6d3103077263be413e2be"
       },
       "blocks": [
@@ -161,7 +161,7 @@
           "hr",
           "script"
         ],
-        "path": "/home/grass/frontend/docs/platform-1927-esperanto.html",
+        "path": "${FRONTEND_DIR}/docs/platform-1927-esperanto.html",
         "sha256": "241edeb9394875093201a5daac99fcb4e1c9d67fcbfdafc265c544a415a4e38d"
       },
       "blocks": [
@@ -190,7 +190,7 @@
           "hr",
           "script"
         ],
-        "path": "/home/grass/frontend/docs/platform-1927-esperanto.html",
+        "path": "${FRONTEND_DIR}/docs/platform-1927-esperanto.html",
         "sha256": "241edeb9394875093201a5daac99fcb4e1c9d67fcbfdafc265c544a415a4e38d"
       },
       "blocks": [
@@ -207,6 +207,6 @@
       }
     }
   ],
-  "output": "/home/grass/frontend/data/commulingo/docs/united-opposition-documents-1926-1927.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/united-opposition-documents-1926-1927.html",
   "quotes": "curly"
 }

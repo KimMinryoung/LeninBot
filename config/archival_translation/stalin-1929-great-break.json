@@ -12,12 +12,12 @@
   ],
   "source": {
     "format": "marxists",
-    "path": "/home/grass/frontend/docs/stalin-1929-great-break-marxists.html",
+    "path": "${FRONTEND_DIR}/docs/stalin-1929-great-break-marxists.html",
     "sha256": "6382b366ffd8b710cda321c0a7ee8cd78e756402b59967eb468b6d2258c9787c"
   },
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "великий перелом": "대전환",
       "производительность труда": "노동생산성",
@@ -40,7 +40,7 @@
       "нэп": "네프"
     }
   },
-  "output": "/home/grass/frontend/data/commulingo/docs/stalin-1929-great-break.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/stalin-1929-great-break.html",
   "allowedCyrillic": [
     "Айхенвальд",
     "Слепков",

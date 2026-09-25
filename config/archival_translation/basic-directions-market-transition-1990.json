@@ -16,13 +16,13 @@
   "source": {
     "format": "html",
     "selector": "div.WordSection1",
-    "path": "/home/grass/frontend/docs/basic-directions-1990-10-19-libussr.html",
+    "path": "${FRONTEND_DIR}/docs/basic-directions-1990-10-19-libussr.html",
     "sha256": "abaa9482ae34f76da78671dbc93428b6cf6ca1be83a5e622e6dd8a2edc1f7778"
   },
-  "output": "/home/grass/frontend/data/commulingo/docs/basic-directions-market-transition-1990.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/basic-directions-market-transition-1990.html",
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "Горбачев": "고르바초프",
       "Горбачёв": "고르바초프",

@@ -13,12 +13,12 @@
   ],
   "source": {
     "format": "wikisource",
-    "path": "/home/grass/frontend/docs/nko-order-227-1942-wikisource.html",
+    "path": "${FRONTEND_DIR}/docs/nko-order-227-1942-wikisource.html",
     "sha256": "9d8ac49f6da90cefa69819ae2471d9336048fd2136f6c887d58d901d5e67068c"
   },
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "Народный комиссар обороны": "국방인민위원",
       "Народного Комиссара Обороны": "국방인민위원",
@@ -54,7 +54,7 @@
       "Ворошиловград": "보로실로프그라드"
     }
   },
-  "output": "/home/grass/frontend/data/commulingo/docs/nko-order-227-1942.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/nko-order-227-1942.html",
   "allowedCyrillic": [],
   "postEdits": {
     "[1]": ""

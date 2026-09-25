@@ -11,10 +11,10 @@
     "원제: The North Atlantic Treaty, Washington D.C., 4 April 1949. 영어·프랑스어 정본 동등(제14조)",
     "번역 저본: NATO 공식 웹사이트(nato.int) 「Official texts」 전자판. NATO가 단 각주 세 개(그리스·튀르키예 가입 의정서에 따른 제6조 개정, 알제리 조항의 실효, 발효일)를 함께 옮겼다. 국가 간 공식 문서로 저작권 보호 대상이 아니다"
   ],
-  "output": "/home/grass/frontend/data/commulingo/docs/north-atlantic-treaty-1949.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/north-atlantic-treaty-1949.html",
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "North Atlantic Treaty": "북대서양 조약",
       "Charter of the United Nations": "국제연합 헌장",
@@ -68,7 +68,7 @@
       "source": {
         "format": "html",
         "selector": "div#treaty",
-        "path": "/home/grass/frontend/docs/north-atlantic-treaty-1949-prepared.html",
+        "path": "${FRONTEND_DIR}/docs/north-atlantic-treaty-1949-prepared.html",
         "sha256": "0d2db1b7664779db4be3f483ef9249f4f0ca3586895d8d63557332085d5a506c"
       },
       "blocks": [
@@ -96,7 +96,7 @@
       "source": {
         "format": "html",
         "selector": "div#footnotes",
-        "path": "/home/grass/frontend/docs/north-atlantic-treaty-1949-prepared.html",
+        "path": "${FRONTEND_DIR}/docs/north-atlantic-treaty-1949-prepared.html",
         "sha256": "0d2db1b7664779db4be3f483ef9249f4f0ca3586895d8d63557332085d5a506c"
       },
       "blocks": [

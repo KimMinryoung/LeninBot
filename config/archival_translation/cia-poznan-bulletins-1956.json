@@ -11,10 +11,10 @@
     "번역 저본: archive.org 미러의 텍스트층. 미국 정부 저작물로 저작권 보호 대상이 아니다"
   ],
   "sourceLang": "en",
-  "output": "/home/grass/frontend/data/commulingo/docs/cia-poznan-bulletins-1956.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/cia-poznan-bulletins-1956.html",
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "Poznan": "포즈난",
       "Warsaw": "바르샤바",
@@ -53,7 +53,7 @@
       "source": {
         "format": "html",
         "selector": "body",
-        "path": "/home/grass/frontend/docs/cia-cib-poznan-1956-prepared.html",
+        "path": "${FRONTEND_DIR}/docs/cia-cib-poznan-1956-prepared.html",
         "sha256": "f804f0c5aa24eda21836b3037548d526dd2344dae9165d04b3b24421d34fb51e"
       },
       "blocks": [
@@ -75,7 +75,7 @@
       "source": {
         "format": "html",
         "selector": "body",
-        "path": "/home/grass/frontend/docs/cia-cib-poznan-1956-prepared.html",
+        "path": "${FRONTEND_DIR}/docs/cia-cib-poznan-1956-prepared.html",
         "sha256": "f804f0c5aa24eda21836b3037548d526dd2344dae9165d04b3b24421d34fb51e"
       },
       "blocks": [

@@ -13,13 +13,13 @@
   ],
   "source": {
     "format": "wikisource",
-    "path": "/home/grass/frontend/docs/ussr-law-1409-1990-wikisource.html",
+    "path": "${FRONTEND_DIR}/docs/ussr-law-1409-1990-wikisource.html",
     "sha256": "2007617dc431da8f00dce4f3c0a62a8043eb043e3d5f25f7fdb3f30bded66c45"
   },
-  "output": "/home/grass/frontend/data/commulingo/docs/ussr-secession-law-1990.html",
+  "output": "${FRONTEND_DIR}/data/commulingo/docs/ussr-secession-law-1990.html",
   "glossary": {
-    "people": "/home/grass/frontend/data/commulingo/people-snapshot.json",
-    "terms": "/home/grass/frontend/data/commulingo/terms-snapshot.json",
+    "people": "${FRONTEND_DIR}/data/commulingo/people-snapshot.json",
+    "terms": "${FRONTEND_DIR}/data/commulingo/terms-snapshot.json",
     "extra": {
       "союзная республика": "연방공화국",
       "союзной республики": "연방공화국",
