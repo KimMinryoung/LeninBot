@@ -23,6 +23,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from ops.paths import FRONTEND_DIR
 from secrets_loader import get_secret
 from translation_runtime import TranslationProviderError
 from translation_runtime.batch_state import BatchState
@@ -32,7 +33,6 @@ from scripts._translation_common import (
     parse_json_object,
 )
 
-FRONTEND_DIR = Path(os.getenv("FRONTEND_DIR", ROOT.parent / "frontend")).resolve()
 FRONTEND_ENV = FRONTEND_DIR / ".env"
 # 프로바이더·모델·예산·타임아웃·thinking은 전부 레지스트리 항목이 정한다
 # (config/llm_call_sites.json). 여기에 base_url이나 키가 없는 것이 정상이다 —

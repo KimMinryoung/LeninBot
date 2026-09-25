@@ -1,5 +1,5 @@
 // Exercise the watchdog Worker against a fake KV and a fake network.
-import worker from "/home/grass/leninbot/watchdog/src/worker.js";
+import worker from "./src/worker.js";
 
 const PING_TOKEN = "testtoken";
 let kv, sent, siteStatus, siteThrows;

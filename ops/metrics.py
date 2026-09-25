@@ -6,8 +6,10 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from ops.paths import PROJECT_ROOT
 
-JSON_DATA_DIR = Path("/home/grass/leninbot/data/metrics")
+
+JSON_DATA_DIR = PROJECT_ROOT / "data" / "metrics"
 
 
 # ─── JSON 데이터 파서 ────────────────────────────────────
