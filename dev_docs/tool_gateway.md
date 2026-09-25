@@ -123,6 +123,7 @@ handler는 조사/발견/초안 artifact를 반환하며 사전 저장 권한은
 `commulingo_pipeline_no_edit`(state), `commulingo_pipeline_cached_passages`와
 `commulingo_pipeline_context`(read)를 로컬로 주입한다. 모두 소유자 권한의 commulingo_curator로
 제한하며 전역 registry에 노출하지 않는다. 제출 도구는 초안 전체 재검증 후에만 단계를 종료한다.
+도구별 인자 구조 교정은 `register_argument_shape_repair`로 등록하며 스키마 검증 직전에 적용된다(현재 편집기 제출 도구만).
 `commulingo_pipeline_research`(state)도 같은 권한으로 로컬 주입되며, 형식 수정 중 필요한 사실 조사를
 필드·이유와 함께 재개한다. 공개 저장 권한은 없다.
 

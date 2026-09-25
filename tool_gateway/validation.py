@@ -279,6 +279,17 @@ def _validate_confirmation_nonce(args: dict) -> None:
         )
 
 
+# Tool-specific repairs of unambiguous argument-shape mistakes, applied before
+# schema validation. Each takes (args, executable_schema) and returns
+# (args, notes); notes describe what moved and are logged. Owners register
+# at import so this module stays free of domain imports.
+_ARGUMENT_SHAPE_REPAIRS: dict = {}
+
+
+def register_argument_shape_repair(tool_name: str, repair) -> None:
+    _ARGUMENT_SHAPE_REPAIRS[tool_name] = repair
+
+
 def validate_tool_arguments(
     tool_name: str,
     args: dict,
@@ -306,6 +317,11 @@ def validate_tool_arguments(
                 "%s: parsed JSON-string argument(s) into containers at %s",
                 tool_name, ", ".join(coerced),
             )
+        repair = _ARGUMENT_SHAPE_REPAIRS.get(tool_name)
+        if repair is not None:
+            normalized, notes = repair(normalized, executable_schema)
+            if notes:
+                logger.info("%s: repaired argument shape: %s", tool_name, "; ".join(notes))
         errors = sorted(
             Draft202012Validator(executable_schema).iter_errors(normalized),
             key=lambda error: list(error.absolute_path),
@@ -344,6 +360,7 @@ def validate_tool_arguments(
 
 __all__ = [
     "ToolArgumentValidationError",
+    "register_argument_shape_repair",
     "tool_schema_map",
     "validate_tool_arguments",
 ]

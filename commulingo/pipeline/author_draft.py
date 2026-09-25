@@ -8,6 +8,7 @@ import json
 import re
 
 from jsonschema import Draft202012Validator
+from tool_gateway.validation import register_argument_shape_repair
 
 from .draft_repair import DraftRepair, RepairProtocolError
 from .evidence import MAX_PASSAGES, PASSAGE_PATTERN
@@ -35,6 +36,56 @@ def intake_schema(schema):
     if isinstance(result, list):
         return [intake_schema(value) for value in result]
     return result
+
+
+def repair_submission_shape(args, schema):
+    """Fix unambiguous nesting mistakes before schema validation.
+
+    Editor logs (2026-09-22..25) showed issues/reason/notes sent inside changes,
+    fields sent without the changes wrapper, evidence inside value and bare
+    values without {value}. Each cost a rejected round although the intent was
+    clear. Only moves that cannot change meaning are made; anything else is
+    left for the validator to report.
+    """
+    props = schema.get('properties') or {}
+    field_schemas = ((props.get('changes') or {}).get('properties')) or {}
+    if not field_schemas:
+        return args, []
+    args, notes = dict(args), []
+    top_keys = set(props) - {'changes'}
+    loose = [key for key in args if key in field_schemas and key not in props]
+    if loose and 'changes' not in args:
+        args['changes'] = {key: args.pop(key) for key in loose}
+        notes.append('wrapped top-level fields in changes: ' + ', '.join(loose))
+    changes = args.get('changes')
+    if not isinstance(changes, dict):
+        return args, notes
+    changes = dict(changes)
+    for key in [k for k in changes if k in top_keys and k not in field_schemas]:
+        if key in args:
+            continue
+        args[key] = changes.pop(key)
+        notes.append(f'moved {key} out of changes')
+    for field, change in list(changes.items()):
+        value_schema = ((field_schemas.get(field) or {}).get('properties') or {}).get('value') or {}
+        object_value = value_schema.get('type') == 'object' or 'properties' in value_schema
+        if not isinstance(change, dict) or not ({'value', 'evidence'} & set(change)):
+            changes[field] = {'value': change}
+            notes.append(f'wrapped changes.{field} in value')
+            continue
+        if 'value' not in change and object_value and set(change) - {'evidence'}:
+            changes[field] = {'value': {k: v for k, v in change.items() if k != 'evidence'},
+                              **({'evidence': change['evidence']} if 'evidence' in change else {})}
+            notes.append(f'moved changes.{field} content into value')
+            continue
+        value = change.get('value')
+        if (isinstance(value, dict) and 'evidence' in value and 'evidence' not in change
+                and 'evidence' not in (value_schema.get('properties') or {})):
+            inner = dict(value)
+            changes[field] = {**change, 'value': inner, 'evidence': inner.pop('evidence')}
+            notes.append(f'moved changes.{field}.value.evidence up one level')
+    args['changes'] = changes
+    return args, notes
 
 
 def structured_args(args):
@@ -198,3 +249,6 @@ class AuthorDraft(DraftRepair):
             'submission_tool': SUBMIT_TOOL,
             'instruction': 'Resend each affected change with its complete value and evidence. Omitted changes remain saved. '
                            'Use commulingo_pipeline_no_edit to finish without edits.'}, ensure_ascii=False)
+
+
+register_argument_shape_repair(SUBMIT_TOOL, repair_submission_shape)

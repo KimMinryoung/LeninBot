@@ -122,6 +122,11 @@ resolved/deferred와 사유를 요구하며, 필드를 채웠다는 이유만으
 공유 저장소는 값이 없으면 0을 써 절이 맨 앞으로 갔다(2026-09-22~24 편집기 절 156건).
 초안 저장 후 제출의 `issues`는 명시한 과제 판단만 교체한다. `notes`와 `reason`도 생략하면 보존한다.
 초안 저장 후 제출에서 `evidence`를 생략한 필드는 값만 바꾸고 저장된 근거를 유지한다(인용 검사는 다시 돈다).
+게이트웨이는 스키마 검증 전에 제출 인자의 뜻이 분명한 구조 실수를 바로잡는다
+(`author_draft.repair_submission_shape`, `tool_gateway.validation.register_argument_shape_repair`):
+`changes` 안의 `issues`/`reason`/`notes`/`remove_fields`를 밖으로 옮기고, `changes` 없이 온 필드를 감싸고,
+`value` 안의 `evidence`를 한 단계 올리고, `{value}` 없이 온 값을 감싼다. 이미 바깥에 같은 키가 있는 등
+뜻이 갈리는 경우는 고치지 않고 검증 오류로 돌려준다. 교정 내용은 `repaired argument shape` INFO 로그로 남는다.
 초안 저장 후 제출의 `remove_fields`는 해당 필드와 근거를 초안에서 철회하며 저장된 공개 데이터를
 삭제하지 않는다. 동일 호출에서 같은 필드를 교체하고 철회할 수 없다. 필수 필드는 철회 후보에서 뺀다
 (절의 `startYear` 철회가 필수 누락 거절을 되풀이했다).

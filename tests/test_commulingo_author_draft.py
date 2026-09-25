@@ -153,6 +153,45 @@ class AuthorDraftTests(unittest.TestCase):
             Draft202012Validator.check_schema(tool['input_schema'])
 
 
+class SubmissionShapeRepairTests(unittest.TestCase):
+    """Unambiguous nesting mistakes seen in editor logs are fixed before validation."""
+
+    def validate(self, args, *, draft=None):
+        from tool_gateway.validation import validate_tool_arguments
+        draft = draft or session()
+        return validate_tool_arguments(draft.submit_tool['name'], args,
+                                       schema=draft.submit_tool['input_schema'], risk_class='state')
+
+    def test_top_level_keys_inside_changes_are_moved_out(self):
+        value = edit()
+        value['changes'].update(issues=value.pop('issues'), reason=value.pop('reason'), notes='Private note.')
+        self.assertEqual(self.validate(value), {**edit(), 'notes': 'Private note.'})
+
+    def test_fields_without_changes_are_wrapped(self):
+        value = edit()
+        loose = {**{k: v for k, v in value.items() if k != 'changes'}, **value['changes']}
+        self.assertEqual(self.validate(loose), value)
+
+    def test_misplaced_evidence_and_bare_values_are_normalized(self):
+        good = edit()
+        bio, years = good['changes']['bio'], good['changes']['years']
+        for changes in ({'bio': {'value': {**bio['value'], 'evidence': bio['evidence']}}, 'years': years},
+                        {'bio': {**bio['value'], 'evidence': bio['evidence']}, 'years': years}):
+            with self.subTest(changes=changes):
+                self.assertEqual(self.validate({**good, 'changes': changes}), good)
+        self.assertEqual(self.validate({**good, 'changes': {'years': '1900–1980'}})['changes'],
+                         {'years': {'value': '1900–1980'}})
+
+    def test_ambiguous_or_conflicting_shapes_are_left_to_the_validator(self):
+        from tool_gateway.validation import ToolArgumentValidationError
+        value = edit()
+        value['changes']['reason'] = 'A second, different reason inside changes.'
+        with self.assertRaisesRegex(ToolArgumentValidationError, 'reason'):
+            self.validate(value)
+        with self.assertRaisesRegex(ToolArgumentValidationError, 'value'):
+            self.validate({**edit(), 'changes': {'years': {'evidence': []}}})
+
+
 class AuthorWorkflowTests(EditorCase):
     async def test_typed_edit_reaches_independent_review_and_bound_publication(self):
         from test_commulingo_editor import JOB, CURRENT, URL, BODY, candidate, submission, store_mock
