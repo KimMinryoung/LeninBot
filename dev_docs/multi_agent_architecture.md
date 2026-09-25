@@ -69,7 +69,7 @@ worker or new public agent is registered. Migration and staged rollout, includin
 the shared daily budget and term editorial service, are specified in
 `commulingo_pipeline.md`. Legacy timers remain the default until that rollout.
 
-`scripts/commulingo_research_memory.py` owns a local SQLite evidence store at
+`runtime_tools/commulingo_research_memory.py` owns a local SQLite evidence store at
 ignored `data/commulingo_research.sqlite3`. People stages, gap workers, event
 stages and term stages reuse research across attempts and process restarts.
 Gap IDs and person IDs identify their work; event IDs plus current body content

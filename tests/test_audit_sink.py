@@ -1,4 +1,4 @@
-"""Hermetic tests for audit_sink.py and the proxy's /audit endpoints.
+"""Hermetic tests for ops/audit_sink.py and the proxy's /audit endpoints.
 
 No DB, no network: inserts and HTTP are patched. Covers the column
 whitelist, mode resolution, the client POST path (retry on connection
@@ -20,7 +20,7 @@ from unittest.mock import patch
 os.environ["LENINBOT_LLM_AUDIT_DB"] = "0"
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import audit_sink  # noqa: E402
+from ops import audit_sink  # noqa: E402
 
 
 class NormalizeTests(unittest.TestCase):
