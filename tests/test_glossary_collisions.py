@@ -1,7 +1,7 @@
 """용어표 충돌 감지 — 남성 성의 생격 표면과 여성형 항목이 같이 주입되는 쌍."""
 import unittest
 
-from runtime_tools.archival_translation.core import glossary_collision_pairs
+from translation_runtime.archival.core import glossary_collision_pairs
 
 
 class GlossaryCollisionPairs(unittest.TestCase):

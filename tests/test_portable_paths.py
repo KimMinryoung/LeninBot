@@ -2,7 +2,7 @@
 import unittest
 
 from ops.paths import FRONTEND_DIR, PROJECT_ROOT, expand_path_tokens
-from runtime_tools.archival_translation import SPEC_DIR
+from translation_runtime.archival import SPEC_DIR
 
 
 class ExpandPathTokensTest(unittest.TestCase):

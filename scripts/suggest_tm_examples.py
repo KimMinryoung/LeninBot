@@ -29,8 +29,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from runtime_tools import translation_memory
-from runtime_tools.archival_translation import Options, load_spec, plan
+from translation_runtime import translation_memory
+from translation_runtime.archival import Options, load_spec, plan
 
 _WORD_RE = re.compile(r"[А-Яа-яЁёA-Za-z]{3,}")
 _HAN_RE = re.compile(r"[㐀-䶿一-鿿]")

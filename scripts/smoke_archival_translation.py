@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Offline smoke test for runtime_tools.archival_translation.
+"""Offline smoke test for translation_runtime.archival.
 
 Exercises everything except the API call: spec loading and its id guard,
 source slicing and its drift guards, chunking, marker round-trip, the
@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from runtime_tools import archival_translation as at
+from translation_runtime import archival as at
 
 failures: list[str] = []
 
@@ -107,7 +107,7 @@ def main() -> int:
         check("Ежов가 격변화형에 걸린다", bool(by_ru["Ежов"]["pattern"].search("приказ Ежова")))
 
     print("gloss dedupe / register")
-    from runtime_tools.archival_translation import core as _core
+    from translation_runtime.archival import core as _core
     deduped = _core.dedupe_glosses([
         "필랴르(Пиляр)가 보고했다.",
         "이후 필랴르(Пиляр)는 체포되었다.",
@@ -165,7 +165,7 @@ def main() -> int:
     from llm import call_registry
     import translation_runtime
 
-    from runtime_tools.archival_translation import core
+    from translation_runtime.archival import core
 
     class _StubCache:
         def __init__(self):

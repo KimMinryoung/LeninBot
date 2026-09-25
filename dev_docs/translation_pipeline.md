@@ -8,7 +8,7 @@
 
 | 대상 | 언어·단위 | 어댑터와 출력 |
 |---|---|---|
-| 사료 | RU/ZH/EN/DE/FR/IT→KO, HTML 블록·마커, 기본 3,500자 청크 | `runtime_tools/archival_translation/`; 스펙의 `output` HTML fragment |
+| 사료 | RU/ZH/EN/DE/FR/IT→KO, HTML 블록·마커, 기본 3,500자 청크 | `translation_runtime/archival/`; 스펙의 `output` HTML fragment |
 | 연구문서 DB | KO→EN, Markdown 구조 단위 청크(목표 8,000자) | `scripts/translate_research_documents.py` → Markdown 어댑터; `research_documents` 영어 열 |
 | 연구문서 파일 | KO→EN, 같은 Markdown 어댑터 | `scripts/translate_research_markdown.py`; 기본 `research/en/*.md` |
 | 기타 DB 콘텐츠 | KO→EN, 행 단위 JSON | `scripts/translate_db_content.py`; posts/ai_diary/hub_curations 영어 열 |
@@ -145,7 +145,7 @@ CommuLingo 인물·용어 스냅샷과 `glossary.extra`를 결합하고, 청크�
 
 용어표 표면 일치로 번역을 강제 검증하지 않는다. Hessen(지명/인물), Союз(나라/단체), Каменева(인물/격변화)처럼 문맥에 따라 달라지는 표기가 있기 때문이다. 사전 스캔 `scan_archival_terms.py --spec <id> --llm`과 사후 `audit_archival_terms.py --spec <id>`는 LLM으로 지시체·실제 번역 표기를 추출해 **보고서와 스펙 수정 제안만** 만든다. 번역 루프에 자동 적용하지 않는다. 결과는 `.terms.jsonl` 캐시와 `.terms-scan.md`/`.terms-audit.md`에 남으며, `--plan`은 모델 호출을 생략한다.
 
-TM은 `runtime_tools/translation_memory.py`가 관리하는 SQLite `output/translation_memory.sqlite3`다.
+TM은 `translation_runtime/translation_memory.py`가 관리하는 SQLite `output/translation_memory.sqlite3`다.
 
 ```text
 segments(id, lang_pair, source, target, doc_id, block_id,

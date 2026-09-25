@@ -5,9 +5,9 @@ from pathlib import Path
 from types import SimpleNamespace as NS
 from unittest.mock import patch
 
-from runtime_tools.archival_translation import Options
-from runtime_tools.archival_translation import batch
-from runtime_tools.archival_translation import core as at
+from translation_runtime.archival import Options
+from translation_runtime.archival import batch
+from translation_runtime.archival import core as at
 
 
 class FakeBatches:

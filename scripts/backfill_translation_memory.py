@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Backfill the translation memory from existing archival chunk caches.
 
-TM(runtime_tools/translation_memory.py)은 사료 파이프라인이 청크를 번역할 때
+TM(translation_runtime/translation_memory.py)은 사료 파이프라인이 청크를 번역할 때
 적재되지만, TM보다 먼저 번역된 문서들의 쌍은 청크 캐시(JSONL)에만 있다.
 
 정렬은 캐시 키 재계산이 아니라 **블록 번호**로 한다. 처음 구현은 스펙을 다시
@@ -31,15 +31,15 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from runtime_tools import translation_memory
-from runtime_tools.archival_translation import (
+from translation_runtime import translation_memory
+from translation_runtime.archival import (
     Options,
     plan,
     load_spec,
     list_specs,
 )
-from runtime_tools.archival_translation.core import _cache_path
-from runtime_tools.archival_translation.terms import align_cached_blocks
+from translation_runtime.archival.core import _cache_path
+from translation_runtime.archival.terms import align_cached_blocks
 
 
 def backfill_spec(spec_id: str) -> dict:

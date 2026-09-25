@@ -1,4 +1,4 @@
-"""runtime_tools.archival_translation.terms — LLM 용어 추출과 결정론 집계.
+"""translation_runtime.archival.terms — LLM 용어 추출과 결정론 집계.
 
 용어 일관성의 판정을 표면 문자열 매칭에서 LLM의 문맥 판단으로 옮긴다.
 표면 매칭은 다의어(Союз, Правда, Октябрьский)와 인물 격변화 충돌(Каменева)을
@@ -176,7 +176,7 @@ def translated_blocks(spec: dict, docs: list[dict], lang: SourceLanguage,
     missing = [idx for idx in sources if idx not in targets]
     if missing:
         try:
-            from runtime_tools import translation_memory
+            from translation_runtime import translation_memory
             hits = translation_memory.exact_matches(
                 [sources[i] for i in missing], lang_pair=f"{lang.code}-ko")
             for idx in list(missing):

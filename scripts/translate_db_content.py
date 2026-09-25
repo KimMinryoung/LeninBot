@@ -309,7 +309,7 @@ def _record_tm(target_name: str, row: dict[str, Any], translated: dict[str, str]
     번역 저장을 깨서는 안 되므로 예외는 경고로만 남긴다.
     """
     try:
-        from runtime_tools import translation_memory
+        from translation_runtime import translation_memory
 
         pairs = [
             (row.get(src) or "", translated.get(en) or "")

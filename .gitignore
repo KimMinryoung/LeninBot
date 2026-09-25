@@ -10,7 +10,8 @@ scripts/dropins/
 
 # 가상환경 폴더
 .venv/
-venv/
+# No trailing slash, so a venv symlink in a git worktree is ignored too.
+/venv
 env/
 
 # 파이썬 캐시 파일

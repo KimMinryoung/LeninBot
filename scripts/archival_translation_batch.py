@@ -16,8 +16,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from runtime_tools.archival_translation import Options, SpecError, load_spec
-from runtime_tools.archival_translation import batch
+from translation_runtime.archival import Options, SpecError, load_spec
+from translation_runtime.archival import batch
 
 
 def main() -> int:

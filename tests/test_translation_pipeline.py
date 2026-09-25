@@ -7,8 +7,8 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 from llm import call_registry as registry
-from runtime_tools.archival_translation import core
-from runtime_tools import translation_memory as tm
+from translation_runtime.archival import core
+from translation_runtime import translation_memory as tm
 from translation_runtime.structure import (
     html_problems, markdown_problems, protect_markdown, restore_markdown,
     markdown_chunks, semantic_review,

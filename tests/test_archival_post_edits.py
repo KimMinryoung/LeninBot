@@ -1,7 +1,7 @@
 """postEdits 치환 뒤 조사 교정."""
 import unittest
 
-from runtime_tools.archival_translation.core import apply_post_edits, assemble
+from translation_runtime.archival.core import apply_post_edits, assemble
 
 
 def _edit(text, **edits):

@@ -1,4 +1,4 @@
-"""runtime_tools.archival_translation.sources — source-format adapters.
+"""translation_runtime.archival.sources — source-format adapters.
 
 An adapter turns one saved-page format into the flat block list the rest of
 the pipeline works on. A block is a dict::

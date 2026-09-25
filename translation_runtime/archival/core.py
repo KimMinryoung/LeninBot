@@ -1,4 +1,4 @@
-"""runtime_tools.archival_translation.core — Russian archival documents → Korean.
+"""translation_runtime.archival.core — Russian archival documents → Korean.
 
 Translates *official documents* — orders, directives, circulars, stenographic
 records of state or party bodies — that sit reproduced inside a saved archive
@@ -1864,7 +1864,7 @@ def _tm_prefill(docs: list[dict], lang: SourceLanguage,
     아니므로 어떤 예외도 여기서 멈춘다.
     """
     try:
-        from runtime_tools import translation_memory
+        from translation_runtime import translation_memory
 
         policy = (spec or {}).get("tmReuse", {})
         if policy.get("enabled") is False:
@@ -1920,7 +1920,7 @@ def _record_translation_memory(spec: dict, lang: SourceLanguage, succeeded, opts
     """
     try:
         from llm import call_registry
-        from runtime_tools import translation_memory
+        from translation_runtime import translation_memory
 
         pairs: list[tuple[str, str]] = []
         block_ids: list[int] = []

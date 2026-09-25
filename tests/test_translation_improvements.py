@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from runtime_tools.archival_translation import core
+from translation_runtime.archival import core
 from translation_runtime import TranslationCallError
 from translation_runtime.batch_state import BatchState
 from translation_runtime.structure import markdown_problems, translate_oversized_markdown

@@ -14,7 +14,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from runtime_tools.archival_translation import core
+from translation_runtime.archival import core
 from translation_runtime.structure import markdown_problems, semantic_review
 
 FIXTURE = ROOT / "tests" / "fixtures" / "translation_eval.json"
@@ -51,7 +51,7 @@ def evaluate(samples, candidates):
 def adapter_hashes():
     return {name: hashlib.sha256((ROOT / name).read_bytes()).hexdigest() for name in (
         "translation_runtime/__init__.py", "translation_runtime/structure.py",
-        "scripts/translate_research_markdown.py", "runtime_tools/archival_translation/core.py")}
+        "scripts/translate_research_markdown.py", "translation_runtime/archival/core.py")}
 
 
 def generate_candidate(sample, *, mode="pipeline", context_chars=0, max_chars=None):

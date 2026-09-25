@@ -1,5 +1,5 @@
 import unittest
-from runtime_tools.archival_translation import core
+from translation_runtime.archival import core
 class BibliographyTests(unittest.TestCase):
  def test_original_reference_requires_explicit_policy(self):
   b={'tag':'p','lines':['1. Raanan Rein, Untold Stories of the Spanish Civil War (Routledge, 2024).']}

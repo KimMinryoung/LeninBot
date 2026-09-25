@@ -332,7 +332,7 @@ class TestRegistryProviderConnections(unittest.TestCase):
 
     def test_archival_preflight_accepts_keyless_gateway_mode(self):
         from llm import call_registry
-        from runtime_tools.archival_translation import core
+        from translation_runtime.archival import core
 
         pol = _policy(proxy_base="http://127.0.0.1:8110")
         with patch.object(gw, "load_policy", return_value=pol):
@@ -342,7 +342,7 @@ class TestRegistryProviderConnections(unittest.TestCase):
 
     def test_archival_preflight_rejects_missing_direct_key(self):
         from llm import call_registry
-        from runtime_tools.archival_translation import core
+        from translation_runtime.archival import core
 
         with patch.object(gw, "load_policy", return_value=_policy()):
             with patch.object(call_registry, "get_secret", return_value=""):

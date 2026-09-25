@@ -1,4 +1,4 @@
-"""runtime_tools.archival_translation — archival documents → Korean.
+"""translation_runtime.archival — archival documents → Korean.
 
 Public surface used by scripts/translate_archival_documents.py and
 api_routes/archival_translation.py. See core.py for the scope rules.

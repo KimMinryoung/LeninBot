@@ -2,7 +2,7 @@ import sys,unittest
 from types import SimpleNamespace
 from unittest.mock import patch,MagicMock
 from llm import call_registry as cr
-from runtime_tools.archival_translation import core
+from translation_runtime.archival import core
 class ThinkingTests(unittest.TestCase):
  def profile(self,extra):return cr.CallSiteProfile(feature='t',provider='gemini',model='gemini-3.1-pro-preview',extra=extra)
  def test_actual_sdk_request_has_low_and_default_is_unchanged(self):

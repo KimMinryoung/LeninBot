@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from runtime_tools.archival_translation.core import (
+from translation_runtime.archival.core import (
     Cache, GERMAN, Options, RUSSIAN, Stats, _cached_blocks, _translate_chunk, validate,
 )
 
@@ -88,7 +88,7 @@ class CacheRevalidation(unittest.TestCase):
 
 class StrayCyrillicSkipsEditorial(unittest.TestCase):
     def test_bibliography_original_title_is_not_a_hole(self):
-        from runtime_tools.archival_translation.core import stray_cyrillic
+        from translation_runtime.archival.core import stray_cyrillic
         html = ('<article><h1>제목</h1><aside class="doc-editorial"><p class="doc-editorial-label">엮은이 주</p>'
                 '<ul><li>원제: Приказ Народного комиссара обороны СССР № 227</li></ul></aside>'
                 '<p>본문에 남은 Ставка 한 낱말.</p><p>병기는 괜찮다(Жуков).</p></article>')
@@ -97,7 +97,7 @@ class StrayCyrillicSkipsEditorial(unittest.TestCase):
 
 class GlossaryPatternBoundary(unittest.TestCase):
     def test_every_alternative_is_bounded(self):
-        from runtime_tools.archival_translation.core import _pattern, _variants
+        from translation_runtime.archival.core import _pattern, _variants
         pat = _pattern(_variants("Горбач"))
         self.assertIsNone(pat.search("Горбачев"))      # 전치격 'Горбаче'가 안에서 걸리면 안 된다
         self.assertIsNone(pat.search("М. Горбачевым"))
@@ -117,30 +117,30 @@ class LatinSourceLanguages(unittest.TestCase):
     보고, 약어와 괄호 원문은 통과시킨다. 용어표 경계는 로마자 기준이다."""
 
     def test_latin_languages_are_registered(self):
-        from runtime_tools.archival_translation.core import LANGUAGES
+        from translation_runtime.archival.core import LANGUAGES
         for code in ("en", "de", "fr", "it"):
             self.assertIn(code, LANGUAGES)
             self.assertTrue(LANGUAGES[code].latin)
             self.assertEqual(LANGUAGES[code].feature, f"archival_document_translation_{code}")
 
     def test_acronyms_and_parenthesised_originals_are_not_holes(self):
-        from runtime_tools.archival_translation.core import ENGLISH, stray_cyrillic
+        from translation_runtime.archival.core import ENGLISH, stray_cyrillic
         html = ("<p>소련은 NATO와 ICBM 문제에서 윌슨(Wilson) 대통령의 입장을 물었다. "
                 "SHAEF는 e.g. 4th 군단을 언급했다.</p>")
         self.assertEqual(stray_cyrillic(html, None, ENGLISH), [])
 
     def test_untranslated_english_word_is_a_hole(self):
-        from runtime_tools.archival_translation.core import ENGLISH, stray_cyrillic
+        from translation_runtime.archival.core import ENGLISH, stray_cyrillic
         html = "<p>최고사령관은 the Supreme Command 가 lodgement 지역을 지킬 것을 지시했다.</p>"
         self.assertEqual(stray_cyrillic(html, None, ENGLISH), ["Command", "Supreme", "lodgement"])
 
     def test_allowed_latin_words_are_kept(self):
-        from runtime_tools.archival_translation.core import ENGLISH, stray_cyrillic
+        from translation_runtime.archival.core import ENGLISH, stray_cyrillic
         html = "<p>작전명 Overlord는 유지한다.</p>"
         self.assertEqual(stray_cyrillic(html, ["Overlord"], ENGLISH), [])
 
     def test_validate_flags_verbatim_echo_and_accepts_translation(self):
-        from runtime_tools.archival_translation.core import ENGLISH
+        from translation_runtime.archival.core import ENGLISH
         src = ("The Supreme Commander directs that all forces shall consolidate the "
                "lodgement area before advancing inland, and that supply over the beaches "
                "be given priority over every other consideration.")
@@ -151,7 +151,7 @@ class LatinSourceLanguages(unittest.TestCase):
         self.assertTrue(problems and "그대로 반환" in problems[0])
 
     def test_glossary_pattern_is_bounded_by_latin_letters(self):
-        from runtime_tools.archival_translation.core import _pattern
+        from translation_runtime.archival.core import _pattern
         pat = _pattern(["Kerr"], True)
         self.assertIsNotNone(pat.search("Ambassador Kerr wrote"))
         self.assertIsNone(pat.search("Kerrigan"))
@@ -184,7 +184,7 @@ class ForeignScript(unittest.TestCase):
 class LatinVerbatimHeading(unittest.TestCase):
     def test_untranslatable_code_heading_is_not_an_echo(self):
         # 「SCAF 48」처럼 번역해도 원문과 같은 제목 블록은 실패가 아니다 (2026-09-07).
-        from runtime_tools.archival_translation.core import ENGLISH
+        from translation_runtime.archival.core import ENGLISH
         chunk = [(10, {"tag": "h3", "lines": ["SCAF 48"]}),
                  (11, {"tag": "p", "lines": ["Losses have been considerable in this force."]})]
         self.assertEqual(validate(chunk, {10: ["SCAF 48"], 11: ["이 부대의 손실이 상당했다."]}, ENGLISH), [])
@@ -196,7 +196,7 @@ class RenumberedCache(unittest.TestCase):
     """블록 번호가 밀려도 내용이 같은 청크는 캐시에 맞는다 (2026-09-07)."""
 
     def _prepared(self, chunk):
-        from runtime_tools.archival_translation.core import _legacy_chunk_key, _prepare_chunk
+        from translation_runtime.archival.core import _legacy_chunk_key, _prepare_chunk
         prompt, key = _prepare_chunk(chunk, [], Options(), RUSSIAN)
         return prompt, key, _legacy_chunk_key(prompt, Options(), RUSSIAN)
 
@@ -213,7 +213,7 @@ class RenumberedCache(unittest.TestCase):
             cache = Cache(Path(d) / "c.jsonl")
             old = _chunk(_SRC)
             _, key, _ = self._prepared(old)
-            from runtime_tools.archival_translation.core import _block_source_hashes
+            from translation_runtime.archival.core import _block_source_hashes
             cache.put(key, {10: _FULL}, {"sourceHashes": _block_source_hashes(old)})
             new = [(500, {"tag": "p", "lines": [_SRC]})]
             self.assertEqual(_cached_blocks(cache, key, new, RUSSIAN), ({500: _FULL}, []))

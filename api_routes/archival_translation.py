@@ -23,7 +23,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from services.api_security import require_admin
-from runtime_tools import archival_translation as at
+from translation_runtime import archival as at
 
 logger = logging.getLogger(__name__)
 

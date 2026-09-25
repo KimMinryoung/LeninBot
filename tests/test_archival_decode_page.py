@@ -1,7 +1,7 @@
 """저본 페이지 디코딩 — 선언된 charset을 따른다 (cp1251 외 라틴 인코딩 포함)."""
 import unittest
 
-from runtime_tools.archival_translation.core import _decode_page
+from translation_runtime.archival.core import _decode_page
 
 
 class DecodePage(unittest.TestCase):

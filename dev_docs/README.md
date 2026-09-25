@@ -82,7 +82,7 @@
 | `services/` | FastAPI·embedding 서비스 진입점과 web/A2A/email/image 서비스 구현 |
 | `jobs/` | systemd timer나 수동 명령이 실행하는 autonomous/experience 작업 |
 | `llm/` | provider adapter, 공용 tool-loop engine, gateway, model/runtime profile |
-| `translation_runtime/` | 사료·사이트 번역 공통 실행, 구조 검증, 원자적 파일 저장 |
+| `translation_runtime/` | 사료·사이트 번역 공통 실행, 구조 검증, 원자적 파일 저장, 번역 메모리(`translation_memory`), 사료 번역 파이프라인(`archival/`) |
 | `telegram/`, `agents/`, `runtime_tools/` | Telegram orchestration, agent specs, runtime tool implementations |
 | `roleplay/` | 별도 정체성의 역할극 봇(`roleplay.bot`, `leninbot-roleplay.service`)과 게임 상태·판정·기억 모듈 |
 | `scripts/`, `deploy/`, `systemd/` | 운영·검증 스크립트, 배포 자산, unit 원본 |

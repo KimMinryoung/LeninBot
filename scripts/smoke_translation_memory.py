@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from runtime_tools import translation_memory as tm
+from translation_runtime import translation_memory as tm
 from scripts._translation_common import (
     field_translation_problems,
     hangul_ratio,
@@ -139,7 +139,7 @@ def _field_checks() -> None:
 
 
 def _post_edit_checks() -> None:
-    from runtime_tools.archival_translation.core import apply_post_edits
+    from translation_runtime.archival.core import apply_post_edits
 
     spec = {"postEdits": {"인민내무위원부": "내무인민위원부", "Ульмером": "울메르와"}}
     lines = ["인민내무위원부(НКВД)의 명령.", "Ульмером 함께.", "무관한 줄."]
@@ -194,8 +194,8 @@ def _validate_checks() -> None:
 
     from llm import call_registry
     import translation_runtime
-    from runtime_tools.archival_translation import core
-    from runtime_tools.archival_translation.core import RUSSIAN, validate
+    from translation_runtime.archival import core
+    from translation_runtime.archival.core import RUSSIAN, validate
 
     chunk = [(1, {"tag": "p", "lines": ["Приказ НКВД о мобилизации."]})]
     check("glossary rendering is not validated",
@@ -233,13 +233,13 @@ def _validate_checks() -> None:
 
 def _tm_prefill_checks() -> None:
     from unittest.mock import patch
-    from runtime_tools.archival_translation import core
+    from translation_runtime.archival import core
     docs = [{"offset": 0, "blocks": [{"tag": "p", "lines": ["Приказ о мобилизации."]}]}]
-    with patch("runtime_tools.translation_memory.exact_matches",
+    with patch("translation_runtime.translation_memory.exact_matches",
                return_value={"Приказ о мобилизации.": "동원에 관한 명령."}):
         check("TM valid block reused", core._tm_prefill(docs, core.RUSSIAN, lambda e: None)
               == {0: ["동원에 관한 명령."]})
-    with patch("runtime_tools.translation_memory.exact_matches",
+    with patch("translation_runtime.translation_memory.exact_matches",
                return_value={"Приказ о мобилизации.": "სწორედ"}):
         check("TM invalid block rejected", core._tm_prefill(docs, core.RUSSIAN, lambda e: None) == {})
 
@@ -269,7 +269,7 @@ def _prepare_scan_checks() -> None:
 
 
 def _tm_example_checks() -> None:
-    from runtime_tools.archival_translation import core
+    from translation_runtime.archival import core
     from scripts.suggest_tm_examples import rank_examples
 
     # 스펙에 고정된 예시가 청크 프롬프트에 실린다

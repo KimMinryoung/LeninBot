@@ -1,7 +1,7 @@
 """라틴 문자 저본: 인물사전 성(姓) 단독 항목은 전체 이름·이니셜이 문서에 있을 때만 주입."""
 import unittest
 
-from runtime_tools.archival_translation.core import _pattern, anchor_latin_people
+from translation_runtime.archival.core import _pattern, anchor_latin_people
 
 
 def _entry(fam_en, ko, full_en, given_en):

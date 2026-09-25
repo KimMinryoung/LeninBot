@@ -1,7 +1,7 @@
 """셀렉터 범위 범용 HTML 어댑터."""
 import unittest
 
-from runtime_tools.archival_translation.sources import generic_html, parse
+from translation_runtime.archival.sources import generic_html, parse
 
 PAGE = """<html><body><div id="nav"><ul><li>Главная</li><li>Поиск</li></ul></div>
 <div id="content"><h2>Приказ № 1</h2><p>Первый абзац приказа.</p>
@@ -64,7 +64,7 @@ class GenericHtml(unittest.TestCase):
 
 class DecodePage(unittest.TestCase):
     def test_declared_cp1251_and_fallbacks(self):
-        from runtime_tools.archival_translation.core import _decode_page
+        from translation_runtime.archival.core import _decode_page
         ru = "Постановление"
         cp = ('<html><head><meta http-equiv="Content-Type" content="text/html; charset=windows-1251"></head>'
               '<body>' + ru + '</body></html>').encode("cp1251")

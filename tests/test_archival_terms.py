@@ -5,8 +5,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from runtime_tools.archival_translation import terms
-from runtime_tools.archival_translation.core import Options, _pattern, _variants
+from translation_runtime.archival import terms
+from translation_runtime.archival.core import Options, _pattern, _variants
 
 
 def _glossary():

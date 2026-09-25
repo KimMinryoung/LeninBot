@@ -1,7 +1,7 @@
 """generic_html 표 블록의 번역 어휘 — 글자가 든 칸은 문자 체계와 무관하게 낸다."""
 import unittest
 
-from runtime_tools.archival_translation.sources import generic_html
+from translation_runtime.archival.sources import generic_html
 
 
 class TableVocabulary(unittest.TestCase):

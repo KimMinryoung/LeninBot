@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CLI for runtime_tools.archival_translation — archival documents → Korean.
+"""CLI for translation_runtime.archival — archival documents → Korean.
 
 Translates the block ranges a spec names (Soviet official documents
 reproduced inside a saved archive page) and writes a CommuLingo reference
@@ -34,7 +34,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from runtime_tools import archival_translation as at
+from translation_runtime import archival as at
 
 
 def _print_plan(prepared: dict) -> None:

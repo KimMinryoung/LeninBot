@@ -13,7 +13,7 @@ glossary.extra에 손으로 채웠다. 첫 등장 표기가 문서 전체의 일
 대문자가 정보가 아니므로 제외). 중국어는 대소문자 신호가 없어 이 방법이
 통하지 않는다 — NER 없이 돌리면 목록 전체가 소음이 되므로 거부한다.
 
---llm은 정규식 대신 LLM 추출(runtime_tools/archival_translation/terms.py)을
+--llm은 정규식 대신 LLM 추출(translation_runtime/archival/terms.py)을
 쓴다: 청크마다 인명·기관·지명·간행물·정치용어를 문맥(lemma+sense)으로 뽑고,
 표면 매칭으로 걸렸지만 이 문맥에서는 뜻이 다른 용어표 항목(misfire →
 glossary.exclude 후보)도 함께 보고한다. 대소문자 신호에 기대지 않으므로
@@ -40,8 +40,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from runtime_tools.archival_translation import Options, load_spec, plan
-from runtime_tools.archival_translation import terms as at_terms
+from translation_runtime.archival import Options, load_spec, plan
+from translation_runtime.archival import terms as at_terms
 
 # 전부 대문자인 약어. ЦК ВКП(б) 같은 괄호 꼬리는 뒤에서 별도로 붙지 않고
 # 낱개 토큰(ЦК, ВКП)으로 잡혀도 검토 목록으로는 충분하다.
