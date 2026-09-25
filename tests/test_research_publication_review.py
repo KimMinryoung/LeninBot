@@ -179,7 +179,7 @@ def install_reviewer(monkeypatch, chat):
         "fetch_url": AsyncMock(return_value="Observed source text"),
         "research_document": AsyncMock(), "send_email": AsyncMock(),
     })
-    monkeypatch.setitem(sys.modules, "telegram.bot", SimpleNamespace(_make_provider_chat_fn=lambda _: chat))
+    monkeypatch.setitem(sys.modules, "telegram.chat_runtime", SimpleNamespace(make_provider_chat_fn=lambda _: chat))
 
 
 VERDICT = review.VERDICT_TOOL["name"]

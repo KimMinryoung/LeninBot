@@ -2180,7 +2180,7 @@ async def _execute_one_tick(project: dict, *, production: dict | None = None) ->
     # no-op, advisories remain pending so operator direction is not lost.
     pending_advisories = _fetch_pending_advisories(project["id"])
 
-    from telegram.bot import _chat_with_tools
+    from telegram.chat_runtime import chat_with_tools as _chat_with_tools
     tick_request_id = production["attempts"][-1]["request_id"] if production else new_request_id()
 
     agent_tools, agent_handlers = _attach_tick_mode_tools(

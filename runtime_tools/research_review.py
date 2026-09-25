@@ -115,7 +115,7 @@ async def _run_review(document: str, notes: str, evidence: list,
     from llm.runtime_profile import resolve_runtime_profile
     from runtime_tools.registry import TOOLS, TOOL_HANDLERS
     from security_gateway.context import get_caller
-    from telegram.bot import _make_provider_chat_fn
+    from telegram.chat_runtime import make_provider_chat_fn as _make_provider_chat_fn
 
     caller = get_caller()
     provider = _get_task_provider()

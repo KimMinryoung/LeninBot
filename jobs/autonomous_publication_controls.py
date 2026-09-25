@@ -418,7 +418,10 @@ async def run_stasova_publication_review(
     from bot_config import _get_task_provider
     from runtime_tools.registry import TOOL_HANDLERS as BASE_HANDLERS
     from runtime_tools.registry import TOOLS as BASE_TOOLS
-    from telegram.bot import _get_model_for_agent, _make_provider_chat_fn
+    from telegram.chat_runtime import (
+        get_model_for_agent as _get_model_for_agent,
+        make_provider_chat_fn as _make_provider_chat_fn,
+    )
 
     spec = get_agent("stasova")
     agent_tools, agent_handlers = spec.filter_tools(BASE_TOOLS, BASE_HANDLERS)

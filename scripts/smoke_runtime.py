@@ -903,7 +903,7 @@ async def _assert_autonomous_tick_failure_updates_cooldown() -> None:
     import jobs.autonomous_project as ap
 
     original_get_agent = __import__("agents").get_agent
-    original_chat = __import__("telegram.bot").bot._chat_with_tools
+    original_chat = __import__("telegram.chat_runtime").chat_runtime.chat_with_tools
     original_execute = ap.db_execute
     original_log_event = ap._log_event
     original_notify = ap._notify_telegram
@@ -946,10 +946,11 @@ async def _assert_autonomous_tick_failure_updates_cooldown() -> None:
 
     import agents
     import telegram.bot as bot
+    import telegram.chat_runtime as chat_runtime
 
     try:
         agents.get_agent = lambda _name: DummySpec()
-        bot._chat_with_tools = failing_chat
+        chat_runtime.chat_with_tools = failing_chat
         ap.db_execute = fake_execute
         ap._log_event = fake_log_event
         ap._notify_telegram = fake_notify
@@ -983,7 +984,7 @@ async def _assert_autonomous_tick_failure_updates_cooldown() -> None:
         assert not any("turn_count = turn_count + 1" in sql for sql, _params in updates)
     finally:
         agents.get_agent = original_get_agent
-        bot._chat_with_tools = original_chat
+        chat_runtime.chat_with_tools = original_chat
         ap.db_execute = original_execute
         ap._log_event = original_log_event
         ap._notify_telegram = original_notify
@@ -1026,7 +1027,7 @@ async def _assert_successful_staged_draft_tick_consumes_advisories() -> None:
     import jobs.autonomous_project as ap
 
     original_get_agent = __import__("agents").get_agent
-    original_chat = __import__("telegram.bot").bot._chat_with_tools
+    original_chat = __import__("telegram.chat_runtime").chat_runtime.chat_with_tools
     original_execute = ap.db_execute
     original_log_event = ap._log_event
     original_notify = ap._notify_telegram
@@ -1072,10 +1073,11 @@ async def _assert_successful_staged_draft_tick_consumes_advisories() -> None:
 
     import agents
     import telegram.bot as bot
+    import telegram.chat_runtime as chat_runtime
 
     try:
         agents.get_agent = lambda _name: DummySpec()
-        bot._chat_with_tools = staged_chat
+        chat_runtime.chat_with_tools = staged_chat
         ap.db_execute = lambda *_args, **_kwargs: None
         ap._log_event = fake_log_event
         ap._notify_telegram = fake_notify
@@ -1114,7 +1116,7 @@ async def _assert_successful_staged_draft_tick_consumes_advisories() -> None:
         assert notifications and notifications[-1]["actions"]["staged_drafts"] == ["research: Staged Report\n/reports/research/staged-report"]
     finally:
         agents.get_agent = original_get_agent
-        bot._chat_with_tools = original_chat
+        chat_runtime.chat_with_tools = original_chat
         ap.db_execute = original_execute
         ap._log_event = original_log_event
         ap._notify_telegram = original_notify
@@ -1130,7 +1132,7 @@ async def _assert_successful_durable_tick_consumes_advisories() -> None:
     import jobs.autonomous_project as ap
 
     original_get_agent = __import__("agents").get_agent
-    original_chat = __import__("telegram.bot").bot._chat_with_tools
+    original_chat = __import__("telegram.chat_runtime").chat_runtime.chat_with_tools
     original_execute = ap.db_execute
     original_log_event = ap._log_event
     original_notify = ap._notify_telegram
@@ -1176,10 +1178,11 @@ async def _assert_successful_durable_tick_consumes_advisories() -> None:
 
     import agents
     import telegram.bot as bot
+    import telegram.chat_runtime as chat_runtime
 
     try:
         agents.get_agent = lambda _name: DummySpec()
-        bot._chat_with_tools = durable_chat
+        chat_runtime.chat_with_tools = durable_chat
         ap.db_execute = lambda *_args, **_kwargs: None
         ap._log_event = fake_log_event
         ap._notify_telegram = fake_notify
@@ -1219,7 +1222,7 @@ async def _assert_successful_durable_tick_consumes_advisories() -> None:
         assert notifications and notifications[-1]["actions"]["notes"] == ["durable note from advised work"]
     finally:
         agents.get_agent = original_get_agent
-        bot._chat_with_tools = original_chat
+        chat_runtime.chat_with_tools = original_chat
         ap.db_execute = original_execute
         ap._log_event = original_log_event
         ap._notify_telegram = original_notify
@@ -1235,7 +1238,7 @@ async def _assert_successful_noop_tick_logs_no_durable_action() -> None:
     import jobs.autonomous_project as ap
 
     original_get_agent = __import__("agents").get_agent
-    original_chat = __import__("telegram.bot").bot._chat_with_tools
+    original_chat = __import__("telegram.chat_runtime").chat_runtime.chat_with_tools
     original_execute = ap.db_execute
     original_log_event = ap._log_event
     original_notify = ap._notify_telegram
@@ -1281,10 +1284,11 @@ async def _assert_successful_noop_tick_logs_no_durable_action() -> None:
 
     import agents
     import telegram.bot as bot
+    import telegram.chat_runtime as chat_runtime
 
     try:
         agents.get_agent = lambda _name: DummySpec()
-        bot._chat_with_tools = quiet_chat
+        chat_runtime.chat_with_tools = quiet_chat
         ap.db_execute = lambda *_args, **_kwargs: None
         ap._log_event = fake_log_event
         ap._notify_telegram = fake_notify
@@ -1321,7 +1325,7 @@ async def _assert_successful_noop_tick_logs_no_durable_action() -> None:
         assert notifications and notifications[-1]["actions"]["publications"] == []
     finally:
         agents.get_agent = original_get_agent
-        bot._chat_with_tools = original_chat
+        chat_runtime.chat_with_tools = original_chat
         ap.db_execute = original_execute
         ap._log_event = original_log_event
         ap._notify_telegram = original_notify

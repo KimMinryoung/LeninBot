@@ -209,7 +209,7 @@ async def test_tick_integration_disables_repeat_review_and_passes_hard_limits(mo
 
     state = p.reserve(None, "integration")
     chat = AsyncMock(return_value="model output is not value evidence")
-    monkeypatch.setitem(sys.modules, "telegram.bot", types.SimpleNamespace(_chat_with_tools=chat))
+    monkeypatch.setitem(sys.modules, "telegram.chat_runtime", types.SimpleNamespace(chat_with_tools=chat))
     spec = MagicMock()
     spec.effective_provider.return_value = "deepseek"
     spec.filter_tools.return_value = ([], {})

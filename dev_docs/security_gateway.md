@@ -99,7 +99,7 @@ Decision labels (also the audit `decision` value): `allow`, `deny`, `shadow_deny
 
 | Interface | Where set | is_owner |
 |---|---|---|
-| `telegram` / `agent` | `telegram/bot._chat_with_tools`; direct messages use `telegram_message`, durable workers/verifiers use `telegram_task`, and nested `run_agent` calls inherit the parent request | `True` (owner's gated channel) |
+| `telegram` / `agent` | `telegram/chat_runtime.chat_with_tools`; direct messages use `telegram_message`, durable workers/verifiers use `telegram_task`, and nested `run_agent` calls inherit the parent request | `True` (owner's gated channel) |
 | `webchat` | `services.web_chat._run_llm` via `tool_gateway.security` | `False` |
 | `a2a` | `services.a2a_handler._run_llm`; A2A context/task/message IDs map to session/scope/user fields | `False` |
 | `autonomous` | autonomous project ticks and scheduled CommuLingo maintainers; project ticks use `autonomous_project`, maintainers use `maintenance_job` | `True` |
