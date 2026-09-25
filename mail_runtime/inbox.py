@@ -189,12 +189,12 @@ def collect(*, connect, parse, scope, audience, sender_filter='', subject_filter
 
 
 async def check_inbox(**kwargs):
-    from runtime_tools.registry import _imap_connect, _parse_email_message
+    from mail_runtime import imap
     from provenance.runtime import _wrap_external
     try:
         caller = get_caller()
         scope = await asyncio.to_thread(store.task_scope, caller.task_id)
-        result = await asyncio.to_thread(collect, connect=_imap_connect, parse=_parse_email_message,
+        result = await asyncio.to_thread(collect, connect=imap.connect, parse=imap.parse_message,
                                         scope=scope, audience=scope[1] if scope else caller.user_id,
                                         **kwargs)
         return _wrap_external(json.dumps(result, ensure_ascii=False), 'imap_inbox')

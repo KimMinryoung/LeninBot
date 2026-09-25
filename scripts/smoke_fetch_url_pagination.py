@@ -16,7 +16,7 @@ from llm.tool_loop_common import execute_tool
 import content_fetch.urls as url_fetch
 import self_runtime.tools as self_tools
 import mcp_gateway.tools as mcp_tools
-from runtime_tools.registry import _parse_email_message
+from mail_runtime.imap import parse_message
 
 
 SOURCE = "A" * 1000 + "B" * 1000 + "C" * 1000
@@ -116,7 +116,7 @@ async def _main() -> None:
         "\n"
         + SOURCE
     ).encode("utf-8")
-    email_page = _parse_email_message(
+    email_page = parse_message(
         raw_email, include_body=True, body_max_chars=1000, body_offset=1000
     )
     assert email_page["body_start"] == 1000, email_page

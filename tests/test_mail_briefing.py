@@ -107,8 +107,8 @@ class Imap:
 
 
 def read(imap, task=1, **kwargs):
-    from runtime_tools.registry import _parse_email_message
-    return collect(connect=lambda: imap, parse=_parse_email_message, scope=(task, '42'),
+    from mail_runtime.imap import parse_message
+    return collect(connect=lambda: imap, parse=parse_message, scope=(task, '42'),
                    audience='42', **kwargs)
 
 

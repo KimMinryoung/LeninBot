@@ -6,7 +6,7 @@ set IMAP `\Seen`; that flag is never a briefing receipt.
 
 ## Read contract
 
-`check_inbox` (`runtime_tools/registry.py` schema, `mail_runtime/inbox.py` handler)
+`check_inbox` (`mail_runtime/tools.py` schema, `mail_runtime/inbox.py` handler; IMAP access in `mail_runtime/imap.py`; registered by `runtime_tools/registry.py`)
 returns external-source-wrapped JSON. Delegated tasks default to `unbriefed_only=true`
 unless `unread_only=true`; non-task reads retain ordinary mailbox browsing by default.
 Set `unbriefed_only=false` to browse history. The audience is resolved from the
