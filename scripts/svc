@@ -411,7 +411,10 @@ $CHANGES
 \`\`\`"
 
     # 7. Browser worker
-    if [[ "$SERVICE" == "all" ]] && _run_systemctl is-active --quiet leninbot-browser 2>/dev/null; then
+    # Read-only queries run without sudo: sudoers allows only
+    # "is-active leninbot-*", so "sudo systemctl is-active --quiet ..." asked
+    # for a password, failed, and the browser was silently never restarted.
+    if [[ "$SERVICE" == "all" ]] && systemctl is-active --quiet leninbot-browser 2>/dev/null; then
         do_graceful_restart browser
         RESTARTED="${RESTARTED:+$RESTARTED+}browser"
     fi
@@ -519,7 +522,7 @@ cmd_status() {
                 echo -e "  ${RED}●${NC} $name ($container): $state"
             fi
         else
-            state=$(_run_systemctl is-active "$unit" 2>/dev/null || true)
+            state=$(systemctl is-active "$unit" 2>/dev/null || true)
             if [[ "$state" == "active" || "$state" == "activating" ]]; then
                 echo -e "  ${GREEN}●${NC} $name: $state"
             else
@@ -532,7 +535,7 @@ cmd_status() {
     for name in "${ALL_TIMERS[@]}"; do
         local unit state
         unit=$(to_unit "$name")
-        state=$(_run_systemctl is-active "$unit" 2>/dev/null || true)
+        state=$(systemctl is-active "$unit" 2>/dev/null || true)
         if [[ "$state" == "active" ]]; then
             echo -e "  ${GREEN}●${NC} $name: $state"
         else
