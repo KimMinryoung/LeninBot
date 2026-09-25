@@ -38,7 +38,7 @@ def _roleplay_tables() -> None:
 
 
 def _research_documents() -> None:
-    from runtime_tools.research_store import ensure_research_table
+    from publishing.research_store import ensure_research_table
 
     ensure_research_table()
 
@@ -54,13 +54,13 @@ def _translation_freshness() -> None:
 
 
 def _publication_records() -> None:
-    from runtime_tools.publication_records import ensure_publish_record_table
+    from publishing.publication_records import ensure_publish_record_table
 
     ensure_publish_record_table()
 
 
 def _site_publishing() -> None:
-    from runtime_tools.site_publishing import _ensure_hub_table, _ensure_static_page_table
+    from publishing.site_publishing import _ensure_hub_table, _ensure_static_page_table
 
     _ensure_hub_table()
     _ensure_static_page_table()

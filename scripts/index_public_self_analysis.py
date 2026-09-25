@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from runtime_tools import research_store
+from publishing import research_store
 from db import query as db_query
 from corpus.public_index import index_public_self_analysis
 

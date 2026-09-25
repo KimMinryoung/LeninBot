@@ -163,7 +163,7 @@ status: machine < published < reviewed
 
 ## 5. 원문 최신성과 DB 적용 상태
 
-`research_documents.markdown_en_source_sha256`는 번역에 사용한 원문의 SHA-256이다. `runtime_tools.research_store.upsert_document()`는 원문이 바뀌고 새 영어 번역이 제공되지 않으면 이전 영어 필드와 번역 해시를 무효화한다. 연구 번역기는 public 문서 중 영어 본문이 비었거나 번역 해시가 `content_sha256`과 다른 문서를 선택한다. 이 두 해시를 관리하는 원문 저장 경로가 기준이다.
+`research_documents.markdown_en_source_sha256`는 번역에 사용한 원문의 SHA-256이다. `publishing.research_store.upsert_document()`는 원문이 바뀌고 새 영어 번역이 제공되지 않으면 이전 영어 필드와 번역 해시를 무효화한다. 연구 번역기는 public 문서 중 영어 본문이 비었거나 번역 해시가 `content_sha256`과 다른 문서를 선택한다. 이 두 해시를 관리하는 원문 저장 경로가 기준이다.
 
 저장은 `id + 선택 당시 markdown + status='public'` 조건의 UPDATE다. 번역 중 원문이 바뀌거나 비공개가 됐으면 저장을 거부한다. 기록하는 출처 해시는 선택 당시 행의 `content_sha256` 값이다. 직접 SQL로 원문을 고쳐 `content_sha256`이 어긋난 행에 sha256(markdown)을 다시 계산해 넣으면 선택 조건과 영원히 불일치해 매일 밤 재번역된다. title_en/summary_en은 번역 Markdown에서 추출한다. 기타 DB도 선택 당시 원문 필드 값으로 조건부 UPDATE한다. 각 원문 테이블의 `translation_source_sha256`로 원문 변경을 탐지하며, 영어본과 해시를 같은 조건부 UPDATE로 저장한다.
 
@@ -228,7 +228,7 @@ SELECT count(*) FROM research_documents
 
 ### 7.2 해시 두 개의 관계
 
-- `content_sha256`은 원문 저장 경로(`runtime_tools.research_store.upsert_document`)가 관리한다. `dedupe_research_headers.py`, `fix_broken_report_links.py`, `demote_research_body_h1.py`처럼 **직접 SQL로 markdown을 고치는 스크립트는 이 열을 갱신하지 않는다.** 7월 24~25일 편집으로 6행이 어긋나 있었고, 이번에 sha256(markdown)으로 복구했다. 그런 스크립트를 다시 쓰면 `content_sha256`도 함께 갱신해야 한다.
+- `content_sha256`은 원문 저장 경로(`publishing.research_store.upsert_document`)가 관리한다. `dedupe_research_headers.py`, `fix_broken_report_links.py`, `demote_research_body_h1.py`처럼 **직접 SQL로 markdown을 고치는 스크립트는 이 열을 갱신하지 않는다.** 7월 24~25일 편집으로 6행이 어긋나 있었고, 이번에 sha256(markdown)으로 복구했다. 그런 스크립트를 다시 쓰면 `content_sha256`도 함께 갱신해야 한다.
 - 번역기는 선택 당시 행의 `content_sha256` 값을 `markdown_en_source_sha256`에 기록한다. sha256(markdown)을 다시 계산하지 않는 이유는, 선택 조건이 저장된 열과 비교하므로 어긋난 행이 매일 밤 재번역되기 때문이다.
 - 특정 문서를 다시 번역하려면 `--force`(전체) 대신 그 행의 `markdown_en_source_sha256`을 NULL로 두면 다음 밤 타이머가 집는다. 이번에 구조 검증 실패 16건(id 45, 52, 53, 81, 194, 235, 263, 276, 299, 303, 315, 322, 331, 337, 340, 418)을 이 방법으로 걸었다.
 

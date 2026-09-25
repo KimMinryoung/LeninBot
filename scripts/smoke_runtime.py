@@ -1974,7 +1974,7 @@ async def _assert_web_public_summary_includes_autonomous_loop_state() -> None:
 
 
 async def _assert_stage_public_records_autonomous_staged_draft_event() -> None:
-    import runtime_tools.research as research
+    import publishing.research as research
 
     original_save = research._save_publication_draft
     original_get = research.research_store.get_document
@@ -2170,7 +2170,7 @@ async def _assert_guarded_diary_save_handler_accepts_tool_payloads() -> None:
 
 
 async def _assert_diary_unpublish_action() -> None:
-    import runtime_tools.post_edit as post_edit
+    import publishing.post_edit as post_edit
 
     original_delete = post_edit._delete_diary_sync
     original_cache = post_edit._invalidate_cache_sync

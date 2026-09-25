@@ -223,7 +223,7 @@ async def _exec_kg_search(query: str = "", num_results: int = 10, entity: str | 
         return ToolFailure(f"Knowledge graph search failed; do not treat this as no KG data: {e}")
 
 
-# ── Research publish/edit/unpublish tools live in runtime_tools.research ──
+# ── Research publish/edit/unpublish tools live in publishing.research ──
 # They are registered into TOOLS / TOOL_HANDLERS at the bottom of this file.
 
 
@@ -372,7 +372,7 @@ TOOLS.extend(X_TOOLS)
 TOOL_HANDLERS.update(X_TOOL_HANDLERS)
 
 # ── Site publishing tools (hub curations + static pages for cyber-lenin.com) ──
-from runtime_tools.site_publishing import SITE_PUBLISHING_TOOLS, SITE_PUBLISHING_TOOL_HANDLERS
+from publishing.site_publishing import SITE_PUBLISHING_TOOLS, SITE_PUBLISHING_TOOL_HANDLERS
 
 TOOLS.extend(SITE_PUBLISHING_TOOLS)
 TOOL_HANDLERS.update(SITE_PUBLISHING_TOOL_HANDLERS)
@@ -384,13 +384,13 @@ TOOLS.extend(DB_TOOLS)
 TOOL_HANDLERS.update(DB_TOOL_HANDLERS)
 
 # ── Public-post editor (UPDATE + Redis cache purge in one step) ──
-from runtime_tools.post_edit import POST_EDIT_TOOLS, POST_EDIT_TOOL_HANDLERS
+from publishing.post_edit import POST_EDIT_TOOLS, POST_EDIT_TOOL_HANDLERS
 
 TOOLS.extend(POST_EDIT_TOOLS)
 TOOL_HANDLERS.update(POST_EDIT_TOOL_HANDLERS)
 
 # ── Research publish/edit/unpublish (atomic write + cache purge) ──
-from runtime_tools.research import RESEARCH_TOOLS, RESEARCH_TOOL_HANDLERS
+from publishing.research import RESEARCH_TOOLS, RESEARCH_TOOL_HANDLERS
 
 TOOLS.extend(RESEARCH_TOOLS)
 TOOL_HANDLERS.update(RESEARCH_TOOL_HANDLERS)
@@ -408,7 +408,7 @@ TOOLS.extend(COMMULINGO_TOOLS)
 TOOL_HANDLERS.update(COMMULINGO_TOOL_HANDLERS)
 
 # ── Admin-only private research documents (not exposed to public web chat) ──
-from runtime_tools.private_reports import PRIVATE_REPORT_TOOLS, PRIVATE_REPORT_TOOL_HANDLERS
+from publishing.private_reports import PRIVATE_REPORT_TOOLS, PRIVATE_REPORT_TOOL_HANDLERS
 
 TOOLS.extend(PRIVATE_REPORT_TOOLS)
 TOOL_HANDLERS.update(PRIVATE_REPORT_TOOL_HANDLERS)
@@ -431,7 +431,7 @@ TOOLS.append(PAY_AND_FETCH_TOOL)
 TOOL_HANDLERS["pay_and_fetch"] = PAY_AND_FETCH_TOOL_HANDLER
 
 # ── Telegram channel broadcast tool ─────────────────────────────────
-from runtime_tools.broadcast import BROADCAST_TO_CHANNEL_TOOL, broadcast_to_channel
+from publishing.broadcast import BROADCAST_TO_CHANNEL_TOOL, broadcast_to_channel
 
 TOOLS.append(BROADCAST_TO_CHANNEL_TOOL)
 TOOL_HANDLERS["broadcast_to_channel"] = broadcast_to_channel

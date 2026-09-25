@@ -507,7 +507,7 @@ def _check_native_script(text: str, codes: list[tuple[str, str]], field: str) ->
 def find_spelling_variants_in_text(text: str, lang: str) -> dict[str, str]:
     """variant -> canonical spellings used in `text` outside quotation marks.
 
-    Shared with the research-document writer (runtime_tools/research.py) so
+    Shared with the research-document writer (publishing/research.py) so
     reports spell dictionary people and glossary terms the way their cards do.
     """
     norm = name_normalization()

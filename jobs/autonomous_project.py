@@ -1365,7 +1365,7 @@ async def _diagnose_staged_drafts_for_tick(project: dict, provider: str, chat_fn
     failure degrades to no injection — the tick itself must never break."""
     from bot_config import get_reflexion_autonomous_publish
     from llm.reflexion import diagnose, diagnosis_is_pass
-    from runtime_tools.research_store import get_document
+    from publishing.research_store import get_document
 
     if not get_reflexion_autonomous_publish():
         return None

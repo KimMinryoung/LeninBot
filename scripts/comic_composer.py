@@ -22,7 +22,7 @@ from runtime_tools.comic_composer import (  # noqa: E402
     build_page_payload,
     validate_payload,
 )
-from runtime_tools.site_publishing import _exec_publish_static_page  # type: ignore  # noqa: E402
+from publishing.site_publishing import _exec_publish_static_page  # type: ignore  # noqa: E402
 
 
 async def publish_payload(payload: dict[str, Any]) -> str:

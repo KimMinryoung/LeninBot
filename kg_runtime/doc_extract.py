@@ -560,7 +560,7 @@ def extract_research_by_slug(slug: str, *, use_llm: bool | None = None) -> dict:
     """Publish-hook entry: extract one public research document by slug.
     Never raises (returns {"error": ...}); the nightly job is the backstop."""
     try:
-        from runtime_tools.research_store import get_document
+        from publishing.research_store import get_document
         from kg_runtime.identity import get_alias_index
         row = get_document(slug)
         if not row or row.get("status") != "public":

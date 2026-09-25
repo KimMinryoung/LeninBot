@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from runtime_tools import site_publishing
+from publishing import site_publishing
 from self_runtime.tools import _exec_read_self
 from llm.tool_loop_common import execute_tool
 

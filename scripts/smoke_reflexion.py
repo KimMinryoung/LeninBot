@@ -172,7 +172,7 @@ async def main():
     print("=" * 72)
 
     import jobs.autonomous_project as ap
-    from runtime_tools import research_store
+    from publishing import research_store
     # Monkeypatch DB surfaces
     logged_events = []
     ap._log_event = lambda pid, et, content="", meta=None, **kw: logged_events.append((et, content, meta))

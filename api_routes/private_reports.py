@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from services.api_security import require_admin
-from runtime_tools.private_reports import (
+from publishing.private_reports import (
     get_private_report_sync,
     list_private_reports_sync,
     publish_private_report_sync,

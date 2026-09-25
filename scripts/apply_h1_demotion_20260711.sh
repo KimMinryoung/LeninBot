@@ -23,7 +23,7 @@ SQL
 
 cd "$ROOT"
 venv/bin/python - <<'PY'
-from runtime_tools.research import _invalidate_cache_sync, _purge_cloudflare_sync
+from publishing.research import _invalidate_cache_sync, _purge_cloudflare_sync
 FILES = [
     "20260405_cyber_lenin_com_seo_optimization_strategy_2026.md",
     "20260416_research.md",

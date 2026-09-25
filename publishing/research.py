@@ -1,4 +1,4 @@
-"""runtime_tools.research — Publish, edit, and unpublish public research documents.
+"""publishing.research — Publish, edit, and unpublish public research documents.
 
 Public research documents are stored as Markdown rows in Postgres and
 served at https://cyber-lenin.com/reports/research/{slug}, where slug is the
@@ -13,7 +13,7 @@ action-based interface so older tool names cannot be invoked directly.
 If a document only exists as a legacy fallback file, that file is relocated out
 of the public-listing scope.
 
-Mirrors the runtime_tools.post_edit pattern (UPDATE + cache purge in one step) for
+Mirrors the publishing.post_edit pattern (UPDATE + cache purge in one step) for
 DB-backed public content.
 """
 
@@ -40,9 +40,9 @@ from jobs.autonomous_publication_controls import (
     validate_autonomous_research_publication,
     was_staged_this_tick,
 )
-from runtime_tools import research_store
+from publishing import research_store
 from tool_gateway.results import ToolFailure
-from runtime_tools.research_review import review_research_document
+from publishing.research_review import review_research_document
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +52,7 @@ RESEARCH_DIR = _PROJECT_ROOT / "research"
 LEGACY_RESEARCH_DIR = _PROJECT_ROOT / "output" / "research"
 PRIVATE_RESEARCH_DIR = RESEARCH_DIR / "private"
 PUBLICATION_DRAFT_DIR = _PROJECT_ROOT / "data" / "publication_drafts" / "research"
-from runtime_tools.cloudflare_purge import FRONTEND_DIR, purge_paths
+from publishing.cloudflare_purge import FRONTEND_DIR, purge_paths
 
 from shared import KST
 
@@ -882,7 +882,7 @@ async def _exec_research_document_publish_public(
                 broadcast_note = f"\nTelegram channel broadcast: sent ({br.sent_count})"
                 if getattr(br, "message_ids", None):
                     try:
-                        from runtime_tools.publication_records import record_publication_broadcast_sync
+                        from publishing.publication_records import record_publication_broadcast_sync
 
                         await asyncio.to_thread(
                             record_publication_broadcast_sync,
@@ -1194,7 +1194,7 @@ async def _exec_research_document_edit_public(
     )
     delete_note = ""
     try:
-        from runtime_tools.publication_records import delete_broadcasts_for_slug
+        from publishing.publication_records import delete_broadcasts_for_slug
 
         delete_result = await delete_broadcasts_for_slug(_public_slug(fname))
         delete_note = (
@@ -1366,7 +1366,7 @@ async def _exec_research_document(
     if op == "save_private":
         if not title or not slug or not markdown_body:
             return "Error: action='save_private' requires title, slug, and markdown_body."
-        from runtime_tools.private_reports import _exec_save_private_report
+        from publishing.private_reports import _exec_save_private_report
 
         return await _exec_save_private_report(
             title=title,
@@ -1377,7 +1377,7 @@ async def _exec_research_document(
     if op == "publish_private":
         if not slug:
             return "Error: action='publish_private' requires slug."
-        from runtime_tools.private_reports import get_private_report_sync
+        from publishing.private_reports import get_private_report_sync
 
         clean_slug = slug[:-3] if slug.endswith(".md") else slug
         try:

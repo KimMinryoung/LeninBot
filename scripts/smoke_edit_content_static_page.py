@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from runtime_tools.post_edit import EDIT_CONTENT_TOOL, _exec_edit_content
+from publishing.post_edit import EDIT_CONTENT_TOOL, _exec_edit_content
 
 
 async def main() -> None:

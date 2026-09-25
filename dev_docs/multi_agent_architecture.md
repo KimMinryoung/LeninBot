@@ -250,8 +250,8 @@ limits still apply.
 
 ### Post-Hoc Verification (Critic)
 
-Public research also has a **pre-publication** boundary in `runtime_tools/research.py`
-and `runtime_tools/research_review.py`. Outside autonomous context, public creation,
+Public research also has a **pre-publication** boundary in `publishing/research.py`
+and `publishing/research_review.py`. Outside autonomous context, public creation,
 public edits, republishing and private-to-public publication run a fresh-context
 independent review of the exact normalized document before public DB writes, cache
 purges or broadcasts. The reviewer uses the task provider's low tier, a $0.15 budget,

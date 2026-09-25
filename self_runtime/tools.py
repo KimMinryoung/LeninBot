@@ -1525,7 +1525,7 @@ async def _exec_read_research(
         markdown = row.get("markdown") or ""
         editable_note = ""
         if row.get("status") == "staged":
-            from runtime_tools.research import _strip_leading_research_scaffold
+            from publishing.research import _strip_leading_research_scaffold
             markdown = _strip_leading_research_scaffold(markdown)
             editable_note = (
                 "view=editable_body; generated title/author/date header excluded. "
@@ -1589,7 +1589,7 @@ async def _exec_read_private_research_documents(
     max_chars: int | None = None,
     offset: int | None = None,
 ) -> str:
-    from runtime_tools import private_reports
+    from publishing import private_reports
 
     if slug:
         try:
@@ -1716,7 +1716,7 @@ async def _exec_read_static_pages(
     max_chars: int | None = None,
     offset: int | None = None,
 ) -> str:
-    from runtime_tools import site_publishing
+    from publishing import site_publishing
     if slug:
         data = await asyncio.to_thread(site_publishing.get_static_page, slug.strip().lower())
         if not data:

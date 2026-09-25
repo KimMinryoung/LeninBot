@@ -1,4 +1,4 @@
-"""runtime_tools.post_edit — Edit public-facing posts with cache invalidation.
+"""publishing.post_edit — Edit public-facing posts with cache invalidation.
 
 The frontend (Node.js, runs in Docker) caches each published post permanently
 in Redis under `{kind}:{id}` and serves from cache before hitting the DB. A
@@ -29,7 +29,7 @@ from tool_gateway.results import ToolFailure
 
 logger = logging.getLogger(__name__)
 
-from runtime_tools.cloudflare_purge import FRONTEND_DIR, purge_paths
+from publishing.cloudflare_purge import FRONTEND_DIR, purge_paths
 
 
 # Per kind: table, which fields the tool may write, which cache keys to purge.
@@ -324,7 +324,7 @@ def _cloudflare_purge_paths(kind: str, target: int | str) -> list[str]:
 
 
 def _validate_static_page_updates(provided: dict[str, Any]) -> str | None:
-    from runtime_tools.site_publishing import _validate_inner_html
+    from publishing.site_publishing import _validate_inner_html
 
     if provided.get("title") is not None and not str(provided["title"]).strip():
         return "Error: title must not be empty for kind='static_page'."
@@ -344,7 +344,7 @@ def _validate_static_page_updates(provided: dict[str, Any]) -> str | None:
 
 
 def _ensure_static_page_storage_sync() -> None:
-    from runtime_tools.site_publishing import _ensure_static_page_table
+    from publishing.site_publishing import _ensure_static_page_table
 
     _ensure_static_page_table()
 

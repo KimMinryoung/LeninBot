@@ -8,8 +8,8 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from runtime_tools import research as r
-from runtime_tools import research_review as review
+from publishing import research as r
+from publishing import research_review as review
 from tool_gateway.results import ToolFailure
 
 
@@ -90,7 +90,7 @@ def test_wrong_hash_cannot_authorize_write(isolated, monkeypatch):
 
 @pytest.mark.parametrize("action", ["edit_public", "republish_public", "publish_private"])
 def test_alternative_public_paths_are_reviewed(isolated, monkeypatch, action):
-    from runtime_tools import private_reports
+    from publishing import private_reports
     current, writes = isolated
     current["status"] = "public" if action == "edit_public" else "private"
     monkeypatch.setattr(private_reports, "get_private_report_sync", lambda **kw: dict(current))
