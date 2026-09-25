@@ -8,7 +8,6 @@ through ``security_gateway``.
 from __future__ import annotations
 
 import asyncio
-import copy
 import difflib
 import inspect
 import json
@@ -24,15 +23,6 @@ from tool_gateway.validation import (
 )
 
 logger = logging.getLogger(__name__)
-
-_TOOL_DESC_LIMIT = 360
-_SCHEMA_DESC_LIMIT = 160
-# Tools whose field descriptions carry the writing contract itself. Cutting
-# them at 160 characters dropped the field-specific rules after the shared
-# length preamble (startYear null rule, bio sentence count, Cyrillic rules;
-# 2026-09-25), so they reach the provider whole. Their definitions sit in the
-# cached prefix.
-UNCOMPACTED_TOOLS = frozenset({"commulingo_pipeline_submit_draft"})
 
 SIDE_EFFECT_RISK_CLASSES = frozenset({
     "admin",
@@ -88,60 +78,6 @@ def _roleplay_snapshot_call(name: str, args: dict) -> bool:
         return True
     from roleplay.memory import MEMORY_OVERRIDE
     return MEMORY_OVERRIDE.get() is not None
-
-
-def _compact_text(text: str, limit: int) -> str:
-    """Collapse long tool/schema descriptions while preserving their meaning."""
-    text = " ".join(str(text or "").split())
-    if len(text) <= limit:
-        return text
-    cut = text[: max(0, limit - 1)].rstrip()
-    split_at = max(cut.rfind(". "), cut.rfind("; "), cut.rfind(", "))
-    if split_at >= int(limit * 0.55):
-        cut = cut[: split_at + 1].rstrip()
-    return cut + "…"
-
-
-def _compact_schema_descriptions(value: Any) -> Any:
-    if isinstance(value, dict):
-        out = {}
-        for key, item in value.items():
-            if key == "description" and isinstance(item, str):
-                out[key] = _compact_text(item, _SCHEMA_DESC_LIMIT)
-            else:
-                out[key] = _compact_schema_descriptions(item)
-        return out
-    if isinstance(value, list):
-        return [_compact_schema_descriptions(item) for item in value]
-    return value
-
-
-def compact_tool_definitions(tools: list[dict]) -> list[dict]:
-    """Return provider payload tool definitions with compact descriptions.
-
-    Tool names, schema keys, types, enums, defaults, and required lists are left
-    intact. Only human-readable description strings are shortened to reduce
-    prompt overhead from large tool surfaces.
-    """
-    compacted: list[dict] = []
-    for tool in tools or []:
-        t = copy.deepcopy(tool)
-        name = t.get("name") or (t.get("function") or {}).get("name")
-        if name in UNCOMPACTED_TOOLS:
-            compacted.append(t)
-            continue
-        if isinstance(t.get("description"), str):
-            t["description"] = _compact_text(t["description"], _TOOL_DESC_LIMIT)
-        if isinstance(t.get("input_schema"), dict):
-            t["input_schema"] = _compact_schema_descriptions(t["input_schema"])
-        fn = t.get("function")
-        if isinstance(fn, dict):
-            if isinstance(fn.get("description"), str):
-                fn["description"] = _compact_text(fn["description"], _TOOL_DESC_LIMIT)
-            if isinstance(fn.get("parameters"), dict):
-                fn["parameters"] = _compact_schema_descriptions(fn["parameters"])
-        compacted.append(t)
-    return compacted
 
 
 def _record_tool_provenance(name: str, args: dict, result: str) -> None:
@@ -723,7 +659,6 @@ async def execute_tools_batch(
 __all__ = [
     "PARALLEL_SAFE_TOOLS",
     "SIDE_EFFECT_RISK_CLASSES",
-    "compact_tool_definitions",
     "execute_tool",
     "execute_tools_batch",
     "is_side_effect_tool",

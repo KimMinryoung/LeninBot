@@ -18,6 +18,7 @@ Error recovery strategy (ported from llm/claude_loop.py):
 """
 
 import asyncio
+import copy
 import json
 import logging
 import re
@@ -34,7 +35,6 @@ from llm.tool_loop_common import (
     is_transient_provider_error,
 )
 from tool_gateway.dispatcher import (
-    compact_tool_definitions,
     execute_tool,
     execute_tools_batch,
     is_side_effect_tool,
@@ -1104,7 +1104,7 @@ class _OpenAIProtocolAdapter:
         self.active_usage_label = provider_label or (
             "openai-sdk" if self.sdk_mode else f"httpx:{base_url}"
         )
-        self.openai_tools = _convert_tools(compact_tool_definitions(tools))
+        self.openai_tools = _convert_tools(copy.deepcopy(list(tools or [])))
         self.side_effect_work_details: list[str] = []
         self.tool_execution_cache: dict[str, tuple[str, bool]] = {}
         self.state = None

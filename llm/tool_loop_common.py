@@ -26,7 +26,6 @@ def estimate_text_tokens(text: str) -> int:
     other = len(text) - cjk
     return cjk + (other // 4)
 
-from tool_gateway.dispatcher import compact_tool_definitions
 
 
 # ── Transient provider-error classification ──────────────────────────

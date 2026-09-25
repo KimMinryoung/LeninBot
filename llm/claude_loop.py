@@ -13,6 +13,7 @@ assistant→user alternation. No post-hoc sanitization is performed.
 """
 
 import asyncio
+import copy
 import json
 import logging
 
@@ -26,7 +27,7 @@ from llm.tool_loop_common import (
     is_transient_provider_error as _is_transient_provider_error,
     provider_status_code as _provider_status_code,
 )
-from tool_gateway.dispatcher import execute_tool, execute_tools_batch, compact_tool_definitions
+from tool_gateway.dispatcher import execute_tool, execute_tools_batch
 from llm.provider_registry import anthropic_pricing_table
 from llm.instrumented_clients import with_audit_owner
 
@@ -411,10 +412,10 @@ class _ClaudeProtocolAdapter:
                 {"type": "text", "text": system_prompt, "cache_control": _CACHE_CONTROL_1H}
             ]
 
-        # Compact verbose tool/schema descriptions before sending them to the
-        # model. Names, parameter types, required keys, enums, and defaults
-        # are preserved.
-        cached_tools = compact_tool_definitions(tools)
+        # Tool definitions go to the provider whole: descriptions carry the
+        # usage contract, and cutting them (360/160 characters until
+        # 2026-09-25) hid field rules from the model.
+        cached_tools = copy.deepcopy(list(tools or []))
         if cached_tools:
             cached_tools[-1] = {**cached_tools[-1], "cache_control": _CACHE_CONTROL_1H}
         self.cached_tools = cached_tools

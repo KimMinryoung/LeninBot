@@ -294,11 +294,8 @@ DeepSeek(Anthropic 호환 엔드포인트, `llm/claude_loop.py`)은 인자가 �
 journalctl -u leninbot-commulingo-pipeline.service --since -1d | grep 'Empty tool input from provider'
 ```
 
-제공자에 보내는 도구 설명은 `tool_gateway.dispatcher.compact_tool_definitions`가 도구 360자·필드 160자로
-자른다. 넘치는 뒷부분은 모델에게 보이지 않는다. 필드 설명이 작성 계약 자체인
-`commulingo_pipeline_submit_draft`는 `UNCOMPACTED_TOOLS`로 압축에서 빼서 온전히 보낸다(2026-09-25,
-인물 작성 도구 기준 약 3,200자 추가, 도구 정의는 캐시 접두부). no_edit 등 나머지 편집기 도구 설명은
-한도 안에 둔다(`test_author_tool_guidance_survives_provider_compaction`).
+도구 정의는 설명을 자르지 않고 그대로 제공자에 보낸다. 2026-09-25까지는 도구 설명 360자·필드 설명
+160자로 잘려, 인물 필드의 공통 길이 안내 뒤에 오는 필드별 지침과 제출 도구의 병합 규칙이 모델에게 가지 않았다.
 
 ### 무편집 대기열 정리와 실행 결과
 

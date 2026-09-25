@@ -100,8 +100,6 @@ class AuthorDraft(DraftRepair):
                        'notes': deepcopy(properties['notes'])}, ['status', 'reason', 'issues'])
         no_edit['properties']['issues']['required'] = self.issue_ids
         self.submit_tool = {'name': SUBMIT_TOOL, 'description':
-            # Provider payloads cut tool descriptions at 360 characters
-            # (tool_gateway.dispatcher._TOOL_DESC_LIMIT); keep this within it.
             'Submit the edit for review. Each change is {value, evidence}. Top-level keys only: changes, issues, '
             'reason, notes, remove_fields. First submission: changes, reason, every issue. With a saved draft send '
             'only what changes; the rest stays saved. Omit evidence to keep saved evidence. Arrays replace the whole '
