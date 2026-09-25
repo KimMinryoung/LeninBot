@@ -4,7 +4,10 @@
 # Usage:
 #   svc deploy [--api|--telegram|--frontend|--all] [--restart]
 #       Pull code, install deps if changed, restart services, notify via Telegram.
-#       Called by Telegram /deploy command. Default: --all
+#       Called by Telegram /deploy command. Default: --all, which checks the
+#       api/telegram restart guards first and then restarts every enabled
+#       long-running unit (llm-proxy, web-gateway, api, a2a-api, email-api,
+#       novel-writer, roleplay, browser, telegram last) and the frontend.
 #
 #   svc boot
 #       Start all services in dependency order with health checks. For server reboot.
@@ -73,6 +76,7 @@ to_unit() {
     case "$name" in
         frontend) echo "docker:leninbot-frontend" ;;
         experience|razvedchik) echo "leninbot-${name}.timer" ;;
+        novel-writer) echo "novel-writer-api.service" ;;
         *) echo "leninbot-${name}.service" ;;
     esac
 }
@@ -154,8 +158,32 @@ do_graceful_restart() {
                 exit 2
             fi
         fi
+        local before after
+        before=$(systemctl show "$unit" -p MainPID --value 2>/dev/null || echo 0)
         log "$name: restarting $unit..."
         _run_systemctl restart "$unit"
+        after=$(systemctl show "$unit" -p MainPID --value 2>/dev/null || echo 0)
+        if ! systemctl is-active --quiet "$unit"; then
+            warn "$name: $unit is not active after restart"
+        elif [[ "$before" != "0" && "$before" == "$after" ]]; then
+            warn "$name: $unit MainPID unchanged ($after); restart may not have happened"
+        fi
+    fi
+}
+
+# Long-running units that import repository code but are not part of
+# ALL_SERVICES. `deploy --all` restarts the enabled ones so none keeps running
+# old code: after a module move, a stale process fails at its next
+# function-level import of the old path.
+DEPLOY_EXTRA_BEFORE=(llm-proxy web-gateway)          # others call through these
+DEPLOY_EXTRA_AFTER_API=(a2a-api email-api novel-writer roleplay)
+
+_restart_if_enabled() {
+    local name="$1" unit
+    unit=$(to_unit "$name")
+    if systemctl is-enabled --quiet "$unit" 2>/dev/null; then
+        do_graceful_restart "$name"
+        RESTARTED="${RESTARTED:+$RESTARTED+}$name"
     fi
 }
 
@@ -239,7 +267,7 @@ cmd_deploy() {
                 echo "  --telegram      Restart leninbot-telegram only."
                 echo "  --api           Restart leninbot-api only."
                 echo "  --frontend      Rebuild and restart frontend container only."
-                echo "  --all           Restart all services (default)."
+                echo "  --all           Restart every enabled long-running service (default)."
                 exit 0
                 ;;
             *)
@@ -351,9 +379,27 @@ METAEOF
     local SUMMARY
     SUMMARY=$(git log --oneline -1 2>/dev/null || echo "n/a")
 
+    # Check both guards before restarting anything: the proxy restart below
+    # would otherwise cut in-flight LLM calls of a task the telegram guard
+    # later protects.
+    if [[ "$SERVICE" == "all" ]]; then
+        local guarded name
+        for guarded in api telegram; do
+            if ! "$VENV/bin/python" "$DEPLOY_DIR/scripts/restart_guard.py" "$guarded"; then
+                err "$guarded: restart refused by guard; nothing restarted. Re-run once active work finishes."
+                exit 2
+            fi
+        done
+        for name in "${DEPLOY_EXTRA_BEFORE[@]}"; do _restart_if_enabled "$name"; done
+    fi
+
     if [[ "$SERVICE" == "all" || "$SERVICE" == "api" ]]; then
         do_graceful_restart api
-        RESTARTED="api"
+        RESTARTED="${RESTARTED:+$RESTARTED+}api"
+    fi
+
+    if [[ "$SERVICE" == "all" ]]; then
+        for name in "${DEPLOY_EXTRA_AFTER_API[@]}"; do _restart_if_enabled "$name"; done
     fi
 
     # 6. Notify BEFORE restarting telegram (since telegram restart kills the bot)
