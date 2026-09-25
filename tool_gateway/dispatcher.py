@@ -27,6 +27,12 @@ logger = logging.getLogger(__name__)
 
 _TOOL_DESC_LIMIT = 360
 _SCHEMA_DESC_LIMIT = 160
+# Tools whose field descriptions carry the writing contract itself. Cutting
+# them at 160 characters dropped the field-specific rules after the shared
+# length preamble (startYear null rule, bio sentence count, Cyrillic rules;
+# 2026-09-25), so they reach the provider whole. Their definitions sit in the
+# cached prefix.
+UNCOMPACTED_TOOLS = frozenset({"commulingo_pipeline_submit_draft"})
 
 SIDE_EFFECT_RISK_CLASSES = frozenset({
     "admin",
@@ -120,6 +126,10 @@ def compact_tool_definitions(tools: list[dict]) -> list[dict]:
     compacted: list[dict] = []
     for tool in tools or []:
         t = copy.deepcopy(tool)
+        name = t.get("name") or (t.get("function") or {}).get("name")
+        if name in UNCOMPACTED_TOOLS:
+            compacted.append(t)
+            continue
         if isinstance(t.get("description"), str):
             t["description"] = _compact_text(t["description"], _TOOL_DESC_LIMIT)
         if isinstance(t.get("input_schema"), dict):

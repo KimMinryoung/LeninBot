@@ -831,12 +831,13 @@ class EditorContractTests(EditorCase):
                          {'body', 'sortOrder'})
         self.assertNotIn('startYear', {item['field'] for item in result.value['draft']['fields']['evidence']})
 
-    def test_section_start_year_accepts_explicit_unknown_date(self):
+    def test_section_start_year_is_a_required_integer(self):
         from commulingo.pipeline.patches import schema_for
         job = {**JOB, 'kind':'person', 'action':'update',
                'payload':{'topics':['sections']}}
         fields = schema_for(job, {'sections':[]})
-        self.assertIn('null', fields['properties']['startYear']['type'])
+        self.assertEqual(fields['properties']['startYear']['type'], 'integer')
+        self.assertNotIn('null', fields['properties']['startYear']['description'])
         self.assertIn('startYear', fields['required'])
 
 

@@ -148,6 +148,15 @@ class AuthorDraftTests(unittest.TestCase):
         self.assertLessEqual(len(draft.no_edit_tool['input_schema']['properties']['status']['description']),
                              _SCHEMA_DESC_LIMIT)
 
+    def test_submit_tool_field_guidance_reaches_the_provider_whole(self):
+        from tool_gateway.dispatcher import compact_tool_definitions
+        draft = session()
+        tool = deepcopy(draft.submit_tool)
+        tool['input_schema']['properties']['reason']['description'] = 'x ' * 200
+        self.assertEqual(compact_tool_definitions([tool]), [tool])
+        other = {**tool, 'name': 'another_tool'}
+        self.assertNotEqual(compact_tool_definitions([other]), [other])
+
     def test_no_edit_has_no_content_or_pointer_protocol(self):
         draft = session()
         good = {'status':'sources_unavailable','reason':'The original could not be retrieved.',

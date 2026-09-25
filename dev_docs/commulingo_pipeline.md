@@ -113,8 +113,9 @@ resolved/deferred와 사유를 요구하며, 필드를 채웠다는 이유만으
 포함하며 체크포인트에 보존해 같은 제목의 형식 수정에서 재호출하지 않는다.
 기존 제안 수정은 원래 절 slug를 유지하고 경량 모델을 부르지 않는다. 생성 실패는 영문 제목의
 결정적 slug로 대체하고(`section_slug_fallbacks` 집계) 기존 절과 같은 제목만 작성 오류로 돌려준다.
-절 작성 API는 인코딩된 `sortOrder` 대신 시기 시작 `startYear`(필수, 해당 연도가 없으면 `null`)와
-`startMonth`(선택)를 받는다. 서버의 `section_sort_order`가 YYYYMM(월 모름=00)으로 바꿔
+절 작성 API는 인코딩된 `sortOrder` 대신 시기 시작 `startYear`(필수 정수, 주제형 절은 시작 연도)와
+`startMonth`(선택)를 받는다. 공유 절 저장 도구의 `null`(연도 없음, 맨 뒤 배치)은 파이프라인 작성자에게
+열지 않는다. 서버의 `section_sort_order`가 YYYYMM(월 모름=00)으로 바꿔
 검토·해시 전에 `sortOrder`로 넣는다. 작성자가 `startYear`나 `startMonth`에 붙인 근거도
 저장 시 `sortOrder` 근거로 옮겨, 공개 패치에 없는 필드의 근거가 남지 않게 한다.
 제목 속 연도는 해석하지 않는다(제목에 연도를 넣으라는 지시가 없고 실제로 37%만 연도를 담는다).
@@ -294,8 +295,10 @@ journalctl -u leninbot-commulingo-pipeline.service --since -1d | grep 'Empty too
 ```
 
 제공자에 보내는 도구 설명은 `tool_gateway.dispatcher.compact_tool_definitions`가 도구 360자·필드 160자로
-자른다. 작성 도구 설명은 이 한도 안에 두며(`test_author_tool_guidance_survives_provider_compaction`),
-넘치는 뒷부분은 모델에게 보이지 않는다.
+자른다. 넘치는 뒷부분은 모델에게 보이지 않는다. 필드 설명이 작성 계약 자체인
+`commulingo_pipeline_submit_draft`는 `UNCOMPACTED_TOOLS`로 압축에서 빼서 온전히 보낸다(2026-09-25,
+인물 작성 도구 기준 약 3,200자 추가, 도구 정의는 캐시 접두부). no_edit 등 나머지 편집기 도구 설명은
+한도 안에 둔다(`test_author_tool_guidance_survives_provider_compaction`).
 
 ### 무편집 대기열 정리와 실행 결과
 

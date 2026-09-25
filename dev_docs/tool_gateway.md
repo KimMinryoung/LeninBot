@@ -43,7 +43,7 @@ the pre-publication flow. Failed edit batches apply no partial changes.
 |---|---|
 | `tool_gateway.profiles` | Named source-of-truth tool profiles for orchestrator, web persona, A2A, roleplay, and MCP surfaces |
 | `tool_gateway.selection` | Common allow-list filtering helpers for tool schemas and handlers |
-| `tool_gateway.dispatcher` | Runtime dispatch, schema enforcement, local/durable dedupe orchestration, batching, and prompt schema compaction |
+| `tool_gateway.dispatcher` | Runtime dispatch, schema enforcement, local/durable dedupe orchestration, batching, and prompt schema compaction (도구 설명 360자·필드 설명 160자, `UNCOMPACTED_TOOLS`는 제외) |
 | `tool_gateway.validation` | Provider-format schema extraction, top-level closed JSON Schema validation, defaults, and URL/path/payment/recipient/nonce policies |
 | `tool_gateway.security` | Runtime adapter/re-export for `security_gateway` caller context, authorization, and audit |
 | `tool_gateway.inference` | Default and resolved delegated-agent input/output ceilings, continuation count, round/budget envelope, replay-safe reads, and provider thinking/budget policy |
