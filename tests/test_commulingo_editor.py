@@ -72,12 +72,11 @@ class SourceAndIssueTests(EditorCase):
         validate({}, tool['input_schema'])
         validate({'passages':[]}, tool['input_schema'])
         self.assertFalse(set(tool['input_schema']) & {'not','oneOf','anyOf','allOf','enum','const'})
-        with self.assertRaisesRegex(ValueError, 'exactly one'):
-            await read(source_id=page['id'], passages=['P1'])
-        with self.assertRaisesRegex(ValueError, 'exactly one'):
-            await read(source_id=page['id'], passages=[])
         with self.assertRaisesRegex(ValueError, 'source_id.*Never guess P1'):
             await read(passages=['P1'])
+        # With both arguments an unknown label opens the page instead of failing.
+        self.assertIn('[P1]', await read(source_id=page['id'], passages=['P1']))
+        self.assertIn('[P1]', await read(source_id=page['id'], passages=[]))
         fetched_at, expires_at = page['fetched_at'], page['expires_at']
         self.assertIn('[P1]', await read(source_id=page['id']))
         restored = await Sources.load(store, JOB, Usage(), checkpoint)
@@ -107,8 +106,23 @@ class SourceAndIssueTests(EditorCase):
             await read(source_id='S1')
         self.assertIn(page['id'], str(error.exception))
         self.assertEqual(session.passages.shown, before)
-        with self.assertRaisesRegex(ValueError, 'exactly one'):
-            await read(source_id=page['id'], passages=['P1'])
+        both = await read(source_id=page['id'], passages=['P1'])
+        self.assertIn(BODY, both)
+        self.assertIn('source_id was ignored', both)
+
+    async def test_oversized_passage_request_shows_first_batch_and_names_the_rest(self):
+        page = snapshot(URL, BODY)
+        session = Sources(store_mock(), JOB, Usage(), {page['id']:page})
+        session.display(page)
+        tool, read, _ = session.cached_tool()
+        from jsonschema import validate
+        labels = ['P1'] * 3 + [f'P{i}' for i in range(2, 12)]
+        validate({'passages':labels}, tool['input_schema'])
+        with patch.object(session.passages, 'shown', {**session.passages.shown,
+                          **{f'P{i}': session.passages.shown['P1'] for i in range(2, 12)}}):
+            text = await read(passages=labels)
+        self.assertIn('Showing 8 of 11 labels', text)
+        self.assertIn('P9, P10, P11', text)
 
     async def test_cached_passage_read_keeps_labels_and_rejects_expiry(self):
         page = snapshot(URL,BODY)

@@ -67,6 +67,9 @@ class EvidenceContracts(TestCase):
             validate_tool_arguments('commulingo_pipeline_result',{},schema=schema,risk_class='state')
         with self.assertRaisesRegex(ToolArgumentValidationError,"^'fields' is a required property"):
             validate_tool_arguments('commulingo_pipeline_result',{'notes':'x'},schema=schema,risk_class='state')
+        merge={'type':'object','properties':{'changes':{'type':'object'}},'minProperties':1}
+        with self.assertRaisesRegex(ToolArgumentValidationError,'empty object.*not parseable'):
+            validate_tool_arguments('commulingo_pipeline_submit_draft',{},schema=merge,risk_class='state')
 
     def test_many_passages_are_all_kept(self):
         source=snapshot('https://example.org/archive','Documented fact number one. '*100)

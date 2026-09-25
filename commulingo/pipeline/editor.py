@@ -337,7 +337,8 @@ class Editor:
                                 if source.get('body') and source['expires_at'] > datetime.now(timezone.utc)})
             box.update(editor_version=2, research={**research, 'status':value['status'],
                 'reason':value['reason'], 'inspected_sources':inspected,
-                'issue_results':[{'id':key, **item} for key, item in value['issues'].items()]})
+                'issue_results':[{'id':key, **item} for key, item in value['issues'].items()],
+                **({'notes':value['notes']} if value.get('notes') else {})})
             return 'OK: no-edit judgment recorded; saved draft retained in history'
 
         focused_current = {k:v for k,v in (current or {}).items()

@@ -8,6 +8,8 @@ from provenance.runtime import external_body
 from commulingo.review_policy import external_url
 from .evidence import Passages, snapshot, MAX_SNAPSHOT_CHARS
 
+MAX_READ = 8
+
 
 class Sources:
     def __init__(self, store, job, usage, sources):
@@ -50,8 +52,16 @@ class Sources:
         async def read(passages=None, source_id=None):
             if (passages is None or passages == []) and source_id is None:
                 return json.dumps(self.context(), default=str, ensure_ascii=False)
-            if passages is not None and source_id is not None:
-                raise ValueError('Supply exactly one of passages or source_id from source_cache.available_pages')
+            note = ''
+            if passages and source_id is not None:
+                # Both arrived: answer whichever is usable instead of spending a
+                # round on an error. Known labels are the narrower request;
+                # otherwise opening the page yields its labels.
+                if all(label in self.passages.shown for label in passages):
+                    source_id = None
+                    note = '\nsource_id was ignored because passages were given; call with only source_id to open a page.'
+                else:
+                    passages = None
             if source_id is not None:
                 source = self.sources.get(source_id)
                 if not source:
@@ -61,8 +71,13 @@ class Sources:
                 if on_read:
                     await on_read()
                 return text
-            if not passages or len(passages) > 8:
-                raise ValueError('Supply between one and eight existing passage labels')
+            # Requests for 9-30 labels were rejected outright and cost a round each
+            # (2026-09-25 logs); show the first batch and name the rest instead.
+            passages = list(dict.fromkeys(passages))
+            if len(passages) > MAX_READ:
+                note += (f'\nShowing {MAX_READ} of {len(passages)} labels; request the rest in another call: '
+                         + ', '.join(passages[MAX_READ:]))
+                passages = passages[:MAX_READ]
             now = datetime.now(timezone.utc)
             output = []
             for label in passages:
@@ -80,11 +95,12 @@ class Sources:
                     raise ValueError(f'{label} expired or unavailable; fetch its original again')
                 self.passages.resolve([label],lambda sid:self.sources[sid]['body'])
                 output.append(f"[{label}] URL: {source['url']}\n" + source['body'][start:end])
-            return '<external source="pipeline-cache">\n'+'\n\n'.join(output)+'\n</external>'
+            return '<external source="pipeline-cache">\n'+'\n\n'.join(output)+'\n</external>'+note
         return ({'name':'commulingo_pipeline_cached_passages',
-            'description':'Read cached originals without network access. Call with {} or passages: [] to list current available_pages. If the list is empty, fetch an original first. Supply existing passages OR an exact source_id from that list to display a page and obtain its labels. Never guess IDs or labels. Retrieval timestamps are unchanged.',
+            'description':'Read cached originals without network access. Call with {} or passages: [] to list current available_pages. If the list is empty, fetch an original first. Supply existing passage labels (P-numbers, not source hashes) OR an exact source_id from that list to display a page and obtain its labels. Never guess IDs or labels. Retrieval timestamps are unchanged.',
             'input_schema':{'type':'object','additionalProperties':False,
-                'properties':{'passages':{'type':'array','maxItems':8,
+                'properties':{'passages':{'type':'array','maxItems':40,
+                    'description':f'Up to {MAX_READ} labels are shown per call.',
                     'items':{'type':'string','pattern':'^P[1-9][0-9]*$'}},
                     'source_id':{'type':'string','minLength':1}}}},read,False)
 

@@ -312,11 +312,12 @@ def validate_tool_arguments(
         )
         if errors:
             message = _format_jsonschema_errors(errors)
-            if not args and executable_schema.get("required"):
+            if not args and (executable_schema.get("required") or executable_schema.get("minProperties")):
                 # DeepSeek returns input {} when a tool call's argument JSON
                 # did not parse (a 3,700-token draft, 2026-09-19); "'fields'
                 # is a required property" then reads as a missing key, and the
-                # model resends the same broken JSON.
+                # model resends the same broken JSON. A merge-style tool has no
+                # required keys, only minProperties, and needs the same hint.
                 message = (
                     "arguments arrived as an empty object, so the call's JSON was probably "
                     "not parseable (unescaped quotes, an unterminated string): resend the same "

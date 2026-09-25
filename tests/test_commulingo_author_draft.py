@@ -61,7 +61,6 @@ class AuthorDraftTests(unittest.TestCase):
         draft.prepare(draft.submission(edit()))
         saved = deepcopy(draft.draft)
         for patch in ({'changes':{'bio':{'value':'wrong type', 'evidence':[]}}},
-                      {'changes':{'bio':{'value':{'ko':'문장', 'en':'Text'}}}},
                       {'repairs':[{'path':'/fields/bio', 'op':'remove'}]},
                       {}, {'changes':{}}, {'issues':{}}):
             with self.subTest(patch=patch), self.assertRaises(RepairProtocolError):
@@ -78,6 +77,22 @@ class AuthorDraftTests(unittest.TestCase):
         self.assertEqual(draft.view()['changes']['bio']['value']['en'], 'x' * 41)
         result = draft.prepare(draft.submission({'changes':{'bio':edit()['changes']['bio']}}))
         self.assertEqual(result['fields']['bio']['en'], 'A documented person.')
+
+    def test_value_without_evidence_keeps_the_saved_evidence(self):
+        draft = session()
+        draft.prepare(draft.submission(edit()))
+        result = draft.prepare(draft.submission({'changes': {'years': {'value': '1901–1980'}}}))
+        self.assertEqual(result['fields']['years'], '1901–1980')
+        self.assertEqual([(c['field'], c['passages']) for c in result['claims']],
+                         [('bio', ['P1']), ('years', ['P2'])])
+
+    def test_required_fields_are_not_offered_for_withdrawal(self):
+        draft = session()
+        fields = obj({'bio': {'type': 'string'}, 'years': {'type': 'string'}}, ['bio'])
+        draft.configure(fields, [{'id': 'missing:bio'}])
+        self.assertEqual(draft.submit_tool['input_schema']['properties']['remove_fields']['items']['enum'], ['years'])
+        draft.configure(obj({'bio': {'type': 'string'}}, ['bio']), [{'id': 'missing:bio'}])
+        self.assertNotIn('remove_fields', draft.submit_tool['input_schema']['properties'])
 
     def test_withdrawal_removes_only_draft_field_and_its_evidence(self):
         draft = session()
