@@ -14,7 +14,7 @@ from collections.abc import AsyncIterator
 from datetime import datetime
 from typing import Awaitable, Callable
 
-from llm.claude_loop import chat_with_tools
+from writer.models import writer_chat as chat_with_tools
 from tool_gateway.security import caller_scope, new_run_context
 from llm.tool_loop_common import EMPTY_RESPONSE_FALLBACK
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Smoke checks for DeepSeek Anthropic-compatible agent harness routing."""
+"""Smoke checks for DeepSeek agent harness routing (tool loops on the OpenAI-compatible endpoint)."""
 
 from pathlib import Path
 import sys
@@ -21,48 +21,31 @@ def _read(path: str) -> str:
     return (ROOT / path).read_text(encoding="utf-8")
 
 
-def test_deepseek_anthropic_client_is_configured() -> None:
+def test_deepseek_clients_are_configured() -> None:
     source = _read("bot_config.py")
     assert "DEEPSEEK_ANTHROPIC_BASE_URL" in source
     # Wrapped in the audit layer since 2026-08-09 (a5323cd) so every importer
     # of the shared client is metered.
     assert "_deepseek_anthropic_client = AuditedAsyncAnthropic(" in source
-    assert 'caller="deepseek_anthropic_direct"' in source
+    assert "_deepseek_client = AuditedAsyncOpenAI(" in source
     assert "https://api.deepseek.com/anthropic" in source
 
 
-def test_telegram_deepseek_routes_to_anthropic_harness() -> None:
-    source = _read("telegram/bot.py")
-    anth = 'effective_provider == "deepseek" and _deepseek_anthropic_client'
-    assert anth in source
-    assert "client=_deepseek_anthropic_client" in source
-    # Multi-tool loops use the tool-loop thinking policy (default off); a
-    # per-call override (tick planner/critic) takes precedence.
-    assert "deepseek_thinking_override or resolve_inference_extra(" in source
-    assert 'call_inference_policy, "deepseek"' in source
-    assert "output_config=deepseek_thinking.get" in source
-    assert 'provider_label="deepseek"' not in source
-
-
-def test_a2a_deepseek_routes_to_anthropic_harness() -> None:
-    source = _read("services/a2a_handler.py")
-    assert 'provider == "deepseek" and _deepseek_anthropic_client' in source
-    assert "client=_deepseek_anthropic_client" in source
-    assert "_get_deepseek_tool_thinking_params" in source
-    assert "output_config=deepseek_thinking.get" in source
-    assert 'provider_label="deepseek:a2a"' not in source
-
-
-def test_browser_worker_deepseek_routes_to_anthropic_harness() -> None:
-    source = _read("browser/worker.py")
-    # Since 3e128f8 the worker borrows bot_config's audited client instead of
-    # building an anonymous anthropic.AsyncAnthropic of its own.
-    assert "from bot_config import _deepseek_anthropic_client as client" in source
-    assert "anthropic.AsyncAnthropic" not in source
-    assert 'if provider == "deepseek":' in source
-    assert 'resolve_inference_extra(call_policy, "deepseek")' in source
-    assert "output_config=deepseek_params.get" in source
-    assert "from llm.openai_tool_loop import chat_with_tools as openai_chat" in source
+def test_tool_loops_route_through_deepseek_tool_loop() -> None:
+    # Since 2026-09-25 every DeepSeek tool loop takes its loop, client and
+    # options from bot_config.deepseek_tool_loop (OpenAI-compatible endpoint
+    # by default, DEEPSEEK_TOOL_LOOP_PROTOCOL=anthropic to revert).
+    import os
+    import bot_config
+    os.environ.pop("DEEPSEEK_TOOL_LOOP_PROTOCOL", None)
+    assert bot_config.deepseek_tool_protocol() == "openai"
+    for path in ("telegram/chat_runtime.py", "services/a2a_handler.py", "services/web_chat.py",
+                 "browser/worker.py", "roleplay/bot.py", "writer/models.py", "bot_config.py"):
+        source = _read(path)
+        assert "deepseek_tool_loop" in source or "deepseek_tool_available" in source, path
+        assert "client=_deepseek_anthropic_client" not in source, path
+    assert "deepseek_thinking_override or resolve_inference_extra(" in _read("telegram/chat_runtime.py")
+    assert "_get_deepseek_tool_thinking_params" in _read("services/a2a_handler.py")
 
 
 def test_browser_use_deepseek_routes_to_anthropic_harness() -> None:
@@ -75,15 +58,9 @@ def test_browser_use_deepseek_routes_to_anthropic_harness() -> None:
     assert "ChatDeepSeek" not in source
 
 
-def test_webchat_deepseek_routes_to_anthropic_harness_with_tool_progress() -> None:
+def test_webchat_deepseek_tool_progress() -> None:
     source = _read("services/web_chat.py")
-    assert "_deepseek_anthropic_client" in source
     assert 'provider == "deepseek"' in source
-    assert "client=_deepseek_anthropic_client" in source
-    assert 'thinking={"type": "disabled"}' in source
-    # Kimi content-filter fallback machinery was removed 2026-08-04 — the
-    # OpenAI-compatible DeepSeek client must no longer be wired into the
-    # Kimi path; native DeepSeek web chat stays Anthropic.
     assert "content_filter_fallback" not in source
     assert 'event == "tool_call"' in source
     assert '"type": "tool_done" if done else "tool_start"' in source
@@ -147,12 +124,10 @@ def test_deepseek_pricing_uses_deepseek_rows() -> None:
     assert round(_calculate_cost(usage, "deepseek-v4-pro"), 6) == round(miss + out, 6)
 
 if __name__ == "__main__":
-    test_deepseek_anthropic_client_is_configured()
-    test_telegram_deepseek_routes_to_anthropic_harness()
-    test_a2a_deepseek_routes_to_anthropic_harness()
-    test_browser_worker_deepseek_routes_to_anthropic_harness()
+    test_deepseek_clients_are_configured()
+    test_tool_loops_route_through_deepseek_tool_loop()
     test_browser_use_deepseek_routes_to_anthropic_harness()
-    test_webchat_deepseek_routes_to_anthropic_harness_with_tool_progress()
+    test_webchat_deepseek_tool_progress()
     test_deepseek_thinking_config_is_enabled_by_default()
     test_deepseek_tool_thinking_disabled_by_default()
     test_thinking_blocks_are_replayed_not_coerced_to_text()

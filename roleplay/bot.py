@@ -29,8 +29,7 @@ from aiogram.types import BotCommand, CallbackQuery, InlineKeyboardButton, Inlin
 
 from secrets_loader import get_secret
 from db import query as _query, execute as _execute
-from bot_config import _deepseek_anthropic_client, _resolve_deepseek_model
-from llm.claude_loop import chat_with_tools
+from bot_config import _resolve_deepseek_model, deepseek_tool_available, deepseek_tool_loop
 from llm.tool_loop_common import EMPTY_RESPONSE_FALLBACK
 from roleplay.jev import adjudicate_turn, PendingChoice
 from roleplay.decisions import AdjudicationUnavailable, DraftOutOfScope, StateConflict, describe_important
@@ -635,19 +634,23 @@ async def _draft_and_settle(message: Message, user_id: int, turn: dict, authoriz
     issues: list[str] = []
     started = time.monotonic()
     draft_count = 0
+    # Thinking stays on for answer quality; both DeepSeek endpoints keep the
+    # reasoning out of the reply (replay-only blocks / reasoning_content).
+    deepseek_chat, deepseek_client, deepseek_options = deepseek_tool_loop(
+        {"thinking": {"type": "enabled"}, "output_config": {"effort": "high"}}, label="deepseek:roleplay")
     try:
         for attempt in range(1 if turn.get("rewrite_without") else 2):
             draft_count += 1
             with caller_scope(ctx), turn_time_scope(time_policy):
                 with roleplay_turn.staged_memory(user_id) as stage:
-                    reply = await chat_with_tools(
-                        history, client=_deepseek_anthropic_client, model=ROLEPLAY_MODEL,
+                    reply = await deepseek_chat(
+                        history, client=deepseek_client, model=ROLEPLAY_MODEL,
                         tools=RP_TOOLS, tool_handlers=RP_HANDLERS,
                         system_prompt=build_system_prompt() + "\nrewrite_without에 지정된 결과는 이번 초안에 일어나지 않게 쓴다. 이전 초안의 기록은 폐기되었으므로 필요한 기록을 새로 저장한다.\n지금은 비공개 초안을 작성한다. 도구 저장도 검증 전 임시 기록이다. 사용자의 장면 범위를 지키고 계산 결과를 추측하지 않는다.",
                         max_rounds=ROLEPLAY_MAX_ROUNDS, max_tokens=ROLEPLAY_MAX_TOKENS,
                         continue_on_length=True, max_length_continuations=1,
                         budget_usd=ROLEPLAY_BUDGET_USD, on_progress=progress_cb,
-                        agent_name="roleplay", thinking={"type":"enabled"}, output_config={"effort":"high"},
+                        agent_name="roleplay", **deepseek_options,
                     )
                 if not reply.strip() or reply.strip() == EMPTY_RESPONSE_FALLBACK:
                     break
@@ -878,7 +881,7 @@ async def bot_main() -> None:
         raise RuntimeError("ROLEPLAY_BOT_TOKEN is not set (.env or systemd credential).")
     if not ALLOWED_USER_IDS:
         raise RuntimeError("No allowed users: set ROLEPLAY_ALLOWED_USER_IDS or ALLOWED_USER_IDS.")
-    if _deepseek_anthropic_client is None:
+    if not deepseek_tool_available():
         raise RuntimeError("DEEPSEEK_API_KEY is not configured; roleplay bot needs DeepSeek.")
 
     session = AiohttpSession()

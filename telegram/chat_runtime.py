@@ -11,7 +11,7 @@ from datetime import datetime
 
 from agents.base import CHAT_AUDIENCE_BLOCK, load_political_line_body
 from bot_config import (
-    _claude, _config, _deepseek_anthropic_client, _get_model_moon, _get_model_task,
+    _claude, _config, deepseek_tool_available, deepseek_tool_loop, _get_model_moon, _get_model_task,
     _get_task_provider, _kimi_client, _openai_client,
 )
 from identity.prompts import CORE_IDENTITY, EXTERNAL_SOURCE_RULE
@@ -467,19 +467,20 @@ async def _dispatch_chat_provider(
         with caller_scope(gw_ctx):
             return await _chat_coro
 
-    if effective_provider == "deepseek" and _deepseek_anthropic_client:
+    if effective_provider == "deepseek" and deepseek_tool_available():
         deepseek_thinking = deepseek_thinking_override or resolve_inference_extra(
             call_inference_policy, "deepseek"
         )
+        deepseek_chat, deepseek_client, deepseek_options = deepseek_tool_loop(
+            deepseek_thinking, label=f"deepseek:{runtime_kind}")
 
         def _deepseek_primary():
-            return chat_with_tools(
+            return deepseek_chat(
                 messages,
-                client=_deepseek_anthropic_client,
+                client=deepseek_client,
                 model=profile.model_id,
                 **loop_kwargs,
-                thinking=deepseek_thinking.get("thinking"),
-                output_config=deepseek_thinking.get("output_config"),
+                **deepseek_options,
             )
 
         from llm.provider_failover import resolve_deepseek_failover_model

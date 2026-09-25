@@ -20,8 +20,8 @@ from datetime import datetime, timezone
 from identity.prompts import CORE_IDENTITY
 from llm.prompt_renderer import SystemPrompt, render as _render_prompt
 from bot_config import (
-    _claude, _openai_client, _deepseek_client, _deepseek_anthropic_client,
-    _kimi_client, _config,
+    _claude, _openai_client,
+    _kimi_client, _config, deepseek_tool_available,
 )
 from llm.runtime_profile import resolve_runtime_profile
 from runtime_tools.registry import TOOLS, TOOL_HANDLERS
@@ -185,7 +185,7 @@ def _resolve_a2a_provider() -> str:
         provider = "openai" if _openai_client else "claude"
     if provider == "openai" and not _openai_client:
         provider = "claude"
-    if provider == "deepseek" and not _deepseek_anthropic_client:
+    if provider == "deepseek" and not deepseek_tool_available():
         provider = "claude"
     if provider == "kimi" and not _kimi_client:
         provider = "openai" if _openai_client else "claude"
@@ -413,19 +413,18 @@ async def _run_llm(
                 provider_label="kimi:a2a",
                 **kimi_openai_tool_options(),
             )
-        elif provider == "deepseek" and _deepseek_anthropic_client:
-            from llm.claude_loop import chat_with_tools
-            from bot_config import _get_deepseek_tool_thinking_params
+        elif provider == "deepseek" and deepseek_tool_available():
+            from bot_config import _get_deepseek_tool_thinking_params, deepseek_tool_loop
             # A2A conversations run a multi-tool loop — thinking off by default
             # (see _get_deepseek_tool_thinking_params).
-            deepseek_thinking = _get_deepseek_tool_thinking_params()
-            return await chat_with_tools(
+            deepseek_chat, deepseek_client, deepseek_options = deepseek_tool_loop(
+                _get_deepseek_tool_thinking_params(), label="deepseek:a2a")
+            return await deepseek_chat(
                 history,
-                client=_deepseek_anthropic_client,
+                client=deepseek_client,
                 model=profile.model_id,
                 **loop_kwargs,
-                thinking=deepseek_thinking.get("thinking"),
-                output_config=deepseek_thinking.get("output_config"),
+                **deepseek_options,
             )
         else:
             from llm.claude_loop import chat_with_tools

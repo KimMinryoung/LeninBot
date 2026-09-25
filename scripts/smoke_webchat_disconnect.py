@@ -33,7 +33,6 @@ async def _check_detached_run_persists(*, regenerate: bool = False, detach: bool
             "render_system_prompt",
             "chat_with_tools",
             "_log_chat",
-            "_deepseek_anthropic_client",
         )
     }
     patches = ExitStack()
@@ -97,7 +96,9 @@ async def _check_detached_run_persists(*, regenerate: bool = False, detach: bool
         web_chat.render_system_prompt = lambda *args, **kwargs: "system"
         web_chat.chat_with_tools = fake_chat
         web_chat._log_chat = fake_log
-        web_chat._deepseek_anthropic_client = object()
+        patches.enter_context(patch("bot_config.deepseek_tool_available", return_value=True))
+        patches.enter_context(patch("bot_config.deepseek_tool_loop",
+                                    return_value=(fake_chat, object(), {})))
         sys.modules["memory_store.redis_state"] = SimpleNamespace(
             register_active_web_chat=lambda *args, **kwargs: None,
             unregister_active_web_chat=lambda *args, **kwargs: None,

@@ -122,7 +122,7 @@ def build_research_handler(project_id: int, resolve_fallback):
 
         budget_tracker: dict = {}
         try:
-            from llm.claude_loop import chat_with_tools
+            from writer.models import writer_chat as chat_with_tools
 
             brief = await asyncio.wait_for(
                 chat_with_tools(

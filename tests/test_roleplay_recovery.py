@@ -37,7 +37,8 @@ class TestReplyPersistence(unittest.IsolatedAsyncioTestCase):
              patch.object(bot, "people_context", return_value={"index": [{"person_id": "ivan"}], "present": []}), \
              patch.object(bot, "build_system_prompt", return_value="sys"), \
              patch.object(bot, "_make_progress_callback", return_value=progress), \
-             patch.object(bot, "chat_with_tools", new_callable=AsyncMock, return_value=reply) as chat:
+             patch.object(bot, "deepseek_tool_loop", return_value=(AsyncMock(return_value=reply), object(), {})) as loop:
+            chat = loop.return_value[0]
             await bot.handle_message(message)
         return save, message, chat
 
@@ -139,7 +140,8 @@ class UnsettledDirectiveTests(unittest.IsolatedAsyncioTestCase):
              patch.object(bot, "people_context", return_value={"index": [], "present": []}), \
              patch.object(bot, "build_system_prompt", return_value="sys"), \
              patch.object(bot, "_make_progress_callback", return_value=SimpleNamespace(flush=AsyncMock())), \
-             patch.object(bot, "chat_with_tools", new_callable=AsyncMock, return_value="초안") as generate:
+             patch.object(bot, "deepseek_tool_loop", return_value=(AsyncMock(return_value="초안"), object(), {})) as loop:
+            generate = loop.return_value[0]
             await bot.handle_message(message)
         self.assertEqual(generate.await_count, 2)
         self.assertIn('draft_revision', str(generate.await_args_list[1].args[0]))

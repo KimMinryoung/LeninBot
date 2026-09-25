@@ -173,8 +173,10 @@ class TelegramDecisionTests(unittest.IsolatedAsyncioTestCase):
              patch.object(bot, '_make_progress_callback', return_value=SimpleNamespace(flush=AsyncMock())), \
              patch.object(bot, '_drop_unsettled') as drop, \
              patch.object(bot, '_deliver', new_callable=AsyncMock) as deliver, \
-             patch.object(bot, 'chat_with_tools', new_callable=AsyncMock, return_value='혐의를 인정하고 서명했다.') as chat, \
+             patch.object(bot, 'deepseek_tool_loop', return_value=(
+                 AsyncMock(return_value='혐의를 인정하고 서명했다.'), object(), {})) as loop, \
              patch.object(bot, 'adjudicate_turn', return_value={'status': 'applied', 'reply': '혐의를 인정하고 서명했다.'}) as commit:
+            chat = loop.return_value[0]
             yield {'user_text': '계속', 'scope_id': '11', 'chat_id': 1, 'history': [], 'state': before,
                    'notes': [], 'people': []}, classify, duration, chat, commit, deliver, drop
 

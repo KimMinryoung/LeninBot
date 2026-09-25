@@ -111,9 +111,32 @@ def _client():   # AuditedAsyncAnthropic, transparent over anthropic.AsyncAnthro
 def _deepseek_available() -> bool:
     try:
         import bot_config
-        return bot_config._deepseek_anthropic_client is not None
+        return bot_config.deepseek_tool_available()
     except Exception:
         return False
+
+
+async def writer_chat(messages, *, client, **kwargs):
+    """Run a writer tool loop on the protocol its client speaks.
+
+    Writer calls are written for claude_loop (system blocks, Anthropic-style
+    thinking/output_config). DeepSeek runs on its OpenAI-compatible endpoint
+    (see bot_config.deepseek_tool_loop), so its calls are translated here:
+    thinking moves to extra_body and system blocks become one text prompt.
+    """
+    import bot_config
+    if client is not None and client is bot_config._deepseek_client:
+        from llm.openai_tool_loop import chat_with_tools
+        reasoning = {key: kwargs.pop(key) for key in ("thinking", "output_config") if key in kwargs}
+        system = kwargs.get("system_prompt")
+        if isinstance(system, list):
+            kwargs["system_prompt"] = "\n\n".join(
+                str(block.get("text", "")) for block in system if isinstance(block, dict))
+        options = bot_config._deepseek_openai_loop_options(reasoning or {"thinking": {"type": "disabled"}})
+        return await chat_with_tools(messages, client=client, **kwargs,
+                                     **{**options, "provider_label": "deepseek:writer"})
+    from llm.claude_loop import chat_with_tools
+    return await chat_with_tools(messages, client=client, **kwargs)
 
 
 def _kimi_available() -> bool:
@@ -186,9 +209,11 @@ def resolve_writer_model(choice: str | None) -> tuple[Any, str, str, dict]:
         raise ValueError(f"Unknown writer model choice: {choice!r}")
     if spec["provider"] == "deepseek":
         import bot_config
-        client = bot_config._deepseek_anthropic_client
-        if client is None:
+        if not bot_config.deepseek_tool_available():
             raise RuntimeError("DeepSeek is not configured (DEEPSEEK_API_KEY missing).")
+        # writer_chat translates these Anthropic-style kwargs for the
+        # OpenAI-compatible endpoint when that is the configured protocol.
+        client = bot_config.deepseek_tool_loop()[1]
         # Thinking-on, effort-high by default (same as other non-web DeepSeek
         # agents). The writer never forces tool_choice, so thinking is stable.
         extra = bot_config._get_deepseek_thinking_params()

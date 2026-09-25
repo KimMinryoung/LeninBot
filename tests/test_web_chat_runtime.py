@@ -60,13 +60,13 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
                  patch.object(self.web, 'chat_with_tools', new_callable=AsyncMock, return_value='answer') as anth, \
                  patch('llm.openai_tool_loop.chat_with_tools', new_callable=AsyncMock, return_value={'text': 'answer'}) as oai, \
                  patch.object(self.web, '_kimi_client', object()), \
-                 patch.object(self.web, '_deepseek_anthropic_client', object()), \
+                 patch('bot_config._deepseek_client', object()), \
                  patch('llm.provider_failover.resolve_deepseek_failover_model', new_callable=AsyncMock, return_value=None), \
                  patch('llm.provider_registry.kimi_openai_tool_options', return_value={'reasoning_effort': 'max'}):
                 turn = self.turn(provider)
                 result = await self.invoke(turn)
                 self.assertEqual(result['text'], 'answer')
-                called = oai if provider in ('openai', 'kimi') else anth
+                called = oai if provider in ('openai', 'kimi', 'deepseek') else anth
                 unused = anth if called is oai else oai
                 called.assert_awaited_once()
                 unused.assert_not_awaited()
@@ -77,7 +77,10 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(options['max_length_continuations'], 2)
                 self.assertEqual(options['system_prompt'], 'system')
                 if provider == 'deepseek':
-                    self.assertEqual(options['thinking'], {'type': 'disabled'})
+                    # DeepSeek tool loops use the OpenAI-compatible endpoint.
+                    self.assertEqual(options['extra_body'], {'thinking': {'type': 'disabled'}})
+                    self.assertEqual(options['provider_label'], 'deepseek:web')
+                    self.assertTrue(options['return_metadata'])
                 if provider == 'kimi':
                     self.assertEqual(options['reasoning_effort'], 'max')
                 if provider in ('openai', 'kimi'):
@@ -85,7 +88,7 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
                     self.assertTrue(options['return_metadata'])
 
     async def test_missing_provider_clients_fail_before_invocation(self):
-        with patch.object(self.web, '_kimi_client', None), patch.object(self.web, '_deepseek_anthropic_client', None), \
+        with patch.object(self.web, '_kimi_client', None), patch('bot_config._deepseek_client', None), \
              patch.object(self.web, 'chat_with_tools', new_callable=AsyncMock) as anth, \
              patch('llm.openai_tool_loop.chat_with_tools', new_callable=AsyncMock) as oai:
             for provider in ('kimi', 'deepseek'):
@@ -96,15 +99,15 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_deepseek_transient_failure_uses_fallback(self):
         import httpx
-        with patch.object(self.web, '_deepseek_anthropic_client', object()), \
-             patch.object(self.web, 'chat_with_tools', new_callable=AsyncMock, side_effect=httpx.ConnectError('offline')) as anth, \
-             patch('llm.openai_tool_loop.chat_with_tools', new_callable=AsyncMock, return_value={'text': 'fallback'}) as oai, \
+        with patch('bot_config._deepseek_client', object()), \
+             patch('llm.openai_tool_loop.chat_with_tools', new_callable=AsyncMock,
+                   side_effect=[httpx.ConnectError('offline'), {'text': 'fallback'}]) as oai, \
              patch('llm.provider_failover.resolve_deepseek_failover_model', new_callable=AsyncMock, return_value='test-fallback'):
             turn = self.turn('deepseek')
             result = await self.invoke(turn)
             self.assertEqual(result['text'], 'fallback')
-            anth.assert_awaited_once()
-            oai.assert_awaited_once()
+            self.assertEqual(oai.await_count, 2)
+            self.assertEqual(oai.call_args_list[0].kwargs['provider_label'], 'deepseek:web')
             self.assertIs(oai.call_args.args[0], turn.history)
             self.assertEqual(oai.call_args.kwargs['model'], 'test-fallback')
             self.assertEqual(oai.call_args.kwargs['provider_label'], 'openai:web-failover')

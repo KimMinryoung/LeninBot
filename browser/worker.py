@@ -94,7 +94,8 @@ def _init_provider_client(provider: str):
     if provider == "openai":
         from bot_config import _openai_client as client
     else:
-        from bot_config import _deepseek_anthropic_client as client
+        from bot_config import deepseek_tool_available, deepseek_tool_loop
+        client = deepseek_tool_loop()[1] if deepseek_tool_available() else None
     if client is None:
         raise RuntimeError(f"no configured client for provider {provider!r}")
     _provider_clients[provider] = client
@@ -289,7 +290,7 @@ async def execute_browser_task(task: dict) -> dict:
             ctx_kwargs["scope_id"] = str(scope_id if scope_id is not None else task_id)
         ctx = new_run_context(**ctx_kwargs)
         if provider == "deepseek":
-            from llm.claude_loop import chat_with_tools as deepseek_chat
+            from bot_config import deepseek_tool_loop
             from tool_gateway.inference import AgentInferencePolicy, resolve_inference_extra
             call_policy = AgentInferencePolicy(
                 max_input_tokens=int(max_input_tokens or inference_policy.max_input_tokens),
@@ -300,15 +301,15 @@ async def execute_browser_task(task: dict) -> dict:
                 thinking_policy=thinking_policy,
                 thinking_budget_tokens=thinking_budget_tokens,
             )
-            deepseek_params = resolve_inference_extra(call_policy, "deepseek")
+            deepseek_chat, deepseek_client, deepseek_options = deepseek_tool_loop(
+                resolve_inference_extra(call_policy, "deepseek"), label="deepseek:browser")
             with caller_scope(ctx):
                 return await deepseek_chat(
                     messages,
-                    client=client,
+                    client=deepseek_client,
                     model=resolved_model,
                     **loop_kwargs,
-                    thinking=deepseek_params.get("thinking"),
-                    output_config=deepseek_params.get("output_config"),
+                    **deepseek_options,
                 )
 
         from llm.openai_tool_loop import chat_with_tools as openai_chat

@@ -20,7 +20,7 @@ from pathlib import Path
 
 from shared import KST
 from bot_config import (
-    _claude, _openai_client, _deepseek_anthropic_client, _kimi_client,
+    _claude, _openai_client, _kimi_client,
 )
 from llm.prompt_context import uses_xml
 from llm.runtime_profile import RuntimeProfile, resolve_runtime_profile
@@ -1120,15 +1120,20 @@ async def _invoke_web_model(
             provider_label=f"{provider}:web", return_metadata=True, **options,
         )
     elif provider == "deepseek":
-        if not _deepseek_anthropic_client:
+        from bot_config import deepseek_tool_available, deepseek_tool_loop, deepseek_tool_protocol
+        if not deepseek_tool_available():
             raise RuntimeError("DEEPSEEK_API_KEY is not configured for webchat_provider=deepseek")
         from llm.provider_failover import resolve_deepseek_failover_model
         failover_model = await resolve_deepseek_failover_model("webchat", _openai_client)
+        deepseek_chat, deepseek_client, deepseek_options = deepseek_tool_loop(
+            {"thinking": {"type": "disabled"}}, label="deepseek:web")
+        if deepseek_tool_protocol() == "openai":
+            deepseek_options["return_metadata"] = True
 
         def primary():
-            return chat_with_tools(
-                turn.history, client=_deepseek_anthropic_client,
-                model=profile.model_id, **loop_kwargs, thinking={"type": "disabled"},
+            return deepseek_chat(
+                turn.history, client=deepseek_client,
+                model=profile.model_id, **loop_kwargs, **deepseek_options,
             )
 
         def fallback():

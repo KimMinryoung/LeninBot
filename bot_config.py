@@ -450,23 +450,44 @@ def resolve_agent_tool_loop(spec, policy) -> AgentLoopBinding:
             _resolve_openai_model(spec.model or "gpt6luna"), "openai", reasoning,
         )
     if provider == "deepseek":
-        model = _resolve_deepseek_model(spec.model or "deepseek_flash")
-        # DeepSeek's Anthropic-compatible endpoint returned input {} for long
-        # tool arguments (2,600-2,900 output tokens, 2026-09-25) and gives no
-        # raw text to recover. The OpenAI-compatible endpoint is the default;
-        # DEEPSEEK_TOOL_LOOP_PROTOCOL=anthropic restores the old path.
-        protocol = (os.getenv("DEEPSEEK_TOOL_LOOP_PROTOCOL", "openai") or "openai").strip().lower()
-        if protocol == "anthropic":
-            from llm.claude_loop import chat_with_tools
-            if _deepseek_anthropic_client is None:
-                raise RuntimeError("DEEPSEEK_API_KEY is not configured")
-            return AgentLoopBinding(chat_with_tools, _deepseek_anthropic_client, model, "deepseek", reasoning)
-        from llm.openai_tool_loop import chat_with_tools
-        if _deepseek_client is None:
-            raise RuntimeError("DEEPSEEK_API_KEY is not configured")
-        return AgentLoopBinding(chat_with_tools, _deepseek_client, model, "deepseek",
-                                _deepseek_openai_loop_options(reasoning))
+        chat_with_tools, client, options = deepseek_tool_loop(reasoning)
+        return AgentLoopBinding(chat_with_tools, client,
+                                _resolve_deepseek_model(spec.model or "deepseek_flash"), "deepseek", options)
     raise ValueError(f"unsupported tool-loop provider for {spec.name}: {provider!r}")
+
+
+def deepseek_tool_protocol() -> str:
+    """Which DeepSeek endpoint tool loops use: "openai" (default) or "anthropic"."""
+    value = (os.getenv("DEEPSEEK_TOOL_LOOP_PROTOCOL", "openai") or "openai").strip().lower()
+    return "anthropic" if value == "anthropic" else "openai"
+
+
+def deepseek_tool_available() -> bool:
+    return (_deepseek_anthropic_client if deepseek_tool_protocol() == "anthropic"
+            else _deepseek_client) is not None
+
+
+def deepseek_tool_loop(reasoning: dict | None = None, *, label: str = "deepseek"):
+    """Return (chat_with_tools, client, kwargs) for every DeepSeek tool loop.
+
+    DeepSeek's Anthropic-compatible endpoint returned input {} for long tool
+    arguments (2,600-2,900 output tokens, 2026-09-25) with no raw text to
+    recover, so tool loops use the OpenAI-compatible endpoint.
+    DEEPSEEK_TOOL_LOOP_PROTOCOL=anthropic restores the previous path.
+    `reasoning` is the Anthropic-style {"thinking": ..., "output_config": ...}.
+    """
+    reasoning = dict(reasoning or {"thinking": {"type": "disabled"}})
+    if deepseek_tool_protocol() == "anthropic":
+        from llm.claude_loop import chat_with_tools
+        if _deepseek_anthropic_client is None:
+            raise RuntimeError("DEEPSEEK_API_KEY is not configured")
+        return chat_with_tools, _deepseek_anthropic_client, {
+            k: v for k, v in reasoning.items() if k in {"thinking", "output_config"} and v is not None}
+    from llm.openai_tool_loop import chat_with_tools
+    if _deepseek_client is None:
+        raise RuntimeError("DEEPSEEK_API_KEY is not configured")
+    return chat_with_tools, _deepseek_client, {
+        **_deepseek_openai_loop_options(reasoning), "provider_label": label}
 
 
 def _deepseek_openai_loop_options(reasoning: dict) -> dict:

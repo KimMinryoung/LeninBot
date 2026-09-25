@@ -62,7 +62,9 @@ class BrowserWorkerContractTests(unittest.IsolatedAsyncioTestCase):
             patch.object(worker, "BROWSER_PROVIDER_OVERRIDE", "deepseek"),
             patch.object(worker, "_init_tools", return_value=([], {})),
             patch.object(worker, "_init_provider_client", return_value=object()),
-            patch("llm.claude_loop.chat_with_tools", side_effect=fake_deepseek_chat),
+            # The DeepSeek loop comes from bot_config.deepseek_tool_loop; the
+            # real one would reach the provider.
+            patch("bot_config.deepseek_tool_loop", return_value=(fake_deepseek_chat, object(), {})),
         ):
             result = await worker.execute_browser_task(
                 {"id": 1312, "user_id": 7, "agent_type": "browser", "content": "test"}

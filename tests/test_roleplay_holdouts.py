@@ -222,7 +222,7 @@ class BotChoiceFlowTests(unittest.IsolatedAsyncioTestCase):
              patch.object(bot, 'people_context', return_value={'index': [], 'present': []}), \
              patch.object(bot, 'build_system_prompt', return_value='sys'), \
              patch.object(bot, '_make_progress_callback', return_value=progress), \
-             patch.object(bot, 'chat_with_tools', new_callable=AsyncMock, return_value='초안 본문'):
+             patch.object(bot, 'deepseek_tool_loop', return_value=(AsyncMock(return_value='초안 본문'), object(), {})):
             await bot.handle_message(message)
             self.assertEqual(save.call_count, 1)  # only the user's message so far
             self.assertTrue(message.answer.await_args_list[0].args[0].startswith('【미확정 초안'))
@@ -377,7 +377,7 @@ class AutoSettleTests(unittest.IsolatedAsyncioTestCase):
              patch.object(bot, 'people_context', return_value={'index': [], 'present': []}), \
              patch.object(bot, 'build_system_prompt', return_value='sys'), \
              patch.object(bot, '_make_progress_callback', return_value=SimpleNamespace(flush=AsyncMock())), \
-             patch.object(bot, 'chat_with_tools', new_callable=AsyncMock, return_value='초안'):
+             patch.object(bot, 'deepseek_tool_loop', return_value=(AsyncMock(return_value='초안'), object(), {})):
             await bot.handle_message(message)
         self.assertEqual(prepare.call_count, 1)
         self.assertTrue(prepare.call_args.args[6]['auto_general'])
