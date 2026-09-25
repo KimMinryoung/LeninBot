@@ -1,6 +1,6 @@
 {
   "phase": "live",
-  "daily_cap_usd": 2.0,
+  "daily_cap_usd": 4.0,
   "review_fraction": 0.3,
   "stage_budget_usd": 0.2,
   "canary_per_group_per_day": 1,
