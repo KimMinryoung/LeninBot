@@ -42,7 +42,10 @@ class DeepSeekSelectionTests(unittest.TestCase):
         self.assertEqual(COMMULINGO_CURATOR.model, "deepseek_flash")
         root = Path(__file__).resolve().parents[1]
         for filename in ("agent_runtime.json", "llm_call_sites.json"):
-            entries = json.loads((root / "config" / filename).read_text())
+            path = root / "config" / filename
+            if not path.exists():  # agent_runtime.json is local; a fresh clone has the example
+                path = path.with_name(filename + ".example")
+            entries = json.loads(path.read_text())
             for name, spec in entries.items():
                 if spec.get("provider") in ("deepseek", "deepseek_anthropic"):
                     with self.subTest(filename=filename, name=name):

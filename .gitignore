@@ -44,8 +44,9 @@ docs/
 tmp_cmd.sh
 scripts/ingest_*
 
-# CLAUDE가 사용하는 비밀 설정 파일
-.claude/
+# Claude Code: 로컬 권한·worktree는 비공개, 공유 설정(.claude/settings.json)만 커밋
+.claude/*
+!.claude/settings.json
 
 # 백업 파일
 *.bak_*

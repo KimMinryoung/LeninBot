@@ -5,6 +5,7 @@ uvicorn
 # Core dependencies
 python-dotenv
 pyflakes==4.0.0  # pre-deploy undefined-name check (scripts/check_python_names.py)
+pytest  # imported by pytest-style modules under tests/
 pydantic
 psycopg2-binary
 requests
