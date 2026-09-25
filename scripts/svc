@@ -124,7 +124,13 @@ do_stop() {
     else
         if [[ "$force" == "yes" ]]; then
             log "$name: killing $unit..."
-            _run_systemctl kill -s SIGKILL "$unit" 2>/dev/null || true
+            # grass's sudoers rule allows stop but not kill, and this failure
+            # used to be discarded: `svc restart` then "started" a unit that
+            # was still running the old code. Fall back to stop, loudly.
+            if ! _run_systemctl kill -s SIGKILL "$unit" 2>/dev/null; then
+                warn "$name: kill not permitted or unit inactive; stopping $unit instead"
+                _run_systemctl stop "$unit" || { err "$name: could not stop $unit"; exit 1; }
+            fi
         else
             log "$name: stopping $unit..."
             _run_systemctl stop "$unit" 2>/dev/null || true
