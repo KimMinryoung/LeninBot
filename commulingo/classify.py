@@ -432,6 +432,17 @@ GROUP_ERAS = {
     "international-counterrevolutionary": (1830, None), "scholar": (1850, None),
 }
 ADULT_AGE = 16
+
+# The dictionary files French Revolution figures by their camp in the
+# Revolution, so their defining activity is the one in it. Lafayette (job
+# 63829, 2026-09-26) was first filed by his Continental Army command, the
+# Feuillant National Guard commander only after an operator correction.
+# Other shelves keep the plain "defining career" rule.
+FRENCH_REVOLUTION_GROUPS = frozenset({"france-revolution"})
+FRENCH_REVOLUTION_BASIS = (" This person is filed on the French Revolution shelf: prefer the excerpt documenting their role"
+                           " in the Revolution and its wars, 1789–1815, the side, club, faction or regime they served,"
+                           " over an earlier or later career elsewhere (the American war, exile, a later"
+                           " reign) even when that career is better known.")
 _YEAR = r"(\d{3,4})(?:/(\d{3,4}))?\??"
 _YEARS = re.compile(r"^\s*(?:c\.\s*)?(?:" + _YEAR + r"|\?)\s*[–-]\s*(?:(?:" + _YEAR + r"|\?)(\s*이후)?)?\s*$")
 
@@ -648,6 +659,8 @@ def classify_person_card(fields: dict, *, catalogs=None, claims: dict | None = N
         # to the First Republic (job 63829, Lafayette, 2026-09-26).
         basis_q = dict(activity_q['activity_basis'])
         basis_q['instructions'] += ' The function is fixed by selected_activity_function in the state.'
+        if decision.choice('group') in FRENCH_REVOLUTION_GROUPS:
+            basis_q['instructions'] += FRENCH_REVOLUTION_BASIS
         basis_result = (decide or decide_detailed)(FEATURE, state,
             {'activity_basis': basis_q}, label='person-activity-basis')
         if basis_result.decision is None:

@@ -120,3 +120,23 @@ class AffiliationPeriodTests(unittest.TestCase):
             c.classify_person_card({**FIELDS, 'years': '1757–1834', 'evidence': evidence}, catalogs=CATALOGS, decide=decide, codes=False)
         self.assertIn('state-france', offered)
         self.assertNotIn('french-first-republic', offered)
+
+
+class FrenchRevolutionBasisTests(unittest.TestCase):
+    """Only French Revolution figures are asked to prefer their role in the Revolution."""
+
+    def basis_instructions(self, group):
+        seen = {}
+        def decide(feature, state, questions, label=None):
+            if label == 'person-activity-basis':
+                seen['text'] = questions['activity_basis']['instructions']
+            return DecisionResult(decision=verdict(group=group))
+        with patch('llm.call_registry.resolve', return_value=PROFILE):
+            c.classify_person_card({**FIELDS, 'evidence': EVIDENCE}, catalogs=CATALOGS, decide=decide, codes=False)
+        return seen['text']
+
+    def test_french_revolution_group_prefers_the_revolutionary_role(self):
+        self.assertIn('role in the Revolution', self.basis_instructions('france-revolution'))
+
+    def test_other_groups_keep_the_plain_rule(self):
+        self.assertNotIn('role in the Revolution', self.basis_instructions('international-revolutionary'))
