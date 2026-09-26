@@ -452,6 +452,8 @@ def active_span(years, today: int | None = None) -> tuple[int, int] | None:
         death = today  # died at an unknown date after the year, or still living
     if birth is None and death is None:
         return None
+    if death is None:  # 'born 1900, death unknown': a lifetime, capped at today
+        death = min(birth + 90, today)
     return ((birth + ADULT_AGE) if birth is not None else death - 50, death)
 
 

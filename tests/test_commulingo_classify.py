@@ -321,6 +321,7 @@ class GroupEraTests(unittest.TestCase):
         self.assertEqual(active_span("1900–1950 이후", today=2026), (1916, 2026))
         self.assertEqual(active_span("c. 1729/1730–1800", today=2026), (1745, 1800))
         self.assertEqual(active_span("?–1794", today=2026), (1744, 1794))
+        self.assertEqual(active_span("1900–?", today=2026), (1916, 1990))
         self.assertIsNone(active_span("", today=2026))
         self.assertEqual(len(self.ids("")), len(self.GROUPS))
 
