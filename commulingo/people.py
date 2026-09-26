@@ -1680,6 +1680,13 @@ def _check_person_native_names(
         patch,
         _stored_patronymic_state(cur, target_id) if action != "create" else {},
     )
+    # The native-name line is required: an empty value has no script to be
+    # wrong about, so the script check alone let blank cards through (nine,
+    # 2026-09-16..18). Mirrors the frontend admin store.
+    if action == "create" or "cyrillic" in patch:
+        if not cyrillic:
+            return ("Error: cyrillic is required: the person's name in their own script — for a "
+                    "Latin-script nationality usually the English name verbatim, diacritics included."), patronymic_state
     patronymic_error = _patronymic_problem(patronymic_state, cyrillic)
     if patronymic_error:
         return f"Error: {patronymic_error}.", patronymic_state
