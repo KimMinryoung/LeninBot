@@ -295,7 +295,7 @@ class ReviewRiskTests(unittest.TestCase):
 class GroupEraTests(unittest.TestCase):
     """Stage one of the group decision: life years rule eras out before any model call."""
     GROUPS = [{"id": g} for g in ("old-regime", "bolshevik", "stalin-era", "thaw", "perestroika", "china-reform",
-                                   "france-revolution", "france-napoleon", "international-revolutionary",
+                                   "france-revolution", "international-revolutionary",
                                    "foreign-statesmen", "international-counterrevolutionary", "scholar", "unlisted")]
 
     def ids(self, years):
@@ -312,7 +312,7 @@ class GroupEraTests(unittest.TestCase):
 
     def test_bridging_lives_keep_both_sides_for_the_model(self):
         ids = self.ids("1788–1856")
-        self.assertIn("france-napoleon", ids)
+        self.assertIn("france-revolution", ids)
         self.assertIn("international-revolutionary", ids)
 
     def test_living_and_open_labels(self):

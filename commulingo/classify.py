@@ -65,14 +65,12 @@ GROUP_RULES = {
                      "Biao, Kang Sheng, Jiang Qing, Hua Guofeng).",
     "china-reform": "Chinese citizens whose public role peaked after 1976: the reform leadership (Deng Xiaoping, Hu Yaobang, "
                     "Zhao Ziyang, Jiang Zemin), the dissidents of Democracy Wall and 1989, and the post-1989 leadership.",
-    "france-revolution": "The French Revolution to the Directory, 1774–1799: Louis XVI and his ministers, the revolutionaries of "
-                         "the assemblies, clubs and Paris Commune (Sieyès, Robespierre, Danton, Marat, Hébert, Babeuf), the "
-                         "royalists, émigrés and Vendée leaders who fought them, the generals of the republican armies (Valmy, "
-                         "Fleurus, the Rhine), and foreign commanders of the coalition wars against the Republic (Howe). "
-                         "Generals made in the republican armies stay here even when they served on under the Consulate.",
-    "france-napoleon": "The Consulate, the First Empire and the Bourbon Restoration, 1799–1830: Napoleon, his marshals and "
-                       "administrators, the foreign commanders who fought the Empire (Nelson), and the Restoration kings to the "
-                       "July Revolution. Socialists of the 1830s and after (Cabet, Blanqui) are world groups.",
+    "france-revolution": "The French Revolution and the Napoleonic era, 1774–1830: Louis XVI and his ministers, the "
+                         "revolutionaries of the assemblies, clubs and Paris Commune (Sieyès, Robespierre, Danton, Marat, "
+                         "Hébert, Babeuf), the royalists, émigrés and Vendée leaders who fought them, the generals of the "
+                         "republican armies, Napoleon and his marshals and administrators, the Restoration kings to the July "
+                         "Revolution, and foreign commanders of the coalition wars (Howe, Nelson). Socialists of the 1830s and "
+                         "after (Cabet, Blanqui) are world groups.",
     "international-revolutionary": "Anyone OUTSIDE the Soviet and Chinese state apparatus on the revolutionary or socialist "
                                    "side: communists, socialists, leaders and officials of socialist states (Poland, Hungary, "
                                    "Czechoslovakia, East Germany, Cuba, Vietnam...), their reformers and dissidents, and "
@@ -429,7 +427,7 @@ GROUP_ERAS = {
     "perestroika": (1975, None),
     "china-old-regime": (1880, 1949), "china-revolution": (1895, 1949), "china-mao-era": (1940, 1976),
     "china-reform": (1970, None),
-    "france-revolution": (1774, 1799), "france-napoleon": (1795, 1830),
+    "france-revolution": (1774, 1830),
     "international-revolutionary": (1830, None), "foreign-statesmen": (1830, None),
     "international-counterrevolutionary": (1830, None), "scholar": (1850, None),
 }
@@ -485,7 +483,7 @@ def build_questions(groups: list[dict], offices: list[dict], categories: list[di
         "group": {"type": "choice", "criteria": group_criteria,
                   "instructions": "Which dictionary group does this person belong to? Soviet citizens go to the era in which "
                                   "their public role peaked; Chinese citizens go to the china-* group of their era or side; "
-                                  "people outside both states go to a world group; people of the French Revolution and Napoleon go to a france-* group. Historians researching this history use scholar regardless of nationality; actors or targets in historical events can retain the era of their activity."},
+                                  "people outside both states go to a world group; people of the French Revolution and Napoleon go to france-revolution. Historians researching this history use scholar regardless of nationality; actors or targets in historical events can retain the era of their activity."},
         "role": {"type": "choice", "criteria": role_criteria, "instructions": ROLE_INSTRUCTIONS[scope]},
     }
 
