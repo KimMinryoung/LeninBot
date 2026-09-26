@@ -1,5 +1,5 @@
 {
-  "version": 4,
+  "version": 5,
   "functions": [
     {
       "id": "political-leadership",
@@ -699,7 +699,7 @@
       },
       "countryCode": "republic-of-congo",
       "icon": "landmark",
-      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify. Outside party-state rule only: service during the ruling period of party-congolese-labour (1969–1991) belongs to that party instead."
+      "criteria": "Actual service for the Republic of the Congo (Congo-Brazzaville) state or its armed forces, not DR Congo (Congo-Kinshasa). Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify. Outside party-state rule only: service during the ruling period of party-congolese-labour (1969–1991) belongs to that party instead."
     },
     {
       "id": "state-romania",
@@ -2119,14 +2119,10 @@
         "ko": "콩고 노동당",
         "en": "Congolese Party of Labour (PCT)"
       },
-      "countryCode": "congo-republic",
+      "countryCode": "republic-of-congo",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Congolese Party of Labour (PCT). Never infer affiliation from nationality, residence or ideology. Party-state rule: 1969–1991 (People's Republic of the Congo). During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card.",
-      "countryLabel": {
-        "ko": "콩고공화국",
-        "en": "Republic of the Congo"
-      }
+      "criteria": "Only documented service, membership or organizational activity in Congolese Party of Labour (PCT). Never infer affiliation from nationality, residence or ideology. Party-state rule: 1969–1991 (People's Republic of the Congo). During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card."
     },
     {
       "id": "party-congolese-mnc",
@@ -2355,22 +2351,6 @@
       "icon": "flag",
       "parentId": null,
       "criteria": "Only documented service, membership or organizational activity in Emancipation of Labour group. Never infer affiliation from nationality, residence or ideology."
-    },
-    {
-      "id": "state-congo-republic",
-      "kind": "state",
-      "label": {
-        "ko": "콩고공화국 국가기관",
-        "en": "Republic of the Congo state institutions"
-      },
-      "countryCode": "congo-republic",
-      "countryLabel": {
-        "ko": "콩고공화국",
-        "en": "Republic of the Congo"
-      },
-      "icon": "landmark",
-      "parentId": null,
-      "criteria": "Actual service in Republic of the Congo (Congo-Brazzaville) state institutions, not DR Congo (Congo-Kinshasa). Not citizenship or sympathy."
     }
   ],
   "legacy": {
@@ -2483,6 +2463,7 @@
     "state-soviet": "soviet-party",
     "china-prc": "china-ccp",
     "state-east-germany": "party-german-sed",
-    "state-north-korea": "party-korean-workers"
+    "state-north-korea": "party-korean-workers",
+    "state-congo-republic": "state-republic-of-congo"
   }
 }
