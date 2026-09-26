@@ -347,11 +347,19 @@ class Editor:
                     raise ValueError('Explain the no-edit decision substantively for every commissioned issue.')
             except ValueError as exc:
                 raise ValueError(str(exc) + '; retry commulingo_pipeline_no_edit with the corrected decision.') from exc
+            inspected = sorted({source['url'] for source in session.sources.values()
+                                if source.get('body') and source['expires_at'] > datetime.now(timezone.utc)})
+            # A draft written from sources this session read cannot then report
+            # that no original was accessible. Job 63829 (Lafayette, 2026-09-26)
+            # did exactly that after four prose values ran a few characters over
+            # their limits: the false status deferred a sourced entry 90 days.
+            if value['status']=='sources_unavailable' and inspected and repair.draft:
+                raise ValueError('sources_unavailable contradicts the sources read in this session ('
+                                 + ', '.join(inspected[:3]) + ') and the draft saved from them. '
+                                 'Fix the values the last validation rejected and resubmit the draft.')
             # Preserve the last draft and its evidence for audit/recovery. This
             # decision is a distinct artifact, never a mutation of draft status.
             await save_checkpoint()
-            inspected = sorted({source['url'] for source in session.sources.values()
-                                if source.get('body') and source['expires_at'] > datetime.now(timezone.utc)})
             box.update(editor_version=2, research={**research, 'status':value['status'],
                 'reason':value['reason'], 'inspected_sources':inspected,
                 'issue_results':[{'id':key, **item} for key, item in value['issues'].items()],

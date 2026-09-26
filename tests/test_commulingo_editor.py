@@ -225,6 +225,30 @@ class EditorTests(EditorCase):
         self.assertEqual(latest([{'stage':'research', 'value':result.value}], 'research')['status'], 'sources_unavailable')
         self.assertEqual([call.args[0]['command'] for call in rpc.call_args_list], ['read'])
 
+    async def test_sources_unavailable_is_refused_after_reading_sources_and_drafting(self):
+        store = store_mock()
+        async def model(**kwargs):
+            await kwargs['read_wrap']('fetch_url', AsyncMock(
+                return_value=f'<external source="web">\n{BODY}\n</external>'))(url=URL)
+            value = candidate()
+            value['claims'] = []
+            with self.assertRaisesRegex(ValueError, 'evidence required'):
+                await kwargs['handler'](submission(value))
+            _, no_edit, _ = next(t for t in kwargs['local_tools']
+                                 if t[0]['name'] == 'commulingo_pipeline_no_edit')
+            with self.assertRaisesRegex(ValueError, 'contradicts the sources read'):
+                await no_edit(status='sources_unavailable',
+                    reason='No available original establishes the commissioned facts.',
+                    issues={'missing:body': {'status':'deferred', 'reason':'No reliable original could be retrieved.'}})
+            response = await no_edit(status='not_applicable',
+                reason='The commissioned facts are outside the scope of this entry after review.',
+                issues={'missing:body': {'status':'deferred', 'reason':'Outside the scope of this entry.'}})
+            self.assertIn('no-edit judgment recorded', response)
+        with patch('commulingo.pipeline.service.call', return_value=CURRENT), \
+             patch('commulingo.pipeline.stages.model_call', side_effect=model):
+            result = await Editor(store)(JOB, [], Usage(), .2)
+        self.assertEqual(latest([{'stage':'research', 'value':result.value}], 'research')['status'], 'not_applicable')
+
     async def test_format_state_survives_restart_and_research_reopen_is_saved(self):
         store = store_mock()
         async def first(**kwargs):
