@@ -144,6 +144,10 @@ it while retaining failure semantics. The dispatcher forwards metadata to audit 
 returning ordinary text to provider loops. KG metadata contains only route, counts,
 empty-result and fallback flags; it does not include result bodies. The KG search schema
 accepts a nonblank `query` or `entity` (either is sufficient).
+`ToolContinue` marks a successful intermediate checkpoint from a terminal tool. The
+dispatcher audits it as `continued` and sets the provider protocol's error flag so the
+shared model loop keeps running until a validated terminal result arrives. It is not a
+failed edit or a refusal; scoped durable receipts remain conservative if one is present.
 
 ## Roleplay snapshot exception
 

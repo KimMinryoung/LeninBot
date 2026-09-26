@@ -1,8 +1,8 @@
 """Handler-reported tool outcomes the dispatcher cannot infer on its own.
 
-Two verdicts live here, and they are opposites. `ToolFailure` promotes a
-swallowed failure out of `ok`; `ToolRejection` rescues a designed refusal out
-of `error`. Both exist because the dispatcher can only see "the handler
+`ToolFailure` promotes a swallowed failure out of `ok`; `ToolRejection` rescues
+a designed refusal out of `error`; `ToolContinue` marks saved progress that
+must keep a terminal-tool loop open. They exist because the dispatcher can only see "the handler
 returned" or "the handler raised", and neither says whether the tool worked.
 
 
@@ -47,9 +47,19 @@ class ToolFailure(ToolResult):
     __slots__ = ()
 
 
+class ToolContinue(ToolResult):
+    """A saved intermediate result that must not end a terminal-tool loop."""
+
+    __slots__ = ()
+
+
 def is_failure(result: object) -> bool:
     """True when a handler flagged its own result as a failure."""
     return isinstance(result, ToolFailure)
+
+
+def is_continuation(result: object) -> bool:
+    return isinstance(result, ToolContinue)
 
 
 class ToolRejection(ValueError):

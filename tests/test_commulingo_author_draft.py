@@ -59,6 +59,32 @@ class AuthorDraftTests(unittest.TestCase):
         self.assertEqual(set(result['fields']), {'bio', 'years'})
         self.assertEqual(draft.submit_tool['name'], 'commulingo_pipeline_submit_draft')
 
+    def test_bilingual_prose_languages_merge_across_saved_calls(self):
+        draft = session()
+        first = {'changes': {'bio': {'value': {'ko': '검증한 인물이다.'},
+            'evidence': [{'claim': 'A documented person.', 'passages': ['P1']}]}},
+            'issues': edit()['issues'], 'reason': edit()['reason']}
+        self.assertFalse(list(Draft202012Validator(draft.submit_tool['input_schema']).iter_errors(first)))
+        partial = draft.submission(first)
+        self.assertEqual(draft.missing(partial), ['changes.bio.value.en'])
+        # This is the same durable representation restored by an editor checkpoint.
+        resumed = session()
+        resumed.draft = {'tool': draft.name, 'args': deepcopy(partial)}
+        second = resumed.submission({'changes': {'bio': {'value': {'en': 'A documented person.'}}}})
+        self.assertEqual(resumed.missing(second), [])
+        result = resumed.prepare(second)
+        self.assertEqual(result['fields']['bio'], edit()['changes']['bio']['value'])
+        self.assertEqual(result['claims'], [{'field': 'bio', 'claim': 'A documented person.',
+                                              'passages': ['P1']}])
+
+    def test_partial_bilingual_prose_cannot_pass_canonical_validation(self):
+        draft = session()
+        partial = draft.submission({'changes': {'bio': {'value': {'ko': '검증한 인물이다.'}}},
+            'issues': edit()['issues'], 'reason': edit()['reason']})
+        self.assertIn('changes.bio.value.en', draft.missing(partial))
+        with self.assertRaises(ValueError):
+            draft.prepare(partial)
+
     def test_invalid_typed_update_never_corrupts_saved_draft(self):
         draft = session()
         draft.prepare(draft.submission(edit()))
@@ -263,6 +289,59 @@ class AuthorWorkflowTests(EditorCase):
                 local_tools=[(draft.no_edit_tool, no_edit, True)])
         no_edit.assert_awaited_once()
         handler.assert_not_awaited()
+
+    async def test_saved_partial_submission_does_not_finish_terminal_stage(self):
+        from commulingo.pipeline.stages import StageContinues, model_call
+        from commulingo.pipeline.prompts import spec
+        from commulingo.pipeline.engine import Usage
+        from tool_gateway.dispatcher import execute_tool
+        draft = session()
+        calls = 0
+        async def save(value):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise StageContinues('Saved incomplete draft; send changes.bio.value.en next')
+            return 'OK: validated draft'
+        async def chat(messages, **kwargs):
+            name = draft.submit_tool['name']
+            with patch('tool_gateway.security.audit'):
+                progress, pending = await execute_tool(name, {'reason':'first'},
+                    kwargs['tool_handlers'], tool_schema=draft.submit_tool)
+                done, finished = await execute_tool(name, {'reason':'second'},
+                    kwargs['tool_handlers'], tool_schema=draft.submit_tool)
+            self.assertTrue(pending)
+            self.assertIn('Saved incomplete draft', progress)
+            self.assertFalse(finished)
+            self.assertEqual(done, 'OK: validated draft')
+            kwargs['budget_tracker']['total_cost'] = 0
+        binding = SimpleNamespace(chat=chat, client=None, model='fixture', render_provider='deepseek', reasoning={})
+        usage = Usage()
+        with patch('bot_config.resolve_agent_tool_loop', return_value=binding):
+            await model_call(spec=spec('research'), prompt='Fixture commission.', tool=draft.submit_tool,
+                handler=save, reads=set(), usage=usage, budget=.2)
+        self.assertEqual(calls,2)
+        self.assertEqual(usage.tracker['partial_submissions'],1)
+
+    async def test_unfinished_stage_reports_saved_partial_count(self):
+        from commulingo.pipeline.stages import StageContinues, model_call
+        from commulingo.pipeline.prompts import spec
+        from commulingo.pipeline.engine import Usage
+        from tool_gateway.dispatcher import execute_tool
+        draft = session()
+        async def save(value):
+            raise StageContinues('Saved incomplete draft')
+        async def chat(messages, **kwargs):
+            with patch('tool_gateway.security.audit'):
+                _, pending = await execute_tool(draft.submit_tool['name'], {'reason':'first'},
+                    kwargs['tool_handlers'], tool_schema=draft.submit_tool)
+            self.assertTrue(pending)
+            kwargs['budget_tracker']['total_cost'] = 0
+        binding = SimpleNamespace(chat=chat, client=None, model='fixture', render_provider='deepseek', reasoning={})
+        with patch('bot_config.resolve_agent_tool_loop', return_value=binding):
+            with self.assertRaisesRegex(RuntimeError, 'saved partial submissions: 1'):
+                await model_call(spec=spec('research'), prompt='Fixture commission.', tool=draft.submit_tool,
+                    handler=save, reads=set(), usage=Usage(), budget=.2)
 
     async def test_no_edit_tool_uses_the_existing_owner_and_caller_boundary(self):
         from security_gateway import CallerContext, authorize, policy

@@ -46,6 +46,12 @@ class ContextTests(HermeticAsyncCase):
         self.assertIn('Author warning',encoded)
         _,read,_ = context_tool(current)
         self.assertIn('unchanged alias',await read(fields=['aliases']))
+        tool,_,_ = context_tool(current)
+        from jsonschema import Draft202012Validator
+        field_schema = tool['input_schema']['properties']['fields']
+        self.assertEqual(field_schema['items']['enum'], sorted(current))
+        self.assertTrue(list(Draft202012Validator(tool['input_schema']).iter_errors(
+            {'fields':['invented']})))
         with self.assertRaises(ValueError):
             await read(fields=['invented'])
         self.assertEqual(current['body']['ko'],old)

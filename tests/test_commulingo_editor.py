@@ -846,6 +846,39 @@ class EditorContractTests(EditorCase):
                          {'body', 'sortOrder'})
         self.assertNotIn('startYear', {item['field'] for item in result.value['draft']['fields']['evidence']})
 
+    async def test_section_body_languages_are_checkpointed_before_validation(self):
+        from commulingo.pipeline.stages import StageContinues
+        current = {'revision':'v1','name':{'ko':'니콜라이 예조프','en':'Nikolai Yezhov'},'sections':[]}
+        job = {**JOB,'id':5434,'kind':'person','topic':'sections','target':'yezhov',
+               'reason':'Add one documented section.'}
+        store = store_mock()
+        evidence = [{'claim':'The award was granted in 1937.', 'passages':['P1']}]
+        async def model(**kwargs):
+            await fetch_fixture(kwargs)
+            with self.assertRaises(StageContinues):
+                await kwargs['handler']({'changes':{
+                    'heading':{'value':{'ko':'훈장 수여','en':'Award of the order'}},
+                    'startYear':{'value':1937,'evidence':evidence}},
+                    'issues':{'missing:sections':{'status':'resolved','reason':'Added a supported detail section.'},
+                              'requested':{'status':'resolved','reason':'The requested section is supported.'}},
+                    'reason':'The original supports this distinct detail section.'})
+            with self.assertRaises(StageContinues) as incomplete:
+                await kwargs['handler']({'changes':{'body':{'value':{
+                    'ko':'1937년에 레닌 훈장을 받았다는 기록이 있다.'},'evidence':evidence}}})
+            self.assertIn('changes.body.value.en',str(incomplete.exception))
+            self.assertEqual(store.save_editor_checkpoint.call_args.args[1]['draft']['args']['fields']['body'],
+                             {'ko':'1937년에 레닌 훈장을 받았다는 기록이 있다.'})
+            await kwargs['handler']({'changes':{'body':{'value':{
+                'en':'The record states that he received the Order of Lenin in 1937.'}}}})
+        with patch('commulingo.pipeline.service.call',return_value=current) as rpc, \
+             patch('commulingo.pipeline.stages.model_call',side_effect=model), \
+             patch('commulingo.section_slug.generate_section_slug',return_value='order-of-lenin'):
+            result = await Editor(store)(job,[],Usage(),.2)
+        self.assertEqual(result.next_stage,'review')
+        self.assertEqual(result.value['draft']['fields']['body']['en'],
+                         'The record states that he received the Order of Lenin in 1937.')
+        self.assertEqual([c.args[0]['command'] for c in rpc.call_args_list],['read','validate'])
+
     def test_section_start_year_is_a_required_integer(self):
         from commulingo.pipeline.patches import schema_for
         job = {**JOB, 'kind':'person', 'action':'update',

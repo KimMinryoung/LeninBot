@@ -288,6 +288,7 @@ _ARGUMENT_SHAPE_REPAIRS: dict = {}
 # default asks for a resend; a tool that accepts partial calls can ask for
 # smaller ones instead.
 _EMPTY_ARGUMENT_HINTS: dict = {}
+_MALFORMED_ARGUMENT_HINTS: dict = {}
 
 
 def register_argument_shape_repair(tool_name: str, repair) -> None:
@@ -296,6 +297,14 @@ def register_argument_shape_repair(tool_name: str, repair) -> None:
 
 def register_empty_arguments_hint(tool_name: str, hint: str) -> None:
     _EMPTY_ARGUMENT_HINTS[tool_name] = hint
+
+
+def register_malformed_arguments_hint(tool_name: str, hint: str) -> None:
+    _MALFORMED_ARGUMENT_HINTS[tool_name] = hint
+
+
+def malformed_arguments_hint(tool_name: str) -> str:
+    return _MALFORMED_ARGUMENT_HINTS.get(tool_name, "")
 
 
 def validate_tool_arguments(
@@ -371,6 +380,8 @@ __all__ = [
     "ToolArgumentValidationError",
     "register_argument_shape_repair",
     "register_empty_arguments_hint",
+    "register_malformed_arguments_hint",
+    "malformed_arguments_hint",
     "tool_schema_map",
     "validate_tool_arguments",
 ]

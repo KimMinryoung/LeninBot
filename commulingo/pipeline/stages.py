@@ -114,7 +114,7 @@ async def model_call(*, spec, prompt, tool, handler, reads, usage, budget, read_
     from runtime_tools.registry import TOOLS, TOOL_HANDLERS
     from tool_gateway.inference import resolve_agent_inference_policy
     from tool_gateway.security import caller_scope, new_run_context
-    from tool_gateway.results import ToolRejection
+    from tool_gateway.results import ToolRejection, ToolContinue
     fallback = ((job or {}).get('payload') or {}).get('provider_fallback')
     if fallback:
         spec = replace(spec,provider=fallback,model=FALLBACK_MODEL)
@@ -134,7 +134,8 @@ async def model_call(*, spec, prompt, tool, handler, reads, usage, budget, read_
         try:
             result = await handler(value)
         except StageContinues as progress:
-            return str(progress)
+            usage.tracker['partial_submissions'] = usage.tracker.get('partial_submissions',0)+1
+            return ToolContinue(str(progress))
         except ValueError as exc:
             rejections.append(str(exc))
             usage.tracker.setdefault('rejections', []).append(str(exc)[:500])
@@ -217,7 +218,9 @@ async def model_call(*, spec, prompt, tool, handler, reads, usage, budget, read_
     usage.complete = True
     if not completed:
         detail = '; '.join(dict.fromkeys(rejections[-3:]))
+        partials = usage.tracker.get('partial_submissions',0)
         raise RuntimeError('stage ended without validated result; collected sources are retained'
+                           + (f'; saved partial submissions: {partials}' if partials else '')
                            + (f'; last rejections: {detail}' if detail else ''))
 
 

@@ -228,6 +228,41 @@ class TestToolRound(unittest.TestCase):
         self.assertEqual(len(tool_msgs), 1)
         self.assertIn("malformed JSON arguments", tool_msgs[0]["content"])
 
+    def test_commulingo_malformed_arguments_ask_for_smaller_saved_calls(self):
+        from commulingo.pipeline.author_draft import SUBMIT_TOOL
+        client = FakeSDKClient([
+            _resp("", finish="tool_calls", tool_calls=[_tc("t1", SUBMIT_TOOL, '{"changes":')]),
+            _resp("done"),
+        ])
+        tool = {"name": SUBMIT_TOOL, "description": "saved partial draft",
+                "input_schema": {"type": "object", "properties": {}}}
+        with patch.object(openai_tool_loop, "execute_tools_batch", _fake_batch_factory({})):
+            asyncio.run(chat_with_tools([{"role": "user", "content": "q"}],
+                client=client, model="deepseek-chat", tools=[tool],
+                tool_handlers={SUBMIT_TOOL: None}, system_prompt="sys",
+                max_rounds=5, max_tokens=256, budget_usd=5.0))
+        tool_msgs = [m for m in client.calls[1]["messages"] if m.get("role") == "tool"]
+        self.assertIn("Send one language", tool_msgs[0]["content"])
+
+    def test_saved_partial_tool_result_keeps_terminal_loop_open(self):
+        client = FakeSDKClient([
+            _resp("", finish="tool_calls", tool_calls=[_tc("t1", "echo")]),
+            _resp("", finish="tool_calls", tool_calls=[_tc("t2", "echo")]),
+        ])
+        calls = 0
+        async def batch(tool_uses, tool_handlers, **kwargs):
+            nonlocal calls
+            calls += 1
+            tid, name, args = tool_uses[0]
+            return [(tid, name, args, "saved partial" if calls == 1 else "validated", calls == 1)]
+        with patch.object(openai_tool_loop, "execute_tools_batch", batch):
+            result = asyncio.run(chat_with_tools([{"role": "user", "content": "q"}],
+                client=client, model="deepseek-chat", terminal_tools=["echo"],
+                finalization_tools=["echo"], **BASE_KWARGS))
+        self.assertEqual(calls,2)
+        self.assertEqual(len(client.calls),2)
+        self.assertIn("validated",result)
+
 
 class TestTransientRetry(unittest.TestCase):
     def test_transient_error_retried_and_succeeds(self):

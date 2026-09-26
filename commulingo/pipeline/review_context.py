@@ -25,13 +25,16 @@ def context(proposal, current, previous_patch=None):
 
 def context_tool(current):
     current = current or {}
+    available = sorted(current)
     async def read(fields):
         if not 1 <= len(fields) <= 12 or any(f not in current for f in fields):
-            raise ValueError('Request 1..12 fields from available_current_fields')
+            raise ValueError('Request 1..12 fields from available_current_fields: '
+                             + ', '.join(available))
         from .stages import stage_evidence
         return stage_evidence({f:deepcopy(current[f]) for f in fields})
     return ({'name':'commulingo_pipeline_review_context',
              'description':'Read unchanged current entry fields, including notes/sections, when needed to check contradictions or duplicate sections. This is current entry data, not independent source evidence.',
              'input_schema':{'type':'object','additionalProperties':False,
                  'properties':{'fields':{'type':'array','minItems':1,'maxItems':12,
-                     'items':{'type':'string'}}}, 'required':['fields']}}, read, False)
+                     'uniqueItems':True,'items':{'type':'string','enum':available}}},
+                 'required':['fields']}}, read, False)

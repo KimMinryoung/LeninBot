@@ -8,12 +8,22 @@ import json
 import re
 
 from jsonschema import Draft202012Validator
-from tool_gateway.validation import register_argument_shape_repair, register_empty_arguments_hint
+from tool_gateway.validation import (register_argument_shape_repair,
+    register_empty_arguments_hint, register_malformed_arguments_hint)
 
 from .draft_repair import DraftRepair, RepairProtocolError
 from .evidence import MAX_PASSAGES, PASSAGE_PATTERN
 
 SUBMIT_TOOL = 'commulingo_pipeline_submit_draft'
+
+
+def bilingual_field(schema):
+    """A prose object whose two language values may be staged separately."""
+    properties = schema.get('properties') or {}
+    return (schema.get('type') == 'object'
+            and {'ko', 'en'} <= set(schema.get('required') or [])
+            and all((properties.get(lang) or {}).get('type') == 'string'
+                    for lang in ('ko', 'en')))
 
 
 def obj(properties, required=()):
@@ -96,6 +106,8 @@ def structured_args(args):
 class AuthorDraft(DraftRepair):
     def configure(self, fields, issues):
         self.field_names = list(fields['properties'])
+        self.bilingual_fields = {name for name, schema in fields['properties'].items()
+                                 if bilingual_field(schema)}
         evidence = obj({'claim': {'type': 'string', 'minLength': 1},
                         'passages': {'type': 'array', 'minItems': 1, 'maxItems': MAX_PASSAGES,
                                      'items': {'type': 'string', 'pattern': PASSAGE_PATTERN}},
@@ -103,7 +115,15 @@ class AuthorDraft(DraftRepair):
                        ['claim', 'passages'])
         # Omitted evidence keeps the field's saved evidence: authors shortening
         # prose or fixing a date left it out and were rejected (2026-09-25 logs).
-        changes = obj({name: obj({'value': intake_schema(schema),
+        def author_value(name, schema):
+            value = intake_schema(schema)
+            if name in self.bilingual_fields:
+                # Canonical required languages remain in self.full_schema.
+                # Only the author intake accepts a single language per call.
+                value.pop('required', None)
+                value['minProperties'] = 1
+            return value
+        changes = obj({name: obj({'value': author_value(name, schema),
                                  'evidence': {'type': 'array', 'items': evidence,
                                               'description': 'Omit to keep this field\'s saved evidence.'}},
                                  ['value'])
@@ -149,7 +169,8 @@ class AuthorDraft(DraftRepair):
         self.submit_tool = {'name': SUBMIT_TOOL, 'description':
             'Submit the edit for review. Each change is {value, evidence}. Top-level keys only: changes, issues, '
             'reason, notes, remove_fields. Calls merge into one saved draft, so a large edit may be sent a few '
-            'fields per call; it is validated once it holds the required fields, reason and every issue. Omit '
+            'fields per call; bilingual prose may send ko and en in separate calls. It is validated once it '
+            'holds both languages of each changed prose field, required fields, reason and every issue. Omit '
             'evidence to keep saved evidence. Arrays replace the whole list. No edit: commulingo_pipeline_no_edit.', 'input_schema': submit}
         self.no_edit_tool = {'name': 'commulingo_pipeline_no_edit', 'description':
             'Finish without a public edit. Explain the decision and each commissioned issue. '
@@ -184,7 +205,12 @@ class AuthorDraft(DraftRepair):
         for field in value.get('remove_fields', []):
             result.setdefault('fields', {}).pop(field, None)
         for field, change in value.get('changes', {}).items():
-            result.setdefault('fields', {})[field] = deepcopy(change['value'])
+            previous = result.setdefault('fields', {}).get(field)
+            incoming = deepcopy(change['value'])
+            if field in self.bilingual_fields and isinstance(previous, dict) and isinstance(incoming, dict):
+                result['fields'][field] = {**previous, **incoming}
+            else:
+                result['fields'][field] = incoming
             result['claims'].extend({'field': field, **deepcopy(e)} for e in change.get('evidence', []))
         outcomes = {item['id']: item for item in result.get('issue_results', [])}
         outcomes.update({key: {'id': key, **deepcopy(item)} for key, item in value.get('issues', {}).items()})
@@ -204,6 +230,10 @@ class AuthorDraft(DraftRepair):
         required = self.full_schema['properties']['changes'].get('required', [])
         decided = {item.get('id') for item in result.get('issue_results') or []}
         missing = [f'changes.{field}' for field in required if field not in fields]
+        for field in sorted(self.bilingual_fields & set(fields)):
+            if isinstance(fields[field], dict):
+                missing.extend(f'changes.{field}.value.{lang}' for lang in ('ko', 'en')
+                               if lang not in fields[field])
         if not fields and not required:
             missing.append('changes (at least one field)')
         missing += [f'issues.{issue}' for issue in self.issue_ids if issue not in decided]
@@ -263,5 +293,8 @@ register_argument_shape_repair(SUBMIT_TOOL, repair_submission_shape)
 # tokens each, 2026-09-25); resending the same call fails the same way.
 register_empty_arguments_hint(SUBMIT_TOOL, (
     'Arguments arrived empty: the provider dropped this call because its arguments were too long. '
-    'Do not resend the same call. Send the draft in parts, one or two fields per call with their '
-    'evidence, then issues and reason; each part is saved and merged.'))
+    'Do not resend the same call. Send the draft in parts; for bilingual prose send ko and en '
+    'in separate calls. Send evidence, issues and reason in small calls. Parts are saved and merged.'))
+register_malformed_arguments_hint(SUBMIT_TOOL, (
+    'Do not resend the same long JSON. Send one language of a bilingual prose field per call; '
+    'send its evidence, issue decisions and reason in small separate calls. Valid parts are saved and merged.'))

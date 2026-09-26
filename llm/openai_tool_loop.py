@@ -39,6 +39,7 @@ from tool_gateway.dispatcher import (
     execute_tools_batch,
     is_side_effect_tool,
 )
+from tool_gateway.validation import malformed_arguments_hint
 from llm.provider_registry import (
     OPENAI_COMPATIBLE_PRICING as OPENAI_PRICING,
     openai_compatible_pricing,
@@ -1398,7 +1399,8 @@ class _OpenAIProtocolAdapter:
                 malformed.append((
                     tc_id,
                     func_name,
-                    f"Tool execution blocked: malformed JSON arguments ({exc})",
+                    f"Tool execution blocked: malformed JSON arguments ({exc}). "
+                    + malformed_arguments_hint(func_name),
                 ))
                 continue
             batch.append((tc_id, func_name, func_args))
@@ -1584,7 +1586,8 @@ class _OpenAIProtocolAdapter:
                     except (json.JSONDecodeError, TypeError) as exc:
                         malformed.append((
                             tc_item["id"], fname,
-                            f"Tool execution blocked: malformed JSON arguments ({exc})",
+                            f"Tool execution blocked: malformed JSON arguments ({exc}). "
+                            + malformed_arguments_hint(fname),
                         ))
                         continue
                     batch.append((tc_item["id"], fname, fargs))

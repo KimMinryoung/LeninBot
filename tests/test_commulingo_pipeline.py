@@ -445,7 +445,7 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
         async def chat(*args, **kwargs):
             with patch('tool_gateway.security.audit'):
                 first, failed = await execute_tool(tool['name'], {'part':'first'}, kwargs['tool_handlers'], tool_schema=tool)
-                self.assertFalse(failed, first)
+                self.assertTrue(failed, first)  # protocol must keep the terminal loop open
                 self.assertIn('Still needed', first)
                 second, failed = await execute_tool(tool['name'], {'part':'second'}, kwargs['tool_handlers'], tool_schema=tool)
                 self.assertFalse(failed, second)

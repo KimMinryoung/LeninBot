@@ -15,7 +15,7 @@ import logging
 import time
 from typing import Any
 
-from tool_gateway.results import ToolRejection, is_failure
+from tool_gateway.results import ToolRejection, is_failure, is_continuation
 from tool_gateway.validation import (
     ToolArgumentValidationError,
     tool_schema_map,
@@ -478,7 +478,11 @@ async def execute_tool(
         # used to reach the audit log as a success. ToolFailure carries that
         # verdict out of the handler without giving up the readable message.
         handler_reported_failure = is_failure(result)
-        is_error = handler_reported_failure
+        handler_reported_continuation = is_continuation(result)
+        # A terminal tool may save an incomplete draft. Flag the protocol
+        # result so the model loop continues, while auditing the saved progress
+        # separately from a failed or rejected call.
+        is_error = handler_reported_failure or handler_reported_continuation
         if handler_reported_failure:
             logger.warning("Tool %s reported failure: %s", name, str(result)[:200])
             if log_event:
@@ -487,6 +491,15 @@ async def execute_tool(
                 # The handler knows the call failed, but a side effect may have
                 # landed before it did. Same conservative verdict as a raised
                 # exception: do not let a retry double-fire.
+                try:
+                    from security_gateway.idempotency import mark_outcome_unknown
+
+                    await asyncio.to_thread(mark_outcome_unknown, durable_record, str(result))
+                except Exception as store_exc:
+                    logger.error("failed to persist outcome_unknown for %s: %s", name, store_exc)
+        elif handler_reported_continuation:
+            logger.info("Tool %s saved intermediate progress", name)
+            if durable_record is not None and durable_record.acquired:
                 try:
                     from security_gateway.idempotency import mark_outcome_unknown
 
@@ -566,6 +579,7 @@ async def execute_tool(
                 result_status=(
                     "outcome_unknown"
                     if is_error and durable_record is not None
+                    else "continued" if is_continuation(result)
                     else "rejected" if rejected
                     else "error" if is_error else "ok"
                 ),
