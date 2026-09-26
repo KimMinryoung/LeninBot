@@ -6,6 +6,7 @@ function and affiliation in the same activity; unsure affiliation stays null.
 """
 from __future__ import annotations
 import json
+import re
 
 from ops.paths import commulingo_data_file
 
@@ -32,17 +33,45 @@ def activity_evidence(fields, claims=None):
     return out[:16]
 
 
-def activity_questions(catalog, evidence):
+_YEAR_RE = re.compile(r'(?<![\d\[])(1[0-9]{3}|20[0-9]{2})(?![\d\]])')
+
+
+def excerpt_years(text, span=None):
+    """Four-digit years an excerpt names, within the person's life when known
+    (a footnote such as [193] is not a year; a later historian's date is)."""
+    years = sorted({int(y) for y in _YEAR_RE.findall(str(text or ''))})
+    if span:
+        years = [y for y in years if span[0] - 20 <= y <= span[1]]
+    return years
+
+
+def periods_overlap(periods, start, end):
+    """Same rule as the frontend validator: one year of slack at each end."""
+    if not periods or (start is None and end is None):
+        return True
+    start, end = (start if start is not None else end), (end if end is not None else start)
+    return any((a is None or a - 1 <= end) and (b is None or start <= b + 1) for a, b in periods)
+
+
+def affiliations_for(catalog, window=None):
+    """Affiliations that existed during the window (start, end); entries
+    without periods are always offered."""
+    if not window:
+        return catalog['affiliations']
+    return [a for a in catalog['affiliations'] if periods_overlap(a.get('periods'), *window)]
+
+
+def activity_questions(catalog, evidence, window=None):
     return {
         'activity_function': {'type':'choice', 'criteria':{f['id']:f"{f['label']['en']}: {f['criteria']}" for f in catalog['functions']},
             'instructions':'Choose the defining documented activity, not citizenship, highest incidental title, victimhood or political sympathy. Choose an activity supported by ONE of the evidence excerpts.'},
         'activity_affiliation': {'type':'choice', 'criteria':{
-            **{a['id']:f"{a['label']['en']} ({a['kind']}): {a['criteria']}" for a in catalog['affiliations']},
+            **{a['id']:f"{a['label']['en']} ({a['kind']}): {a['criteria']}" for a in affiliations_for(catalog, window)},
             'independent':'The chosen evidence explicitly establishes independent/unaffiliated activity.',
             'unresolved':'The evidence does not establish the organization served in the chosen activity, or it is absent from the catalogue.'},
-            'instructions':'Choose the actual organization served or joined in the SAME activity selected above. Citizenship, ethnicity, residence and research subject are NOT affiliation. Prefer a named party/force over a generic state. A communist party-state is one affiliation: service in its government, state organs, armed forces or security during the ruling period (stated in the criteria of that party) is the ruling party, never a separate state entry, even for non-members. Use a state entry only outside such a period. In the French Revolution choose the named club, faction, Paris Commune or the regime of the date (Bourbon monarchy, First Republic, Consulate/Empire); the generic revolutionary camp only when none is named. For scholars and artists do not infer state service from nationality or a public university. Select unresolved when evidence is insufficient.'},
-        'activity_basis': {'type':'choice', 'criteria':{str(i):e['excerpt'][:2400] for i,e in enumerate(evidence)} | {'unsupported':'No single excerpt supports the selected activity and affiliation together.'},
-            'instructions':'Which excerpt supports BOTH the chosen function and affiliation in the SAME career? If affiliation is unresolved, support the function alone. Select unsupported if the two selections belong to different careers or periods.'},
+            'instructions':'Choose the actual organization served or joined in the career the selected excerpt documents (selected_activity_evidence). Only organizations that existed in that period are offered. Citizenship, ethnicity, residence and research subject are NOT affiliation. Prefer a named party/force over a generic state. A communist party-state is one affiliation: service in its government, state organs, armed forces or security during the ruling period (stated in the criteria of that party) is the ruling party, never a separate state entry, even for non-members. Use a state entry only outside such a period. In the French Revolution choose the named club, faction, Paris Commune or the regime of the date (Bourbon monarchy, First Republic, Consulate/Empire); the generic revolutionary camp only when none is named. For scholars and artists do not infer state service from nationality or a public university. Select unresolved when evidence is insufficient.'},
+        'activity_basis': {'type':'choice', 'criteria':{str(i):e['excerpt'][:2400] for i,e in enumerate(evidence)} | {'unsupported':'No excerpt documents the selected function.'},
+            'instructions':'Which excerpt documents the selected function as this person\'s DEFINING activity, the career the card is about? Prefer the excerpt of that career over a later or incidental episode. Select unsupported if no excerpt documents the function.'},
     }
 
 

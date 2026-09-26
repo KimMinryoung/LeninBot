@@ -49,16 +49,16 @@ class ActivitiesTests(unittest.TestCase):
                 self.assertIn('activity_function', questions)
                 self.assertNotIn('activity_affiliation', questions)
                 self.assertNotIn('activity_basis', questions)
-            elif label == 'person-activity-affiliation':
+            elif label == 'person-activity-basis':
                 self.assertEqual(state['selected_activity_function'], 'security')
-                self.assertEqual(set(questions), {'activity_affiliation'})
-            else:
-                self.assertEqual(state['selected_activity_affiliation'], 'china-ccp')
                 self.assertEqual(set(questions), {'activity_basis'})
+            else:
+                self.assertEqual(state['selected_activity_evidence']['source'], EVIDENCE[0]['source'])
+                self.assertEqual(set(questions), {'activity_affiliation'})
             return DecisionResult(decision=verdict())
         with patch('llm.call_registry.resolve',return_value=PROFILE):
             out=c.classify_person_card({**FIELDS,'evidence':EVIDENCE},catalogs=CATALOGS,decide=decide,codes=False)
-        self.assertEqual(stages, ['person-classification', 'person-activity-affiliation', 'person-activity-basis'])
+        self.assertEqual(stages, ['person-classification', 'person-activity-basis', 'person-activity-affiliation'])
         person=out['person'];filled=c.fill_classification(FIELDS,person)
         self.assertEqual(filled['activities'][0]['affiliationId'],'china-ccp')
         self.assertEqual(filled['activities'][0]['evidence'][0]['source'],EVIDENCE[0]['source'])
@@ -83,3 +83,40 @@ class ActivitiesTests(unittest.TestCase):
             with patch('llm.call_registry.resolve', return_value=PROFILE):
                 out=c.classify_person_card({**FIELDS,'evidence':EVIDENCE},catalogs=CATALOGS,decide=decide,codes=False)
             self.assertTrue(out is None or out['person'] is None)
+
+
+class AffiliationPeriodTests(unittest.TestCase):
+    """The chosen excerpt's years decide which organizations existed and are offered."""
+
+    def test_excerpt_years_ignore_footnotes_and_dates_outside_the_life(self):
+        from commulingo.activities import excerpt_years
+        text = 'On July 25, 1830, the king signed the Ordinances.[193] He died in 1834; a 1989 study.'
+        self.assertEqual(excerpt_years(text, (1773, 1834)), [1830, 1834])
+        self.assertEqual(excerpt_years(text), [1830, 1834, 1989])
+
+    def test_offered_affiliations_follow_the_window(self):
+        catalog = load_catalog()
+        in_1830 = set(activity_questions(catalog, EVIDENCE, (1830, 1830))['activity_affiliation']['criteria'])
+        self.assertNotIn('french-first-republic', in_1830)
+        self.assertNotIn('french-jacobins', in_1830)
+        self.assertIn('state-france', in_1830)
+        self.assertIn('state-usa', in_1830)          # no periods: always offered
+        self.assertIn('unresolved', in_1830)
+        in_1794 = set(activity_questions(catalog, EVIDENCE, (1794, 1794))['activity_affiliation']['criteria'])
+        self.assertIn('french-first-republic', in_1794)
+        self.assertNotIn('state-france', in_1794)
+        self.assertNotIn('french-monarchy', in_1794)
+
+    def test_card_classifier_filters_affiliations_by_the_chosen_excerpt(self):
+        evidence = [{'field':'career','source':'https://example.org/laf','locator':'1830','claim':'July Revolution',
+                     'excerpt':'In July 1830 Lafayette went to the barricades and was made head of the National Guard.'}]
+        offered = {}
+        def decide(feature, state, questions, label=None):
+            if label == 'person-activity-affiliation':
+                offered.update(questions['activity_affiliation']['criteria'])
+                self.assertEqual(state['selected_activity_years'], [1830, 1830])
+            return DecisionResult(decision=verdict(activity_function='military', activity_affiliation='state-france'))
+        with patch('llm.call_registry.resolve', return_value=PROFILE):
+            c.classify_person_card({**FIELDS, 'years': '1757–1834', 'evidence': evidence}, catalogs=CATALOGS, decide=decide, codes=False)
+        self.assertIn('state-france', offered)
+        self.assertNotIn('french-first-republic', offered)

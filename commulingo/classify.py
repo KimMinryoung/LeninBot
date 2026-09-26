@@ -617,7 +617,7 @@ def classify_person_card(fields: dict, *, catalogs=None, claims: dict | None = N
     groups = groups_for_years(groups, fields.get("years"))
     questions = person_card_questions(fields, groups, offices, categories, sorted(_NATIONALITY_CODES),
                                       sorted(_NATIONAL_ORIGIN_CODES), codes=codes)
-    from commulingo.activities import activity_evidence, activity_questions, activity_person_from, load_catalog
+    from commulingo.activities import activity_evidence, activity_questions, activity_person_from, excerpt_years, load_catalog
     basis = activity_evidence(fields, claims)
     if not basis and not legacy:
         logger.warning("activity classification requires cited career/bio evidence excerpts; no legacy fallback")
@@ -644,21 +644,33 @@ def classify_person_card(fields: dict, *, catalogs=None, claims: dict | None = N
         if function not in {f['id'] for f in activity_catalog['functions']}:
             return None
         state['selected_activity_function'] = function
-        affiliation_q = dict(activity_q['activity_affiliation'])
-        affiliation_q['instructions'] += ' The function is fixed by selected_activity_function in the state.'
+        # Evidence first, then the organization: the chosen excerpt's years
+        # (or the adult life when it names none) decide which affiliations
+        # existed and are offered, so an 1830 excerpt is never read as service
+        # to the First Republic (job 63829, Lafayette, 2026-09-26).
+        basis_q = dict(activity_q['activity_basis'])
+        basis_q['instructions'] += ' The function is fixed by selected_activity_function in the state.'
+        basis_result = (decide or decide_detailed)(FEATURE, state,
+            {'activity_basis': basis_q}, label='person-activity-basis')
+        if basis_result.decision is None:
+            return None
+        basis_choice = basis_result.decision.choice('activity_basis')
+        if not isinstance(basis_choice, str) or not basis_choice.isdigit() or int(basis_choice) >= len(basis):
+            return None
+        chosen = basis[int(basis_choice)]
+        state['selected_activity_evidence'] = chosen
+        span = active_span(fields.get("years"))
+        years = excerpt_years(chosen.get('excerpt'), span)
+        window = (years[0], years[-1]) if years else span
+        state['selected_activity_years'] = list(window) if window else None
+        affiliation_q = activity_questions(activity_catalog, basis, window)['activity_affiliation']
+        affiliation_q['instructions'] += ' The function and excerpt are fixed by selected_activity_function and selected_activity_evidence in the state.'
         affiliation_result = (decide or decide_detailed)(FEATURE, state,
             {'activity_affiliation': affiliation_q}, label='person-activity-affiliation')
         if affiliation_result.decision is None:
             return None
         affiliation = affiliation_result.decision.choice('activity_affiliation')
-        if affiliation not in {a['id'] for a in activity_catalog['affiliations']} | {'unresolved', 'independent'}:
-            return None
-        state['selected_activity_affiliation'] = affiliation
-        basis_q = dict(activity_q['activity_basis'])
-        basis_q['instructions'] += ' Verify the exact selected_activity_function and selected_activity_affiliation in the state.'
-        basis_result = (decide or decide_detailed)(FEATURE, state,
-            {'activity_basis': basis_q}, label='person-activity-basis')
-        if basis_result.decision is None:
+        if affiliation not in set(affiliation_q['criteria']):
             return None
         decision = Decision(answers={**decision.answers,
             'activity_affiliation': affiliation_result.decision.answers['activity_affiliation'],

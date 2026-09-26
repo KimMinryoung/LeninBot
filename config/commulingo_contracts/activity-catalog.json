@@ -1,5 +1,5 @@
 {
-  "version": 6,
+  "version": 7,
   "functions": [
     {
       "id": "political-leadership",
@@ -193,7 +193,11 @@
       },
       "countryCode": "azerbaijan",
       "icon": "landmark",
-      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify.",
+      "periods": [
+        [1918, 1920],
+        [1991, null]
+      ]
     },
     {
       "id": "state-belarus",
@@ -204,7 +208,11 @@
       },
       "countryCode": "belarus",
       "icon": "landmark",
-      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify.",
+      "periods": [
+        [1918, 1919],
+        [1991, null]
+      ]
     },
     {
       "id": "state-belgium",
@@ -314,7 +322,10 @@
       },
       "countryCode": "czechia",
       "icon": "landmark",
-      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify.",
+      "periods": [
+        [1993, null]
+      ]
     },
     {
       "id": "state-czechoslovakia",
@@ -325,7 +336,10 @@
       },
       "countryCode": "czechoslovakia",
       "icon": "landmark",
-      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify. Outside party-state rule only: service during the ruling period of party-czechoslovak-communist (1948–1989) belongs to that party instead."
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify. Outside party-state rule only: service during the ruling period of party-czechoslovak-communist (1948–1989) belongs to that party instead.",
+      "periods": [
+        [1918, 1992]
+      ]
     },
     {
       "id": "state-el-salvador",
@@ -347,7 +361,11 @@
       },
       "countryCode": "estonia",
       "icon": "landmark",
-      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify.",
+      "periods": [
+        [1918, 1940],
+        [1990, null]
+      ]
     },
     {
       "id": "state-ethiopia",
@@ -380,7 +398,10 @@
       },
       "countryCode": "france",
       "icon": "landmark",
-      "criteria": "Actual service for the French state or its armed forces from the July Monarchy (1830) onward. The Bourbon monarchy, the First Republic and the Consulate/Empire have their own entries. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+      "criteria": "Actual service for the French state or its armed forces from the July Monarchy (1830) onward. The Bourbon monarchy, the First Republic and the Consulate/Empire have their own entries. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify.",
+      "periods": [
+        [1830, null]
+      ]
     },
     {
       "id": "state-georgia",
@@ -391,7 +412,11 @@
       },
       "countryCode": "georgia",
       "icon": "landmark",
-      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify.",
+      "periods": [
+        [1918, 1921],
+        [1991, null]
+      ]
     },
     {
       "id": "state-germany",
@@ -501,7 +526,10 @@
       },
       "countryCode": "israel",
       "icon": "landmark",
-      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify.",
+      "periods": [
+        [1948, null]
+      ]
     },
     {
       "id": "state-italy",
@@ -534,7 +562,10 @@
       },
       "countryCode": "kazakhstan",
       "icon": "landmark",
-      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify.",
+      "periods": [
+        [1991, null]
+      ]
     },
     {
       "id": "state-korea",
@@ -545,7 +576,10 @@
       },
       "countryCode": "korea",
       "icon": "landmark",
-      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify.",
+      "periods": [
+        [null, 1910]
+      ]
     },
     {
       "id": "state-kyrgyzstan",
@@ -556,7 +590,10 @@
       },
       "countryCode": "kyrgyzstan",
       "icon": "landmark",
-      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify.",
+      "periods": [
+        [1991, null]
+      ]
     },
     {
       "id": "state-laos",
@@ -578,7 +615,11 @@
       },
       "countryCode": "latvia",
       "icon": "landmark",
-      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify.",
+      "periods": [
+        [1918, 1940],
+        [1990, null]
+      ]
     },
     {
       "id": "state-lithuania",
@@ -589,7 +630,11 @@
       },
       "countryCode": "lithuania",
       "icon": "landmark",
-      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify.",
+      "periods": [
+        [1918, 1940],
+        [1990, null]
+      ]
     },
     {
       "id": "state-madagascar",
@@ -611,7 +656,10 @@
       },
       "countryCode": "moldova",
       "icon": "landmark",
-      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify.",
+      "periods": [
+        [1991, null]
+      ]
     },
     {
       "id": "state-mongolia",
@@ -743,7 +791,10 @@
       },
       "countryCode": "south-korea",
       "icon": "landmark",
-      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify.",
+      "periods": [
+        [1948, null]
+      ]
     },
     {
       "id": "state-spain",
@@ -809,7 +860,10 @@
       },
       "countryCode": "turkmenistan",
       "icon": "landmark",
-      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify.",
+      "periods": [
+        [1991, null]
+      ]
     },
     {
       "id": "state-uk",
@@ -831,7 +885,11 @@
       },
       "countryCode": "ukraine",
       "icon": "landmark",
-      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify.",
+      "periods": [
+        [1917, 1921],
+        [1991, null]
+      ]
     },
     {
       "id": "state-usa",
@@ -853,7 +911,10 @@
       },
       "countryCode": "uzbekistan",
       "icon": "landmark",
-      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify.",
+      "periods": [
+        [1991, null]
+      ]
     },
     {
       "id": "state-vietnam",
@@ -886,7 +947,10 @@
       },
       "countryCode": "yugoslavia",
       "icon": "landmark",
-      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify. Outside party-state rule only: service during the ruling period of party-yugoslav-communist (1945–1990) belongs to that party instead."
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify. Outside party-state rule only: service during the ruling period of party-yugoslav-communist (1945–1990) belongs to that party instead.",
+      "periods": [
+        [1918, 1992]
+      ]
     },
     {
       "id": "china-ccp",
@@ -898,7 +962,10 @@
       "countryCode": "china",
       "icon": "hammer-sickle",
       "parentId": null,
-      "criteria": "Choose only when the cited career explicitly establishes service or organizational membership in this body; not citizenship or sympathy. Party-state rule: 1949 onward (PRC), and the CCP base-area governments before 1949. During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card."
+      "criteria": "Choose only when the cited career explicitly establishes service or organizational membership in this body; not citizenship or sympathy. Party-state rule: 1949 onward (PRC), and the CCP base-area governments before 1949. During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card.",
+      "periods": [
+        [1921, null]
+      ]
     },
     {
       "id": "china-kmt",
@@ -910,7 +977,10 @@
       "countryCode": "china",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Choose only when the cited career explicitly establishes service or organizational membership in this body; not citizenship or sympathy."
+      "criteria": "Choose only when the cited career explicitly establishes service or organizational membership in this body; not citizenship or sympathy.",
+      "periods": [
+        [1894, null]
+      ]
     },
     {
       "id": "china-qing",
@@ -922,7 +992,10 @@
       "countryCode": "china",
       "icon": "crown",
       "parentId": null,
-      "criteria": "Choose only when the cited career explicitly establishes service or organizational membership in this body; not citizenship or sympathy."
+      "criteria": "Choose only when the cited career explicitly establishes service or organizational membership in this body; not citizenship or sympathy.",
+      "periods": [
+        [1636, 1912]
+      ]
     },
     {
       "id": "china-beiyang",
@@ -934,7 +1007,10 @@
       "countryCode": "china",
       "icon": "shield",
       "parentId": null,
-      "criteria": "Choose only when the cited career explicitly establishes service or organizational membership in this body; not citizenship or sympathy."
+      "criteria": "Choose only when the cited career explicitly establishes service or organizational membership in this body; not citizenship or sympathy.",
+      "periods": [
+        [1912, 1928]
+      ]
     },
     {
       "id": "china-pla",
@@ -946,7 +1022,10 @@
       "countryCode": "china",
       "icon": "star",
       "parentId": "china-ccp",
-      "criteria": "Choose only when the cited career explicitly establishes service or organizational membership in this body; not citizenship or sympathy."
+      "criteria": "Choose only when the cited career explicitly establishes service or organizational membership in this body; not citizenship or sympathy.",
+      "periods": [
+        [1927, null]
+      ]
     },
     {
       "id": "russian-empire",
@@ -958,7 +1037,10 @@
       "countryCode": "russia",
       "icon": "crown",
       "parentId": null,
-      "criteria": "Choose only when the cited career explicitly establishes service or organizational membership in this body; not citizenship or sympathy."
+      "criteria": "Choose only when the cited career explicitly establishes service or organizational membership in this body; not citizenship or sympathy.",
+      "periods": [
+        [1721, 1917]
+      ]
     },
     {
       "id": "russian-white",
@@ -970,7 +1052,10 @@
       "countryCode": "russia",
       "icon": "shield",
       "parentId": null,
-      "criteria": "Choose only when the cited career explicitly establishes service or organizational membership in this body; not citizenship or sympathy."
+      "criteria": "Choose only when the cited career explicitly establishes service or organizational membership in this body; not citizenship or sympathy.",
+      "periods": [
+        [1917, 1923]
+      ]
     },
     {
       "id": "russia-federation",
@@ -982,7 +1067,10 @@
       "countryCode": "russia",
       "icon": "landmark",
       "parentId": null,
-      "criteria": "Choose only when the cited career explicitly establishes service or organizational membership in this body; not citizenship or sympathy."
+      "criteria": "Choose only when the cited career explicitly establishes service or organizational membership in this body; not citizenship or sympathy.",
+      "periods": [
+        [1991, null]
+      ]
     },
     {
       "id": "soviet-party",
@@ -994,7 +1082,10 @@
       "countryCode": "soviet",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Choose only when the cited career explicitly establishes service or organizational membership in this body; not citizenship or sympathy. Party-state rule: 1918–1991 (Soviet Russia and the USSR; Left SR commissars of the 1917–1918 coalition belong to russian-left-sr). During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card."
+      "criteria": "Choose only when the cited career explicitly establishes service or organizational membership in this body; not citizenship or sympathy. Party-state rule: 1918–1991 (Soviet Russia and the USSR; Left SR commissars of the 1917–1918 coalition belong to russian-left-sr). During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card.",
+      "periods": [
+        [1903, 1991]
+      ]
     },
     {
       "id": "comintern",
@@ -1006,7 +1097,10 @@
       "countryCode": null,
       "icon": "globe",
       "parentId": null,
-      "criteria": "Choose only when the cited career explicitly establishes service or organizational membership in this body; not citizenship or sympathy."
+      "criteria": "Choose only when the cited career explicitly establishes service or organizational membership in this body; not citizenship or sympathy.",
+      "periods": [
+        [1919, 1943]
+      ]
     },
     {
       "id": "spanish-republic",
@@ -1018,7 +1112,10 @@
       "countryCode": "spain",
       "icon": "landmark",
       "parentId": null,
-      "criteria": "Choose only when the cited career explicitly establishes service or organizational membership in this body; not citizenship or sympathy."
+      "criteria": "Choose only when the cited career explicitly establishes service or organizational membership in this body; not citizenship or sympathy.",
+      "periods": [
+        [1931, 1939]
+      ]
     },
     {
       "id": "spanish-nationalists",
@@ -1030,7 +1127,10 @@
       "countryCode": "spain",
       "icon": "shield",
       "parentId": null,
-      "criteria": "Choose only when the cited career explicitly establishes service or organizational membership in this body; not citizenship or sympathy."
+      "criteria": "Choose only when the cited career explicitly establishes service or organizational membership in this body; not citizenship or sympathy.",
+      "periods": [
+        [1936, 1975]
+      ]
     },
     {
       "id": "german-nazi",
@@ -1042,7 +1142,10 @@
       "countryCode": "germany",
       "icon": "landmark",
       "parentId": null,
-      "criteria": "Choose only when the cited career explicitly establishes service or organizational membership in this body; not citizenship or sympathy."
+      "criteria": "Choose only when the cited career explicitly establishes service or organizational membership in this body; not citizenship or sympathy.",
+      "periods": [
+        [1920, 1945]
+      ]
     },
     {
       "id": "french-revolution",
@@ -1054,7 +1157,10 @@
       "countryCode": "france",
       "icon": "flame",
       "parentId": null,
-      "criteria": "Documented revolutionary activity in 1789–1799 for which no specific club, faction, assembly or state body can be named. Prefer the Jacobins, Cordeliers, Montagnards, Girondins, Feuillants, Enragés, the Paris Commune (1789–1795) or the First Republic whenever the evidence names one."
+      "criteria": "Documented revolutionary activity in 1789–1799 for which no specific club, faction, assembly or state body can be named. Prefer the Jacobins, Cordeliers, Montagnards, Girondins, Feuillants, Enragés, the Paris Commune (1789–1795) or the First Republic whenever the evidence names one.",
+      "periods": [
+        [1789, 1799]
+      ]
     },
     {
       "id": "french-first-republic",
@@ -1066,7 +1172,10 @@
       "countryCode": "france",
       "icon": "landmark",
       "parentId": null,
-      "criteria": "Service in the National Convention and its committees (Public Safety, General Security), the ministries, the Directory, representatives on mission and the republican armies, from September 1792 to the Coup of 18 Brumaire (November 1799). Leadership of a Convention faction is that faction (Montagnards, Girondins), not this entry."
+      "criteria": "Service in the National Convention and its committees (Public Safety, General Security), the ministries, the Directory, representatives on mission and the republican armies, from September 1792 to the Coup of 18 Brumaire (November 1799). Leadership of a Convention faction is that faction (Montagnards, Girondins), not this entry.",
+      "periods": [
+        [1792, 1799]
+      ]
     },
     {
       "id": "french-napoleonic-state",
@@ -1078,7 +1187,10 @@
       "countryCode": "france",
       "icon": "landmark",
       "parentId": null,
-      "criteria": "Service in the government, administration, prefectures, colonies and armies of the Consulate and the First Empire, from 18 Brumaire (November 1799) to 1815, the Hundred Days included."
+      "criteria": "Service in the government, administration, prefectures, colonies and armies of the Consulate and the First Empire, from 18 Brumaire (November 1799) to 1815, the Hundred Days included.",
+      "periods": [
+        [1799, 1815]
+      ]
     },
     {
       "id": "french-monarchy",
@@ -1090,7 +1202,11 @@
       "countryCode": "france",
       "icon": "crown",
       "parentId": null,
-      "criteria": "Service to the Bourbon crown, its ministers and royal armies: the absolute monarchy to 1789, the constitutional monarchy of 1789 to 10 August 1792, and the Restoration of 1814–1830. Émigré armies and the Vendée have their own entries."
+      "criteria": "Service to the Bourbon crown, its ministers and royal armies: the absolute monarchy to 1789, the constitutional monarchy of 1789 to 10 August 1792, and the Restoration of 1814–1830. Émigré armies and the Vendée have their own entries.",
+      "periods": [
+        [null, 1792],
+        [1814, 1830]
+      ]
     },
     {
       "id": "russian-sr",
@@ -1102,7 +1218,10 @@
       "countryCode": "russia",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Socialist Revolutionary Party (PSR/SR). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Socialist Revolutionary Party (PSR/SR). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1902, 1940]
+      ]
     },
     {
       "id": "russian-left-sr",
@@ -1114,7 +1233,10 @@
       "countryCode": "russia",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Party of Left Socialist Revolutionaries. Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Party of Left Socialist Revolutionaries. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1917, 1923]
+      ]
     },
     {
       "id": "russian-mensheviks",
@@ -1126,7 +1248,10 @@
       "countryCode": "russia",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Mensheviks (RSDLP). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Mensheviks (RSDLP). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1903, 1924]
+      ]
     },
     {
       "id": "russian-octobrists",
@@ -1138,7 +1263,10 @@
       "countryCode": "russia",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Union of 17 October (Octobrists). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Union of 17 October (Octobrists). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1905, 1917]
+      ]
     },
     {
       "id": "russian-kadets",
@@ -1150,7 +1278,10 @@
       "countryCode": "russia",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Constitutional Democratic Party (Kadets). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Constitutional Democratic Party (Kadets). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1905, 1920]
+      ]
     },
     {
       "id": "russian-narodnaya-volya",
@@ -1162,7 +1293,10 @@
       "countryCode": "russia",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Narodnaya Volya. Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Narodnaya Volya. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1879, 1887]
+      ]
     },
     {
       "id": "russian-provisional-government",
@@ -1174,7 +1308,10 @@
       "countryCode": "russia",
       "icon": "swords",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Russian Provisional Government. Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Russian Provisional Government. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1917, 1917]
+      ]
     },
     {
       "id": "party-french-communist",
@@ -1186,7 +1323,10 @@
       "countryCode": "france",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in French Communist Party (PCF). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in French Communist Party (PCF). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1920, null]
+      ]
     },
     {
       "id": "party-french-workers",
@@ -1198,7 +1338,10 @@
       "countryCode": "france",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented membership or leadership in the Parti ouvrier (French Workers' Party, 1880–1902) of Guesde and Lafargue."
+      "criteria": "Only documented membership or leadership in the Parti ouvrier (French Workers' Party, 1880–1902) of Guesde and Lafargue.",
+      "periods": [
+        [1880, 1902]
+      ]
     },
     {
       "id": "party-german-communist",
@@ -1210,7 +1353,10 @@
       "countryCode": "germany",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Communist Party of Germany (KPD). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Communist Party of Germany (KPD). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1918, 1956]
+      ]
     },
     {
       "id": "party-german-spd",
@@ -1222,7 +1368,10 @@
       "countryCode": "germany",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Social Democratic Party of Germany (SPD). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Social Democratic Party of Germany (SPD). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1863, null]
+      ]
     },
     {
       "id": "party-german-sed",
@@ -1234,7 +1383,10 @@
       "countryCode": "east-germany",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Socialist Unity Party of Germany (SED). Never infer affiliation from nationality, residence or ideology. Party-state rule: 1949–1990 (GDR). During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card."
+      "criteria": "Only documented service, membership or organizational activity in Socialist Unity Party of Germany (SED). Never infer affiliation from nationality, residence or ideology. Party-state rule: 1949–1990 (GDR). During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card.",
+      "periods": [
+        [1946, 1990]
+      ]
     },
     {
       "id": "party-czechoslovak-communist",
@@ -1246,7 +1398,10 @@
       "countryCode": "czechoslovakia",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Communist Party of Czechoslovakia (KSČ). Never infer affiliation from nationality, residence or ideology. Party-state rule: 1948–1989. During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card."
+      "criteria": "Only documented service, membership or organizational activity in Communist Party of Czechoslovakia (KSČ). Never infer affiliation from nationality, residence or ideology. Party-state rule: 1948–1989. During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card.",
+      "periods": [
+        [1921, 1992]
+      ]
     },
     {
       "id": "party-polish-pzpr",
@@ -1258,7 +1413,10 @@
       "countryCode": "poland",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Polish United Workers' Party (PZPR). Never infer affiliation from nationality, residence or ideology. Party-state rule: 1948–1989. During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card."
+      "criteria": "Only documented service, membership or organizational activity in Polish United Workers' Party (PZPR). Never infer affiliation from nationality, residence or ideology. Party-state rule: 1948–1989. During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card.",
+      "periods": [
+        [1948, 1990]
+      ]
     },
     {
       "id": "party-romanian-communist",
@@ -1270,7 +1428,10 @@
       "countryCode": "romania",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Romanian Communist Party (PCR). Never infer affiliation from nationality, residence or ideology. Party-state rule: 1947–1989. During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card."
+      "criteria": "Only documented service, membership or organizational activity in Romanian Communist Party (PCR). Never infer affiliation from nationality, residence or ideology. Party-state rule: 1947–1989. During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card.",
+      "periods": [
+        [1921, 1989]
+      ]
     },
     {
       "id": "party-bulgarian-communist",
@@ -1282,7 +1443,10 @@
       "countryCode": "bulgaria",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Bulgarian Communist Party (BKP). Never infer affiliation from nationality, residence or ideology. Party-state rule: 1946–1990 (People's Republic of Bulgaria). During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card."
+      "criteria": "Only documented service, membership or organizational activity in Bulgarian Communist Party (BKP). Never infer affiliation from nationality, residence or ideology. Party-state rule: 1946–1990 (People's Republic of Bulgaria). During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card.",
+      "periods": [
+        [1919, 1990]
+      ]
     },
     {
       "id": "party-hungarian-communist",
@@ -1294,7 +1458,10 @@
       "countryCode": "hungary",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Party of Communists in Hungary (KMP). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Party of Communists in Hungary (KMP). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1918, 1948]
+      ]
     },
     {
       "id": "party-hungarian-workers",
@@ -1306,7 +1473,10 @@
       "countryCode": "hungary",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Hungarian Working People's Party (MDP). Never infer affiliation from nationality, residence or ideology. Party-state rule: 1948 to October 1956. During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card."
+      "criteria": "Only documented service, membership or organizational activity in Hungarian Working People's Party (MDP). Never infer affiliation from nationality, residence or ideology. Party-state rule: 1948 to October 1956. During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card.",
+      "periods": [
+        [1948, 1956]
+      ]
     },
     {
       "id": "party-hungarian-socialist-workers",
@@ -1318,7 +1488,10 @@
       "countryCode": "hungary",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Hungarian Socialist Workers' Party (MSzMP). Never infer affiliation from nationality, residence or ideology. Party-state rule: November 1956–1989. During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card."
+      "criteria": "Only documented service, membership or organizational activity in Hungarian Socialist Workers' Party (MSzMP). Never infer affiliation from nationality, residence or ideology. Party-state rule: November 1956–1989. During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card.",
+      "periods": [
+        [1956, 1989]
+      ]
     },
     {
       "id": "party-yugoslav-communist",
@@ -1330,7 +1503,10 @@
       "countryCode": "yugoslavia",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Communist Party / League of Communists of Yugoslavia (KPJ/SKJ). Never infer affiliation from nationality, residence or ideology. Party-state rule: 1945–1990, and the Partisan army and AVNOJ organs of 1941–1945. During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card."
+      "criteria": "Only documented service, membership or organizational activity in Communist Party / League of Communists of Yugoslavia (KPJ/SKJ). Never infer affiliation from nationality, residence or ideology. Party-state rule: 1945–1990, and the Partisan army and AVNOJ organs of 1941–1945. During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card.",
+      "periods": [
+        [1919, 1990]
+      ]
     },
     {
       "id": "party-albanian-labour",
@@ -1342,7 +1518,10 @@
       "countryCode": "albania",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Party of Labour of Albania. Never infer affiliation from nationality, residence or ideology. Party-state rule: 1944–1991. During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card."
+      "criteria": "Only documented service, membership or organizational activity in Party of Labour of Albania. Never infer affiliation from nationality, residence or ideology. Party-state rule: 1944–1991. During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card.",
+      "periods": [
+        [1941, 1991]
+      ]
     },
     {
       "id": "party-italian-communist",
@@ -1354,7 +1533,10 @@
       "countryCode": "italy",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Communist Party of Italy / Italian Communist Party (PCdI/PCI). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Communist Party of Italy / Italian Communist Party (PCdI/PCI). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1921, 1991]
+      ]
     },
     {
       "id": "party-italian-socialist",
@@ -1366,7 +1548,10 @@
       "countryCode": "italy",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Italian Socialist Party (PSI). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Italian Socialist Party (PSI). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1892, 1994]
+      ]
     },
     {
       "id": "party-italian-fascist",
@@ -1378,7 +1563,10 @@
       "countryCode": "italy",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in National Fascist Party (PNF). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in National Fascist Party (PNF). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1919, 1943]
+      ]
     },
     {
       "id": "party-spanish-communist",
@@ -1390,7 +1578,10 @@
       "countryCode": "spain",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Communist Party of Spain (PCE). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Communist Party of Spain (PCE). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1921, null]
+      ]
     },
     {
       "id": "party-spanish-poum",
@@ -1402,7 +1593,10 @@
       "countryCode": "spain",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Workers' Party of Marxist Unification (POUM). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Workers' Party of Marxist Unification (POUM). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1935, 1980]
+      ]
     },
     {
       "id": "party-portuguese-communist",
@@ -1414,7 +1608,10 @@
       "countryCode": "portugal",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Portuguese Communist Party (PCP). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Portuguese Communist Party (PCP). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1921, null]
+      ]
     },
     {
       "id": "party-greek-communist",
@@ -1426,7 +1623,10 @@
       "countryCode": "greece",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Communist Party of Greece (KKE). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Communist Party of Greece (KKE). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1918, null]
+      ]
     },
     {
       "id": "party-finnish-social-democratic",
@@ -1438,7 +1638,10 @@
       "countryCode": "finland",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Social Democratic Party of Finland. Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Social Democratic Party of Finland. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1899, null]
+      ]
     },
     {
       "id": "party-finnish-communist",
@@ -1450,7 +1653,10 @@
       "countryCode": "finland",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Communist Party of Finland (SKP). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Communist Party of Finland (SKP). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1918, 1992]
+      ]
     },
     {
       "id": "party-british-labour",
@@ -1462,7 +1668,10 @@
       "countryCode": "uk",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Labour Party (United Kingdom). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Labour Party (United Kingdom). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1900, null]
+      ]
     },
     {
       "id": "party-british-communist",
@@ -1474,7 +1683,10 @@
       "countryCode": "uk",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Communist Party of Great Britain (CPGB). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Communist Party of Great Britain (CPGB). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1920, 1991]
+      ]
     },
     {
       "id": "party-us-communist",
@@ -1486,7 +1698,10 @@
       "countryCode": "usa",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Communist Party USA (CPUSA). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Communist Party USA (CPUSA). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1919, null]
+      ]
     },
     {
       "id": "party-vietnamese-communist",
@@ -1498,7 +1713,10 @@
       "countryCode": "vietnam",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Communist Party of Vietnam / Workers' Party of Vietnam. Never infer affiliation from nationality, residence or ideology. Party-state rule: 1945 onward (DRV/North Vietnam, then the Socialist Republic), including the Viet Minh and the People's Army. During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card."
+      "criteria": "Only documented service, membership or organizational activity in Communist Party of Vietnam / Workers' Party of Vietnam. Never infer affiliation from nationality, residence or ideology. Party-state rule: 1945 onward (DRV/North Vietnam, then the Socialist Republic), including the Viet Minh and the People's Army. During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card.",
+      "periods": [
+        [1930, null]
+      ]
     },
     {
       "id": "party-korean-workers",
@@ -1510,7 +1728,10 @@
       "countryCode": "north-korea",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Workers' Party of Korea (WPK). Never infer affiliation from nationality, residence or ideology. Party-state rule: 1948 onward (DPRK). During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card."
+      "criteria": "Only documented service, membership or organizational activity in Workers' Party of Korea (WPK). Never infer affiliation from nationality, residence or ideology. Party-state rule: 1948 onward (DPRK). During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card.",
+      "periods": [
+        [1949, null]
+      ]
     },
     {
       "id": "party-choson-new-people",
@@ -1522,7 +1743,10 @@
       "countryCode": "north-korea",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in New People's Party of Korea. Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in New People's Party of Korea. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1942, 1946]
+      ]
     },
     {
       "id": "party-korean-democratic",
@@ -1534,7 +1758,10 @@
       "countryCode": "north-korea",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Democratic Party of Korea. Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Democratic Party of Korea. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1945, null]
+      ]
     },
     {
       "id": "party-indonesian-communist",
@@ -1546,7 +1773,10 @@
       "countryCode": "indonesia",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Communist Party of Indonesia (PKI). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Communist Party of Indonesia (PKI). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1914, 1966]
+      ]
     },
     {
       "id": "party-indian-communist",
@@ -1558,7 +1788,10 @@
       "countryCode": "india",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Communist Party of India (CPI). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Communist Party of India (CPI). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1925, null]
+      ]
     },
     {
       "id": "party-indian-cpim",
@@ -1570,7 +1803,10 @@
       "countryCode": "india",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Communist Party of India (Marxist), CPI(M). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Communist Party of India (Marxist), CPI(M). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1964, null]
+      ]
     },
     {
       "id": "party-afghan-pdpa",
@@ -1582,7 +1818,10 @@
       "countryCode": "afghanistan",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in People's Democratic Party of Afghanistan (PDPA). Never infer affiliation from nationality, residence or ideology. Party-state rule: 1978–1992 (Democratic Republic of Afghanistan). During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card."
+      "criteria": "Only documented service, membership or organizational activity in People's Democratic Party of Afghanistan (PDPA). Never infer affiliation from nationality, residence or ideology. Party-state rule: 1978–1992 (Democratic Republic of Afghanistan). During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card.",
+      "periods": [
+        [1965, 1992]
+      ]
     },
     {
       "id": "party-yemeni-socialist",
@@ -1594,7 +1833,10 @@
       "countryCode": "yemen",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Yemeni Socialist Party (YSP). Never infer affiliation from nationality, residence or ideology. Party-state rule: 1978–1990 (South Yemen / PDRY only). During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card."
+      "criteria": "Only documented service, membership or organizational activity in Yemeni Socialist Party (YSP). Never infer affiliation from nationality, residence or ideology. Party-state rule: 1978–1990 (South Yemen / PDRY only). During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card.",
+      "periods": [
+        [1978, null]
+      ]
     },
     {
       "id": "party-angolan-mpla",
@@ -1606,7 +1848,10 @@
       "countryCode": "angola",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Popular Movement for the Liberation of Angola (MPLA). Never infer affiliation from nationality, residence or ideology. Party-state rule: 1975–1991, and the MPLA armed forces of the independence war. During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card."
+      "criteria": "Only documented service, membership or organizational activity in Popular Movement for the Liberation of Angola (MPLA). Never infer affiliation from nationality, residence or ideology. Party-state rule: 1975–1991, and the MPLA armed forces of the independence war. During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card.",
+      "periods": [
+        [1956, null]
+      ]
     },
     {
       "id": "party-mozambican-frelimo",
@@ -1618,7 +1863,10 @@
       "countryCode": "mozambique",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Mozambique Liberation Front (FRELIMO). Never infer affiliation from nationality, residence or ideology. Party-state rule: 1975–1990. During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card."
+      "criteria": "Only documented service, membership or organizational activity in Mozambique Liberation Front (FRELIMO). Never infer affiliation from nationality, residence or ideology. Party-state rule: 1975–1990. During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card.",
+      "periods": [
+        [1962, null]
+      ]
     },
     {
       "id": "party-paigc",
@@ -1630,7 +1878,10 @@
       "countryCode": "guinea-bissau",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in African Party for the Independence of Guinea and Cape Verde (PAIGC). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in African Party for the Independence of Guinea and Cape Verde (PAIGC). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1956, null]
+      ]
     },
     {
       "id": "party-south-african-communist",
@@ -1642,7 +1893,10 @@
       "countryCode": "south-africa",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in South African Communist Party (SACP). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in South African Communist Party (SACP). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1921, null]
+      ]
     },
     {
       "id": "party-african-national-congress",
@@ -1654,7 +1908,10 @@
       "countryCode": "south-africa",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in African National Congress (ANC). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in African National Congress (ANC). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1912, null]
+      ]
     },
     {
       "id": "party-cuban-communist",
@@ -1666,7 +1923,10 @@
       "countryCode": "cuba",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Communist Party of Cuba (PCC). Never infer affiliation from nationality, residence or ideology. Party-state rule: 1959 onward (revolutionary government and its armed forces). During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card."
+      "criteria": "Only documented service, membership or organizational activity in Communist Party of Cuba (PCC). Never infer affiliation from nationality, residence or ideology. Party-state rule: 1959 onward (revolutionary government and its armed forces). During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card.",
+      "periods": [
+        [1959, null]
+      ]
     },
     {
       "id": "cuban-july-26",
@@ -1678,7 +1938,10 @@
       "countryCode": "cuba",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in 26th of July Movement. Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in 26th of July Movement. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1953, 1965]
+      ]
     },
     {
       "id": "polish-solidarity",
@@ -1690,7 +1953,10 @@
       "countryCode": "poland",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Solidarity (Solidarność). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Solidarity (Solidarność). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1980, null]
+      ]
     },
     {
       "id": "polish-kor",
@@ -1702,7 +1968,10 @@
       "countryCode": "poland",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Workers' Defence Committee (KOR). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Workers' Defence Committee (KOR). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1976, 1981]
+      ]
     },
     {
       "id": "polish-wzz",
@@ -1714,7 +1983,10 @@
       "countryCode": "poland",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Free Trade Unions of the Coast (WZZ). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Free Trade Unions of the Coast (WZZ). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1978, 1980]
+      ]
     },
     {
       "id": "french-cgt",
@@ -1726,7 +1998,10 @@
       "countryCode": "france",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in General Confederation of Labour (CGT, France). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in General Confederation of Labour (CGT, France). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1895, null]
+      ]
     },
     {
       "id": "spanish-cnt",
@@ -1738,7 +2013,10 @@
       "countryCode": "spain",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Confederación Nacional del Trabajo (CNT). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Confederación Nacional del Trabajo (CNT). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1910, null]
+      ]
     },
     {
       "id": "greek-eam",
@@ -1750,7 +2028,10 @@
       "countryCode": "greece",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in National Liberation Front (EAM). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in National Liberation Front (EAM). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1941, 1945]
+      ]
     },
     {
       "id": "greek-elas",
@@ -1762,7 +2043,10 @@
       "countryCode": "greece",
       "icon": "swords",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Greek People's Liberation Army (ELAS). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Greek People's Liberation Army (ELAS). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1942, 1945]
+      ]
     },
     {
       "id": "french-ftp",
@@ -1774,7 +2058,10 @@
       "countryCode": "france",
       "icon": "swords",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Francs-Tireurs et Partisans (FTP/FTPF). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Francs-Tireurs et Partisans (FTP/FTPF). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1941, 1944]
+      ]
     },
     {
       "id": "south-african-mk",
@@ -1786,7 +2073,10 @@
       "countryCode": "south-africa",
       "icon": "swords",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Umkhonto we Sizwe (MK). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Umkhonto we Sizwe (MK). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1961, 1993]
+      ]
     },
     {
       "id": "latvian-popular-front",
@@ -1798,7 +2088,10 @@
       "countryCode": "latvia",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Popular Front of Latvia. Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Popular Front of Latvia. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1988, 1993]
+      ]
     },
     {
       "id": "estonian-popular-front",
@@ -1810,7 +2103,10 @@
       "countryCode": "estonia",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Popular Front of Estonia (Rahvarinne). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Popular Front of Estonia (Rahvarinne). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1988, 1993]
+      ]
     },
     {
       "id": "azerbaijani-popular-front",
@@ -1822,7 +2118,10 @@
       "countryCode": "azerbaijan",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Azerbaijani Popular Front. Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Azerbaijani Popular Front. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1988, null]
+      ]
     },
     {
       "id": "nicaraguan-fsln",
@@ -1834,7 +2133,10 @@
       "countryCode": "nicaragua",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Sandinista National Liberation Front (FSLN). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Sandinista National Liberation Front (FSLN). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1961, null]
+      ]
     },
     {
       "id": "german-kpo",
@@ -1846,7 +2148,10 @@
       "countryCode": "germany",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Communist Party of Germany Opposition (KPO). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Communist Party of Germany Opposition (KPO). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1928, 1940]
+      ]
     },
     {
       "id": "french-girondins",
@@ -1858,7 +2163,10 @@
       "countryCode": "france",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Girondins. Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Girondins. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1791, 1793]
+      ]
     },
     {
       "id": "french-jacobins",
@@ -1870,7 +2178,10 @@
       "countryCode": "france",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Jacobin Club. Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Jacobin Club. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1789, 1799]
+      ]
     },
     {
       "id": "french-montagnards",
@@ -1882,7 +2193,10 @@
       "countryCode": "france",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented membership or leadership in the Montagnard faction of the Legislative Assembly and National Convention (1792–1795). Club membership alone is the club."
+      "criteria": "Only documented membership or leadership in the Montagnard faction of the Legislative Assembly and National Convention (1792–1795). Club membership alone is the club.",
+      "periods": [
+        [1792, 1795]
+      ]
     },
     {
       "id": "french-cordeliers",
@@ -1894,7 +2208,10 @@
       "countryCode": "france",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented membership or leadership in the Society of the Friends of the Rights of Man and of the Citizen (Cordeliers Club, 1790–1795), including the Hébertist faction."
+      "criteria": "Only documented membership or leadership in the Society of the Friends of the Rights of Man and of the Citizen (Cordeliers Club, 1790–1795), including the Hébertist faction.",
+      "periods": [
+        [1790, 1795]
+      ]
     },
     {
       "id": "french-revolutionary-commune",
@@ -1906,7 +2223,10 @@
       "countryCode": "france",
       "icon": "landmark",
       "parentId": null,
-      "criteria": "Service in the revolutionary municipal government of Paris, 1789–1795 (mayor, procureur, council, the insurrectionary Commune of 10 August 1792). NOT the Paris Commune of 1871."
+      "criteria": "Service in the revolutionary municipal government of Paris, 1789–1795 (mayor, procureur, council, the insurrectionary Commune of 10 August 1792). NOT the Paris Commune of 1871.",
+      "periods": [
+        [1789, 1795]
+      ]
     },
     {
       "id": "french-feuillants",
@@ -1918,7 +2238,10 @@
       "countryCode": "france",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Feuillants. Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Feuillants. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1791, 1792]
+      ]
     },
     {
       "id": "party-mongolian-people",
@@ -1930,7 +2253,10 @@
       "countryCode": "mongolia",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Mongolian People's Party / Mongolian People's Revolutionary Party. Never infer affiliation from nationality, residence or ideology. Party-state rule: 1921–1990 (people's government and Mongolian People's Republic). During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card."
+      "criteria": "Only documented service, membership or organizational activity in Mongolian People's Party / Mongolian People's Revolutionary Party. Never infer affiliation from nationality, residence or ideology. Party-state rule: 1921–1990 (people's government and Mongolian People's Republic). During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card.",
+      "periods": [
+        [1920, null]
+      ]
     },
     {
       "id": "party-lao-revolutionary",
@@ -1942,7 +2268,10 @@
       "countryCode": "laos",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Lao People's Revolutionary Party. Never infer affiliation from nationality, residence or ideology. Party-state rule: 1975 onward (Lao PDR). During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card."
+      "criteria": "Only documented service, membership or organizational activity in Lao People's Revolutionary Party. Never infer affiliation from nationality, residence or ideology. Party-state rule: 1975 onward (Lao PDR). During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card.",
+      "periods": [
+        [1955, null]
+      ]
     },
     {
       "id": "party-kampuchean-communist",
@@ -1954,7 +2283,10 @@
       "countryCode": "cambodia",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Communist Party of Kampuchea (CPK). Never infer affiliation from nationality, residence or ideology. Party-state rule: 1975–1979 (Democratic Kampuchea). During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card."
+      "criteria": "Only documented service, membership or organizational activity in Communist Party of Kampuchea (CPK). Never infer affiliation from nationality, residence or ideology. Party-state rule: 1975–1979 (Democratic Kampuchea). During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card.",
+      "periods": [
+        [1951, 1981]
+      ]
     },
     {
       "id": "party-kampuchean-revolutionary",
@@ -1966,7 +2298,10 @@
       "countryCode": "cambodia",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Kampuchean People's Revolutionary Party (KPRP). Never infer affiliation from nationality, residence or ideology. Party-state rule: 1979–1991 (People's Republic of Kampuchea / State of Cambodia). During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card."
+      "criteria": "Only documented service, membership or organizational activity in Kampuchean People's Revolutionary Party (KPRP). Never infer affiliation from nationality, residence or ideology. Party-state rule: 1979–1991 (People's Republic of Kampuchea / State of Cambodia). During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card.",
+      "periods": [
+        [1979, 1991]
+      ]
     },
     {
       "id": "party-japanese-communist",
@@ -1978,7 +2313,10 @@
       "countryCode": "japan",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Japanese Communist Party (JCP). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Japanese Communist Party (JCP). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1922, null]
+      ]
     },
     {
       "id": "party-brazilian-communist",
@@ -1990,7 +2328,10 @@
       "countryCode": "brazil",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Brazilian Communist Party (PCB). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Brazilian Communist Party (PCB). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1922, null]
+      ]
     },
     {
       "id": "party-chilean-communist",
@@ -2002,7 +2343,10 @@
       "countryCode": "chile",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Communist Party of Chile. Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Communist Party of Chile. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1912, null]
+      ]
     },
     {
       "id": "party-ethiopian-workers",
@@ -2014,7 +2358,10 @@
       "countryCode": "ethiopia",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Workers' Party of Ethiopia. Never infer affiliation from nationality, residence or ideology. Party-state rule: 1984–1991 (the Derg before 1984 stays with the state). During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card."
+      "criteria": "Only documented service, membership or organizational activity in Workers' Party of Ethiopia. Never infer affiliation from nationality, residence or ideology. Party-state rule: 1984–1991 (the Derg before 1984 stays with the state). During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card.",
+      "periods": [
+        [1984, 1991]
+      ]
     },
     {
       "id": "party-polish-communist",
@@ -2026,7 +2373,10 @@
       "countryCode": "poland",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Communist Party of Poland (KPP). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Communist Party of Poland (KPP). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1918, 1938]
+      ]
     },
     {
       "id": "party-polish-workers",
@@ -2038,7 +2388,10 @@
       "countryCode": "poland",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Polish Workers' Party (PPR). Never infer affiliation from nationality, residence or ideology. Party-state rule: 1944–1948. During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card."
+      "criteria": "Only documented service, membership or organizational activity in Polish Workers' Party (PPR). Never infer affiliation from nationality, residence or ideology. Party-state rule: 1944–1948. During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card.",
+      "periods": [
+        [1942, 1948]
+      ]
     },
     {
       "id": "party-polish-peoples",
@@ -2050,7 +2403,10 @@
       "countryCode": "poland",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Polish People's Party (PSL). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Polish People's Party (PSL). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1895, null]
+      ]
     },
     {
       "id": "party-sdkpil",
@@ -2062,7 +2418,10 @@
       "countryCode": "poland",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Social Democracy of the Kingdom of Poland and Lithuania (SDKPiL). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Social Democracy of the Kingdom of Poland and Lithuania (SDKPiL). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1893, 1918]
+      ]
     },
     {
       "id": "party-korean-communist",
@@ -2074,7 +2433,10 @@
       "countryCode": "south-korea",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Communist Party of Korea. Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Communist Party of Korea. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1925, 1946]
+      ]
     },
     {
       "id": "party-south-korean-workers",
@@ -2086,7 +2448,10 @@
       "countryCode": "south-korea",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Workers' Party of South Korea. Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Workers' Party of South Korea. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1946, 1949]
+      ]
     },
     {
       "id": "party-north-korean-workers",
@@ -2098,7 +2463,10 @@
       "countryCode": "north-korea",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Workers' Party of North Korea. Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Workers' Party of North Korea. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1946, 1949]
+      ]
     },
     {
       "id": "party-french-sfio",
@@ -2110,7 +2478,10 @@
       "countryCode": "france",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in French Section of the Workers' International (SFIO). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in French Section of the Workers' International (SFIO). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1905, 1969]
+      ]
     },
     {
       "id": "party-spanish-socialist",
@@ -2122,7 +2493,10 @@
       "countryCode": "spain",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Spanish Socialist Workers' Party (PSOE). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Spanish Socialist Workers' Party (PSOE). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1879, null]
+      ]
     },
     {
       "id": "party-german-cdu",
@@ -2134,7 +2508,10 @@
       "countryCode": "germany",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Christian Democratic Union (CDU). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Christian Democratic Union (CDU). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1945, null]
+      ]
     },
     {
       "id": "party-british-conservative",
@@ -2146,7 +2523,10 @@
       "countryCode": "uk",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Conservative Party (United Kingdom). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Conservative Party (United Kingdom). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1834, null]
+      ]
     },
     {
       "id": "party-australian-labor",
@@ -2158,7 +2538,10 @@
       "countryCode": "australia",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Australian Labor Party (ALP). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Australian Labor Party (ALP). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1891, null]
+      ]
     },
     {
       "id": "party-indian-congress",
@@ -2170,7 +2553,10 @@
       "countryCode": "india",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Indian National Congress. Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Indian National Congress. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1885, null]
+      ]
     },
     {
       "id": "party-algerian-fln",
@@ -2182,7 +2568,10 @@
       "countryCode": "algeria",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in National Liberation Front (FLN, Algeria). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in National Liberation Front (FLN, Algeria). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1954, null]
+      ]
     },
     {
       "id": "party-congolese-labour",
@@ -2194,7 +2583,10 @@
       "countryCode": "republic-of-congo",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Congolese Party of Labour (PCT). Never infer affiliation from nationality, residence or ideology. Party-state rule: 1969–1991 (People's Republic of the Congo). During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card."
+      "criteria": "Only documented service, membership or organizational activity in Congolese Party of Labour (PCT). Never infer affiliation from nationality, residence or ideology. Party-state rule: 1969–1991 (People's Republic of the Congo). During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card.",
+      "periods": [
+        [1969, null]
+      ]
     },
     {
       "id": "party-congolese-mnc",
@@ -2206,7 +2598,10 @@
       "countryCode": "congo",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Congolese National Movement (MNC). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Congolese National Movement (MNC). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1958, null]
+      ]
     },
     {
       "id": "party-grenadian-new-jewel",
@@ -2218,7 +2613,10 @@
       "countryCode": "grenada",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in New JEWEL Movement (NJM). Never infer affiliation from nationality, residence or ideology. Party-state rule: 1979–1983 (People's Revolutionary Government). During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card."
+      "criteria": "Only documented service, membership or organizational activity in New JEWEL Movement (NJM). Never infer affiliation from nationality, residence or ideology. Party-state rule: 1979–1983 (People's Revolutionary Government). During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card.",
+      "periods": [
+        [1973, 1983]
+      ]
     },
     {
       "id": "lithuanian-sajudis",
@@ -2230,7 +2628,10 @@
       "countryCode": "lithuania",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Sąjūdis (Reform Movement of Lithuania). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Sąjūdis (Reform Movement of Lithuania). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1988, null]
+      ]
     },
     {
       "id": "polish-home-army",
@@ -2242,7 +2643,10 @@
       "countryCode": "poland",
       "icon": "landmark",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Home Army (Armia Krajowa, AK). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Home Army (Armia Krajowa, AK). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1942, 1945]
+      ]
     },
     {
       "id": "ukrainian-insurgent-army-makhno",
@@ -2254,7 +2658,10 @@
       "countryCode": "ukraine",
       "icon": "landmark",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Revolutionary Insurgent Army of Ukraine (Makhnovists). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Revolutionary Insurgent Army of Ukraine (Makhnovists). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1918, 1921]
+      ]
     },
     {
       "id": "russian-rovs",
@@ -2266,7 +2673,10 @@
       "countryCode": "russia",
       "icon": "landmark",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Russian All-Military Union (ROVS). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Russian All-Military Union (ROVS). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1924, null]
+      ]
     },
     {
       "id": "russian-orthodox-church",
@@ -2290,7 +2700,10 @@
       "countryCode": null,
       "icon": "landmark",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in United Nations. Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in United Nations. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1945, null]
+      ]
     },
     {
       "id": "international-iwa",
@@ -2302,7 +2715,10 @@
       "countryCode": null,
       "icon": "landmark",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in International Workingmen's Association (First International). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in International Workingmen's Association (First International). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1864, 1876]
+      ]
     },
     {
       "id": "international-iww",
@@ -2314,7 +2730,10 @@
       "countryCode": null,
       "icon": "landmark",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Industrial Workers of the World (IWW). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Industrial Workers of the World (IWW). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1905, null]
+      ]
     },
     {
       "id": "american-relief-administration",
@@ -2326,7 +2745,10 @@
       "countryCode": "usa",
       "icon": "landmark",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in American Relief Administration (ARA). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in American Relief Administration (ARA). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1919, 1923]
+      ]
     },
     {
       "id": "french-catholic-royal-army",
@@ -2338,7 +2760,10 @@
       "countryCode": "france",
       "icon": "landmark",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Catholic and Royal Army (Vendée). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Catholic and Royal Army (Vendée). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1793, 1800]
+      ]
     },
     {
       "id": "french-conde-army",
@@ -2350,7 +2775,10 @@
       "countryCode": "france",
       "icon": "landmark",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Army of Condé. Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Army of Condé. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1791, 1801]
+      ]
     },
     {
       "id": "french-action-francaise",
@@ -2362,7 +2790,10 @@
       "countryCode": "france",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Action Française. Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Action Française. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1899, null]
+      ]
     },
     {
       "id": "french-enrages",
@@ -2374,7 +2805,10 @@
       "countryCode": "france",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Enragés. Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Enragés. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1792, 1794]
+      ]
     },
     {
       "id": "french-equals",
@@ -2386,7 +2820,10 @@
       "countryCode": "france",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Conspiracy of the Equals / Société des Égaux. Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Conspiracy of the Equals / Société des Égaux. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1795, 1797]
+      ]
     },
     {
       "id": "russian-bund",
@@ -2398,7 +2835,10 @@
       "countryCode": "russia",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in General Jewish Labour Bund. Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in General Jewish Labour Bund. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1897, 1921]
+      ]
     },
     {
       "id": "russian-rsdlp",
@@ -2410,7 +2850,10 @@
       "countryCode": "russia",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Russian Social Democratic Labour Party (RSDLP). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Russian Social Democratic Labour Party (RSDLP). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1898, 1918]
+      ]
     },
     {
       "id": "russian-emancipation-labour",
@@ -2422,7 +2865,10 @@
       "countryCode": "russia",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Emancipation of Labour group. Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Emancipation of Labour group. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [1883, 1903]
+      ]
     }
   ],
   "legacy": {
