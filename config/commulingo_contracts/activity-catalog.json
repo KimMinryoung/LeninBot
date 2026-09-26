@@ -1,5 +1,5 @@
 {
-  "version": 3,
+  "version": 4,
   "functions": [
     {
       "id": "political-leadership",
@@ -138,7 +138,7 @@
       },
       "countryCode": "afghanistan",
       "icon": "landmark",
-      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify. Outside party-state rule only: service during the ruling period of party-afghan-pdpa (1978–1992) belongs to that party instead."
     },
     {
       "id": "state-albania",
@@ -149,7 +149,7 @@
       },
       "countryCode": "albania",
       "icon": "landmark",
-      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify. Outside party-state rule only: service during the ruling period of party-albanian-labour (1944–1991) belongs to that party instead."
     },
     {
       "id": "state-angola",
@@ -160,7 +160,7 @@
       },
       "countryCode": "angola",
       "icon": "landmark",
-      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify. Outside party-state rule only: service during the ruling period of party-angolan-mpla (1975–1991) belongs to that party instead."
     },
     {
       "id": "state-argentina",
@@ -248,7 +248,7 @@
       },
       "countryCode": "bulgaria",
       "icon": "landmark",
-      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify. Outside party-state rule only: service during the ruling period of party-bulgarian-communist (1946–1990) belongs to that party instead."
     },
     {
       "id": "state-burkina-faso",
@@ -270,7 +270,7 @@
       },
       "countryCode": "cambodia",
       "icon": "landmark",
-      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify. Outside party-state rule only: service during the ruling period of party-kampuchean-communist (1975–1979); party-kampuchean-revolutionary (1979–1991) belongs to that party instead."
     },
     {
       "id": "state-chile",
@@ -303,7 +303,7 @@
       },
       "countryCode": "cuba",
       "icon": "landmark",
-      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify. Outside party-state rule only: service during the ruling period of party-cuban-communist (1959 onward) belongs to that party instead."
     },
     {
       "id": "state-czechia",
@@ -325,18 +325,7 @@
       },
       "countryCode": "czechoslovakia",
       "icon": "landmark",
-      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
-    },
-    {
-      "id": "state-east-germany",
-      "kind": "state",
-      "label": {
-        "ko": "동독 국가기관",
-        "en": "East Germany state institutions"
-      },
-      "countryCode": "east-germany",
-      "icon": "landmark",
-      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify. Outside party-state rule only: service during the ruling period of party-czechoslovak-communist (1948–1989) belongs to that party instead."
     },
     {
       "id": "state-el-salvador",
@@ -369,7 +358,7 @@
       },
       "countryCode": "ethiopia",
       "icon": "landmark",
-      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify. Outside party-state rule only: service during the ruling period of party-ethiopian-workers (1984–1991) belongs to that party instead."
     },
     {
       "id": "state-finland",
@@ -446,7 +435,7 @@
       },
       "countryCode": "grenada",
       "icon": "landmark",
-      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify. Outside party-state rule only: service during the ruling period of party-grenadian-new-jewel (1979–1983) belongs to that party instead."
     },
     {
       "id": "state-guyana",
@@ -468,7 +457,7 @@
       },
       "countryCode": "hungary",
       "icon": "landmark",
-      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify. Outside party-state rule only: service during the ruling period of party-hungarian-workers (1948 to October 1956); party-hungarian-socialist-workers (November 1956–1989) belongs to that party instead."
     },
     {
       "id": "state-india",
@@ -578,7 +567,7 @@
       },
       "countryCode": "laos",
       "icon": "landmark",
-      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify. Outside party-state rule only: service during the ruling period of party-lao-revolutionary (1975 onward) belongs to that party instead."
     },
     {
       "id": "state-latvia",
@@ -633,7 +622,7 @@
       },
       "countryCode": "mongolia",
       "icon": "landmark",
-      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify. Outside party-state rule only: service during the ruling period of party-mongolian-people (1921–1990) belongs to that party instead."
     },
     {
       "id": "state-mozambique",
@@ -644,7 +633,7 @@
       },
       "countryCode": "mozambique",
       "icon": "landmark",
-      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify. Outside party-state rule only: service during the ruling period of party-mozambican-frelimo (1975–1990) belongs to that party instead."
     },
     {
       "id": "state-netherlands",
@@ -669,17 +658,6 @@
       "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
     },
     {
-      "id": "state-north-korea",
-      "kind": "state",
-      "label": {
-        "ko": "조선민주주의인민공화국 국가기관",
-        "en": "Democratic People's Republic of Korea state institutions"
-      },
-      "countryCode": "north-korea",
-      "icon": "landmark",
-      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
-    },
-    {
       "id": "state-peru",
       "kind": "state",
       "label": {
@@ -699,7 +677,7 @@
       },
       "countryCode": "poland",
       "icon": "landmark",
-      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify. Outside party-state rule only: service during the ruling period of party-polish-workers (1944–1948); party-polish-pzpr (1948–1989) belongs to that party instead."
     },
     {
       "id": "state-portugal",
@@ -721,7 +699,7 @@
       },
       "countryCode": "republic-of-congo",
       "icon": "landmark",
-      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify. Outside party-state rule only: service during the ruling period of party-congolese-labour (1969–1991) belongs to that party instead."
     },
     {
       "id": "state-romania",
@@ -732,7 +710,7 @@
       },
       "countryCode": "romania",
       "icon": "landmark",
-      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify. Outside party-state rule only: service during the ruling period of party-romanian-communist (1947–1989) belongs to that party instead."
     },
     {
       "id": "state-somalia",
@@ -764,17 +742,6 @@
         "en": "South Korea state institutions"
       },
       "countryCode": "south-korea",
-      "icon": "landmark",
-      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
-    },
-    {
-      "id": "state-soviet",
-      "kind": "state",
-      "label": {
-        "ko": "소련 국가기관",
-        "en": "Soviet Union state institutions"
-      },
-      "countryCode": "soviet",
       "icon": "landmark",
       "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
     },
@@ -897,7 +864,7 @@
       },
       "countryCode": "vietnam",
       "icon": "landmark",
-      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify. Outside party-state rule only: service during the ruling period of party-vietnamese-communist (1945 onward) belongs to that party instead."
     },
     {
       "id": "state-yemen",
@@ -908,7 +875,7 @@
       },
       "countryCode": "yemen",
       "icon": "landmark",
-      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify. Outside party-state rule only: service during the ruling period of party-yemeni-socialist (1978–1990) belongs to that party instead."
     },
     {
       "id": "state-yugoslavia",
@@ -919,7 +886,7 @@
       },
       "countryCode": "yugoslavia",
       "icon": "landmark",
-      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify. Outside party-state rule only: service during the ruling period of party-yugoslav-communist (1945–1990) belongs to that party instead."
     },
     {
       "id": "china-ccp",
@@ -931,19 +898,7 @@
       "countryCode": "china",
       "icon": "hammer-sickle",
       "parentId": null,
-      "criteria": "Choose only when the cited career explicitly establishes service or organizational membership in this body; not citizenship or sympathy."
-    },
-    {
-      "id": "china-prc",
-      "kind": "state",
-      "label": {
-        "ko": "중화인민공화국 국가기관",
-        "en": "PRC state institutions"
-      },
-      "countryCode": "china",
-      "icon": "landmark",
-      "parentId": null,
-      "criteria": "Choose only when the cited career explicitly establishes service or organizational membership in this body; not citizenship or sympathy."
+      "criteria": "Choose only when the cited career explicitly establishes service or organizational membership in this body; not citizenship or sympathy. Party-state rule: 1949 onward (PRC), and the CCP base-area governments before 1949. During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card."
     },
     {
       "id": "china-kmt",
@@ -1038,8 +993,8 @@
       },
       "countryCode": "soviet",
       "icon": "flag",
-      "parentId": "state-soviet",
-      "criteria": "Choose only when the cited career explicitly establishes service or organizational membership in this body; not citizenship or sympathy."
+      "parentId": null,
+      "criteria": "Choose only when the cited career explicitly establishes service or organizational membership in this body; not citizenship or sympathy. Party-state rule: 1918–1991 (Soviet Russia and the USSR; Left SR commissars of the 1917–1918 coalition belong to russian-left-sr). During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card."
     },
     {
       "id": "comintern",
@@ -1243,7 +1198,7 @@
       "countryCode": "east-germany",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Socialist Unity Party of Germany (SED). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Socialist Unity Party of Germany (SED). Never infer affiliation from nationality, residence or ideology. Party-state rule: 1949–1990 (GDR). During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card."
     },
     {
       "id": "party-czechoslovak-communist",
@@ -1255,7 +1210,7 @@
       "countryCode": "czechoslovakia",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Communist Party of Czechoslovakia (KSČ). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Communist Party of Czechoslovakia (KSČ). Never infer affiliation from nationality, residence or ideology. Party-state rule: 1948–1989. During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card."
     },
     {
       "id": "party-polish-pzpr",
@@ -1267,7 +1222,7 @@
       "countryCode": "poland",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Polish United Workers' Party (PZPR). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Polish United Workers' Party (PZPR). Never infer affiliation from nationality, residence or ideology. Party-state rule: 1948–1989. During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card."
     },
     {
       "id": "party-romanian-communist",
@@ -1279,7 +1234,7 @@
       "countryCode": "romania",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Romanian Communist Party (PCR). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Romanian Communist Party (PCR). Never infer affiliation from nationality, residence or ideology. Party-state rule: 1947–1989. During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card."
     },
     {
       "id": "party-bulgarian-communist",
@@ -1291,7 +1246,7 @@
       "countryCode": "bulgaria",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Bulgarian Communist Party (BKP). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Bulgarian Communist Party (BKP). Never infer affiliation from nationality, residence or ideology. Party-state rule: 1946–1990 (People's Republic of Bulgaria). During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card."
     },
     {
       "id": "party-hungarian-communist",
@@ -1315,7 +1270,7 @@
       "countryCode": "hungary",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Hungarian Working People's Party (MDP). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Hungarian Working People's Party (MDP). Never infer affiliation from nationality, residence or ideology. Party-state rule: 1948 to October 1956. During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card."
     },
     {
       "id": "party-hungarian-socialist-workers",
@@ -1327,7 +1282,7 @@
       "countryCode": "hungary",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Hungarian Socialist Workers' Party (MSzMP). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Hungarian Socialist Workers' Party (MSzMP). Never infer affiliation from nationality, residence or ideology. Party-state rule: November 1956–1989. During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card."
     },
     {
       "id": "party-yugoslav-communist",
@@ -1339,7 +1294,7 @@
       "countryCode": "yugoslavia",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Communist Party / League of Communists of Yugoslavia (KPJ/SKJ). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Communist Party / League of Communists of Yugoslavia (KPJ/SKJ). Never infer affiliation from nationality, residence or ideology. Party-state rule: 1945–1990, and the Partisan army and AVNOJ organs of 1941–1945. During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card."
     },
     {
       "id": "party-albanian-labour",
@@ -1351,7 +1306,7 @@
       "countryCode": "albania",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Party of Labour of Albania. Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Party of Labour of Albania. Never infer affiliation from nationality, residence or ideology. Party-state rule: 1944–1991. During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card."
     },
     {
       "id": "party-italian-communist",
@@ -1507,7 +1462,7 @@
       "countryCode": "vietnam",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Communist Party of Vietnam / Workers' Party of Vietnam. Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Communist Party of Vietnam / Workers' Party of Vietnam. Never infer affiliation from nationality, residence or ideology. Party-state rule: 1945 onward (DRV/North Vietnam, then the Socialist Republic), including the Viet Minh and the People's Army. During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card."
     },
     {
       "id": "party-korean-workers",
@@ -1519,7 +1474,7 @@
       "countryCode": "north-korea",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Workers' Party of Korea (WPK). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Workers' Party of Korea (WPK). Never infer affiliation from nationality, residence or ideology. Party-state rule: 1948 onward (DPRK). During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card."
     },
     {
       "id": "party-choson-new-people",
@@ -1591,7 +1546,7 @@
       "countryCode": "afghanistan",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in People's Democratic Party of Afghanistan (PDPA). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in People's Democratic Party of Afghanistan (PDPA). Never infer affiliation from nationality, residence or ideology. Party-state rule: 1978–1992 (Democratic Republic of Afghanistan). During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card."
     },
     {
       "id": "party-yemeni-socialist",
@@ -1603,7 +1558,7 @@
       "countryCode": "yemen",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Yemeni Socialist Party (YSP). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Yemeni Socialist Party (YSP). Never infer affiliation from nationality, residence or ideology. Party-state rule: 1978–1990 (South Yemen / PDRY only). During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card."
     },
     {
       "id": "party-angolan-mpla",
@@ -1615,7 +1570,7 @@
       "countryCode": "angola",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Popular Movement for the Liberation of Angola (MPLA). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Popular Movement for the Liberation of Angola (MPLA). Never infer affiliation from nationality, residence or ideology. Party-state rule: 1975–1991, and the MPLA armed forces of the independence war. During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card."
     },
     {
       "id": "party-mozambican-frelimo",
@@ -1627,7 +1582,7 @@
       "countryCode": "mozambique",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Mozambique Liberation Front (FRELIMO). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Mozambique Liberation Front (FRELIMO). Never infer affiliation from nationality, residence or ideology. Party-state rule: 1975–1990. During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card."
     },
     {
       "id": "party-paigc",
@@ -1675,7 +1630,7 @@
       "countryCode": "cuba",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Communist Party of Cuba (PCC). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Communist Party of Cuba (PCC). Never infer affiliation from nationality, residence or ideology. Party-state rule: 1959 onward (revolutionary government and its armed forces). During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card."
     },
     {
       "id": "cuban-july-26",
@@ -1903,7 +1858,7 @@
       "countryCode": "mongolia",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Mongolian People's Party / Mongolian People's Revolutionary Party. Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Mongolian People's Party / Mongolian People's Revolutionary Party. Never infer affiliation from nationality, residence or ideology. Party-state rule: 1921–1990 (people's government and Mongolian People's Republic). During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card."
     },
     {
       "id": "party-lao-revolutionary",
@@ -1915,7 +1870,7 @@
       "countryCode": "laos",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Lao People's Revolutionary Party. Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Lao People's Revolutionary Party. Never infer affiliation from nationality, residence or ideology. Party-state rule: 1975 onward (Lao PDR). During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card."
     },
     {
       "id": "party-kampuchean-communist",
@@ -1927,7 +1882,7 @@
       "countryCode": "cambodia",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Communist Party of Kampuchea (CPK). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Communist Party of Kampuchea (CPK). Never infer affiliation from nationality, residence or ideology. Party-state rule: 1975–1979 (Democratic Kampuchea). During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card."
     },
     {
       "id": "party-kampuchean-revolutionary",
@@ -1939,7 +1894,7 @@
       "countryCode": "cambodia",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Kampuchean People's Revolutionary Party (KPRP). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Kampuchean People's Revolutionary Party (KPRP). Never infer affiliation from nationality, residence or ideology. Party-state rule: 1979–1991 (People's Republic of Kampuchea / State of Cambodia). During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card."
     },
     {
       "id": "party-japanese-communist",
@@ -1987,7 +1942,7 @@
       "countryCode": "ethiopia",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Workers' Party of Ethiopia. Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Workers' Party of Ethiopia. Never infer affiliation from nationality, residence or ideology. Party-state rule: 1984–1991 (the Derg before 1984 stays with the state). During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card."
     },
     {
       "id": "party-polish-communist",
@@ -2011,7 +1966,7 @@
       "countryCode": "poland",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Polish Workers' Party (PPR). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in Polish Workers' Party (PPR). Never infer affiliation from nationality, residence or ideology. Party-state rule: 1944–1948. During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card."
     },
     {
       "id": "party-polish-peoples",
@@ -2167,7 +2122,7 @@
       "countryCode": "congo-republic",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Congolese Party of Labour (PCT). Never infer affiliation from nationality, residence or ideology.",
+      "criteria": "Only documented service, membership or organizational activity in Congolese Party of Labour (PCT). Never infer affiliation from nationality, residence or ideology. Party-state rule: 1969–1991 (People's Republic of the Congo). During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card.",
       "countryLabel": {
         "ko": "콩고공화국",
         "en": "Republic of the Congo"
@@ -2195,7 +2150,7 @@
       "countryCode": "grenada",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in New JEWEL Movement (NJM). Never infer affiliation from nationality, residence or ideology."
+      "criteria": "Only documented service, membership or organizational activity in New JEWEL Movement (NJM). Never infer affiliation from nationality, residence or ideology. Party-state rule: 1979–1983 (People's Revolutionary Government). During that period this entry ALSO covers service in the state institutions, government, armed forces and security organs, whether or not the person held a party card."
     },
     {
       "id": "lithuanian-sajudis",
@@ -2429,15 +2384,15 @@
     ],
     "head-of-government": [
       "government",
-      "state-soviet"
+      "soviet-party"
     ],
     "defence": [
       "military",
-      "state-soviet"
+      "soviet-party"
     ],
     "state-security": [
       "security",
-      "state-soviet"
+      "soviet-party"
     ],
     "ideology-propaganda": [
       "propaganda",
@@ -2445,7 +2400,7 @@
     ],
     "culture-literature": [
       "propaganda",
-      "state-soviet"
+      "soviet-party"
     ],
     "state-head": [
       "government",
@@ -2453,31 +2408,31 @@
     ],
     "foreign-affairs": [
       "diplomacy",
-      "state-soviet"
+      "soviet-party"
     ],
     "nationalities-federal": [
       "government",
-      "state-soviet"
+      "soviet-party"
     ],
     "central-planning": [
       "economy",
-      "state-soviet"
+      "soviet-party"
     ],
     "economic-management": [
       "economy",
-      "state-soviet"
+      "soviet-party"
     ],
     "heavy-military-industry": [
       "industry",
-      "state-soviet"
+      "soviet-party"
     ],
     "agriculture": [
       "agriculture",
-      "state-soviet"
+      "soviet-party"
     ],
     "science-nuclear-space": [
       "science",
-      "state-soviet"
+      "soviet-party"
     ],
     "comintern": [
       "diplomacy",
@@ -2505,7 +2460,7 @@
     ],
     "prc-government": [
       "government",
-      "china-prc"
+      "china-ccp"
     ],
     "ccp-security": [
       "security",
@@ -2517,11 +2472,17 @@
     ],
     "prc-economy-planning": [
       "economy",
-      "china-prc"
+      "china-ccp"
     ],
     "prc-foreign-affairs": [
       "diplomacy",
-      "china-prc"
+      "china-ccp"
     ]
+  },
+  "retired": {
+    "state-soviet": "soviet-party",
+    "china-prc": "china-ccp",
+    "state-east-germany": "party-german-sed",
+    "state-north-korea": "party-korean-workers"
   }
 }

@@ -24,6 +24,14 @@ class ActivitiesTests(unittest.TestCase):
         self.assertIn('unresolved',q['activity_affiliation']['criteria'])
         self.assertNotIn('role_china',q)
 
+    def test_party_state_organs_are_offered_only_as_the_ruling_party(self):
+        q=activity_questions(load_catalog(),EVIDENCE)['activity_affiliation']
+        for retired in ('china-prc','state-soviet','state-east-germany','state-north-korea'):
+            self.assertNotIn(retired,q['criteria'])
+        self.assertIn('Party-state rule: 1949 onward',q['criteria']['china-ccp'])
+        self.assertIn('party-polish-pzpr',q['criteria']['state-poland'])
+        self.assertIn('party-state is one affiliation',q['instructions'])
+
     def test_unknown_affiliation_stays_unknown_and_unsupported_is_rejected(self):
         out=activity_person_from(verdict(activity_affiliation='unresolved'),load_catalog(),EVIDENCE,{'international-revolutionary'})
         self.assertIsNone(out['activities'][0]['affiliationId'])
