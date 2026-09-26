@@ -37,7 +37,7 @@ from datetime import date
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 FEATURE = "commulingo_classification_audit"
-from commulingo.classify import build_questions, offices_allowed, role_scope  # noqa: E402  shared editorial rules
+from commulingo.classify import build_questions, groups_for_years, offices_allowed, role_scope  # noqa: E402  shared editorial rules
 
 # stored→judged pairs the operator has accepted as boundary judgements; a
 # disagreement on these lines is not reported (2026-09-19 decisions).
@@ -70,6 +70,7 @@ def state_of(p: dict) -> dict:
 def judge(p: dict, catalogs: tuple, decide) -> dict:
     groups, offices, categories = catalogs
     scope = role_scope(p["citizenship_code"])
+    groups = groups_for_years(groups, p["years_label"])
     result = decide(FEATURE, state_of(p), build_questions(groups, offices, categories, scope == "soviet", scope=scope),
                     label="classification-audit")
     row = {"id": p["id"], "name": p["name_ko"], "years": p["years_label"],

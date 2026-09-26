@@ -20,6 +20,8 @@ same rules so the two never drift.
 from __future__ import annotations
 
 import logging
+import re
+from datetime import date
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +65,14 @@ GROUP_RULES = {
                      "Biao, Kang Sheng, Jiang Qing, Hua Guofeng).",
     "china-reform": "Chinese citizens whose public role peaked after 1976: the reform leadership (Deng Xiaoping, Hu Yaobang, "
                     "Zhao Ziyang, Jiang Zemin), the dissidents of Democracy Wall and 1989, and the post-1989 leadership.",
+    "france-revolution": "The French Revolution to the Directory, 1774–1799: Louis XVI and his ministers, the revolutionaries of "
+                         "the assemblies, clubs and Paris Commune (Sieyès, Robespierre, Danton, Marat, Hébert, Babeuf), the "
+                         "royalists, émigrés and Vendée leaders who fought them, the generals of the republican armies (Valmy, "
+                         "Fleurus, the Rhine), and foreign commanders of the coalition wars against the Republic (Howe). "
+                         "Generals made in the republican armies stay here even when they served on under the Consulate.",
+    "france-napoleon": "The Consulate, the First Empire and the Bourbon Restoration, 1799–1830: Napoleon, his marshals and "
+                       "administrators, the foreign commanders who fought the Empire (Nelson), and the Restoration kings to the "
+                       "July Revolution. Socialists of the 1830s and after (Cabet, Blanqui) are world groups.",
     "international-revolutionary": "Anyone OUTSIDE the Soviet and Chinese state apparatus on the revolutionary or socialist "
                                    "side: communists, socialists, leaders and officials of socialist states (Poland, Hungary, "
                                    "Czechoslovakia, East Germany, Cuba, Vietnam...), their reformers and dissidents, and "
@@ -405,6 +415,59 @@ ROLE_INSTRUCTIONS = {
 }
 
 
+# Stage one of the group decision is arithmetic, not a model call. The
+# groups span three centuries — the French Revolution, the Soviet and Chinese
+# eras, the wider modern world — and a person's life years already rule most of
+# them out: Robespierre (1758–1794) cannot belong to a group of 1871–2016 or to
+# the Soviet eras. The model then chooses only among the groups whose era
+# overlaps the person's adult life (from 16 to death, or to today). Windows are
+# the years a group's people were active, wider than the display range_label.
+# A group missing here is never filtered out, and years that cannot be parsed
+# leave every group open.
+GROUP_ERAS = {
+    "old-regime": (1700, 1917), "bolshevik": (1890, 1940), "stalin-era": (1924, 1953), "thaw": (1945, 1991),
+    "perestroika": (1975, None),
+    "china-old-regime": (1880, 1949), "china-revolution": (1895, 1949), "china-mao-era": (1940, 1976),
+    "china-reform": (1970, None),
+    "france-revolution": (1774, 1799), "france-napoleon": (1795, 1830),
+    "international-revolutionary": (1830, None), "foreign-statesmen": (1830, None),
+    "international-counterrevolutionary": (1830, None), "scholar": (1850, None),
+}
+ADULT_AGE = 16
+_YEAR = r"(\d{3,4})(?:/(\d{3,4}))?\??"
+_YEARS = re.compile(r"^\s*(?:c\.\s*)?(?:" + _YEAR + r"|\?)\s*[–-]\s*(?:(?:" + _YEAR + r"|\?)(\s*이후)?)?\s*$")
+
+
+def active_span(years, today: int | None = None) -> tuple[int, int] | None:
+    """(first, last) year of a person's adult life from a years label such as
+    '1758–1794', 'c. 1729/1730–1800', '1950–' (living) or '1900–1950 이후';
+    None when neither end is a year."""
+    today = today or date.today().year
+    m = _YEARS.match(str(years or ""))
+    if not m:
+        return None
+    birth = int(m.group(1)) if m.group(1) else None  # the earlier of two candidate years
+    death = int(m.group(4) or m.group(3)) if m.group(3) else None
+    if m.group(5) or (death is None and not re.search(r"[–-]\s*\?", str(years))):
+        death = today  # died at an unknown date after the year, or still living
+    if birth is None and death is None:
+        return None
+    return ((birth + ADULT_AGE) if birth is not None else death - 50, death)
+
+
+def groups_for_years(groups: list[dict], years, today: int | None = None) -> list[dict]:
+    """Stage one: the groups whose era overlaps the person's adult life."""
+    span = active_span(years, today)
+    if span is None:
+        return groups
+    today = today or date.today().year
+    first, last = span
+    kept = [g for g in groups
+            if g["id"] not in GROUP_ERAS
+            or (GROUP_ERAS[g["id"]][0] <= last and first <= (GROUP_ERAS[g["id"]][1] or today))]
+    return kept or groups
+
+
 def build_questions(groups: list[dict], offices: list[dict], categories: list[dict], soviet: bool, scope: str | None = None) -> dict:
     """The group and role questions for one role scope. ``soviet`` is the
     older boolean form (True → 'soviet', False → 'other'); ``scope`` wins."""
@@ -420,7 +483,7 @@ def build_questions(groups: list[dict], offices: list[dict], categories: list[di
         "group": {"type": "choice", "criteria": group_criteria,
                   "instructions": "Which dictionary group does this person belong to? Soviet citizens go to the era in which "
                                   "their public role peaked; Chinese citizens go to the china-* group of their era or side; "
-                                  "people outside both states go to a world group. Historians researching this history use scholar regardless of nationality; actors or targets in historical events can retain the era of their activity."},
+                                  "people outside both states go to a world group; people of the French Revolution and Napoleon go to a france-* group. Historians researching this history use scholar regardless of nationality; actors or targets in historical events can retain the era of their activity."},
         "role": {"type": "choice", "criteria": role_criteria, "instructions": ROLE_INSTRUCTIONS[scope]},
     }
 
@@ -548,6 +611,8 @@ def classify_person_card(fields: dict, *, catalogs=None, claims: dict | None = N
     groups, offices, categories = catalogs or load_catalogs()
     if not groups or not categories:
         return None
+    # Stage one: the life years narrow the era groups; the model picks among them.
+    groups = groups_for_years(groups, fields.get("years"))
     questions = person_card_questions(fields, groups, offices, categories, sorted(_NATIONALITY_CODES),
                                       sorted(_NATIONAL_ORIGIN_CODES), codes=codes)
     from commulingo.activities import activity_evidence, activity_questions, activity_person_from, load_catalog

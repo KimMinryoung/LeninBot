@@ -1,5 +1,5 @@
 {
-  "version": 5,
+  "version": 6,
   "functions": [
     {
       "id": "political-leadership",
@@ -380,7 +380,7 @@
       },
       "countryCode": "france",
       "icon": "landmark",
-      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+      "criteria": "Actual service for the French state or its armed forces from the July Monarchy (1830) onward. The Bourbon monarchy, the First Republic and the Consulate/Empire have their own entries. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
     },
     {
       "id": "state-georgia",
@@ -1054,7 +1054,31 @@
       "countryCode": "france",
       "icon": "flame",
       "parentId": null,
-      "criteria": "Choose only when the cited career explicitly establishes service or organizational membership in this body; not citizenship or sympathy."
+      "criteria": "Documented revolutionary activity in 1789–1799 for which no specific club, faction, assembly or state body can be named. Prefer the Jacobins, Cordeliers, Montagnards, Girondins, Feuillants, Enragés, the Paris Commune (1789–1795) or the First Republic whenever the evidence names one."
+    },
+    {
+      "id": "french-first-republic",
+      "kind": "state",
+      "label": {
+        "ko": "프랑스 제1공화국 국가기관",
+        "en": "French First Republic state institutions"
+      },
+      "countryCode": "france",
+      "icon": "landmark",
+      "parentId": null,
+      "criteria": "Service in the National Convention and its committees (Public Safety, General Security), the ministries, the Directory, representatives on mission and the republican armies, from September 1792 to the Coup of 18 Brumaire (November 1799). Leadership of a Convention faction is that faction (Montagnards, Girondins), not this entry."
+    },
+    {
+      "id": "french-napoleonic-state",
+      "kind": "state",
+      "label": {
+        "ko": "통령정부·제1제국 국가기관",
+        "en": "Consulate and First Empire state institutions"
+      },
+      "countryCode": "france",
+      "icon": "landmark",
+      "parentId": null,
+      "criteria": "Service in the government, administration, prefectures, colonies and armies of the Consulate and the First Empire, from 18 Brumaire (November 1799) to 1815, the Hundred Days included."
     },
     {
       "id": "french-monarchy",
@@ -1066,7 +1090,7 @@
       "countryCode": "france",
       "icon": "crown",
       "parentId": null,
-      "criteria": "Choose only when the cited career explicitly establishes service or organizational membership in this body; not citizenship or sympathy."
+      "criteria": "Service to the Bourbon crown, its ministers and royal armies: the absolute monarchy to 1789, the constitutional monarchy of 1789 to 10 August 1792, and the Restoration of 1814–1830. Émigré armies and the Vendée have their own entries."
     },
     {
       "id": "russian-sr",
@@ -1163,6 +1187,18 @@
       "icon": "flag",
       "parentId": null,
       "criteria": "Only documented service, membership or organizational activity in French Communist Party (PCF). Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "party-french-workers",
+      "kind": "party",
+      "label": {
+        "ko": "프랑스 노동자당",
+        "en": "French Workers' Party (POF)"
+      },
+      "countryCode": "france",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented membership or leadership in the Parti ouvrier (French Workers' Party, 1880–1902) of Guesde and Lafargue."
     },
     {
       "id": "party-german-communist",
@@ -1835,6 +1871,42 @@
       "icon": "flag",
       "parentId": null,
       "criteria": "Only documented service, membership or organizational activity in Jacobin Club. Never infer affiliation from nationality, residence or ideology."
+    },
+    {
+      "id": "french-montagnards",
+      "kind": "force",
+      "label": {
+        "ko": "산악파",
+        "en": "The Mountain (Montagnards)"
+      },
+      "countryCode": "france",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented membership or leadership in the Montagnard faction of the Legislative Assembly and National Convention (1792–1795). Club membership alone is the club."
+    },
+    {
+      "id": "french-cordeliers",
+      "kind": "force",
+      "label": {
+        "ko": "코르들리에 클럽",
+        "en": "Cordeliers Club"
+      },
+      "countryCode": "france",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented membership or leadership in the Society of the Friends of the Rights of Man and of the Citizen (Cordeliers Club, 1790–1795), including the Hébertist faction."
+    },
+    {
+      "id": "french-revolutionary-commune",
+      "kind": "institution",
+      "label": {
+        "ko": "파리 코뮌 (1789–1795)",
+        "en": "Paris Commune (1789–1795)"
+      },
+      "countryCode": "france",
+      "icon": "landmark",
+      "parentId": null,
+      "criteria": "Service in the revolutionary municipal government of Paris, 1789–1795 (mayor, procureur, council, the insurrectionary Commune of 10 August 1792). NOT the Paris Commune of 1871."
     },
     {
       "id": "french-feuillants",
