@@ -64,7 +64,7 @@ def affiliations_for(catalog, window=None):
 def activity_questions(catalog, evidence, window=None):
     return {
         'activity_function': {'type':'choice', 'criteria':{f['id']:f"{f['label']['en']}: {f['criteria']}" for f in catalog['functions']},
-            'instructions':'Choose the defining documented activity, not citizenship, highest incidental title, victimhood or political sympathy. Choose an activity supported by ONE of the evidence excerpts.'},
+            'instructions':'Choose the defining documented activity, not citizenship, highest incidental title, victimhood or political sympathy. Prefer the specific field that defines the career over government, even for ministers or heads of state. Government requires defining cross-policy executive management or administrative coordination; never use it as a catch-all for officials or uncertain cases. Choose an activity supported by ONE of the evidence excerpts.'},
         'activity_affiliation': {'type':'choice', 'criteria':{
             **{a['id']:f"{a['label']['en']} ({a['kind']}): {a['criteria']}" for a in affiliations_for(catalog, window)},
             'independent':'The chosen evidence explicitly establishes independent/unaffiliated activity.',

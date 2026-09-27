@@ -659,6 +659,10 @@ def classify_person_card(fields: dict, *, catalogs=None, claims: dict | None = N
         # to the First Republic (job 63829, Lafayette, 2026-09-26).
         basis_q = dict(activity_q['activity_basis'])
         basis_q['instructions'] += ' The function is fixed by selected_activity_function in the state.'
+        selected_function = next(f for f in activity_catalog['functions'] if f['id'] == function)
+        basis_q['instructions'] += ' Apply the selected function criteria: ' + selected_function['criteria']
+        if function == 'government':
+            basis_q['instructions'] += ' A high office title alone is insufficient. Select unsupported unless an excerpt establishes cross-policy executive management or administrative coordination as the defining career; a specialized portfolio alone does not qualify.'
         if decision.choice('group') in FRENCH_REVOLUTION_GROUPS:
             basis_q['instructions'] += FRENCH_REVOLUTION_BASIS
         basis_result = (decide or decide_detailed)(FEATURE, state,

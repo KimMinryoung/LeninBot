@@ -1,5 +1,5 @@
 {
-  "version": 9,
+  "version": 10,
   "functions": [
     {
       "id": "political-leadership",
@@ -17,7 +17,7 @@
         "en": "Government and administration"
       },
       "icon": "briefcase",
-      "criteria": "Heads of government or state, general public and regional administration. Prefer a specialized function when it defines the career."
+      "criteria": "Cross-policy executive management and administrative coordination of a government or territory must define the career. A head-of-state, premier, deputy-premier, minister or regional-office title alone is insufficient. Prefer agriculture, economy, industry, diplomacy, law, security, military or another specific function when that field defines the career, including specialized ministers. Party or movement leadership belongs to political-leadership. Ceremonial office, legislative membership and being a public official do not by themselves qualify. Never use government as a catch-all when evidence is unclear."
     },
     {
       "id": "military",

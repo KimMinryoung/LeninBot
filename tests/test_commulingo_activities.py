@@ -12,6 +12,28 @@ def verdict(**overrides):
     return Decision(answers={k:{'choice':v,'confidence':.98,'probabilities':{v:.98}} for k,v in choices.items()},model='test')
 
 class ActivitiesTests(unittest.TestCase):
+    def test_government_requires_grounded_cross_policy_career(self):
+        for supported in (False, True):
+            with self.subTest(supported=supported):
+                calls = []
+                def decide(feature, state, questions, label=None):
+                    calls.append(label)
+                    if label == 'person-activity-basis':
+                        instructions = questions['activity_basis']['instructions']
+                        criteria = next(f['criteria'] for f in load_catalog()['functions'] if f['id'] == 'government')
+                        self.assertIn(criteria, instructions)
+                        self.assertIn('A high office title alone is insufficient', instructions)
+                        return DecisionResult(decision=verdict(activity_basis='0' if supported else 'unsupported'))
+                    return DecisionResult(decision=verdict(activity_function='government'))
+                with patch('llm.call_registry.resolve', return_value=PROFILE):
+                    out = c.classify_person_card({**FIELDS, 'evidence': EVIDENCE}, catalogs=CATALOGS, decide=decide, codes=False)
+                if supported:
+                    self.assertEqual(out['person']['activities'][0]['functionId'], 'government')
+                    self.assertIn('person-activity-affiliation', calls)
+                else:
+                    self.assertIsNone(out)
+                    self.assertNotIn('person-activity-affiliation', calls)
+
     def test_missing_source_evidence_makes_no_legacy_guess(self):
         with patch('llm.call_registry.resolve',return_value=PROFILE):
             self.assertIsNone(c.classify_person_card(FIELDS,catalogs=CATALOGS,
