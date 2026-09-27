@@ -1,5 +1,5 @@
 {
-  "version": 11,
+  "version": 12,
   "functions": [
     {
       "id": "political-leadership",
@@ -17,7 +17,16 @@
         "en": "Government and administration"
       },
       "icon": "briefcase",
-      "criteria": "Cross-policy executive management and administrative coordination of a government or territory must define the career. A head-of-state, premier, deputy-premier, minister or regional-office title alone is insufficient. Prefer agriculture, economy, industry, diplomacy, law, security, military or another specific function when that field defines the career, including specialized ministers. Party or movement leadership belongs to political-leadership. Ceremonial office, legislative membership and being a public official do not by themselves qualify. Never use government as a catch-all when evidence is unclear."
+      "criteria": "Cross-policy executive management and administrative coordination of a government or territory must define the career. A head-of-state, premier, deputy-premier, minister or regional-office title alone is insufficient. Prefer agriculture, economy, industry, diplomacy, law, security, military or another specific function when that field defines the career, including specialized ministers. Party or movement leadership belongs to political-leadership. Ceremonial or nominal head-of-state office and presiding over a legislature belong to legislature; legislative membership and being a public official do not by themselves qualify. Never use government as a catch-all when evidence is unclear."
+    },
+    {
+      "id": "legislature",
+      "label": {
+        "ko": "입법·국가 대표",
+        "en": "Legislature and state representation"
+      },
+      "icon": "building",
+      "criteria": "Presiding over a legislature or its presidium, or holding a ceremonial or nominal head-of-state office, when that office defines the career and real executive power lay elsewhere. Ordinary legislative membership alone does not qualify. A head of state or premier who actually directed the executive belongs to government; leading a party or movement belongs to political-leadership."
     },
     {
       "id": "military",
@@ -101,6 +110,15 @@
       "criteria": "Historical, social-scientific, philosophical and theoretical research. Research subjects and citizenship are not political affiliations."
     },
     {
+      "id": "education",
+      "label": {
+        "ko": "교육",
+        "en": "Education"
+      },
+      "icon": "book-open",
+      "criteria": "Teaching, school and university administration and education-policy administration. Research belongs to scholarship or science; ideological schooling of party cadres belongs to propaganda."
+    },
+    {
       "id": "science",
       "label": {
         "ko": "과학·기술",
@@ -117,6 +135,15 @@
       },
       "icon": "feather",
       "criteria": "Literary, visual, musical and performing arts. Administration of censorship belongs to propaganda."
+    },
+    {
+      "id": "religion",
+      "label": {
+        "ko": "종교",
+        "en": "Religion"
+      },
+      "icon": "dove",
+      "criteria": "Clergy, religious orders and church or religious-community leadership and administration. Faith, religious upbringing or persecution alone does not qualify; state control of religion belongs to propaganda or security."
     },
     {
       "id": "law",
