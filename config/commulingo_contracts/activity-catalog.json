@@ -1,5 +1,5 @@
 {
-  "version": 7,
+  "version": 8,
   "functions": [
     {
       "id": "political-leadership",
@@ -1076,8 +1076,8 @@
       "id": "soviet-party",
       "kind": "party",
       "label": {
-        "ko": "소련 공산당·볼셰비키",
-        "en": "Soviet Communist Party and Bolsheviks"
+        "ko": "소련",
+        "en": "Soviet Union"
       },
       "countryCode": "soviet",
       "icon": "flag",
