@@ -5,6 +5,7 @@ import hashlib
 from urllib.parse import urlsplit
 
 from commulingo.pipeline.evidence import MAX_PASSAGES, PASSAGE_PATTERN, Passages
+from tool_gateway.validation import register_argument_shape_repair
 
 DECISION_TOOL = {"name": "commulingo_review_decision", "description": "Submit one independently researched review decision; does not directly write dictionary content.",
     "input_schema": {"type": "object", "additionalProperties": False,
@@ -19,13 +20,35 @@ DECISION_TOOL = {"name": "commulingo_review_decision", "description": "Submit on
                     "citation_id": {"type": "string", "pattern": "^S[1-9][0-9]*$", "description": "S1 is suggestion.source_refs[0], S2 is source_refs[1]."},
                     "passages": {"type": "array", "minItems": 1, "maxItems": MAX_PASSAGES,
                                  "items": {"type": "string", "pattern": PASSAGE_PATTERN},
-                                 "description": "The immutable labels shown in brackets before retrieved paragraphs that verify this finding (for example P12), copied exactly. Cite only the passages needed to verify this finding."},
+                                 "description": f"The immutable labels shown in brackets before retrieved paragraphs that verify this finding (for example P12), copied exactly. At most {MAX_PASSAGES} labels: cite only the passages needed to verify this finding, and split a finding that needs more into separate checks, each with its own narrower finding."},
                     "finding": {"type": "string", "description": "Your Korean explanation of what those passages verify."},
                 },
                 "required": ["passages", "finding"],
                 "oneOf": [{"required": ["citation"], "not": {"required": ["citation_id"]}}, {"required": ["citation_id"], "not": {"required": ["citation"]}}],
                 }},
         }, "required": ["decision", "reason", "resolved_risks", "checks"]}}
+
+
+def keep_citation_id(args, schema):
+    """A check naming its source twice keeps the S-number and drops the copy.
+
+    The schema accepts exactly one of citation/citation_id; reviewers sent both
+    in a few checks per day and lost a round to the oneOf rejection. The ID is
+    resolved against source_refs anyway, so nothing is guessed.
+    """
+    checks = args.get("checks") if isinstance(args, dict) else None
+    if not isinstance(checks, list):
+        return args, []
+    fixed = 0
+    for check in checks:
+        if (isinstance(check, dict) and "citation" in check
+                and re.fullmatch(r"S[1-9][0-9]*", str(check.get("citation_id", "")))):
+            del check["citation"]
+            fixed += 1
+    return args, [f"dropped citation beside citation_id in {fixed} check(s)"] if fixed else []
+
+
+register_argument_shape_repair(DECISION_TOOL["name"], keep_citation_id)
 
 
 def review_source(url, body, snapshots, passages, base=0):

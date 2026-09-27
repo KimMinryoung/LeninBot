@@ -237,3 +237,17 @@ class PolicyTests(EditorCase):
             self.assertTrue(rpc.call_args.args[0]['approve'])
 
 if __name__=='__main__':unittest.main()
+
+
+class DecisionShapeTests(unittest.TestCase):
+    def test_citation_beside_citation_id_is_dropped_before_validation(self):
+        from commulingo.review_policy import DECISION_TOOL
+        from tool_gateway.validation import validate_tool_arguments
+        value = {'decision': 'approve', 'reason': 'The retrieved originals confirm the changed facts.',
+                 'resolved_risks': [], 'checks': [
+                     {'citation': 'https://example.org/a', 'citation_id': 'S1', 'passages': ['P1'], 'finding': '확인했다.'},
+                     {'citation': 'https://example.org/b', 'passages': ['P2'], 'finding': '확인했다.'}]}
+        result = validate_tool_arguments(DECISION_TOOL['name'], value,
+                                         schema=DECISION_TOOL['input_schema'], risk_class='write')
+        self.assertEqual(result['checks'][0], {'citation_id': 'S1', 'passages': ['P1'], 'finding': '확인했다.'})
+        self.assertEqual(result['checks'][1]['citation'], 'https://example.org/b')
