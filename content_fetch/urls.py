@@ -4,6 +4,7 @@ import asyncio
 import logging
 import re as _re
 import socket
+import tempfile
 from typing import Optional as _Optional
 from urllib.parse import urlparse as _urlparse
 
@@ -172,6 +173,35 @@ def diagnose_url_fetch_failure(url: str, observed_errors: list[str] | None = Non
         return f"Fetch diagnosis: http_probe_failed - TCP works, but the HTTP probe failed: {e}."
 
 
+_DOCUMENT_SUFFIXES = {
+    "application/pdf": ".pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+}
+
+
+def _document_text(resp) -> _Optional[str]:
+    """Convert a PDF/Office response with markitdown.
+
+    Returns None when the response is not a document, and "" when it is one
+    but yields no text (scanned PDF), so callers never parse the raw bytes as
+    HTML. Until 2026-09-27 BeautifulSoup returned `%PDF-1.x` byte soup here and
+    fetch_url handed it to agents as page text.
+    """
+    ctype = str(resp.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+    body = resp.content if isinstance(resp.content, bytes) else b""
+    suffix = _DOCUMENT_SUFFIXES.get(ctype) or (".pdf" if body.lstrip()[:5] == b"%PDF-" else None)
+    if not suffix:
+        return None
+    from content_fetch.documents import convert_document
+
+    with tempfile.NamedTemporaryFile(suffix=suffix) as tmp:
+        tmp.write(body)
+        tmp.flush()
+        return convert_document(tmp.name, 0) or ""
+
+
 def _fetch_url_fallbacks(url: str, max_chars: int = 10000) -> _Optional[str]:
     """SSRF-safe fallback chain after Playwright: requests+BeautifulSoup → Tavily.
 
@@ -201,6 +231,13 @@ def _fetch_url_fallbacks(url: str, max_chars: int = 10000) -> _Optional[str]:
         }
         resp = safe_requests_get(url, request_get=_req.get, headers=headers, timeout=15)
         resp.raise_for_status()
+
+        document = _document_text(resp)
+        if document is not None:
+            text = _clean_text(document)
+            if not _is_low_quality(text):
+                return text[:max_chars]
+            raise ValueError("document has no extractable text")
         resp.encoding = resp.apparent_encoding or "utf-8"
 
         from bs4 import BeautifulSoup, Comment

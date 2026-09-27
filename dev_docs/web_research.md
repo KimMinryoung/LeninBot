@@ -18,6 +18,11 @@ content_fetch/urls.py: Playwright → 무료 HTTP → client.extract → POST /e
 - `web_gateway/client.py`: 키 없는 로컬 HTTP 클라이언트. 공급자 직접 호출·재시도 fallback 없음.
 - `runtime_tools/registry.py`: 기존 `web_search` 도구 이름·인자·노출 경계 유지.
 - `content_fetch/urls.py`: 로컬 URL/DNS/redirect 검증과 무료 본문 추출 유지.
+  무료 HTTP 응답이 PDF(Content-Type 또는 `%PDF-` 서명)·Office 문서면 HTML로 파싱하지 않고
+  `content_fetch/documents.py`의 markitdown으로 변환한다(Playwright는 문서 URL에서
+  `Download is starting`으로 실패한다). 텍스트가 없는 스캔 PDF는 원시 바이트를 돌려주지 않고
+  유료 Extract로 넘긴다. 2026-09-27 이전에는 PDF 바이트가 본문으로 반환돼 CommuLingo 원문 캐시에
+  `%PDF-1.x` 본문 215건이 쌓였다.
   유료 Extract는 게이트웨이가 URL을 다시 검증하고 single-URL basic으로만 실행한다.
 
 서버는 임의 upstream/path/API 인자를 받는 프록시가 아니다. 허용된 요청 모델만 받으며

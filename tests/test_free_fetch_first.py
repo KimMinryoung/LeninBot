@@ -40,6 +40,24 @@ class FreeFetchTests(unittest.TestCase):
         extract.assert_called_once()
         sdk.assert_not_called()
 
+    def test_pdf_response_is_converted_not_parsed_as_html(self):
+        pdf = Mock(headers={"Content-Type": "application/octet-stream"}, content=b"%PDF-1.4\n\x00\xff binary")
+        with patch.object(urls, "safe_requests_get", return_value=pdf), \
+             patch("content_fetch.documents.convert_document", return_value=self.body) as convert, \
+             patch.object(client, "extract") as extract:
+            text = urls._fetch_url_fallbacks("https://example.com/paper")
+        self.assertIn("substantive", text)
+        self.assertTrue(convert.call_args.args[0].endswith(".pdf"))
+        extract.assert_not_called()
+
+    def test_textless_pdf_never_returns_raw_bytes(self):
+        pdf = Mock(headers={"Content-Type": "application/pdf"}, content=b"%PDF-1.7\n" + b"stream x y z " * 100)
+        with patch.object(urls, "safe_requests_get", return_value=pdf), \
+             patch("content_fetch.documents.convert_document", return_value=None), \
+             patch.object(client, "extract", return_value={"results": []}) as extract:
+            self.assertIsNone(urls._fetch_url_fallbacks("https://example.com/scan.pdf"))
+        extract.assert_called_once()
+
     def test_unsafe_destination_blocked_before_any_fetch(self):
         with patch.object(urls, "validate_public_http_url", side_effect=UnsafeUrlError("private")), \
              patch.object(urls, "safe_requests_get") as http, patch.object(client, "extract") as extract:
