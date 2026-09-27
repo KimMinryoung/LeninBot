@@ -153,15 +153,25 @@ class Editor:
         focused_contract = deepcopy(tool['input_schema'])
         focused_contract['properties']['fields']['properties'] = {
             k:v for k,v in field_schema['properties'].items() if k in needed and k != 'notes'}
-        repair.configure(focused_contract['properties']['fields'], issues)
+        factual = {'body'} if section else FACTS[job['kind']]
+        repair.configure(focused_contract['properties']['fields'], issues, factual_fields=factual)
         failures = dict(checkpoint.get('failures') or {})
         section_slug_cache = dict(checkpoint.get('section_slug_cache') or {})
         box = {}
         error_kind = checkpoint.get('error_kind', '')
         last_error = repair.author_error(checkpoint.get('error', '') or '')
+        def pending_evidence(args):
+            fields = deepcopy(args.get('fields') or {})
+            if job['kind'] == 'term':
+                drop_unchanged_term_facts(fields, current or {}, job['action'])
+            return (set(fields) & factual) - {c['field'] for c in args.get('claims') or []}
+
+        def missing_parts(args):
+            return repair.missing(args, factual_fields=pending_evidence(args))
+
         def status():
             state = work_status(issues, repair.draft, reads, error=last_error, error_kind=error_kind)
-            missing = repair.missing(repair.draft['args']) if repair.draft and structured_args(repair.draft['args']) else []
+            missing = missing_parts(repair.draft['args']) if repair.draft and structured_args(repair.draft['args']) else []
             if missing and not last_error:
                 state.update(missing_before_validation=missing,
                              next_action='Send the remaining parts; the draft is validated once they are present: '
@@ -188,12 +198,15 @@ class Editor:
             error_kind = 'schema'
             try:
                 merged = repair.submission(value)
-                missing = repair.missing(merged)
+                missing = missing_parts(merged)
                 if missing:
                     # A split submission: keep the part and ask for the rest
                     # without counting a rejection or ending the stage.
                     repair.draft = {'tool': repair.name, 'args': deepcopy(merged)}
                     error_kind, last_error = '', ''
+                    reads.missing_fields = sorted(pending_evidence(merged))
+                    if reads.missing_fields:
+                        reads.repair_only = False
                     await save_checkpoint()
                     raise StageContinues(reads.with_status(
                         'Saved to the draft. Still needed before validation: ' + ', '.join(missing) + '.'))
@@ -238,7 +251,6 @@ class Editor:
                 extras = {c['field'] for c in claims} - set(fields)
                 if extras:
                     problems.append('claims must support fields in this patch: ' + ', '.join(sorted(extras)))
-                factual = {'body'} if section else FACTS[job['kind']]
                 missing = (set(fields) & factual) - {c['field'] for c in claims}
                 if missing:
                     if error_kind != 'passages':
@@ -394,7 +406,7 @@ class Editor:
                   'Use commulingo_pipeline_context for additional current values. Editable changes are defined by the tools.\n'
                   + ('For a person section, send a small first call to commulingo_pipeline_submit_draft '
                      'with changes.heading, changes.startYear, issues and reason. Then send changes.body.value.ko '
-                     'and changes.body.value.en in separate calls; attach the body evidence to either call. '
+                     'and changes.body.value.en in separate calls; send changes.body.evidence in its own call. '
                      'The first calls save an incomplete draft; do not repeat saved languages. '
                      'Keep each tool argument JSON short, '
                      'because long calls may arrive malformed and cannot be saved. '

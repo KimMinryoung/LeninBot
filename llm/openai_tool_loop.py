@@ -1344,6 +1344,20 @@ class _OpenAIProtocolAdapter:
 
     # ── Round parsing / message building ─────────────────────────────
 
+    def malformed_arguments(self, name, raw, exc):
+        # Diagnose syntax without logging source prose or reasoning. Preserve
+        # the same counters across normal/final rounds and provider failures.
+        reason = exc.msg if isinstance(exc, json.JSONDecodeError) else str(exc)
+        tracker = self.state.budget_tracker if self.state is not None else None
+        if tracker is not None:
+            tracker['malformed_json_calls'] = tracker.get('malformed_json_calls', 0) + 1
+            reasons = tracker.setdefault('malformed_json_reasons', {})
+            reasons[reason] = reasons.get(reason, 0) + 1
+        logger.warning('Malformed arguments for %s: %s; chars=%s position=%s',
+                       name, reason, len(raw) if isinstance(raw, str) else None, getattr(exc, 'pos', None))
+        return (f'Tool execution blocked: malformed JSON arguments ({exc}). '
+                + malformed_arguments_hint(name))
+
     def parse_turn(self, response, round_num):
         finish_reason, content_text, tool_calls, message_obj, _usage = _extract_response(
             self.sdk_mode, response, surface_reasoning=not self.preserve_reasoning_content,
@@ -1394,13 +1408,10 @@ class _OpenAIProtocolAdapter:
                 if not isinstance(func_args, dict):
                     raise TypeError("tool arguments must decode to an object")
             except (json.JSONDecodeError, TypeError) as exc:
-                logger.warning("Malformed arguments for %s: %s",
-                               func_name, tc_item["function"]["arguments"][:200])
                 malformed.append((
                     tc_id,
                     func_name,
-                    f"Tool execution blocked: malformed JSON arguments ({exc}). "
-                    + malformed_arguments_hint(func_name),
+                    self.malformed_arguments(func_name, tc_item["function"]["arguments"], exc),
                 ))
                 continue
             batch.append((tc_id, func_name, func_args))
@@ -1586,8 +1597,7 @@ class _OpenAIProtocolAdapter:
                     except (json.JSONDecodeError, TypeError) as exc:
                         malformed.append((
                             tc_item["id"], fname,
-                            f"Tool execution blocked: malformed JSON arguments ({exc}). "
-                            + malformed_arguments_hint(fname),
+                            self.malformed_arguments(fname, tc_item["function"]["arguments"], exc),
                         ))
                         continue
                     batch.append((tc_item["id"], fname, fargs))

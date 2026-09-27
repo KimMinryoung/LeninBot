@@ -19,6 +19,19 @@ CURRENT = {'id':'fixture', 'revision':'r1','body':{'ko':'본문','en':'Body'}}
 
 
 class ContextTests(HermeticAsyncCase):
+    async def test_all_available_fields_can_be_read_together(self):
+        from tool_gateway.validation import validate_tool_arguments, ToolArgumentValidationError
+        current = {f'field{i}': i for i in range(15)}
+        tool, read, _ = context_tool(current)
+        args = validate_tool_arguments(tool['name'], {'fields': list(current)},
+                                       schema=tool['input_schema'], risk_class='read')
+        self.assertIn('field14', await read(**args))
+        with self.assertRaises(ToolArgumentValidationError):
+            validate_tool_arguments(tool['name'], {'fields': ['field0', 'field0']},
+                                    schema=tool['input_schema'], risk_class='read')
+        with self.assertRaises(ValueError):
+            await read(fields=['field0', 'field0'])
+
     async def test_section_leaf_requests_read_sections_without_losing_other_fields(self):
         from tool_gateway.validation import validate_tool_arguments
         current = {'sections': [{'slug': 'old', 'body': {'en': 'Old section'}}],
@@ -72,8 +85,8 @@ class ContextTests(HermeticAsyncCase):
                                {'slug':'other','body':{'en':'other text'}}]}
         proposal = {'target_type':'person_section','patch_json':{'slug':'target','body':{'en':'new section'}}}
         compact = context(proposal,current,{'slug':'target','body':{'en':'prior proposal'}})
-        self.assertEqual(compact['changes'],[{'path':'/body/en','before':'old section'}])
-        self.assertEqual(compact['changes_since_previous_patch'],[{'path':'/body/en','before':'prior proposal'}])
+        self.assertEqual(compact['changes'],[{'path':'/fields/body/en','before':'old section'}])
+        self.assertEqual(compact['changes_since_previous_patch'],[{'path':'/fields/body/en','before':'prior proposal'}])
 
 
 class PreflightTests(HermeticAsyncCase):

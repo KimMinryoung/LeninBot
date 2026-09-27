@@ -82,7 +82,7 @@ Jev에 질의한다. 질문별 판정은 독립적이므로 후속 질의 state�
 
 | 세션 내부 도구 | 역할 |
 |---|---|
-| `commulingo_pipeline_submit_draft` | 초안 제출. 호출마다 저장된 초안에 병합하며, 필수 필드·모든 과제의 `issues`·`reason`이 모이면 전체 검증을 돌린다. 큰 편집은 여러 번에 나눠 보낼 수 있다 |
+| `commulingo_pipeline_submit_draft` | 초안 제출. 호출마다 저장된 초안에 병합하며, 필수 필드·사실 필드의 근거·모든 과제의 `issues`·`reason`이 모이면 전체 검증을 돌린다. 큰 편집은 여러 번에 나눠 보낼 수 있다 |
 | `commulingo_pipeline_no_edit` | `status`, `reason`, 모든 과제의 `issues`, 선택적 `notes`로 무편집 판단 제출; 기존 초안은 이력에 보존 |
 | `commulingo_pipeline_cached_passages` | 캐시 목록 및 원문을 네트워크 없이 조회. 라벨은 한 번에 8개까지 보여 주고 나머지 라벨을 응답에 적는다. `passages`와 `source_id`가 함께 오면 라벨이 모두 알려진 경우 라벨을, 아니면 페이지를 연다 |
 | `commulingo_pipeline_context` | 추가 현재 값과 이번 작업에서 편집 가능한 필드의 schema 조회 |
@@ -145,6 +145,11 @@ OpenAI 호환 응답의 도구 인자 JSON이 깨지면 같은 긴 인자를 재
 초안 저장 후 제출에서 `evidence`를 생략한 필드는 값만 바꾸고 저장된 근거를 유지한다(인용 검사는 다시 돈다).
 이미 초안에 값이 저장된 필드는 `changes.<field> = {evidence: [...]}`만 보내 근거를 추가·교체할 수 있다.
 값이 없는 필드의 근거만 제출하면 거절한다. 긴 본문을 다시 전송하지 않아도 근거를 보완할 수 있다.
+본문은 저장됐지만 필수 근거가 아직 오지 않은 경우도 분할 제출로 보존하고
+`changes.<field>.evidence`를 다음 입력으로 안내한다. 검증 거절이나 무진전 반복으로 처리하지 않는다.
+용어의 변경 없는 연도·시기와 신규의 null 기본값은 기존 공개 패치 정리 규칙에 따라 근거 대기에서 제외한다.
+실제 제출 근거의 라벨·인용 지지·독립 검토는 완성된 초안에 그대로 적용한다.
+근거 수정 안내는 저장된 본문 재전송을 요구하지 않으며, 절 작성도 본문 언어별 호출과 근거 호출을 분리한다.
 게이트웨이는 스키마 검증 전에 제출 인자의 뜻이 분명한 구조 실수를 바로잡는다
 (`author_draft.repair_submission_shape`, `tool_gateway.validation.register_argument_shape_repair`):
 `changes` 안의 `issues`/`reason`/`notes`/`remove_fields`를 밖으로 옮기고, `changes` 없이 온 필드를 감싸고,
@@ -206,7 +211,9 @@ Editor 시스템 문맥에 넣지 않는다. curator 기본 프롬프트 역시 
 `workflow.py`는 현재 문서와의 차이, 이전 수정안과의 차이 및 이전 검토를 제공한다.
 검토자는 원문을 직접 가져와 핵심 변경 사실과 위험 항목을 확인한다.
 검토 문맥 조회에서 현재 인물 상세 절의 `body`·`heading`·`slug`·`sortOrder` 요청은
-실제 `sections` 필드 조회로 합쳐 중복 없이 반환한다. 원문 근거 조회를 대신하지 않는다.
+실제 `sections` 필드 조회로 합쳐 중복 없이 반환한다. 조회 수 상한은 실제 조회 가능한 필드 수이며,
+중복 필드와 없는 필드는 거절한다. 원문 근거 조회를 대신하지 않는다.
+검토 입력의 변경 위치와 이전 수정안 비교 위치는 제출 규칙과 같은 `/fields/...` 경로로 제공한다.
 `required_corrections`는 사실 오류의 필드 위치와 이유를 담으며 `optional_suggestions`와 구분한다.
 선택 제안만으로 revise할 수 없고 내용·근거가 그대로인 거절안은 유료 재검토 전에 보류한다.
 reject는 complete, escalate는 escalated로 끝난다. 두 경우와, 수정 요청이 반영되지 않은 같은 patch가
@@ -312,6 +319,12 @@ frontend DB 검사는 동시 반영, 승인 해시 불일치, 메모 실패 롤�
 `efficiency`는 원장 비용·검증률·수정 요청·무진전 보류·승인된 해결 과제와 미해결 과제를 집계한다.
 Jev 호출 수와 비용은 `jev_calls`·`jev_cost_usd`로 분리한다.
 해결 과제 수는 작성자가 보고하고 검토자가 승인한 값이다. 독립 사후 표본 감사의 오류율은 아직 계측하지 않는다.
+첫 저장 검증률은 처음 전체 검증을 시도한 초안의 `preflight_passed`와 `preflight_failures`로 계산한다.
+부분 저장 호출 수를 반려로 간주하지 않으며, 전체 검증 전 중단은 검증률 분모에 넣지 않는다.
+`partial_submissions`와 OpenAI 호환 도구 루프의 `malformed_json_calls`·`malformed_json_reasons`를
+시도에 보존한다. JSON 파손은 일반 응답과 강제 최종 응답 모두에서 집계하며, journal에는
+원문 대신 JSON 오류 종류·인자 길이·오류 위치를 남긴다. 효율 보고서의 두 신규 카운터는 배포 후
+계측분만 포함한다. 기존 통계 정의 수정과 실제 모델 실패율 감소를 구분한다.
 단위 테스트 통과나 소수 성공 사례만으로 품질 향상·비용 절감률을 주장하지 않는다.
 
 DeepSeek(Anthropic 호환 엔드포인트, `llm/claude_loop.py`)은 인자가 필요한 도구 호출에 `input: {}`를

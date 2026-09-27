@@ -35,6 +35,24 @@ def edit():
 
 
 class AuthorDraftTests(unittest.TestCase):
+    def test_evidence_waits_for_a_separate_call_and_survives_restart(self):
+        draft = session()
+        draft.factual_fields = {'bio', 'years'}
+        value = edit()
+        del value['changes']['bio']['evidence']
+        part = draft.submission(value)
+        self.assertEqual(draft.missing(part), ['changes.bio.evidence'])
+        resumed = session()
+        resumed.factual_fields = draft.factual_fields
+        resumed.draft = {'tool': draft.name, 'args': deepcopy(part)}
+        whole = resumed.submission({'changes': {'bio': {'evidence': edit()['changes']['bio']['evidence']}}})
+        self.assertEqual(resumed.missing(whole), [])
+        self.assertEqual(whole['fields'], part['fields'])
+        # Removing evidence cannot let a completed draft through validation.
+        resumed.draft['args'] = whole
+        cleared = resumed.submission({'changes': {'bio': {'evidence': []}}})
+        self.assertEqual(resumed.missing(cleared), ['changes.bio.evidence'])
+
     def test_saved_field_can_receive_evidence_in_separate_call(self):
         draft = session()
         first = draft.submission({'changes': {'bio': {'value': {'ko': '검증한 인물이다.'}}}})

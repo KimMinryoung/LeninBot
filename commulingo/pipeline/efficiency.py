@@ -30,6 +30,8 @@ def query(boundary):
             sum((a.metrics->>'cache_read_tokens')::bigint) AS cache_read_tokens,
             count(*) FILTER (WHERE a.metrics->>'preflight_no_model'='true') AS preflight_no_model,
             sum((a.metrics->>'fetch_backoff_hits')::integer) AS fetch_backoff_hits,
+            sum(coalesce((a.metrics->>'partial_submissions')::integer,0)) AS partial_submissions,
+            sum(coalesce((a.metrics->>'malformed_json_calls')::integer,0)) AS malformed_json_calls,
             sum((a.metrics->>'review_context_original_chars')::bigint) AS review_original_chars,
             sum((a.metrics->>'review_context_chars')::bigint) AS review_chars,
             count(*) FILTER (WHERE a.stage='research') AS research,
@@ -39,13 +41,12 @@ def query(boundary):
     first_checks AS (
         SELECT DISTINCT ON (job_id) job_id,started_at,metrics
         FROM commulingo_pipeline_attempts WHERE (stage='draft' OR metrics->>'workflow'='editor')
-            AND (metrics ? 'preflight_passed' OR metrics ? 'preflight_failures' OR coalesce((metrics->>'terminal_calls')::integer,0)>0)
+            AND (metrics ? 'preflight_passed' OR metrics ? 'preflight_failures')
         ORDER BY job_id,started_at,id),
     validation AS (
         SELECT j.kind,j.action,count(*) AS checked,
             count(*) FILTER (WHERE f.metrics->>'preflight_passed'='true'
-                AND coalesce((f.metrics->>'preflight_failures')::integer,0)=0
-                AND coalesce((f.metrics->>'terminal_calls')::integer,0)<=1) AS first_pass
+                AND coalesce((f.metrics->>'preflight_failures')::integer,0)=0) AS first_pass
         FROM first_checks f JOIN commulingo_pipeline_jobs j ON j.id=f.job_id
         WHERE f.started_at>(SELECT cutoff FROM bounds) GROUP BY 1,2),
     editorial AS (
@@ -71,6 +72,7 @@ def query(boundary):
             a.seconds,a.rounds,a.research,a.rework,v.checked,v.first_pass,
             a.token_measured,a.input_tokens,a.output_tokens,a.cache_read_tokens,
             a.preflight_no_model,a.fetch_backoff_hits,a.review_original_chars,a.review_chars,
+            a.partial_submissions,a.malformed_json_calls,
             d.discoveries,d.judgments,e.resolved_issues,e.deferred_issues,e.no_progress_holds,e.factual_revisions
         FROM groups g LEFT JOIN publications p USING(kind,action)
         LEFT JOIN costs c USING(kind,action) LEFT JOIN attempts a USING(kind,action)
@@ -96,6 +98,8 @@ def render(rows):
                          f"후보 발견 {r['discoveries'] or 0} · 무편집 판단 {r['judgments'] or 0}")
         if r.get('token_measured'):
             lines.append(f"    토큰 계측 {r['token_measured']}시도: 입력 {r['input_tokens']} · 출력 {r['output_tokens']} · 캐시 읽기 {r.get('cache_read_tokens') or 0}")
+        if r.get('partial_submissions') or r.get('malformed_json_calls'):
+            lines.append(f"    분할 초안 저장 {r.get('partial_submissions') or 0} · JSON 인자 파손 {r.get('malformed_json_calls') or 0} (신규 계측분)")
         if r.get('review_original_chars'):
             lines.append(f"    검토 문맥 {r['review_original_chars']}→{r['review_chars']}자 (비용 절감률 아님)")
         if r.get('preflight_no_model') or r.get('fetch_backoff_hits'):

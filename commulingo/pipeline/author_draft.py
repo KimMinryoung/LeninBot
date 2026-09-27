@@ -122,8 +122,9 @@ def structured_args(args):
 
 
 class AuthorDraft(DraftRepair):
-    def configure(self, fields, issues):
+    def configure(self, fields, issues, *, factual_fields=()):
         self.field_names = list(fields['properties'])
+        self.factual_fields = set(factual_fields)
         self.bilingual_fields = {name for name, schema in fields['properties'].items()
                                  if bilingual_field(schema)}
         evidence = obj({'claim': {'type': 'string', 'minLength': 1},
@@ -154,9 +155,7 @@ class AuthorDraft(DraftRepair):
         properties = {'changes': changes, 'issues': outcomes,
                       'reason': {'type': 'string', 'minLength': 20},
                       'notes': {'type': 'string', 'maxLength': 4000}}
-        # The first submission must be complete; later calls to the same tool
-        # replace only what they name. The server checks which case applies, so
-        # the author never has to pick between a submit and a repair tool.
+        # Intake accepts parts; the merged draft must meet the full contract.
         full = obj(deepcopy(properties), ['changes', 'issues', 'reason'])
         full['properties']['changes']['minProperties'] = 1
         full['properties']['changes']['required'] = fields.get('required', [])
@@ -190,7 +189,8 @@ class AuthorDraft(DraftRepair):
             'reason, notes, remove_fields. Calls merge into one saved draft, so a large edit may be sent a few '
             'fields per call; bilingual prose may send ko and en in separate calls. After saving a field value, '
             'send {evidence:[...]} for that field alone without resending prose. It is validated once it '
-            'holds both languages of each changed prose field, required fields, reason and every issue. Omit '
+            'holds both languages of each changed prose field, required factual evidence, required fields, '
+            'reason and every issue. Omit '
             'evidence to keep saved evidence. Arrays replace the whole list. No edit: commulingo_pipeline_no_edit.', 'input_schema': submit}
         self.no_edit_tool = {'name': 'commulingo_pipeline_no_edit', 'description':
             'Finish without a public edit. Explain the decision and each commissioned issue. '
@@ -244,11 +244,11 @@ class AuthorDraft(DraftRepair):
                 result[key] = value[key]
         return result
 
-    def missing(self, result):
+    def missing(self, result, *, factual_fields=None):
         """What a merged draft still lacks before full validation can run.
 
         Large edits may arrive over several calls; a draft is validated only
-        once it holds the required fields, every issue decision and a reason.
+        once it holds the required fields, factual evidence, every issue decision and a reason.
         """
         fields = result.get('fields') or {}
         required = self.full_schema['properties']['changes'].get('required', [])
@@ -260,6 +260,10 @@ class AuthorDraft(DraftRepair):
                                if lang not in fields[field])
         if not fields and not required:
             missing.append('changes (at least one field)')
+        evidenced = {claim['field'] for claim in result.get('claims') or []}
+        factual = self.factual_fields if factual_fields is None else set(factual_fields)
+        missing += [f'changes.{field}.evidence'
+                    for field in sorted((set(fields) & factual) - evidenced)]
         missing += [f'issues.{issue}' for issue in self.issue_ids if issue not in decided]
         if not result.get('reason'):
             missing.append('reason')
@@ -308,7 +312,9 @@ class AuthorDraft(DraftRepair):
                            'message': self.author_error(error.message[:300])})
         return message + '\n' + json.dumps({'errors': errors[:12],
             'submission_tool': SUBMIT_TOOL,
-            'instruction': 'Resend each affected change with its complete value and evidence. Omitted changes remain saved. '
+            'instruction': 'Send only the rejected value or evidence. For evidence-only corrections, send '
+                           'changes.<field>.evidence without resending saved prose. Omitted values, languages '
+                           'and evidence remain saved. '
                            'Use commulingo_pipeline_no_edit to finish without edits.'}, ensure_ascii=False)
 
 
@@ -320,5 +326,6 @@ register_empty_arguments_hint(SUBMIT_TOOL, (
     'Do not resend the same call. Send the draft in parts; for bilingual prose send ko and en '
     'in separate calls. Send evidence, issues and reason in small calls. Parts are saved and merged.'))
 register_malformed_arguments_hint(SUBMIT_TOOL, (
+    'Use valid JSON: escape double quotes and newlines inside strings; close every string, array and object. '
     'Do not resend the same long JSON. Send one language of a bilingual prose field per call; '
     'send its evidence, issue decisions and reason in small separate calls. Valid parts are saved and merged.'))

@@ -102,7 +102,8 @@ class Review:
             'factual errors, unsupported core assertions or bilingual contradictions. Put optional improvements '
             'in optional_suggestions; they must not prevent approval. If an unchanged field is included solely '
             'to attach missing evidence, verify that evidence without requiring additional prose. '
-            'Proposed values appear once in suggestion.patch_json; changes lists their old values by JSON pointer. '
+            'Proposed values appear once in suggestion.patch_json; changes lists their old values with '
+            '/fields/... correction paths. Copy those paths into required_corrections. '
             'Use commulingo_pipeline_review_context to inspect other current fields for contradictions or duplicate sections. '
             'Missing context is not evidence of absence.\n' + stage_evidence(compact))
         await model_call(spec=COMMULINGO_REVIEWER,prompt=prompt,tool=tool,handler=finish,reads=READS,

@@ -321,7 +321,8 @@ class Store:
             'attempt_id','cache_read_tokens','cache_create_tokens','llm_responses','observed_llm_cost_usd',
             'review_context_original_chars','review_context_chars','preflight_no_model',
             'fetch_backoff_hits','fetch_failures','cost_complete','actual_cost_usd',
-            'auxiliary_cost_usd','section_slug_calls','section_slug_fallbacks'}}
+            'auxiliary_cost_usd','section_slug_calls','section_slug_fallbacks',
+            'partial_submissions','malformed_json_calls','malformed_json_reasons'}}
         metrics['terminal_calls'] = terminal_calls
         if 'rejections' in metrics:
             metrics['rejections'] = metrics['rejections'][-12:]

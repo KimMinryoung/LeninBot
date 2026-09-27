@@ -477,6 +477,7 @@ class TestOpenAIFinalizationTools(unittest.TestCase):
 
     def test_malformed_forced_final_arguments_are_not_executed(self):
         executed = []
+        tracker = {}
 
         async def fake_batch(tool_uses, tool_handlers, **kwargs):
             executed.extend(name for _tid, name, _input in tool_uses)
@@ -496,10 +497,13 @@ class TestOpenAIFinalizationTools(unittest.TestCase):
                 client=client, model="deepseek-chat",
                 tools=TOOLS, tool_handlers=HANDLERS, system_prompt="s",
                 budget_usd=0.01, finalization_tools=["save_diary"],
+                budget_tracker=tracker,
             ))
         self.assertEqual(executed, ["echo"])
         self.assertIn("malformed JSON arguments", str(client.calls[2]["messages"]))
         self.assertIn("실행하지 않았다", result)
+        self.assertEqual(tracker['malformed_json_calls'], 1)
+        self.assertEqual(tracker['malformed_json_reasons'], {'tool arguments must decode to an object': 1})
 
 
 if __name__ == "__main__":

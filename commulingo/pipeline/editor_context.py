@@ -13,14 +13,14 @@ def work_status(issues, draft, reads, *, error='', error_kind=''):
     if error_kind == 'citation':
         action = ('Read the cited passages for the rejected claims with commulingo_pipeline_cached_passages. '
                   'Correct the claim to match the original, or research only its missing/conflicting fact. '
-                  'Resubmit each affected change with its value and corrected evidence.')
+                  'Send corrected changes.<field>.evidence only; resend a value only if the prose also needs correction.')
         next_tool = 'commulingo_pipeline_cached_passages'
     elif error_kind == 'passages' or reads.missing_fields:
         action = ('Inspect current cached pages and labels; resubmit affected changes with corrected evidence. '
                   'Fetch an original only if cached text is insufficient. Preserve other draft content.')
         next_tool = 'commulingo_pipeline_cached_passages'
     elif draft:
-        action = ('Resubmit each affected change with its complete value and evidence; omitted changes remain saved. '
+        action = ('Send only the rejected value or evidence; omitted values, languages and evidence remain saved. '
                   'Repair prose/schema errors from saved text without new research. '
                   'If a fact needs investigation, follow research_access.')
         next_tool = SUBMIT_TOOL

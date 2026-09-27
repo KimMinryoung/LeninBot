@@ -211,6 +211,7 @@ class TestToolRound(unittest.TestCase):
         self.assertIn("skipped", tool_msgs[0]["content"])
 
     def test_malformed_arguments_become_error_result(self):
+        tracker = {}
         client = FakeSDKClient([
             _resp("", finish="tool_calls",
                   tool_calls=[_tc("t1", "echo", "{not json")]),
@@ -221,12 +222,15 @@ class TestToolRound(unittest.TestCase):
             result = asyncio.run(chat_with_tools(
                 [{"role": "user", "content": "q"}],
                 client=client, model="deepseek-chat",
+                budget_tracker=tracker,
                 **BASE_KWARGS,
             ))
         self.assertEqual(result, "done")
         tool_msgs = [m for m in client.calls[1]["messages"] if m.get("role") == "tool"]
         self.assertEqual(len(tool_msgs), 1)
         self.assertIn("malformed JSON arguments", tool_msgs[0]["content"])
+        self.assertEqual(tracker['malformed_json_calls'], 1)
+        self.assertEqual(tracker['malformed_json_reasons'], {'Expecting property name enclosed in double quotes': 1})
 
     def test_commulingo_malformed_arguments_ask_for_smaller_saved_calls(self):
         from commulingo.pipeline.author_draft import SUBMIT_TOOL
