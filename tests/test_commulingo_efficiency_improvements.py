@@ -19,6 +19,17 @@ CURRENT = {'id':'fixture', 'revision':'r1','body':{'ko':'본문','en':'Body'}}
 
 
 class ContextTests(HermeticAsyncCase):
+    async def test_section_leaf_requests_read_sections_without_losing_other_fields(self):
+        from tool_gateway.validation import validate_tool_arguments
+        current = {'sections': [{'slug': 'old', 'body': {'en': 'Old section'}}],
+                   'bio': {'en': 'Person biography'}}
+        tool, read, _ = context_tool(current)
+        args = validate_tool_arguments(tool['name'],
+            {'fields': ['body', 'heading', 'slug', 'sortOrder', 'bio']},
+            schema=tool['input_schema'], risk_class='read')
+        self.assertEqual(args['fields'], ['sections', 'bio'])
+        self.assertIn('Old section', await read(**args))
+
     def test_context_tool_is_owner_reviewer_only(self):
         from security_gateway import CallerContext, authorize, policy
         with patch.object(policy,'enforce_mode',return_value='enforce'):

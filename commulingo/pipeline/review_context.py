@@ -1,6 +1,26 @@
 """Lossless patch input with old values once and on-demand unchanged context."""
 from copy import deepcopy
+from tool_gateway.validation import register_argument_shape_repair
 from .patches import changes
+
+
+def repair_context_fields(args, schema):
+    """Map section leaf requests to the current sections container."""
+    fields = args.get('fields')
+    allowed = set(schema.get('properties', {}).get('fields', {}).get('items', {}).get('enum', []))
+    if not isinstance(fields, list) or 'sections' not in allowed:
+        return args, []
+    repaired = []
+    changed = False
+    for field in fields:
+        if field in {'body', 'heading', 'slug', 'sortOrder'} and field not in allowed:
+            field = 'sections'
+            changed = True
+        if field not in repaired:
+            repaired.append(field)
+    if not changed:
+        return args, []
+    return {**args, 'fields': repaired}, ['mapped section leaf fields to sections']
 
 
 def context(proposal, current, previous_patch=None):
@@ -38,3 +58,6 @@ def context_tool(current):
                  'properties':{'fields':{'type':'array','minItems':1,'maxItems':12,
                      'uniqueItems':True,'items':{'type':'string','enum':available}}},
                  'required':['fields']}}, read, False)
+
+
+register_argument_shape_repair('commulingo_pipeline_review_context', repair_context_fields)

@@ -1,4 +1,5 @@
 from copy import deepcopy
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 import unittest
@@ -8,6 +9,7 @@ from jsonschema import Draft202012Validator
 from commulingo.pipeline.author_draft import AuthorDraft, obj
 from commulingo.pipeline.draft_repair import RepairProtocolError
 from commulingo_test_support import EditorCase
+from tool_gateway.validation import validate_tool_arguments
 
 
 def session():
@@ -33,6 +35,31 @@ def edit():
 
 
 class AuthorDraftTests(unittest.TestCase):
+    def test_saved_field_can_receive_evidence_in_separate_call(self):
+        draft = session()
+        first = draft.submission({'changes': {'bio': {'value': {'ko': '검증한 인물이다.'}}}})
+        draft.draft = {'tool': draft.name, 'args': first}
+        evidence = [{'claim': 'The archive identifies this person.', 'passages': ['P1']}]
+        call = {'changes': {'bio': {'evidence': evidence}}}
+        validated = validate_tool_arguments(draft.submit_tool['name'], call,
+                                            schema=draft.submit_tool['input_schema'], risk_class='write')
+        result = draft.submission(validated)
+        self.assertEqual(result['fields']['bio'], {'ko': '검증한 인물이다.'})
+        self.assertEqual(result['claims'], [{'field': 'bio', **evidence[0]}])
+        with self.assertRaisesRegex(RepairProtocolError, 'needs a saved value'):
+            session().submission(call)
+
+    def test_wrapped_arguments_and_single_field_evidence_are_repaired(self):
+        draft = session()
+        payload = {'changes': {'bio': {'value': {'ko': '검증한 인물이다.'}},
+                               'evidence': [{'claim': 'Supported life.', 'passages': ['P1']}]}}
+        result = validate_tool_arguments(draft.submit_tool['name'],
+                                         {'arguments': json.dumps(payload)},
+                                         schema=draft.submit_tool['input_schema'], risk_class='write')
+        self.assertEqual(result['changes']['bio']['evidence'], payload['changes']['evidence'])
+        self.assertNotIn('evidence', result['changes'])
+        self.assertEqual(draft.submission(result)['claims'][0]['passages'], ['P1'])
+
     def test_field_update_replaces_value_and_evidence_atomically(self):
         draft = session()
         draft.prepare(draft.submission(edit()))
@@ -220,8 +247,8 @@ class SubmissionShapeRepairTests(unittest.TestCase):
         value['changes']['reason'] = 'A second, different reason inside changes.'
         with self.assertRaisesRegex(ToolArgumentValidationError, 'reason'):
             self.validate(value)
-        with self.assertRaisesRegex(ToolArgumentValidationError, 'value'):
-            self.validate({**edit(), 'changes': {'years': {'evidence': []}}})
+        with self.assertRaisesRegex(RepairProtocolError, 'needs a saved value'):
+            session().submission(self.validate({**edit(), 'changes': {'years': {'evidence': []}}}))
 
 
 class AuthorWorkflowTests(EditorCase):

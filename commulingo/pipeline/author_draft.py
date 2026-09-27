@@ -53,11 +53,22 @@ def repair_submission_shape(args, schema):
     clear. Only moves that cannot change meaning are made; anything else is
     left for the validator to report.
     """
+    notes = []
+    if set(args) == {'arguments'}:
+        wrapped = args['arguments']
+        if isinstance(wrapped, str):
+            try:
+                wrapped = json.loads(wrapped)
+            except ValueError:
+                pass
+        if isinstance(wrapped, dict):
+            args = wrapped
+            notes.append('unwrapped arguments object')
     props = schema.get('properties') or {}
     field_schemas = ((props.get('changes') or {}).get('properties')) or {}
     if not field_schemas:
         return args, []
-    args, notes = dict(args), []
+    args = dict(args)
     top_keys = set(props) - {'changes'}
     loose = [key for key in args if key in field_schemas and key not in props]
     if loose and 'changes' not in args:
@@ -67,6 +78,13 @@ def repair_submission_shape(args, schema):
     if not isinstance(changes, dict):
         return args, notes
     changes = dict(changes)
+    # A split submission sometimes puts the single changed field's evidence
+    # beside it. Move it only when the destination is unambiguous.
+    if 'evidence' in changes and 'evidence' not in field_schemas:
+        named = [key for key in changes if key in field_schemas]
+        if len(named) == 1 and isinstance(changes[named[0]], dict) and 'evidence' not in changes[named[0]]:
+            changes[named[0]] = {**changes[named[0]], 'evidence': changes.pop('evidence')}
+            notes.append(f'moved changes.evidence into changes.{named[0]}')
     for key in [k for k in changes if k in top_keys and k not in field_schemas]:
         if key in args:
             continue
@@ -125,9 +143,10 @@ class AuthorDraft(DraftRepair):
             return value
         changes = obj({name: obj({'value': author_value(name, schema),
                                  'evidence': {'type': 'array', 'items': evidence,
-                                              'description': 'Omit to keep this field\'s saved evidence.'}},
-                                 ['value'])
+                                              'description': 'Omit to keep this field\'s saved evidence.'}})
                        for name, schema in fields['properties'].items()})
+        for field_schema in changes['properties'].values():
+            field_schema['anyOf'] = [{'required': ['value']}, {'required': ['evidence']}]
         outcome = obj({'status': {'type': 'string', 'enum': ['resolved', 'deferred']},
                        'reason': {'type': 'string', 'minLength': 10}}, ['status', 'reason'])
         outcomes = obj({issue['id']: deepcopy(outcome) for issue in issues})
@@ -169,7 +188,8 @@ class AuthorDraft(DraftRepair):
         self.submit_tool = {'name': SUBMIT_TOOL, 'description':
             'Submit the edit for review. Each change is {value, evidence}. Top-level keys only: changes, issues, '
             'reason, notes, remove_fields. Calls merge into one saved draft, so a large edit may be sent a few '
-            'fields per call; bilingual prose may send ko and en in separate calls. It is validated once it '
+            'fields per call; bilingual prose may send ko and en in separate calls. After saving a field value, '
+            'send {evidence:[...]} for that field alone without resending prose. It is validated once it '
             'holds both languages of each changed prose field, required fields, reason and every issue. Omit '
             'evidence to keep saved evidence. Arrays replace the whole list. No edit: commulingo_pipeline_no_edit.', 'input_schema': submit}
         self.no_edit_tool = {'name': 'commulingo_pipeline_no_edit', 'description':
@@ -205,12 +225,16 @@ class AuthorDraft(DraftRepair):
         for field in value.get('remove_fields', []):
             result.setdefault('fields', {}).pop(field, None)
         for field, change in value.get('changes', {}).items():
-            previous = result.setdefault('fields', {}).get(field)
-            incoming = deepcopy(change['value'])
-            if field in self.bilingual_fields and isinstance(previous, dict) and isinstance(incoming, dict):
-                result['fields'][field] = {**previous, **incoming}
-            else:
-                result['fields'][field] = incoming
+            saved_fields = result.setdefault('fields', {})
+            if 'value' not in change and field not in saved_fields:
+                raise RepairProtocolError(f'changes.{field}.evidence needs a saved value first.')
+            if 'value' in change:
+                previous = saved_fields.get(field)
+                incoming = deepcopy(change['value'])
+                if field in self.bilingual_fields and isinstance(previous, dict) and isinstance(incoming, dict):
+                    saved_fields[field] = {**previous, **incoming}
+                else:
+                    saved_fields[field] = incoming
             result['claims'].extend({'field': field, **deepcopy(e)} for e in change.get('evidence', []))
         outcomes = {item['id']: item for item in result.get('issue_results', [])}
         outcomes.update({key: {'id': key, **deepcopy(item)} for key, item in value.get('issues', {}).items()})

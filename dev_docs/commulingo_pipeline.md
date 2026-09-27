@@ -143,10 +143,13 @@ OpenAI 호환 응답의 도구 인자 JSON이 깨지면 같은 긴 인자를 재
 단계를 끝내지 않는다(`stages.StageContinues`, `rejections`에 세지 않음). `work_status.missing_before_validation`이
 남은 항목을 알려 준다. 긴 인자 한 번에 DeepSeek이 `{}`를 보내는 경우를 줄이려고 2026-09-25에 도입했다.
 초안 저장 후 제출에서 `evidence`를 생략한 필드는 값만 바꾸고 저장된 근거를 유지한다(인용 검사는 다시 돈다).
+이미 초안에 값이 저장된 필드는 `changes.<field> = {evidence: [...]}`만 보내 근거를 추가·교체할 수 있다.
+값이 없는 필드의 근거만 제출하면 거절한다. 긴 본문을 다시 전송하지 않아도 근거를 보완할 수 있다.
 게이트웨이는 스키마 검증 전에 제출 인자의 뜻이 분명한 구조 실수를 바로잡는다
 (`author_draft.repair_submission_shape`, `tool_gateway.validation.register_argument_shape_repair`):
 `changes` 안의 `issues`/`reason`/`notes`/`remove_fields`를 밖으로 옮기고, `changes` 없이 온 필드를 감싸고,
-`value` 안의 `evidence`를 한 단계 올리고, `{value}` 없이 온 값을 감싼다. 이미 바깥에 같은 키가 있는 등
+`value` 안의 `evidence`를 한 단계 올리고, `{value}` 없이 온 값을 감싼다. 단독 `arguments` 객체/JSON 문자열은
+풀어 정상 입력으로 검증하며, `changes`에 필드가 하나뿐일 때만 형제 `evidence`를 그 필드로 옮긴다. 이미 바깥에 같은 키가 있는 등
 뜻이 갈리는 경우는 고치지 않고 검증 오류로 돌려준다. 교정 내용은 `repaired argument shape` INFO 로그로 남는다.
 초안 저장 후 제출의 `remove_fields`는 해당 필드와 근거를 초안에서 철회하며 저장된 공개 데이터를
 삭제하지 않는다. 동일 호출에서 같은 필드를 교체하고 철회할 수 없다. 필수 필드는 철회 후보에서 뺀다
@@ -202,6 +205,8 @@ Editor 시스템 문맥에 넣지 않는다. curator 기본 프롬프트 역시 
 
 `workflow.py`는 현재 문서와의 차이, 이전 수정안과의 차이 및 이전 검토를 제공한다.
 검토자는 원문을 직접 가져와 핵심 변경 사실과 위험 항목을 확인한다.
+검토 문맥 조회에서 현재 인물 상세 절의 `body`·`heading`·`slug`·`sortOrder` 요청은
+실제 `sections` 필드 조회로 합쳐 중복 없이 반환한다. 원문 근거 조회를 대신하지 않는다.
 `required_corrections`는 사실 오류의 필드 위치와 이유를 담으며 `optional_suggestions`와 구분한다.
 선택 제안만으로 revise할 수 없고 내용·근거가 그대로인 거절안은 유료 재검토 전에 보류한다.
 reject는 complete, escalate는 escalated로 끝난다. 두 경우와, 수정 요청이 반영되지 않은 같은 patch가
