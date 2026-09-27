@@ -64,7 +64,7 @@ def affiliations_for(catalog, window=None):
 def activity_questions(catalog, evidence, window=None):
     return {
         'activity_function': {'type':'choice', 'criteria':{f['id']:f"{f['label']['en']}: {f['criteria']}" for f in catalog['functions']},
-            'instructions':'Choose the defining documented activity, not citizenship, highest incidental title, victimhood or political sympathy. Prefer the specific field that defines the career over government, even for ministers or heads of state. Government requires defining cross-policy executive management or administrative coordination; never use it as a catch-all for officials or uncertain cases. Choose an activity supported by ONE of the evidence excerpts.'},
+            'instructions':'Choose the defining documented activity, not citizenship, highest incidental title, victimhood or political sympathy. The defining career is the one the sources and card identify the person by, usually their opening description; do not replace it with a shorter or lesser-known earlier career. Prefer the specific field that defines the career over government, even for ministers or heads of state. Government requires defining cross-policy executive management or administrative coordination; never use it as a catch-all for officials or uncertain cases. A nominal or ceremonial head of state, or the chair of a legislature or its presidium, whose office defines the career while real power lay elsewhere belongs to legislature, not government. Choose an activity supported by ONE of the evidence excerpts.'},
         'activity_affiliation': {'type':'choice', 'criteria':{
             **{a['id']:f"{a['label']['en']} ({a['kind']}): {a['criteria']}" for a in affiliations_for(catalog, window)},
             'independent':'The chosen evidence explicitly establishes independent/unaffiliated activity.',
@@ -84,6 +84,8 @@ def activity_basis_question(catalog, evidence, function, group=None):
     question['instructions'] += ' Apply the selected function criteria: ' + selected['criteria']
     if function == 'government':
         question['instructions'] += ' A high office title alone is insufficient. Select unsupported unless an excerpt establishes cross-policy executive management or administrative coordination as the defining career; a specialized portfolio alone does not qualify.'
+    if function == 'legislature':
+        question['instructions'] += ' Select unsupported unless an excerpt establishes presiding over a legislature or its presidium, or a ceremonial or nominal head-of-state office, as the defining career; ordinary legislative membership does not qualify.'
     if group in FRENCH_REVOLUTION_GROUPS:
         question['instructions'] += FRENCH_REVOLUTION_BASIS
     return question

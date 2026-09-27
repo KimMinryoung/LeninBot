@@ -118,6 +118,32 @@ class ActivitiesTests(unittest.TestCase):
             self.assertTrue(out is None or out['person'] is None)
 
 
+class DefiningCareerTests(unittest.TestCase):
+    # 2026-09-27 government review: nominal heads of state and legislature chairs
+    # were stored as government or swapped for a minor earlier career.
+    def test_function_question_routes_nominal_office_to_legislature(self):
+        catalog = load_catalog()
+        q = activity_questions(catalog, EVIDENCE)['activity_function']
+        self.assertIn('legislature', q['criteria'])
+        self.assertIn('belongs to legislature, not government', q['instructions'])
+        self.assertIn('do not replace it with a shorter or lesser-known earlier career', q['instructions'])
+
+    def test_legislature_basis_requires_the_office(self):
+        from commulingo.activities import activity_basis_question
+        q = activity_basis_question(load_catalog(), EVIDENCE, 'legislature')
+        self.assertIn('ordinary legislative membership does not qualify', q['instructions'])
+        self.assertNotIn('A high office title alone is insufficient', q['instructions'])
+
+    def test_catalog_boundaries_learned_in_review(self):
+        catalog = load_catalog()
+        functions = {f['id']: f for f in catalog['functions']}
+        self.assertTrue({'legislature', 'education', 'religion'} <= set(functions))
+        self.assertIn('belong to legislature', functions['government']['criteria'])
+        self.assertIn('official mass organizations', functions['organizing']['criteria'])
+        south = next(a for a in catalog['affiliations'] if a['id'] == 'state-south-korea')
+        self.assertIn('korean-independence-movement', south['criteria'])
+
+
 class AffiliationPeriodTests(unittest.TestCase):
     """The chosen excerpt's years decide which organizations existed and are offered."""
 

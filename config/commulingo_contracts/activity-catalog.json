@@ -1,5 +1,5 @@
 {
-  "version": 12,
+  "version": 13,
   "functions": [
     {
       "id": "political-leadership",
@@ -98,7 +98,7 @@
         "en": "Social movements and organizing"
       },
       "icon": "flame",
-      "criteria": "Labor, peasant, civic or underground political organizing, activism and resistance. Not a catch-all for everyone called a revolutionary or dissident."
+      "criteria": "Labor, peasant, civic or underground political organizing, activism and resistance. Not a catch-all for everyone called a revolutionary or dissident. Running official mass organizations of a ruling system (Komsomol, official trade unions, state friendship societies) is not organizing."
     },
     {
       "id": "scholarship",
@@ -896,7 +896,7 @@
       },
       "countryCode": "south-korea",
       "icon": "landmark",
-      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify.",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify. The 1919–1948 Provisional Government of the Republic of Korea is not this state; use korean-independence-movement.",
       "periods": [
         [
           1948,
