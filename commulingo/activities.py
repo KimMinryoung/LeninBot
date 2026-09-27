@@ -75,6 +75,20 @@ def activity_questions(catalog, evidence, window=None):
     }
 
 
+def activity_basis_question(catalog, evidence, function, group=None):
+    """Use identical source-grounding criteria for registration and audits."""
+    from commulingo.classify import FRENCH_REVOLUTION_GROUPS, FRENCH_REVOLUTION_BASIS
+    question = dict(activity_questions(catalog, evidence)['activity_basis'])
+    selected = next(f for f in catalog['functions'] if f['id'] == function)
+    question['instructions'] += ' The function is fixed by selected_activity_function in the state.'
+    question['instructions'] += ' Apply the selected function criteria: ' + selected['criteria']
+    if function == 'government':
+        question['instructions'] += ' A high office title alone is insufficient. Select unsupported unless an excerpt establishes cross-policy executive management or administrative coordination as the defining career; a specialized portfolio alone does not qualify.'
+    if group in FRENCH_REVOLUTION_GROUPS:
+        question['instructions'] += FRENCH_REVOLUTION_BASIS
+    return question
+
+
 def activity_person_from(decision, catalog, evidence, group_ids, accept=0.7):
     group = decision.choice('group')
     function = decision.choice('activity_function')

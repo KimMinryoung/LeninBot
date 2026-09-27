@@ -626,7 +626,7 @@ def classify_person_card(fields: dict, *, catalogs=None, claims: dict | None = N
     groups = groups_for_years(groups, fields.get("years"))
     questions = person_card_questions(fields, groups, offices, categories, sorted(_NATIONALITY_CODES),
                                       sorted(_NATIONAL_ORIGIN_CODES), codes=codes)
-    from commulingo.activities import activity_evidence, activity_questions, activity_person_from, excerpt_years, load_catalog
+    from commulingo.activities import activity_evidence, activity_questions, activity_person_from, activity_basis_question, excerpt_years, load_catalog
     basis = activity_evidence(fields, claims)
     if not basis and not legacy:
         logger.warning("activity classification requires cited career/bio evidence excerpts; no legacy fallback")
@@ -657,14 +657,7 @@ def classify_person_card(fields: dict, *, catalogs=None, claims: dict | None = N
         # (or the adult life when it names none) decide which affiliations
         # existed and are offered, so an 1830 excerpt is never read as service
         # to the First Republic (job 63829, Lafayette, 2026-09-26).
-        basis_q = dict(activity_q['activity_basis'])
-        basis_q['instructions'] += ' The function is fixed by selected_activity_function in the state.'
-        selected_function = next(f for f in activity_catalog['functions'] if f['id'] == function)
-        basis_q['instructions'] += ' Apply the selected function criteria: ' + selected_function['criteria']
-        if function == 'government':
-            basis_q['instructions'] += ' A high office title alone is insufficient. Select unsupported unless an excerpt establishes cross-policy executive management or administrative coordination as the defining career; a specialized portfolio alone does not qualify.'
-        if decision.choice('group') in FRENCH_REVOLUTION_GROUPS:
-            basis_q['instructions'] += FRENCH_REVOLUTION_BASIS
+        basis_q = activity_basis_question(activity_catalog, basis, function, decision.choice('group'))
         basis_result = (decide or decide_detailed)(FEATURE, state,
             {'activity_basis': basis_q}, label='person-activity-basis')
         if basis_result.decision is None:

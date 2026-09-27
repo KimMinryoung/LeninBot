@@ -51,7 +51,14 @@ CommuLingo의 필요한 설명·라벨·원문 발췌 전송과 자동 실행은
 
 일당제 현실 사회주의 체제 내의 집권당·국가기관 활동은 국가 이름과 `kind=state`인 소속 ID로 판정하며, 국가 관계는 `service`로 저장한다. 건국 전 정당 활동과 체제 반대파는 해당 정당·세력 또는 미확정 소속으로 구분한다. 정당 카탈로그의 `governingState`와 criteria가 적용 기간을 명시하며, 국가에 `membership`을 쓰는 요청은 frontend가 거부한다. 옛 역할 매핑도 국가 ID를 사용하지만 건국 전에 사망한 인물은 `legacyBeforeState`에 따라 정당에 남긴다.
 
-`list_activity_catalog`가 공통 카탈로그를 반환하고 `get_person.activities`는 원본 활동 묶음을 반환한다. 각 활동은 functionId, affiliationId/affiliationStatus, relation, 기간, primary, evidence를 가진다. 국적이나 연구 주제를 소속으로 대신하지 않는다. `scripts/audit_person_activities.py`는 전체 공개 사전의 기능·소속 후보를 JSONL에 기록하며 사전을 수정하지 않는다. 자동 판정과 출처 검토를 마친 배정을 구별한다.
+`list_activity_catalog`가 공통 카탈로그를 반환하고 `get_person.activities`는 원본 활동 묶음을 반환한다. 각 활동은 functionId, affiliationId/affiliationStatus, relation, 기간, primary, evidence를 가진다. 국적이나 연구 주제를 소속으로 대신하지 않는다. `scripts/audit_person_activities.py`는 공개 인물 API의 현재 대표 기능과 Jev 후보를 비교하는 읽기 전용 감사다. 기본 대상은 `government`, `--function all`이면 전체다. 공개 약력·경력과 기존 활동의 출처 발췌만 전송하고 기존 분류값은 판정 입력에서 제외한다. 기능 판정 후 발췌가 있으면 신규 등록과 같은 `activity_basis_question`으로 근거를 확인한다. 발췌가 없으면 약력 기반 후보만 기록한다(`needs_source`). 소속·시대 그룹은 재분류하지 않는다.
+
+```bash
+venv/bin/python scripts/audit_person_activities.py --function government --concurrency 8 --out logs/commulingo/government-review.jsonl
+# 같은 입력 스냅샷으로 이어하기: --input /path/to/public-people.json
+```
+
+`--limit`으로 소규모 검사를 할 수 있다. JSONL은 완료 순서로 즉시 저장하며 동일 인물·입력·카탈로그·질문·모델 설정·문턱값 결과를 재사용하고 오류는 재시도한다. `.md`는 변경 후보와 미확정 사례, `.summary.json`은 상태별 수·이번 실행 호출 수와 보고된 비용을 기록한다. `source_supported_candidate`도 Jev의 근거 선택 결과이며 독립 검토·저장 승인이 아니다. `low_confidence`, `unsupported`, `needs_source`, `error`를 구분한다. 기존 출처가 빈약하거나 편향되어 있으면 실제 대표 경력을 놓칠 수 있으므로 후보는 원문 검토 후 공통 편집 서비스로 정정한다. DB 접근·자동 반영 옵션은 없다.
 
 `scripts/commulingo_classification_audit.py`는 저장값과 고신뢰 판정이 다른 인물을 보고한다.
 감사 자체는 쓰지 않는다. 정정은 근거를 갖춘 공통 편집 서비스의 제출·승인을 거친다.
