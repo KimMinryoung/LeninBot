@@ -644,7 +644,10 @@ def _search_people(q: str, group_id: str, limit: int, function_id: str = "", aff
                      WHEN %(legacy)s::jsonb ? COALESCE(r.office_id, r.category_id)
                      THEN jsonb_build_array(jsonb_build_object(
                        'functionId', %(legacy)s::jsonb -> COALESCE(r.office_id, r.category_id) -> 0,
-                       'affiliationId', %(legacy)s::jsonb -> COALESCE(r.office_id, r.category_id) -> 1))
+                       'affiliationId', CASE
+                         WHEN p.death_year < (%(legacy_before_state)s::jsonb -> COALESCE(r.office_id, r.category_id) ->> 'startYear')::int
+                         THEN %(legacy_before_state)s::jsonb -> COALESCE(r.office_id, r.category_id) -> 'affiliationId'
+                         ELSE %(legacy)s::jsonb -> COALESCE(r.office_id, r.category_id) -> 1 END))
                      ELSE '[]'::jsonb END
                    ) a WHERE (%(function)s = '' OR a->>'functionId' = %(function)s)
                      AND (%(affiliation)s = '' OR a->>'affiliationId' = ANY(%(descendants)s::text[]))

@@ -24,13 +24,24 @@ class ActivitiesTests(unittest.TestCase):
         self.assertIn('unresolved',q['activity_affiliation']['criteria'])
         self.assertNotIn('role_china',q)
 
-    def test_party_state_organs_are_offered_only_as_the_ruling_party(self):
-        q=activity_questions(load_catalog(),EVIDENCE)['activity_affiliation']
-        for retired in ('china-prc','state-soviet','state-east-germany','state-north-korea'):
-            self.assertNotIn(retired,q['criteria'])
-        self.assertIn('Party-state rule: 1949 onward',q['criteria']['china-ccp'])
-        self.assertIn('party-polish-pzpr',q['criteria']['state-poland'])
-        self.assertIn('party-state is one affiliation',q['instructions'])
+    def test_socialist_systems_use_states_and_keep_opposition_parties_separate(self):
+        catalog = load_catalog()
+        q = activity_questions(catalog, EVIDENCE)['activity_affiliation']
+        for state in ('china-prc', 'state-soviet', 'state-east-germany', 'state-north-korea'):
+            self.assertIn(state, q['criteria'])
+        self.assertIn('opposition', q['instructions'])
+        self.assertIn('pre-state', q['criteria']['china-ccp'])
+        self.assertNotIn('china-prc', activity_questions(catalog, EVIDENCE, (1921, 1927))['activity_affiliation']['criteria'])
+        self.assertIn('china-ccp', activity_questions(catalog, EVIDENCE, (1921, 1927))['activity_affiliation']['criteria'])
+        for affiliation in catalog['affiliations']:
+            if affiliation.get('governingState'):
+                state = next(a for a in catalog['affiliations'] if a['id'] == affiliation['governingState']['id'])
+                self.assertEqual(state['kind'], 'state')
+                out = activity_person_from(verdict(activity_affiliation=state['id']), catalog, EVIDENCE, {'international-revolutionary'})
+                self.assertEqual(out['activities'][0]['relation'], 'service')
+                self.assertEqual(out['activities'][0]['affiliationId'], state['id'])
+        party = activity_person_from(verdict(activity_affiliation='china-ccp'), catalog, EVIDENCE, {'international-revolutionary'})
+        self.assertEqual(party['activities'][0]['relation'], 'membership')
 
     def test_unknown_affiliation_stays_unknown_and_unsupported_is_rejected(self):
         out=activity_person_from(verdict(activity_affiliation='unresolved'),load_catalog(),EVIDENCE,{'international-revolutionary'})
