@@ -37,9 +37,14 @@ class DeepSeekSelectionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             models.set_selected_model_choice("unknown")
 
-    def test_scheduled_agent_and_oneshot_defaults_use_flash(self):
+    def test_commulingo_uses_luna_none_and_deepseek_defaults_still_use_flash(self):
         from agents.commulingo_curator import COMMULINGO_CURATOR
-        self.assertEqual(COMMULINGO_CURATOR.model, "deepseek_flash")
+        from bot_config import resolve_agent_tool_loop
+        from tool_gateway.inference import resolve_agent_inference_policy
+        with patch('bot_config._openai_client', object()):
+            binding = resolve_agent_tool_loop(COMMULINGO_CURATOR, resolve_agent_inference_policy(COMMULINGO_CURATOR))
+        self.assertEqual(binding.model, 'gpt-6-luna')
+        self.assertEqual(binding.reasoning['extra_body'], {'reasoning_effort':'none'})
         root = Path(__file__).resolve().parents[1]
         for filename in ("agent_runtime.json", "llm_call_sites.json"):
             path = root / "config" / filename

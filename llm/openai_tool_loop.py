@@ -187,7 +187,7 @@ def _convert_tool_anthropic_to_openai(tool: dict) -> dict:
         "description": tool.get("description", ""),
         "parameters": params,
     }
-    if params.get("additionalProperties") is False and _is_strict_safe_schema(params):
+    if tool.get("strict") is True or (params.get("additionalProperties") is False and _is_strict_safe_schema(params)):
         func_def["strict"] = True
     return {"type": "function", "function": func_def}
 

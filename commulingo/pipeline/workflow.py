@@ -60,11 +60,19 @@ class Review:
             'required_corrections':{'type':'array','items':{'type':'object','additionalProperties':False,
                 'properties':{'path':{'type':'string','pattern':'^/fields/'},
                               'reason':{'type':'string','minLength':10}}, 'required':['path','reason']}},
-            'optional_suggestions':{'type':'array','items':{'type':'string'}}})
-        tool['input_schema']['required'] += ['required_corrections','optional_suggestions']
+            'optional_suggestions':{'type':'array','items':{'type':'string'}},
+            'coverage': {'type':'object','additionalProperties':False,
+                'properties': {'sufficient':{'type':'boolean'},
+                    'reason':{'type':'string','minLength':20,
+                        'description':'Assess whether the title and commissioned topic are answered, using the original sources and existing text. Identify material omissions, not optional expansion.'}},
+                'required':['sufficient','reason']}})
+        tool['input_schema']['required'] += ['required_corrections','optional_suggestions','coverage']
 
         async def finish(value):
             corrections = value.get('required_corrections', [])
+            coverage = value['coverage']
+            if not coverage['sufficient'] and (value['decision']=='approve' or not corrections):
+                raise ValueError('Material omissions require non-approval and evidence-backed required_corrections.')
             if value['decision']=='revise' and not corrections:
                 raise ValueError('revise requires specific factual corrections; optional suggestions alone warrant approval')
             if value['decision']=='approve' and corrections:
@@ -73,9 +81,9 @@ class Review:
                 key = correction['path'].split('/')[2].replace('~1','/').replace('~0','~')
                 if key not in draft['fields']:
                     raise ValueError('required correction must identify a field in the reviewed patch')
-            decision = {k:v for k,v in value.items() if k not in {'required_corrections','optional_suggestions'}}
+            decision = {k:v for k,v in value.items() if k not in {'required_corrections','optional_suggestions','coverage'}}
             result = await handlers[DECISION_TOOL['name']](**decision)
-            box.update(required_corrections=corrections, optional_suggestions=value.get('optional_suggestions',[]),
+            box.update(coverage=coverage, required_corrections=corrections, optional_suggestions=value.get('optional_suggestions',[]),
                        reviewed_patch_hash=digest, baseline=research.get('baseline',''), editor_version=2)
             if value['decision']=='approve':
                 box['approved_patch_hash'] = digest
@@ -99,7 +107,13 @@ class Review:
             'Review the actual delta. Do not expand the article or request stylistic rewrites. '
             'On re-review first check previous required corrections and newly changed facts; preserve prior '
             'accepted conclusions unless new conflicting evidence appears. Required corrections are only material '
-            'factual errors, unsupported core assertions or bilingual contradictions. Put optional improvements '
+            'factual errors, unsupported core assertions, bilingual contradictions, or material omissions. '
+            'Assess coverage explicitly: does the body answer its title and commissioned topic, and add '
+            'useful supported information beyond the existing biography? A missing central role, action, '
+            'outcome or causal link that makes the account misleading requires correction backed by a '
+            'retrieved source and an existing /fields/... path. Archive catalog descriptions and general '
+            'caveats cannot substitute for the subject’s documented actions. Do not demand length, '
+            'extra background or unsupported speculation. Put optional improvements '
             'in optional_suggestions; they must not prevent approval. If an unchanged field is included solely '
             'to attach missing evidence, verify that evidence without requiring additional prose. '
             'Proposed values appear once in suggestion.patch_json; changes lists their old values with '

@@ -146,6 +146,17 @@ class SourceAndIssueTests(EditorCase):
         errors = json.loads(prose_errors({'body':{'en':'A clause — another clause.',
             'ko':'「스페인의 교훈 — 마지막 경고」'}}))
         self.assertEqual([e['path'] for e in errors],['/fields/body/en'])
+    def test_displayed_passage_markers_are_rejected_only_in_public_prose(self):
+        from commulingo.pipeline.diagnostics import prose_errors
+        fields = {'body':{'ko':'판결을 받았다. (P65)', 'en':'The P-51 flew. [P12, P65]'}}
+        original = deepcopy(fields)
+        errors = json.loads(prose_errors(fields, passage_labels={'P65'}))
+        self.assertEqual([e['path'] for e in errors], ['/fields/body/ko','/fields/body/en'])
+        self.assertIn('retain passage references in evidence', errors[0]['message'])
+        self.assertEqual(fields, original)
+        self.assertEqual(prose_errors({'body':{'en':'P-51 (P-51); P65 is a name.'}}, passage_labels={'P65'}), '')
+        self.assertEqual(prose_errors(fields), '')
+
     def test_commissions_are_defects_not_prose_quotas(self):
         self.assertEqual([i['id'] for i in commission(JOB,CURRENT)], ['missing:body'])
         full = {**CURRENT,'body':{'ko':'본문','en':'Body'},'evidence':[{'field':'body'}]}
@@ -942,12 +953,16 @@ class ReviewAndPublishTests(EditorCase):
         artifacts = self.artifacts()
         value = {'decision':'approve','reason':'The original archive verifies the changed facts.',
                  'resolved_risks':[], 'checks':[{'citation_id':'S1','passages':['P1'],'finding':'The source verifies the explanation.'}],
-                 'required_corrections':[], 'optional_suggestions':['Could add a later example.']}
+                 'required_corrections':[], 'coverage':{'sufficient':True,'reason':'The commissioned topic is adequately covered.'}, 'optional_suggestions':['Could add a later example.']}
         async def model(**kwargs):
             fetch = kwargs['read_wrap']('fetch_url',None)
             await fetch(url=URL)
             with self.assertRaisesRegex(ValueError,'specific factual corrections'):
                 await kwargs['handler']({**value,'decision':'revise'})
+            with self.assertRaisesRegex(ValueError, 'Material omissions'):
+                await kwargs['handler']({**value, 'coverage':{'sufficient':False,
+                    'reason':'The subject’s documented role is missing.'}})
+            self.assertIn('material omissions', kwargs['prompt'])
             await kwargs['handler'](value)
         reads = {name:AsyncMock(return_value=f'<external source="web">\n{BODY}\n</external>')
                  for name in ('wiki_search','wiki_get','web_search','fetch_url','commulingo_people')}
@@ -1024,7 +1039,7 @@ class ReviewAndPublishTests(EditorCase):
 
     def verdict(self, decision, corrections=()):
         return {'decision':decision,'reason':'Verified against the original archive.','checks':[],
-                'resolved_risks':[],'required_corrections':list(corrections),'optional_suggestions':[]}
+                'resolved_risks':[],'required_corrections':list(corrections),'coverage':{'sufficient':True,'reason':'The commissioned topic is adequately covered.'}, 'optional_suggestions':[]}
 
     async def test_review_routes_each_decision_and_holds_only_an_unchanged_patch(self):
         correction = [{'path':'/fields/body','reason':'The date contradicts the original.'}]

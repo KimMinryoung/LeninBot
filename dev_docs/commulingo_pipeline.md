@@ -6,7 +6,10 @@
 
 ## 운영 경로와 승인 범위
 
-운영 설정은 `workflow=editor`, `phase=live`다. workflow는 `editor`만 허용하며 미지정 기본값도 `editor`다.
+운영 설정은 `workflow=editor`, `phase=live`다. 작성 모델은 GPT-6 Luna (`provider=openai`,
+`model=gpt6luna`, `thinking_policy=disabled` → Responses `reasoning.effort=none`)이며 제출·무편집
+도구는 strict로 전달한다. 기본 AgentSpec·설정 예제·운영 agent_runtime 설정을 같은 값으로 유지한다.
+독립 검토 모델은 기존 DeepSeek을 유지한다. timer의 다음 새 프로세스부터 설정이 적용된다. workflow는 `editor`만 허용하며 미지정 기본값도 `editor`다.
 옛 두 RPC 방식의 legacy 단계(`Research`·`Draft`·`Review`·`validate`·`submit`)는 2026-09-24에 제거했다.
 `leninbot-commulingo-pipeline.timer`가 배치를 실행하고, 별도 `leninbot-commulingo-review.timer`는 비활성화되어 있다.
 독립 검토는 editor 안에서 수행한다. 사건 작성·인물-사건 연결의 기존 batch는
@@ -91,6 +94,20 @@ Jev에 질의한다. 질문별 판정은 독립적이므로 후속 질의 state�
 
 미완성 부분 저장과 최종 스키마 반려는 모두 독립된 초안 사본을 남긴다.
 독립 검토·승인 해시·게시 시 revision 검증은 기존 경로를 따른다.
+
+OpenAI 작성 세션은 `strict_input.py`에서 제출·무편집 도구의 wire schema만 strict로 변환한다.
+모든 속성을 required로 보내고 선택값의 null은 생략으로 복원한다. 원래 null을 허용하는 선택 필드는
+`{value: null}`이 실제 초기화이고, 바깥 null은 변경 없음이다. 필드 철회는 기존 remove_fields를 쓴다.
+uniqueItems 등 wire에서 제거한 제약은 원래 입력 스키마로 다시 검증하며, 영속 계약은 바꾸지 않는다.
+다른 provider와 조회 도구에는 이 변환을 적용하지 않는다.
+
+독립 검토의 `coverage`는 sufficient와 reason을 필수로 기록한다. 제목·commission에 필요한 핵심
+행위·역할·결과가 빠져 오해를 일으키거나 주제에 답하지 못하면, 원문 근거와 기존 필드 경로를 갖춘
+required_corrections를 요구한다. coverage.sufficient=false인 결과는 승인할 수 없다.
+분량·선택적 배경 정보는 반려 사유가 아니며 자료 목록 설명이나 일반적인 유보문으로 핵심 사실을
+대체했는지도 검토한다. 기존 bio와 일치한다는 이유만으로 신규 본문의 중심 주장을 승인하지 않고
+원문으로 확인한다. 작성 검증은 공개 필드의 `(P65)`·`[P65]` 같은 실제 표시된 내부 passage 표지를
+정확한 필드 경로와 함께 반려하며, 근거 목록의 passage 참조는 유지한다.
 
 
 | 세션 내부 도구 | 역할 |

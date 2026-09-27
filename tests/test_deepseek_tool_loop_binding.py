@@ -1,5 +1,6 @@
 """DeepSeek tool loops use the OpenAI-compatible endpoint by default."""
 import os
+from dataclasses import replace
 import unittest
 from unittest.mock import patch
 
@@ -10,11 +11,12 @@ from tool_gateway.inference import resolve_agent_inference_policy
 
 class DeepSeekToolLoopBindingTests(unittest.TestCase):
     def binding(self, **env):
-        policy = resolve_agent_inference_policy(COMMULINGO_CURATOR)
+        spec = replace(COMMULINGO_CURATOR, provider="deepseek", model="deepseek_flash", thinking_policy="tool_loop")
+        policy = resolve_agent_inference_policy(spec)
         with patch.dict(os.environ, env), \
              patch.object(bot_config, '_deepseek_client', object()), \
              patch.object(bot_config, '_deepseek_anthropic_client', object()):
-            return bot_config.resolve_agent_tool_loop(COMMULINGO_CURATOR, policy)
+            return bot_config.resolve_agent_tool_loop(spec, policy)
 
     def test_openai_compatible_endpoint_is_the_default(self):
         binding = self.binding()

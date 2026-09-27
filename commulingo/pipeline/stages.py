@@ -181,10 +181,18 @@ async def model_call(*, spec, prompt, tool, handler, reads, usage, budget, read_
         )])
     async def run(spec):
         binding = resolve_agent_tool_loop(spec,policy)
+        run_tools = [*tools, tool]
+        run_handlers = dict(handlers)
+        if binding.render_provider == 'openai':
+            from .strict_input import strict_tool
+            for index, definition in enumerate(run_tools):
+                name = definition['name']
+                if name in {'commulingo_pipeline_submit_draft', 'commulingo_pipeline_no_edit'}:
+                    run_tools[index], run_handlers[name] = strict_tool(definition, handlers[name])
         with caller_scope(context):
             usage.started = True
             await binding.chat(messages(),
-                client=binding.client,model=binding.model,tools=[*tools,tool],tool_handlers=handlers,
+                client=binding.client,model=binding.model,tools=run_tools,tool_handlers=run_handlers,
                 system_prompt=spec.render_prompt(provider=binding.render_provider),
                 max_rounds=min(policy.max_rounds,max_rounds),max_tokens=policy.max_output_tokens,
                 max_input_tokens=policy.max_input_tokens,budget_usd=budget,budget_tracker=usage.tracker,

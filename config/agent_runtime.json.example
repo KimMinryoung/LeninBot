@@ -68,14 +68,14 @@
     "max_rounds": 40
   },
   "commulingo_curator": {
-    "provider": "deepseek",
-    "model": "deepseek_flash",
+    "provider": "openai",
+    "model": "gpt6luna",
     "budget_usd": 0.35,
     "max_rounds": 16,
     "max_input_tokens": 160000,
     "max_output_tokens": 16000,
     "max_output_continuations": 2,
-    "thinking_policy": "tool_loop",
+    "thinking_policy": "disabled",
     "thinking_budget_tokens": 8192,
     "finalization_tools": [
       "commulingo_person_create",

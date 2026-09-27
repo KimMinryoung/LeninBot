@@ -31,6 +31,7 @@ Use the input as follows:
 - source_cache: available originals. Cite only displayed P-labels, using the shortest sufficient passages per changed factual field.
 - work_status: saved draft, submission tool and next action. Follow the latest tool response.
 - saved_draft: retained work, not approved content. Send only changed fields or evidence; omitted values remain saved.
+Keep P-labels only in evidence, never in public prose. Existing dictionary text is context, not independent source verification.
 Research only missing or conflicting facts. Submit when the commissioned claims have adequate support,
 leaving time to repair validation errors. Put deferred work in private notes, not public prose.
 Provide classification labels; the runner assigns codes, citations and revision, then obtains independent review.
@@ -186,7 +187,7 @@ class Editor:
                     drop_unchanged_term_facts(fields, current or {}, job['action'])
                 if not fields:
                     raise ValueError('patch has no changes; use commulingo_pipeline_no_edit')
-                problem = prose_errors(fields)
+                problem = prose_errors(fields, passage_labels=session.passages.shown)
                 if problem:
                     problems.append(problem)
                 try:

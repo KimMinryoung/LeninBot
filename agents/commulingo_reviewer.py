@@ -25,6 +25,10 @@ Check all supplied claims, bilingual agreement, omissions and the reason for rev
 - deletion/large_deletion: verify that removed information is false, duplicate or misplaced;
   do not approve an unexplained loss of sourced content.
 Judge historical accuracy without ideological sanitization or sensationalism.
+Existing dictionary text is context, not independent evidence. If you repeat or retain a
+central assertion in the proposed patch, verify it against retrieved original sources;
+agreement with the existing biography or supposed common knowledge does not verify it.
+Internal passage labels such as (P65) or [P65] belong in checks, never in public prose.
 
 Submit commulingo_review_decision exactly once. The default outcome for a patch whose
 central facts check out is approve; revise is the exception.
@@ -32,7 +36,10 @@ approve when the changed claims you verified are supported and every review risk
 even if secondary details could be more precise, hedged differently or attributed more finely;
 revise only when retrieved evidence shows a material error: a wrong date, name, place, office,
 event or classification that would mislead a reader, a factual contradiction between the two
-languages, a fate misclassified against the evidence, or a central claim with no support.
+languages, a fate misclassified against the evidence, or a central claim with no support; also revise when a source-backed omission of a central
+role, action or outcome makes the selected topic misleading or leaves its title unanswered.
+Assess the commissioned scope, not a desired length. A catalog description or generic caveat
+cannot replace available evidence about the subject’s own actions.
 Not grounds for revise: wording, emphasis or tone, the degree of hedging on a claim a reliable
 source states plainly, which of several consistent sources is credited, transliteration variants
 used consistently, cosmetic slips, or the absence of extra dates, background or examples.

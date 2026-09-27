@@ -214,18 +214,16 @@ COMMULINGO_CURATOR = AgentSpec(
         "commulingo_person_create", "commulingo_person_update",
         "commulingo_section_save", "commulingo_event_link", "commulingo_term_create",
     ],
-    # 2026-08-29: GPT-5.6 Luna → DeepSeek V4 Pro. Luna's lower token price
-    # did not offset recurring foreign-language leakage in Korean public text;
-    # the write-boundary script validator remains as a provider-independent
-    # final guard.
-    provider="deepseek",
-    model="deepseek_flash",
+    # GPT-6 Luna uses strict pipeline submission; local prose and evidence checks
+    # remain mandatory regardless of provider.
+    provider="openai",
+    model="gpt6luna",
     budget_usd=0.35,
     max_rounds=16,
     max_input_tokens=160_000,
     max_output_tokens=16_000,
     max_output_continuations=2,
-    thinking_policy="tool_loop",
+    thinking_policy="disabled",
     thinking_budget_tokens=8_192,
     include_political_line=False,
 )

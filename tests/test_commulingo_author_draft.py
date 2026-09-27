@@ -200,7 +200,7 @@ class AuthorWorkflowTests(EditorCase):
             await kwargs['read_wrap']('fetch_url', None)(url=URL)
             await kwargs['handler']({'decision':'approve','reason':'Independent original verifies the changed facts.',
                 'resolved_risks':[], 'checks':[{'citation_id':'S1','passages':['P1'], 'finding':'The explanation matches the original.'}],
-                'required_corrections':[], 'optional_suggestions':[]})
+                'required_corrections':[], 'coverage':{'sufficient':True,'reason':'The commissioned topic is adequately covered.'}, 'optional_suggestions':[]})
         with patch('commulingo.pipeline.service.call', return_value=CURRENT), \
              patch('commulingo.pipeline.stages.model_call', side_effect=author):
             result = await Editor(store_mock())(JOB, [], Usage(), .2)
@@ -234,18 +234,21 @@ class AuthorWorkflowTests(EditorCase):
             self.assertIn(name, kwargs['terminal_tools'])
             self.assertIn(name, kwargs['finalization_tools'])
             value = {'status':'sources_unavailable', 'reason':'No original is available for this issue.',
-                     'issues':{'missing:bio':{'status':'deferred', 'reason':'No accessible original source.'}}}
+                     'issues':{'missing:bio':{'status':'deferred', 'reason':'No accessible original source.'}}, 'notes':None}
+            wire = next(t for t in kwargs['tools'] if t['name']==name)
+            self.assertTrue(wire['strict'])
             with patch('tool_gateway.security.audit'):
                 response, failed = await execute_tool(name, value, kwargs['tool_handlers'],
-                                                       tool_schema=draft.no_edit_tool)
+                                                       tool_schema=wire)
             self.assertFalse(failed, response)
             kwargs['budget_tracker']['total_cost'] = 0
-        binding = SimpleNamespace(chat=chat, client=None, model='fixture', render_provider='deepseek', reasoning={})
+        binding = SimpleNamespace(chat=chat, client=None, model='fixture', render_provider='openai', reasoning={})
         with patch('bot_config.resolve_agent_tool_loop', return_value=binding):
             await model_call(spec=spec('research'), prompt='Fixture commission.', tool=draft.submit_tool,
                 handler=handler, reads=set(), usage=Usage(), budget=.2,
                 local_tools=[(draft.no_edit_tool, no_edit, True)])
         no_edit.assert_awaited_once()
+        self.assertNotIn('notes', no_edit.call_args.kwargs)
         handler.assert_not_awaited()
 
     async def test_saved_partial_submission_does_not_finish_terminal_stage(self):

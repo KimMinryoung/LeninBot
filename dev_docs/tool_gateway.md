@@ -125,6 +125,10 @@ handler는 조사/발견/초안 artifact를 반환하며 사전 저장 권한은
 제한하며 전역 registry에 노출하지 않는다. 제출 도구는 초안 전체 재검증 후에만 단계를 종료한다.
 도구별 인자 구조 교정은 `register_argument_shape_repair`로 등록하며 스키마 검증 직전에 적용된다.
 작성 도구는 제공자의 단독 arguments 포장만 풀고, 검토 문맥 도구는 절 필드를 sections 조회로 매핑한다.
+OpenAI 작성의 제출·무편집 도구는 strict wire schema를 사용한다. Dispatcher에서 wire를 검증한 뒤
+전용 adapter가 선택값 null을 생략으로 복원하고 원래 스키마를 재검증한다. 실제 null 초기화는
+별도 value 포장으로 구분한다. wire에서 빠진 uniqueItems 등의 제약은 이 두 번째 검증에서 유지하며,
+위반은 짧은 ToolRejection으로 반환한다. 권한·대상·revision 검사는 그대로 적용한다.
 별도의 조사 재개 도구와 형식 수정 중 조회 차단은 제거했다. 조사에는 공통 권한·예산·실패 URL 억제가 적용된다.
 
 ## Evidence in tool results

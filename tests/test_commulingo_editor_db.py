@@ -98,7 +98,7 @@ class EditorDatabaseTests(unittest.IsolatedAsyncioTestCase):
             else:
                 await kwargs['handler']({'decision':'approve','reason':'Independent original text supports the changed historical explanation.',
                     'resolved_risks':[], 'checks':[{'citation_id':'S1','passages':['P1'],'finding':'The original confirms the explanation.'}],
-                    'required_corrections':[], 'optional_suggestions':[]})
+                    'required_corrections':[], 'coverage':{'sufficient':True,'reason':'The commissioned topic is adequately covered.'}, 'optional_suggestions':[]})
         from commulingo.pipeline.stages import READS
         reads = {name:AsyncMock(return_value=f'<external source="web">\n{text}\n</external>') for name in READS}
         with patch('commulingo.pipeline.service.call',side_effect=self.rpc), \
