@@ -30,6 +30,11 @@ Finish this stage with commulingo_pipeline_result; do not attempt unavailable wr
 '''
 
 WRITING_RULES = '''Korean and English must express equivalent claims. Write natural Korean 한다체 and fluent English.
+Spend the text on substance: what the subject did, decided and caused, with dates, figures, places,
+people and outcomes. Do not end a paragraph with an evaluative summary of what it shows, marks or
+illustrates, and do not describe what the sources fail to say. Mention sources in the prose only
+when the reader needs it: conflicting accounts, a disputed or partisan claim, or an attribution
+that changes how a fact should be read.
 Use card definitions/biographies for concise explanation and body/sections for depth. Do not
 expand to a character target. Preserve existing information and complete replacement lists.
 For terms, explain meaning, historical context, distinctions or examples only as commissioned.

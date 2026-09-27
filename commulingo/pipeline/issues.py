@@ -20,7 +20,12 @@ def commission(job, current):
             if not current.get('sections'):
                 issues.append({'id':'missing:sections', 'field':'body', 'topic':topic,
                     'problem':'No detail section exists for this person.',
-                    'done_when':'Add one distinct, well-documented bilingual detail section with body evidence, or explain why this life does not warrant one.'})
+                    'done_when':('Add one distinct bilingual detail section built from documented actions, decisions, '
+                        'dates, figures and outcomes the card does not already give, with body evidence. Read at '
+                        'least two independent sources before writing; rest the section mainly on one source only '
+                        'when that source is substantial and the others add nothing. If the material is one thin '
+                        'source (a short encyclopedia entry, an obituary, a catalogue note) or only restates the '
+                        'bio, finish with the no-edit tool and say why.')})
             continue
         fields = (PERSON if job['kind']=='person' else TERM).get(topic, ())
         for field in fields:
