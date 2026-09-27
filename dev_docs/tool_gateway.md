@@ -119,13 +119,13 @@ venv/bin/python -m py_compile tool_gateway/*.py runtime_tools/allowlists.py agen
 commulingo_curator만 실행할 수 있으며 현재 단계의 JSON schema를 dispatcher가 검증한다.
 handler는 조사/발견/초안 artifact를 반환하며 사전 저장 권한은 제공하지 않는다.
 실제 저장은 실행기가 고정된 대상·revision·검토 판단으로 private frontend RPC를 호출한다.
-편집기는 단계 결과 도구 대신 `commulingo_pipeline_submit_draft`(state, 최초 전체 제출과 이후 병합 수정을 겸함),
+편집기는 단계 결과 도구 대신 `commulingo_pipeline_submit_draft`(state, 평탄한 fields/evidence 제출과 병합 수정),
 `commulingo_pipeline_no_edit`(state), `commulingo_pipeline_cached_passages`와
 `commulingo_pipeline_context`(read)를 로컬로 주입한다. 모두 소유자 권한의 commulingo_curator로
 제한하며 전역 registry에 노출하지 않는다. 제출 도구는 초안 전체 재검증 후에만 단계를 종료한다.
-도구별 인자 구조 교정은 `register_argument_shape_repair`로 등록하며 스키마 검증 직전에 적용된다(현재 편집기 제출 도구만).
-`commulingo_pipeline_research`(state)도 같은 권한으로 로컬 주입되며, 형식 수정 중 필요한 사실 조사를
-필드·이유와 함께 재개한다. 공개 저장 권한은 없다.
+도구별 인자 구조 교정은 `register_argument_shape_repair`로 등록하며 스키마 검증 직전에 적용된다.
+작성 도구는 제공자의 단독 arguments 포장만 풀고, 검토 문맥 도구는 절 필드를 sections 조회로 매핑한다.
+별도의 조사 재개 도구와 형식 수정 중 조회 차단은 제거했다. 조사에는 공통 권한·예산·실패 URL 억제가 적용된다.
 
 ## Evidence in tool results
 

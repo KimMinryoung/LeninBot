@@ -1,10 +1,9 @@
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import patch
 from types import SimpleNamespace
 from commulingo_test_support import HermeticAsyncCase
 from commulingo.pipeline.decisions import Decisions
-from commulingo.pipeline.editor_context import RepairReads, prose_budgets
+from commulingo.pipeline.editor_context import prose_budgets
 from commulingo.pipeline.engine import Usage
-from tool_gateway.results import ToolRejection
 
 
 class DecisionTests(HermeticAsyncCase):
@@ -40,17 +39,6 @@ class DecisionTests(HermeticAsyncCase):
         self.assertAlmostEqual(usage.tracker['jev_cost_usd'],.0001)
         self.assertAlmostEqual(usage.tracker['total_cost'],.01)
         self.assertEqual(usage.tracker['jev_calls'],1)
-
-    async def test_format_repair_blocks_search_but_explicit_research_can_resume(self):
-        sources = Mock(); call = AsyncMock(return_value='source')
-        sources.wrap.return_value = call
-        reads = RepairReads(sources,True)
-        fetch = reads.wrap('fetch_url',call)
-        with self.assertRaises(ToolRejection): await fetch(url='https://example.org')
-        call.assert_not_called()
-        _,reopen,_ = reads.tool(['body'],Usage())
-        await reopen(fields=['body'],reason='The date conflicts with the source.')
-        self.assertEqual(await fetch(url='https://example.org'),'source')
 
     def test_prose_budget_is_not_a_minimum(self):
         budgets = prose_budgets({'properties':{'bio':{'properties':{'ko':{'maxLength':500}}}}})

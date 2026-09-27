@@ -9,264 +9,177 @@ from jsonschema import Draft202012Validator
 from commulingo.pipeline.author_draft import AuthorDraft, obj
 from commulingo.pipeline.draft_repair import RepairProtocolError
 from commulingo_test_support import EditorCase
-from tool_gateway.validation import validate_tool_arguments
+from tool_gateway.validation import validate_tool_arguments, ToolArgumentValidationError
 
 
 def session():
     fields = obj({'bio': obj({'ko': {'type':'string', 'maxLength':20},
                               'en': {'type':'string', 'maxLength':40}}, ['ko', 'en']),
                   'years': {'type':'string'}})
-    canonical = obj({'status': {'type':'string'}, 'reason': {'type':'string'},
-                     'fields': fields, 'claims': {'type':'array'}, 'issue_results': {'type':'array'},
-                     'notes': {'type':'string'}}, ['status', 'reason'])
-    draft = AuthorDraft({'name':'commulingo_pipeline_result', 'input_schema':canonical}, capture_invalid=True)
-    draft.configure(fields, [{'id':'missing:bio'}])
+    draft = AuthorDraft(fields, [{'id':'missing:bio'}], factual_fields={'bio', 'years'})
     return draft
 
 
 def edit():
-    return {'changes': {
-                'bio': {'value': {'ko':'검증한 인물이다.', 'en':'A documented person.'},
-                        'evidence':[{'claim':'A documented person.', 'passages':['P1']}]},
-                'years': {'value':'1900–1980',
-                          'evidence':[{'claim':'The life dates.', 'passages':['P2']}]}},
+    return {'fields': {'bio': {'ko':'검증한 인물이다.', 'en':'A documented person.'}, 'years':'1900–1980'},
+            'evidence': {'bio': [{'claim':'A documented person.', 'passages':['P1']}],
+                         'years': [{'claim':'The life dates.', 'passages':['P2']}]},
             'issues': {'missing:bio': {'status':'resolved', 'reason':'Added the supported biography.'}},
             'reason':'The archive establishes the commissioned facts.'}
 
 
 class AuthorDraftTests(unittest.TestCase):
-    def test_evidence_waits_for_a_separate_call_and_survives_restart(self):
+    def validate(self, value, draft):
+        return validate_tool_arguments(draft.submit_tool['name'], value,
+                                       schema=draft.submit_tool['input_schema'], risk_class='write')
+
+    def test_complete_edit_is_one_call_with_flat_values(self):
         draft = session()
-        draft.factual_fields = {'bio', 'years'}
-        value = edit()
-        del value['changes']['bio']['evidence']
+        value = self.validate(edit(), draft)
+        result = draft.submission(value)
+        self.assertEqual(draft.missing(result), [])
+        draft.prepare(result)
+        self.assertEqual(draft.view(), {**edit(), 'notes':''})
+        self.assertEqual(result['fields'], edit()['fields'])
+        self.assertEqual([c['field'] for c in result['claims']], ['bio', 'years'])
+
+    def test_evidence_can_arrive_separately_and_survives_restart(self):
+        draft = session()
+        value = edit(); del value['evidence']['bio']
         part = draft.submission(value)
-        self.assertEqual(draft.missing(part), ['changes.bio.evidence'])
-        resumed = session()
-        resumed.factual_fields = draft.factual_fields
-        resumed.draft = {'tool': draft.name, 'args': deepcopy(part)}
-        whole = resumed.submission({'changes': {'bio': {'evidence': edit()['changes']['bio']['evidence']}}})
+        self.assertEqual(draft.missing(part), ['evidence.bio'])
+        resumed = session(); resumed.draft = {'tool':draft.name, 'args':deepcopy(part)}
+        whole = resumed.submission(self.validate({'evidence': {'bio':edit()['evidence']['bio']}}, resumed))
         self.assertEqual(resumed.missing(whole), [])
         self.assertEqual(whole['fields'], part['fields'])
-        # Removing evidence cannot let a completed draft through validation.
         resumed.draft['args'] = whole
-        cleared = resumed.submission({'changes': {'bio': {'evidence': []}}})
-        self.assertEqual(resumed.missing(cleared), ['changes.bio.evidence'])
+        self.assertEqual(resumed.missing(resumed.submission({'evidence':{'bio':[]}})), ['evidence.bio'])
+        with self.assertRaisesRegex(RepairProtocolError, 'needs a saved or supplied'):
+            session().submission({'evidence': {'bio':edit()['evidence']['bio']}})
 
-    def test_saved_field_can_receive_evidence_in_separate_call(self):
-        draft = session()
-        first = draft.submission({'changes': {'bio': {'value': {'ko': '검증한 인물이다.'}}}})
-        draft.draft = {'tool': draft.name, 'args': first}
-        evidence = [{'claim': 'The archive identifies this person.', 'passages': ['P1']}]
-        call = {'changes': {'bio': {'evidence': evidence}}}
-        validated = validate_tool_arguments(draft.submit_tool['name'], call,
-                                            schema=draft.submit_tool['input_schema'], risk_class='write')
-        result = draft.submission(validated)
-        self.assertEqual(result['fields']['bio'], {'ko': '검증한 인물이다.'})
-        self.assertEqual(result['claims'], [{'field': 'bio', **evidence[0]}])
-        with self.assertRaisesRegex(RepairProtocolError, 'needs a saved value'):
-            session().submission(call)
-
-    def test_wrapped_arguments_and_single_field_evidence_are_repaired(self):
-        draft = session()
-        payload = {'changes': {'bio': {'value': {'ko': '검증한 인물이다.'}},
-                               'evidence': [{'claim': 'Supported life.', 'passages': ['P1']}]}}
-        result = validate_tool_arguments(draft.submit_tool['name'],
-                                         {'arguments': json.dumps(payload)},
-                                         schema=draft.submit_tool['input_schema'], risk_class='write')
-        self.assertEqual(result['changes']['bio']['evidence'], payload['changes']['evidence'])
-        self.assertNotIn('evidence', result['changes'])
-        self.assertEqual(draft.submission(result)['claims'][0]['passages'], ['P1'])
-
-    def test_field_update_replaces_value_and_evidence_atomically(self):
-        draft = session()
-        draft.prepare(draft.submission(edit()))
-        patch = {'changes': {'bio': {'value': {'ko':'자료로 확인한 인물이다.', 'en':'A revised biography.'},
-                                     'evidence':[{'claim':'A revised claim.', 'passages':['P3']}]}}}
-        result = draft.prepare(draft.submission(patch))
+    def test_field_and_evidence_updates_preserve_other_fields(self):
+        draft = session(); draft.prepare(draft.submission(edit()))
+        result = draft.prepare(draft.submission({'fields': {'bio':{'en':'A revised biography.'}},
+            'evidence': {'bio':[{'claim':'A revised claim.', 'passages':['P3']}]}}))
         self.assertEqual(result['fields']['years'], '1900–1980')
+        self.assertEqual(result['fields']['bio']['ko'], edit()['fields']['bio']['ko'])
         self.assertEqual([(c['field'], c['passages']) for c in result['claims']], [('years',['P2']), ('bio',['P3'])])
         self.assertEqual(result['issue_results'][0]['id'], 'missing:bio')
-        self.assertEqual(draft.view()['changes']['bio'], patch['changes']['bio'])
 
-    def test_split_submissions_accumulate_until_the_draft_is_complete(self):
+    def test_bilingual_parts_and_metadata_accumulate(self):
         draft = session()
-        with self.assertRaisesRegex(RepairProtocolError, 'No saved draft'):
-            draft.submission({'remove_fields': ['years']})
-        part = draft.submission({'changes': {'bio': edit()['changes']['bio']}})
-        self.assertEqual(draft.missing(part), ['issues.missing:bio', 'reason'])
-        draft.draft = {'tool': draft.name, 'args': part}
-        rest = {k: v for k, v in edit().items() if k != 'changes'}
-        rest['changes'] = {'years': edit()['changes']['years']}
-        whole = draft.submission(rest)
-        self.assertEqual(draft.missing(whole), [])
-        result = draft.prepare(whole)
-        self.assertEqual(set(result['fields']), {'bio', 'years'})
-        self.assertEqual(draft.submit_tool['name'], 'commulingo_pipeline_submit_draft')
-
-    def test_bilingual_prose_languages_merge_across_saved_calls(self):
-        draft = session()
-        first = {'changes': {'bio': {'value': {'ko': '검증한 인물이다.'},
-            'evidence': [{'claim': 'A documented person.', 'passages': ['P1']}]}},
-            'issues': edit()['issues'], 'reason': edit()['reason']}
-        self.assertFalse(list(Draft202012Validator(draft.submit_tool['input_schema']).iter_errors(first)))
-        partial = draft.submission(first)
-        self.assertEqual(draft.missing(partial), ['changes.bio.value.en'])
-        # This is the same durable representation restored by an editor checkpoint.
-        resumed = session()
-        resumed.draft = {'tool': draft.name, 'args': deepcopy(partial)}
-        second = resumed.submission({'changes': {'bio': {'value': {'en': 'A documented person.'}}}})
-        self.assertEqual(resumed.missing(second), [])
-        result = resumed.prepare(second)
-        self.assertEqual(result['fields']['bio'], edit()['changes']['bio']['value'])
-        self.assertEqual(result['claims'], [{'field': 'bio', 'claim': 'A documented person.',
-                                              'passages': ['P1']}])
-
-    def test_partial_bilingual_prose_cannot_pass_canonical_validation(self):
-        draft = session()
-        partial = draft.submission({'changes': {'bio': {'value': {'ko': '검증한 인물이다.'}}},
-            'issues': edit()['issues'], 'reason': edit()['reason']})
-        self.assertIn('changes.bio.value.en', draft.missing(partial))
+        part = draft.submission({'fields':{'bio':{'ko':'검증한 인물이다.'}}})
+        self.assertEqual(draft.missing(part), ['fields.bio.en', 'evidence.bio', 'issues.missing:bio', 'reason'])
+        draft.draft = {'tool':draft.name, 'args':deepcopy(part)}
         with self.assertRaises(ValueError):
-            draft.prepare(partial)
+            draft.prepare({**part, 'reason':edit()['reason']})
+        second = draft.submission({'fields':{'bio':{'en':'A documented person.'}},
+            'evidence': {'bio':edit()['evidence']['bio']}, 'issues':edit()['issues'], 'reason':edit()['reason']})
+        self.assertEqual(draft.missing(second), [])
+        self.assertEqual(second['fields']['bio'], edit()['fields']['bio'])
 
-    def test_invalid_typed_update_never_corrupts_saved_draft(self):
-        draft = session()
-        draft.prepare(draft.submission(edit()))
-        saved = deepcopy(draft.draft)
-        for patch in ({'changes':{'bio':{'value':'wrong type', 'evidence':[]}}},
-                      {'repairs':[{'path':'/fields/bio', 'op':'remove'}]},
-                      {}, {'changes':{}}, {'issues':{}}):
-            with self.subTest(patch=patch), self.assertRaises(RepairProtocolError):
-                draft.submission(patch)
+    def test_invalid_input_never_corrupts_saved_draft(self):
+        draft = session(); draft.prepare(draft.submission(edit())); saved = deepcopy(draft.draft)
+        for value in ({'fields':{'bio':'wrong type'}}, {'evidence':{'invented':[]}},
+                      {'repairs':[{'path':'/fields/bio','op':'remove'}]}, {}, {'fields':{}}, {'issues':{}},
+                      {'fields':{'bio':{'value':edit()['fields']['bio']}}}):
+            with self.subTest(value=value), self.assertRaises(RepairProtocolError):
+                draft.submission(value)
             self.assertEqual(draft.draft, saved)
 
-    def test_overlength_value_is_saved_and_repaired_as_one_field(self):
-        draft = session()
-        value = edit()
-        value['changes']['bio']['value']['en'] = 'x' * 41
-        self.assertFalse(list(Draft202012Validator(draft.submit_tool['input_schema']).iter_errors(value)))
-        with self.assertRaisesRegex(ValueError, 'changes.bio.value.en'):
+    def test_overlength_text_is_saved_and_repaired_without_evidence_resend(self):
+        draft = session(); value = edit(); value['fields']['bio']['en'] = 'x' * 41
+        self.validate(value, draft)
+        with self.assertRaisesRegex(ValueError, 'fields.bio.en'):
             draft.prepare(draft.submission(value))
-        self.assertEqual(draft.view()['changes']['bio']['value']['en'], 'x' * 41)
-        result = draft.prepare(draft.submission({'changes':{'bio':edit()['changes']['bio']}}))
-        self.assertEqual(result['fields']['bio']['en'], 'A documented person.')
+        self.assertEqual(draft.view()['fields']['bio']['en'], 'x' * 41)
+        result = draft.prepare(draft.submission({'fields':{'bio':{'en':'A documented person.'}}}))
+        self.assertEqual(result['fields'], edit()['fields'])
+        self.assertEqual(draft.view()['evidence'], edit()['evidence'])
 
-    def test_value_without_evidence_keeps_the_saved_evidence(self):
-        draft = session()
-        draft.prepare(draft.submission(edit()))
-        result = draft.prepare(draft.submission({'changes': {'years': {'value': '1901–1980'}}}))
-        self.assertEqual(result['fields']['years'], '1901–1980')
-        self.assertEqual([(c['field'], c['passages']) for c in result['claims']],
-                         [('bio', ['P1']), ('years', ['P2'])])
-
-    def test_required_fields_are_not_offered_for_withdrawal(self):
-        draft = session()
-        fields = obj({'bio': {'type': 'string'}, 'years': {'type': 'string'}}, ['bio'])
-        draft.configure(fields, [{'id': 'missing:bio'}])
+    def test_withdrawal_removes_only_optional_draft_fields_and_evidence(self):
+        draft = AuthorDraft(obj({'bio':{'type':'string'},'years':{'type':'string'}}, ['bio']),
+                            [{'id':'missing:bio'}])
         self.assertEqual(draft.submit_tool['input_schema']['properties']['remove_fields']['items']['enum'], ['years'])
-        draft.configure(obj({'bio': {'type': 'string'}}, ['bio']), [{'id': 'missing:bio'}])
-        self.assertNotIn('remove_fields', draft.submit_tool['input_schema']['properties'])
-
-    def test_withdrawal_removes_only_draft_field_and_its_evidence(self):
-        draft = session()
-        draft.prepare(draft.submission(edit()))
+        draft = session(); draft.prepare(draft.submission(edit()))
         result = draft.prepare(draft.submission({'remove_fields':['years']}))
         self.assertNotIn('years', result['fields'])
         self.assertEqual([c['field'] for c in result['claims']], ['bio'])
-        with self.assertRaisesRegex(RepairProtocolError, 'same call'):
-            draft.submission({'changes':{'bio':edit()['changes']['bio']}, 'remove_fields':['bio']})
+        for extra in ({'fields':{'bio':edit()['fields']['bio']}}, {'evidence':{'bio':[]}}):
+            with self.assertRaisesRegex(RepairProtocolError, 'same call'):
+                draft.submission({**extra, 'remove_fields':['bio']})
+        with self.assertRaisesRegex(RepairProtocolError, 'No saved draft'):
+            session().submission({'remove_fields':['years']})
 
-    def test_outcomes_are_explicit_and_ids_cannot_be_invented(self):
-        draft = session()
-        value = edit(); value['issues'] = {'invented': {'status':'resolved','reason':'Claiming completion is insufficient.'}}
-        with self.assertRaises(RepairProtocolError):
-            draft.submission(value)
-        value['issues'] = {}
+    def test_explicit_issue_decisions_cannot_be_invented_or_inferred(self):
+        draft = session(); value = edit(); value['issues'] = {}
         self.assertEqual(draft.missing(draft.submission(value)), ['issues.missing:bio'])
+        value['issues'] = {'invented': {'status':'resolved', 'reason':'Not a commissioned issue.'}}
+        with self.assertRaises(RepairProtocolError): draft.submission(value)
         draft.prepare(draft.submission(edit()))
-        result = draft.prepare(draft.submission({'issues':{'missing:bio':{
-            'status':'deferred','reason':'A conflicting source needs checking.'}}}))
+        result = draft.submission({'issues':{'missing:bio':{'status':'deferred','reason':'A conflict needs research.'}}})
         self.assertEqual(result['issue_results'][0]['status'], 'deferred')
-        self.assertEqual(result['fields']['bio'], edit()['changes']['bio']['value'])
+        self.assertEqual(result['fields'], edit()['fields'])
 
-    def test_old_checkpoint_is_read_and_repaired_without_label_reassignment(self):
+    def test_legacy_checkpoint_keeps_values_labels_and_claim_error_positions(self):
         draft = session()
-        draft.draft = {'tool':'commulingo_pipeline_result', 'args':{
-            'status':'ready', 'reason':'Previously saved canonical draft.',
-            'fields':{'bio':{'ko':'이전 초안', 'en':'Prior draft'}, 'years':'1900–1980'},
-            'claims':[{'field':'years','claim':'Life dates','passages':['P18']},
-                      {'field':'bio','claim':'Previous claim','passages':['P27']}],
-            'issue_results':[{'id':'missing:bio','status':'resolved','reason':'A previously supported explanation.'}]}}
-        self.assertEqual(draft.view()['changes']['bio']['evidence'][0]['passages'], ['P27'])
-        result = draft.prepare(draft.submission({'changes':{'bio':edit()['changes']['bio']}}))
+        draft.draft = {'tool':draft.name, 'args':{'status':'ready', 'reason':edit()['reason'],
+            'fields':edit()['fields'], 'claims':[
+                {'field':'years','claim':'Life dates','passages':['P18']},
+                {'field':'bio','claim':'Previous claim','passages':['P27']}],
+            'issue_results':[{'id':'missing:bio', **edit()['issues']['missing:bio']}]}}
+        self.assertEqual(draft.view()['evidence']['bio'][0]['passages'], ['P27'])
+        result = draft.prepare(draft.submission({'evidence':{'bio':edit()['evidence']['bio']}}))
         self.assertEqual(result['claims'][0]['passages'], ['P18'])
-        self.assertEqual(draft.author_error('/claims/1/passages'), '/changes/bio/evidence/0/passages')
+        self.assertEqual(draft.author_error('/claims/1/passages'), '/evidence/bio/0/passages')
 
-    def test_malformed_legacy_containers_are_retained_until_explicit_replacement(self):
+    def test_malformed_legacy_containers_are_retained_until_replacement(self):
         draft = session()
-        draft.draft = {'tool':draft.name, 'args':{'fields':['malformed legacy value'],
-            'claims':'bad container', 'issue_results':None, 'reason':'Saved before typed intake.'}}
+        draft.draft = {'tool':draft.name,'args':{'fields':['bad'],'claims':'bad','issue_results':None}}
         saved = deepcopy(draft.draft)
         self.assertTrue(draft.view()['needs_full_submission'])
-        # A new submission starts over instead of merging into malformed containers.
-        fresh = draft.submission({'changes':{'bio':edit()['changes']['bio']}})
-        self.assertEqual(set(fresh['fields']), {'bio'})
-        self.assertEqual(draft.missing(fresh), ['issues.missing:bio', 'reason'])
+        fresh = draft.submission(edit())
+        self.assertEqual(draft.missing(fresh), [])
         self.assertEqual(draft.draft, saved)
-        draft.prepare(draft.submission(edit()))
-        self.assertEqual(draft.view()['changes']['bio'], edit()['changes']['bio'])
+        draft.prepare(fresh)
+        self.assertEqual(draft.view()['fields'], edit()['fields'])
 
-    def test_no_edit_has_no_content_or_pointer_protocol(self):
+    def test_validation_and_saved_state_do_not_alias_caller_data(self):
+        draft = session()
+        payload = draft.submission(edit())
+        result = draft.prepare(payload)
+        payload['fields']['bio']['ko'] = 'changed by caller'
+        result['claims'][0]['passages'].append('P99')
+        self.assertEqual(draft.view(), {**edit(), 'notes': ''})
+        saved = deepcopy(draft.draft)
+        with self.assertRaises(RepairProtocolError):
+            draft.prepare({})
+        self.assertEqual(draft.draft, saved)
+        resumed = AuthorDraft(draft.canonical_fields, [{'id':'missing:bio'}], draft=saved)
+        resumed.draft['args']['fields']['bio']['ko'] = 'changed after resume'
+        self.assertEqual(saved, draft.draft)
+
+    def test_only_provider_arguments_envelope_is_unwrapped(self):
+        draft = session()
+        for wrapped in (edit(), json.dumps(edit())):
+            self.assertEqual(self.validate({'arguments':wrapped}, draft), edit())
+        with self.assertRaises(ToolArgumentValidationError):
+            self.validate({'arguments':edit(), 'fields':edit()['fields']}, draft)
+        # Retired nesting is rejected rather than silently moving editorial data.
+        with self.assertRaises(ToolArgumentValidationError):
+            self.validate({'changes':{'bio':{'value':edit()['fields']['bio']}}}, draft)
+
+    def test_no_edit_requires_a_reason_and_every_issue(self):
         draft = session()
         good = {'status':'sources_unavailable','reason':'The original could not be retrieved.',
                 'issues':{'missing:bio':{'status':'deferred','reason':'No accessible supporting original.'}}}
         draft.validate_call(good, draft.no_edit_tool)
-        for extra in ('fields', 'changes', 'claims', 'repairs'):
+        for extra in ('fields', 'evidence', 'claims', 'repairs'):
             with self.assertRaises(RepairProtocolError):
                 draft.validate_call({**good, extra:{}}, draft.no_edit_tool)
         for tool in (draft.submit_tool, draft.no_edit_tool):
             self.assertFalse(set(tool['input_schema']) & {'not','oneOf','anyOf','allOf','enum','const'})
             Draft202012Validator.check_schema(tool['input_schema'])
-
-
-class SubmissionShapeRepairTests(unittest.TestCase):
-    """Unambiguous nesting mistakes seen in editor logs are fixed before validation."""
-
-    def validate(self, args, *, draft=None):
-        from tool_gateway.validation import validate_tool_arguments
-        draft = draft or session()
-        return validate_tool_arguments(draft.submit_tool['name'], args,
-                                       schema=draft.submit_tool['input_schema'], risk_class='state')
-
-    def test_top_level_keys_inside_changes_are_moved_out(self):
-        value = edit()
-        value['changes'].update(issues=value.pop('issues'), reason=value.pop('reason'), notes='Private note.')
-        self.assertEqual(self.validate(value), {**edit(), 'notes': 'Private note.'})
-
-    def test_fields_without_changes_are_wrapped(self):
-        value = edit()
-        loose = {**{k: v for k, v in value.items() if k != 'changes'}, **value['changes']}
-        self.assertEqual(self.validate(loose), value)
-
-    def test_misplaced_evidence_and_bare_values_are_normalized(self):
-        good = edit()
-        bio, years = good['changes']['bio'], good['changes']['years']
-        for changes in ({'bio': {'value': {**bio['value'], 'evidence': bio['evidence']}}, 'years': years},
-                        {'bio': {**bio['value'], 'evidence': bio['evidence']}, 'years': years}):
-            with self.subTest(changes=changes):
-                self.assertEqual(self.validate({**good, 'changes': changes}), good)
-        self.assertEqual(self.validate({**good, 'changes': {'years': '1900–1980'}})['changes'],
-                         {'years': {'value': '1900–1980'}})
-
-    def test_ambiguous_or_conflicting_shapes_are_left_to_the_validator(self):
-        from tool_gateway.validation import ToolArgumentValidationError
-        value = edit()
-        value['changes']['reason'] = 'A second, different reason inside changes.'
-        with self.assertRaisesRegex(ToolArgumentValidationError, 'reason'):
-            self.validate(value)
-        with self.assertRaisesRegex(RepairProtocolError, 'needs a saved value'):
-            session().submission(self.validate({**edit(), 'changes': {'years': {'evidence': []}}}))
 
 
 class AuthorWorkflowTests(EditorCase):
@@ -279,7 +192,7 @@ class AuthorWorkflowTests(EditorCase):
         from commulingo.pipeline.patches import patch_hash
         async def author(**kwargs):
             schema = kwargs['tool']['input_schema']
-            self.assertEqual(set(schema['properties']['changes']['properties']), {'body'})
+            self.assertEqual(set(schema['properties']['fields']['properties']), {'body'})
             self.assertNotIn('draft_contract', kwargs['prompt'])
             await kwargs['read_wrap']('fetch_url', AsyncMock(return_value=f'<external source="web">\n{BODY}\n</external>'))(url=URL)
             await kwargs['handler'](submission(candidate()))
@@ -346,7 +259,7 @@ class AuthorWorkflowTests(EditorCase):
             nonlocal calls
             calls += 1
             if calls == 1:
-                raise StageContinues('Saved incomplete draft; send changes.bio.value.en next')
+                raise StageContinues('Saved incomplete draft; send fields.bio.en next')
             return 'OK: validated draft'
         async def chat(messages, **kwargs):
             name = draft.submit_tool['name']

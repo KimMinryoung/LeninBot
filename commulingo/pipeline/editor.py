@@ -4,19 +4,21 @@ from copy import deepcopy
 from dataclasses import replace
 from datetime import datetime, timezone
 import hashlib
+import json
 
 from llm.prompt_renderer import SystemPrompt
 from . import service
 from .bundles import work_topics
 from .draft_repair import RepairProtocolError
 from .author_draft import AuthorDraft, structured_args
+from .editor_checkpoint import restore_draft
 from .diagnostics import prose_errors
 from .engine import Result
-from .evidence import compile_evidence, resolve_passages, PASSAGE_PATTERN, MAX_PASSAGES
+from .evidence import compile_evidence, resolve_passages
 from .issues import commission, FACTS
 from .patches import canonical, changes, patch_hash, schema_for
 from .source_session import Sources
-from .editor_context import RepairReads, prose_budgets, work_status
+from .editor_context import prose_budgets, work_status
 from .decisions import Decisions
 
 EDITOR_MAX_ROUNDS = 24
@@ -27,8 +29,8 @@ Use the input as follows:
 - current, surrounding_context: existing content to preserve. Read notes and sections to avoid duplication.
 - tool schemas, prose_budgets: typed changes and output limits, never length targets.
 - source_cache: available originals. Cite only displayed P-labels, using the shortest sufficient passages per changed factual field.
-- work_status: current research access, submission tool and next action. Follow the latest tool response.
-- saved_draft: retained work, not approved content. Resubmit changed fields with their evidence; omitted fields remain saved.
+- work_status: saved draft, submission tool and next action. Follow the latest tool response.
+- saved_draft: retained work, not approved content. Send only changed fields or evidence; omitted values remain saved.
 Research only missing or conflicting facts. Submit when the commissioned claims have adequate support,
 leaving time to repair validation errors. Put deferred work in private notes, not public prose.
 Provide classification labels; the runner assigns codes, citations and revision, then obtains independent review.
@@ -63,7 +65,7 @@ class Editor:
         return None
 
     async def __call__(self, job, artifacts, usage, budget):
-        from .stages import (current_artifacts, latest, model_call, result_tool, stage_evidence,
+        from .stages import (current_artifacts, latest, model_call, stage_evidence,
                              write_request, prose_problem, is_probe, StageContinues,
                              drop_unchanged_term_facts, READS)
         from .prompts import EDITOR_POLICY
@@ -87,60 +89,12 @@ class Editor:
         field_schema = decisions.author_schema(schema_for(job, current, catalogs))
         field_schema['properties']['notes'] = {'type':'string','maxLength':4000,
             'description':'Private working notes; moved out of published fields.'}
-        reads = RepairReads(session,repair_only=checkpoint.get('repair_only',False))
-        reads.missing_fields = list(checkpoint.get('missing_fields', []))
-        tool = result_tool({'type':'object','additionalProperties':False,
-            'properties': {
-                'status':{'type':'string','enum':['ready','complete','not_applicable','sources_unavailable']},
-                'reason':{'type':'string','minLength':20},
-                'issue_results':{'type':'array','items':{'type':'object','additionalProperties':False,
-                    'properties':{'id':{'type':'string','enum':[i['id'] for i in issues]},
-                                  'status':{'type':'string','enum':['resolved','deferred']},
-                                  'reason':{'type':'string','minLength':10}},
-                    'required':['id','status','reason']}},
-                'fields':field_schema,
-                'claims':{'type':'array','items':{'type':'object','additionalProperties':False,
-                    'properties':{'field':{'type':'string','enum':list(field_schema['properties'])},
-                        'claim':{'type':'string','minLength':1},
-                        'passages':{'type':'array','minItems':1,'maxItems':MAX_PASSAGES,
-                                    'items':{'type':'string','pattern':PASSAGE_PATTERN}},
-                        'stance':{'type':'string','enum':['supports','disputes']}},
-                    'required':['field','claim','passages']}},
-                'notes':{'type':'string','maxLength':4000}},
-            'required':['status','reason']})
-        repair = AuthorDraft(tool, capture_invalid=True)
-        repair.draft = deepcopy(checkpoint.get('draft'))
-        # Earlier editor checkpoints used sentence arrays for bilingual prose.
-        # Joining preserves their text; canonical length checks still apply.
-        if repair.draft and structured_args(repair.draft['args']):
-            saved_args = repair.draft['args']
-            # Older checkpoints asked the author for a slug. The server now
-            # owns it, so retain the draft prose and regenerate at validation.
-            if section:
-                saved_fields = saved_args.get('fields', {})
-                saved_fields.pop('slug', None)
-                # Older checkpoints carried the encoded key; the author field is the year.
-                saved_order = saved_fields.pop('sortOrder', None)
-                if isinstance(saved_order, int) and saved_order > 0 and 'startYear' not in saved_fields:
-                    saved_fields['startYear'] = saved_order // 100
-                    if 1 <= saved_order % 100 <= 12:
-                        saved_fields['startMonth'] = saved_order % 100
-                saved_args['claims'] = [c for c in saved_args.get('claims', [])
-                                        if c.get('field') not in {'slug', 'sortOrder'}]
-            nested_notes = saved_args.get('fields', {}).pop('notes', None)
-            if isinstance(nested_notes, str):
-                saved_args['notes'] = '\n\n'.join(dict.fromkeys(
-                    n.strip() for n in (saved_args.get('notes'), nested_notes) if n and n.strip()))
-            decisions.strip_assigned(saved_args.get('fields',{}))
-            for field, value in repair.draft['args'].get('fields', {}).items():
-                properties = field_schema['properties'].get(field, {}).get('properties', {})
-                if isinstance(value, dict):
-                    for lang in ('ko','en'):
-                        if properties.get(lang, {}).get('type')=='string' and isinstance(value.get(lang), list) and all(isinstance(s,str) for s in value[lang]):
-                            value[lang] = ' '.join(value[lang])
+        saved_draft = restore_draft(checkpoint.get('draft'), field_schema, section=section)
+        if saved_draft and structured_args(saved_draft['args']):
+            decisions.strip_assigned(saved_draft['args'].get('fields', {}))
         previous_patch = latest(artifacts,'draft') or {}
         needed = {i['field'] for i in issues}
-        saved_fields = (repair.draft or {}).get('args', {}).get('fields', {})
+        saved_fields = (saved_draft or {}).get('args', {}).get('fields', {})
         saved_fields = saved_fields if isinstance(saved_fields, dict) else {}
         needed.update(saved_fields)
         needed.update(previous_patch.get('fields',{}))
@@ -150,16 +104,17 @@ class Editor:
         if '*' in needed:
             needed = set(field_schema['properties']) - {'aliasEdits', 'careerEdits', 'sceneEdits'}
             needed.update(saved_fields)
-        focused_contract = deepcopy(tool['input_schema'])
-        focused_contract['properties']['fields']['properties'] = {
+        focused_fields = deepcopy(field_schema)
+        focused_fields['properties'] = {
             k:v for k,v in field_schema['properties'].items() if k in needed and k != 'notes'}
         factual = {'body'} if section else FACTS[job['kind']]
-        repair.configure(focused_contract['properties']['fields'], issues, factual_fields=factual)
+        author = AuthorDraft(field_schema, issues, editable_fields=focused_fields,
+                             factual_fields=factual, draft=saved_draft)
         failures = dict(checkpoint.get('failures') or {})
         section_slug_cache = dict(checkpoint.get('section_slug_cache') or {})
         box = {}
         error_kind = checkpoint.get('error_kind', '')
-        last_error = repair.author_error(checkpoint.get('error', '') or '')
+        last_error = author.author_error(checkpoint.get('error', '') or '')
         def pending_evidence(args):
             fields = deepcopy(args.get('fields') or {})
             if job['kind'] == 'term':
@@ -167,29 +122,29 @@ class Editor:
             return (set(fields) & factual) - {c['field'] for c in args.get('claims') or []}
 
         def missing_parts(args):
-            return repair.missing(args, factual_fields=pending_evidence(args))
+            return author.missing(args, factual_fields=pending_evidence(args))
 
         def status():
-            state = work_status(issues, repair.draft, reads, error=last_error, error_kind=error_kind)
-            missing = missing_parts(repair.draft['args']) if repair.draft and structured_args(repair.draft['args']) else []
+            state = work_status(issues, author.draft, error=last_error, error_kind=error_kind)
+            missing = missing_parts(author.draft['args']) if author.draft and structured_args(author.draft['args']) else []
             if missing and not last_error:
-                state.update(missing_before_validation=missing,
+                state.update(missing_before_validation=missing, next_tool=author.submit_tool['name'],
                              next_action='Send the remaining parts; the draft is validated once they are present: '
                                          + ', '.join(missing) + '.')
-            if repair.draft and not structured_args(repair.draft['args']):
+            if author.draft and not structured_args(author.draft['args']):
                 state.update(draft_saved=False,
                              next_action='Replace the malformed legacy draft with a new submission, or use the no-edit tool. History is retained.')
             return state
-        reads.status = status
+        def feedback(text):
+            return text + '\n' + json.dumps({'work_status': status()}, ensure_ascii=False)
 
         async def save_checkpoint(error=None):
-            if repair.draft or session.passages.shown:
+            if author.draft or session.passages.shown:
                 await asyncio.to_thread(self.store.save_editor_checkpoint, job, {
-                    'baseline':baseline, 'draft':repair.draft, 'passages':session.passages.shown,
+                    'baseline':baseline, 'draft':author.draft, 'passages':session.passages.shown,
                     'source_requests':session.requests, 'failures':failures,
-                    'error':last_error if error is None else repair.author_error(error),
+                    'error':last_error if error is None else author.author_error(error),
                     'error_kind':error_kind,
-                    'repair_only':reads.repair_only,'missing_fields':reads.missing_fields,
                     'classification_cache':decisions.cache,
                     'section_slug_cache':section_slug_cache})
 
@@ -197,20 +152,17 @@ class Editor:
             nonlocal error_kind, last_error
             error_kind = 'schema'
             try:
-                merged = repair.submission(value)
+                merged = author.submission(value)
                 missing = missing_parts(merged)
                 if missing:
                     # A split submission: keep the part and ask for the rest
                     # without counting a rejection or ending the stage.
-                    repair.draft = {'tool': repair.name, 'args': deepcopy(merged)}
+                    author.save(merged)
                     error_kind, last_error = '', ''
-                    reads.missing_fields = sorted(pending_evidence(merged))
-                    if reads.missing_fields:
-                        reads.repair_only = False
                     await save_checkpoint()
-                    raise StageContinues(reads.with_status(
+                    raise StageContinues(feedback(
                         'Saved to the draft. Still needed before validation: ' + ', '.join(missing) + '.'))
-                value = repair.prepare(merged)
+                value = author.prepare(merged)
                 error_kind = 'validation'
                 await save_checkpoint()
                 if is_probe(value['reason']) or any(is_probe(c['claim']) for c in value.get('claims',[])):
@@ -256,8 +208,6 @@ class Editor:
                     if error_kind != 'passages':
                         error_kind = 'missing_evidence'
                     problems.append('evidence required for ' + ', '.join(sorted(missing)) + '; repair those claims in this session')
-                reads.missing_fields = sorted(missing)
-                reads.repair_only = not missing and bool(claims)
                 if missing:
                     usage.tracker['targeted_research'] = sorted(missing)
                     problems.append('Research only the missing fields. All other draft fields and claims remain saved.')
@@ -268,7 +218,6 @@ class Editor:
                     claims = annotate(claims,await check_claims(claims,session.sources,usage=usage,
                         decide=decisions.decide,cache=decisions.citations))
                 except ValueError:
-                    reads.repair_only = False
                     error_kind = 'citation'
                     raise
                 # Section dates are authored as startYear/startMonth but stored
@@ -335,7 +284,7 @@ class Editor:
                 box.update(editor_version=2, draft=candidate, research=research)
                 return 'OK: validated patch recorded for independent review'
             except ValueError as exc:
-                last_error = repair.author_error(str(exc))
+                last_error = author.author_error(str(exc))
                 usage.tracker['preflight_failures'] = usage.tracker.get('preflight_failures',0)+1
                 if 'revision_conflict' in str(exc):
                     box.update(rebase=True, error=str(exc))
@@ -343,18 +292,18 @@ class Editor:
                 if isinstance(exc, RepairProtocolError):
                     usage.tracker['repair_protocol_errors'] = usage.tracker.get('repair_protocol_errors',0)+1
                     await save_checkpoint(str(exc))
-                    raise RepairProtocolError(reads.with_status(repair.feedback(str(exc)))) from exc
-                fingerprint = hashlib.sha256(canonical({'draft':repair.draft,'error':str(exc)}).encode()).hexdigest()
+                    raise RepairProtocolError(feedback(author.feedback(str(exc)))) from exc
+                fingerprint = hashlib.sha256(canonical({'draft':author.draft,'error':str(exc)}).encode()).hexdigest()
                 failures[fingerprint] = failures.get(fingerprint,0)+1
                 await save_checkpoint(str(exc))
                 if failures[fingerprint]>=2:
                     box.update(hold_reason='same rejected patch and error repeated without progress', error=str(exc))
                     return 'Held: identical failed patch repeated; retained for diagnosis.'
-                raise ValueError(reads.with_status(repair.feedback(str(exc)))) from exc
+                raise ValueError(feedback(author.feedback(str(exc)))) from exc
 
         async def no_edit(**value):
             try:
-                repair.validate_call(value, repair.no_edit_tool)
+                author.validate_call(value, author.no_edit_tool)
                 if is_probe(value['reason']) or any(is_probe(item['reason']) for item in value['issues'].values()):
                     raise ValueError('Explain the no-edit decision substantively for every commissioned issue.')
             except ValueError as exc:
@@ -365,7 +314,7 @@ class Editor:
             # that no original was accessible. Job 63829 (Lafayette, 2026-09-26)
             # did exactly that after four prose values ran a few characters over
             # their limits: the false status deferred a sourced entry 90 days.
-            if value['status']=='sources_unavailable' and inspected and repair.draft:
+            if value['status']=='sources_unavailable' and inspected and author.draft:
                 raise ValueError('sources_unavailable contradicts the sources read in this session ('
                                  + ', '.join(inspected[:3]) + ') and the draft saved from them. '
                                  'Fix the values the last validation rejected and resubmit the draft.')
@@ -391,8 +340,8 @@ class Editor:
             if unknown:
                 raise ValueError('unknown editable fields: '+', '.join(sorted(unknown)))
             return stage_evidence({'current':{k:(current or {}).get(k) for k in fields},
-                                   'change_schema':{k:repair.submit_tool['input_schema']['properties']['changes']['properties'][k]
-                                                    for k in fields if k in repair.field_names}})
+                                   'change_schema':{k:author.submit_tool['input_schema']['properties']['fields']['properties'][k]
+                                                    for k in fields if k in author.field_names}})
         context_tool = {'name':'commulingo_pipeline_context',
             'description':'Read current values and exact schema for additional fields only when needed for the commissioned correction.',
             'input_schema':{'type':'object','additionalProperties':False,
@@ -404,12 +353,9 @@ class Editor:
         initial_status.pop('scope')
         prompt = ('Complete the commissioned edit using the task data below. '
                   'Use commulingo_pipeline_context for additional current values. Editable changes are defined by the tools.\n'
-                  + ('For a person section, send a small first call to commulingo_pipeline_submit_draft '
-                     'with changes.heading, changes.startYear, issues and reason. Then send changes.body.value.ko '
-                     'and changes.body.value.en in separate calls; send changes.body.evidence in its own call. '
-                     'The first calls save an incomplete draft; do not repeat saved languages. '
-                     'Keep each tool argument JSON short, '
-                     'because long calls may arrive malformed and cannot be saved. '
+                  + ('For a person section, use commulingo_pipeline_submit_draft '
+                     'with fields.heading, fields.startYear, fields.body and evidence.body, plus issues and reason. '
+                     'One call is sufficient; split only if the text is long, preserving already saved parts. '
                      'startYear is always a year: for a theme, the year it begins; startMonth only when known. '
                      'Cite a passage for a factual year. '
                      'The server generates the section topic slug; do not supply it. Write one distinct documented phase or theme '
@@ -420,19 +366,18 @@ class Editor:
                   + stage_evidence({'job':{k:job[k] for k in ('id','kind','action','target')},
                       'current':focused_current,'issues':issues,
                       'surrounding_context':surrounding_context,'work_status':initial_status,
-                      'prose_budgets':prose_budgets(focused_contract['properties']['fields']),
+                      'prose_budgets':prose_budgets(focused_fields),
                       'original_proposal':(job.get('payload') or {}).get('original_proposal'),
-                      'source_cache':session.context(),'saved_draft':repair.view(),
-                      'previous_patch':previous_patch if not repair.draft else None,'review_feedback':previous_review}))
+                      'source_cache':session.context(),'saved_draft':author.view(),
+                      'previous_patch':previous_patch if not author.draft else None,'review_feedback':previous_review}))
         # 12 rounds ended 27 of 32 failed attempts and capped 80 of 257
         # successes (2026-09-22..25) while a run cost $0.0135 on average
         # against the $0.20 stage budget; split submissions add rounds too.
         spec = replace(COMMULINGO_CURATOR, prompt_ir=SystemPrompt(identity=EDITOR_POLICY+INSTRUCTIONS),
                        max_rounds=EDITOR_MAX_ROUNDS)
-        await model_call(spec=spec,prompt=prompt,tool=repair.submit_tool,handler=finish,reads=READS,
-            usage=usage,budget=budget,read_wrap=reads.wrap,max_rounds=EDITOR_MAX_ROUNDS,
-            local_tools=[(repair.no_edit_tool,no_edit,True),session.cached_tool(on_read=save_checkpoint),(context_tool,read_context,False),
-                         reads.tool(field_schema['properties'],usage,on_reopen=save_checkpoint)],
+        await model_call(spec=spec,prompt=prompt,tool=author.submit_tool,handler=finish,reads=READS,
+            usage=usage,budget=budget,read_wrap=session.wrap,max_rounds=EDITOR_MAX_ROUNDS,
+            local_tools=[(author.no_edit_tool,no_edit,True),session.cached_tool(on_read=save_checkpoint),(context_tool,read_context,False)],
             scope_id=f'commulingo_pipeline:{job["id"]}:editor',job=job)
         if box.get('rebase'):
             return Result(box,'research')
