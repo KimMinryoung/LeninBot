@@ -1,5 +1,5 @@
 {
-  "version": 10,
+  "version": 11,
   "functions": [
     {
       "id": "political-leadership",
@@ -3049,6 +3049,24 @@
         [
           1925,
           1946
+        ]
+      ]
+    },
+    {
+      "id": "korean-independence-movement",
+      "kind": "force",
+      "label": {
+        "ko": "조선 독립운동",
+        "en": "Korean independence movement"
+      },
+      "countryCode": "korea",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in the movement for Korean independence from Japanese rule, including the Provisional Government of the Republic of Korea (1919–1948) and independence armies and societies. The Provisional Government is not the Republic of Korea state founded in 1948. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1905,
+          1948
         ]
       ]
     },
