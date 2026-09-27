@@ -22,6 +22,36 @@ def bilingual_field(schema):
                     for lang in ('ko', 'en')))
 
 
+# English renderings of Korean prose run 1.79-2.68x the Korean character count
+# across 2,764 published sections (1st-99th percentile, 2026-09-27). Far
+# outside that band one language is untranslated or truncated: sections went
+# live with en "", "placeholder" or "REPLACE_EN" beside a full Korean body,
+# and others dropped whole Korean paragraphs from the English.
+PARITY_MIN_CHARS = 300
+PARITY_RATIO = (1.4, 3.4)
+
+
+def bilingual_gaps(field, value):
+    """Missing-list entries for a bilingual value: absent or blank languages,
+    then a long text whose languages are out of proportion."""
+    texts = {lang: value.get(lang) for lang in ('ko', 'en')}
+    gaps = [f'fields.{field}.{lang}' for lang, text in texts.items()
+            if not (isinstance(text, str) and text.strip())]
+    if gaps:
+        return gaps
+    ko, en = len(texts['ko'].strip()), len(texts['en'].strip())
+    if max(ko, en) < PARITY_MIN_CHARS:
+        return []
+    low, high = PARITY_RATIO
+    if en < ko * low:
+        return [f'fields.{field}.en (only {en} characters beside {ko} Korean; English normally runs '
+                f'about 2x the Korean length, so render every Korean claim in English)']
+    if en > ko * high:
+        return [f'fields.{field}.ko (only {ko} characters beside {en} English; Korean normally runs '
+                f'about half the English length, so write every English claim in Korean)']
+    return []
+
+
 def obj(properties, required=()):
     return {'type': 'object', 'additionalProperties': False,
             'properties': properties, **({'required': list(required)} if required else {})}
@@ -204,7 +234,7 @@ class AuthorDraft:
         missing = [f'fields.{field}' for field in self.required_fields if field not in fields]
         for field in sorted(self.bilingual_fields & set(fields)):
             if isinstance(fields[field], dict):
-                missing.extend(f'fields.{field}.{lang}' for lang in ('ko', 'en') if lang not in fields[field])
+                missing.extend(bilingual_gaps(field, fields[field]))
         if not fields and not self.required_fields:
             missing.append('fields (at least one field)')
         evidenced = {claim['field'] for claim in result.get('claims') or []}

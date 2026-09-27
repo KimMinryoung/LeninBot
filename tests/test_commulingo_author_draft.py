@@ -57,6 +57,24 @@ class AuthorDraftTests(unittest.TestCase):
         with self.assertRaisesRegex(RepairProtocolError, 'needs a saved or supplied'):
             session().submission({'evidence': {'bio':edit()['evidence']['bio']}})
 
+    def test_blank_or_disproportionate_language_is_still_missing(self):
+        from commulingo.pipeline.author_draft import bilingual_gaps
+        ko = '검증한 사실을 서술한다. ' * 30
+        en = 'The account states verified facts in full English sentences. ' * 21
+        self.assertEqual(bilingual_gaps('body', {'ko': ko, 'en': en}), [])
+        self.assertEqual(bilingual_gaps('body', {'ko': ko, 'en': ''}), ['fields.body.en'])
+        self.assertEqual(bilingual_gaps('body', {'ko': '  ', 'en': en}), ['fields.body.ko'])
+        placeholder = bilingual_gaps('body', {'ko': ko, 'en': 'REPLACE_EN'})
+        self.assertEqual(len(placeholder), 1)
+        self.assertTrue(placeholder[0].startswith('fields.body.en (only 10 characters'))
+        dropped = bilingual_gaps('body', {'ko': ko, 'en': en[:len(ko)]})
+        self.assertTrue(dropped[0].startswith('fields.body.en'))
+        self.assertTrue(bilingual_gaps('body', {'ko': ko[:60], 'en': en})[0].startswith('fields.body.ko'))
+        self.assertEqual(bilingual_gaps('heading', {'ko': '짧은 제목', 'en': 'A short heading that runs long'}), [])
+        draft = session()
+        blank = draft.submission({**edit(), 'fields': {**edit()['fields'], 'bio': {'ko': '검증한 인물이다.', 'en': ' '}}})
+        self.assertEqual(draft.missing(blank), ['fields.bio.en'])
+
     def test_field_and_evidence_updates_preserve_other_fields(self):
         draft = session(); draft.prepare(draft.submission(edit()))
         result = draft.prepare(draft.submission({'fields': {'bio':{'en':'A revised biography.'}},
