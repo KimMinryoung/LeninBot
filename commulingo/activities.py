@@ -85,7 +85,9 @@ def activity_basis_question(catalog, evidence, function, group=None):
     if function == 'government':
         question['instructions'] += ' A high office title alone is insufficient. Select unsupported unless an excerpt establishes cross-policy executive management or administrative coordination as the defining career; a specialized portfolio alone does not qualify.'
     if function == 'legislature':
-        question['instructions'] += ' Select unsupported unless an excerpt establishes presiding over a legislature or its presidium, or a ceremonial or nominal head-of-state office, as the defining career; ordinary legislative membership does not qualify.'
+        question['instructions'] += ' Select unsupported unless an excerpt establishes presiding over a legislature or its presidium, or a ceremonial or nominal non-monarchical head-of-state office, as the defining career; ordinary legislative membership does not qualify, and monarchs belong to monarchy.'
+    if function == 'monarchy':
+        question['instructions'] += ' Select unsupported unless an excerpt establishes reigning as a monarch, ruling as regent or serving as a royal consort as the defining career; royal birth or a noble title alone does not qualify.'
     if group in FRENCH_REVOLUTION_GROUPS:
         question['instructions'] += FRENCH_REVOLUTION_BASIS
     return question

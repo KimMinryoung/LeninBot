@@ -134,10 +134,19 @@ class DefiningCareerTests(unittest.TestCase):
         self.assertIn('ordinary legislative membership does not qualify', q['instructions'])
         self.assertNotIn('A high office title alone is insufficient', q['instructions'])
 
+    def test_monarchy_basis_requires_a_reign(self):
+        from commulingo.activities import activity_basis_question
+        q = activity_basis_question(load_catalog(), EVIDENCE, 'monarchy')
+        self.assertIn('royal birth or a noble title alone does not qualify', q['instructions'])
+        legislature = activity_basis_question(load_catalog(), EVIDENCE, 'legislature')
+        self.assertIn('monarchs belong to monarchy', legislature['instructions'])
+
     def test_catalog_boundaries_learned_in_review(self):
         catalog = load_catalog()
         functions = {f['id']: f for f in catalog['functions']}
-        self.assertTrue({'legislature', 'education', 'religion'} <= set(functions))
+        self.assertTrue({'legislature', 'monarchy', 'education', 'religion', 'law'} <= set(functions))
+        self.assertIn('belong to monarchy', functions['government']['criteria'])
+        self.assertIn('belong to monarchy', functions['legislature']['criteria'])
         self.assertIn('belong to legislature', functions['government']['criteria'])
         self.assertIn('official mass organizations', functions['organizing']['criteria'])
         south = next(a for a in catalog['affiliations'] if a['id'] == 'state-south-korea')
