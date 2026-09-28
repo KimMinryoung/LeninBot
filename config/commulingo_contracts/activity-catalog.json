@@ -1,5 +1,5 @@
 {
-  "version": 14,
+  "version": 15,
   "functions": [
     {
       "id": "political-leadership",
@@ -116,7 +116,7 @@
         "en": "Scholarship and theory"
       },
       "icon": "library",
-      "criteria": "Historical, social-scientific, philosophical and theoretical research. Research subjects and citizenship are not political affiliations."
+      "criteria": "Historical, social-scientific, philosophical and theoretical research. Legal scholarship and legal theory belong to law. Research subjects and citizenship are not political affiliations."
     },
     {
       "id": "education",
@@ -161,7 +161,7 @@
         "en": "Law and justice"
       },
       "icon": "scale",
-      "criteria": "Legal practice, defense counsel, prosecution, judging and judicial administration. Academic legal theory belongs to scholarship; being a defendant or victim alone does not qualify."
+      "criteria": "Legal practice, defense counsel, prosecution, judging, judicial administration, and legal scholarship or legal theory, including constitutional and international law. A law degree alone does not qualify; being a defendant or victim alone does not qualify."
     }
   ],
   "affiliations": [
