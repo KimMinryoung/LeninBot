@@ -119,7 +119,7 @@ next_day(경과량 미상의 하루 건너뛰기) 거절 조건은 "활성 예�
 각 기록은 kind, status(active/worsening/recovering/resolved), severity(unknown/mild/moderate/severe),
 treatment(unknown/untreated/treated), fever(unknown/yes/no), elapsed_minutes, source, scope_id를 가진다.
 elapsed_minutes는 발병 시점부터의 실제 병력이 아니라 엔진이 **등록 이후 계산한 활동 구간**의 분이다.
-활동 미상의 다음 날 생략 구간은 질병 경과에 더하지 않는다.
+다음 아침 전환의 생략된 밤은 휴식·수면으로 계산되므로 질병 경과에도 더한다. 날짜 미상의 next_day 건너뛰기 구간은 더하지 않는다.
 
 Jev의 기존 `roleplay-records` 호출에 폐렴 경과·중증도·치료·발열의 네 선택형 질문을 추가한다.
 현재 장면의 명시적 발병·진단 또는 경과 변화만 판정하며, 과거 사료·가정·계획은 keep이다.
@@ -172,7 +172,7 @@ unknown으로 덮어쓰지 않고 keep을 선택하도록 한다. /status는 항
 합성 장면에서 의지 5/굴욕 100 → 선택권·작은 성취·인정·경계 존중 → 의지 27/굴욕 76이다.
 이는 네 사건이 실제 성립한 경우의 계산 예시이며 진행을 강제로 성공시키거나 운영 상태를 변경한 결과가 아니다.
 
-새 초안 사후 정산 절차·심문 사건 3종·다음 아침 시간의 미상 구간 처리 및 현재 활성화 상태는
+새 초안 사후 정산 절차·심문 사건 3종·다음 아침 전 생략된 밤의 계산 및 현재 활성화 상태는
 [초안 사후 정산](roleplay_postdraft.md)을 참조한다. 연기 모델의 기록은 최종 확정 전 임시 저장된다.
 
 역할극 회귀 검증: `venv/bin/python -m unittest discover -s tests -p 'test_roleplay*.py'`.

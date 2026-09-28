@@ -490,6 +490,35 @@ def advance(state, target_minute, time_basis):
     return result
 
 
+NIGHT_SLEEP_START_MINUTE = 22 * 60
+MORNING_START_MINUTE = 6 * 60
+
+
+def pass_night(state, clock_minute, basis):
+    """Settle the omitted night up to the next 06:00: quiet waking until 22:00, then sleep.
+
+    A skipped night is still time: hunger grows, sleep restores and wounds and
+    illness keep their course. Returns (state, gap minutes, summary or None);
+    without initialized conditions only the clock moves (the gap stays uncalculated).
+    """
+    gap = (MORNING_START_MINUTE - clock_minute) % 1440 or 1440
+    awake = (0 if clock_minute >= NIGHT_SLEEP_START_MINUTE or clock_minute < MORNING_START_MINUTE
+             else min(gap, NIGHT_SLEEP_START_MINUTE - clock_minute))
+    if not state.get("conditions_initialized"):
+        result = deepcopy(state)
+        result["scene_minute"] += gap
+        result["last_calculated_minute"] += gap
+        return result, gap, None
+    result = state
+    for activity, minutes in (("rest", awake), ("sleep", gap - awake)):
+        if minutes > 0:
+            result = advance({**result, "activity": activity}, result["last_calculated_minute"] + minutes, basis)
+    result = {**result, "activity": state["activity"]}
+    summary = {"rest_minutes": awake, "sleep_minutes": gap - awake,
+               "before": {k: state[k] for k in METRICS}, "after": {k: result[k] for k in METRICS}}
+    return result, gap, summary
+
+
 def _merge_injury_changes(changes):
     merged = {}
     for change in changes:

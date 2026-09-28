@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from roleplay import memory
-from roleplay.dynamics import advance, with_defaults
+from roleplay.dynamics import advance, pass_night, with_defaults
 from tool_gateway.security import caller_scope, new_run_context
 
 
@@ -24,6 +24,21 @@ class DynamicsTests(unittest.TestCase):
         self.assertEqual(sleep['fatigue'], 50)
         self.assertEqual(advance(rest, 60, '같은 시점'), rest)
         self.assertEqual(rest['last_calculation']['before']['fatigue'], 60)
+
+    def test_omitted_night_is_waking_rest_then_sleep_until_six(self):
+        state, gap, night = pass_night(self.initial(activity='light', sleep_quality='normal'), 19 * 60 + 20, '밤')
+        self.assertEqual((gap, night['rest_minutes'], night['sleep_minutes']), (640, 160, 480))
+        self.assertEqual(state['hunger'], 30 + 3 * 640 / 60)
+        self.assertLess(state['fatigue'], 60)
+        self.assertEqual((state['activity'], state['wakefulness_minutes']), ('light', 0))
+        self.assertEqual(state['last_calculated_minute'], 640)
+        _, gap, night = pass_night(self.initial(activity='light'), 3 * 60, '새벽')
+        self.assertEqual((gap, night['rest_minutes']), (180, 0))  # the coming 06:00, not tomorrow's
+        _, gap, _ = pass_night(self.initial(activity='light'), 6 * 60, '아침')
+        self.assertEqual(gap, 1440)
+        raw, gap, night = pass_night(with_defaults({"hunger": 30}), 22 * 60, '미설정')
+        self.assertIsNone(night)
+        self.assertEqual((raw['hunger'], raw['scene_minute'], gap), (30, 480, 480))
 
     def test_injury_trends_and_threat_adaptation(self):
         injury = {'id': 'arm', 'description': '팔 부상', 'severity': 2, 'trend': 'stable', 'treated': False}

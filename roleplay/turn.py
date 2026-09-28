@@ -19,6 +19,7 @@ from roleplay import memory, jev
 from roleplay.actor import actor_state_view
 from roleplay.review import REVIEW_RULES, screen_reply, validate_review
 from roleplay.clock import interpret_clock
+from roleplay.dynamics import pass_night
 from roleplay.story import blocking_events
 from roleplay.pacing import policy_for, turn_time_scope, check_time_request, check_time_result
 
@@ -209,26 +210,28 @@ def prepare(user_text, before, people, history, scope_id, draft, authorization, 
             if blocking_events(state, 1440):
                 raise ValueError('예정 사건을 지나쳐 다음 날로 건너뛸 수 없음')
             temporal={'operation':'next_day','relation':'current','certainty':'explicit','source_quote':user_text[:400],
-                'interpretation':'사용자가 지정한 다음 장면으로 전환. 생략된 밤의 활동은 미상이며 수치에 적용하지 않음',
+                'interpretation':'사용자가 지정한 다음 장면으로 전환. 아침 전환이면 생략된 밤을 22시까지 깨어 쉼, 이후 수면으로 계산',
                 'daypart':'morning' if authorization['labels']['transition']=='next_morning' else 'unknown'}
             checked = check_time_request(state,temporal,scope_id)
             state = interpret_clock(state,temporal,lambda *args: None)
             check_time_result(before,state,temporal,scope_id,checked)
-            # A next-morning scene needs a usable clock anchor. 06:00 is an
-            # explicit game estimate, not evidence that the omitted night was sleep.
+            # A next-morning scene needs a usable clock anchor (06:00, a game estimate).
+            # The omitted night is still time: hunger grows and sleep restores.
             if authorization['labels']['transition'] == 'next_morning':
                 previous_time = before.get('clock', {}).get('time')
-                gap = None
+                gap, night = None, None
                 if previous_time:
                     hour, minute = map(int, previous_time.split(':'))
-                    gap = 1440 - (hour * 60 + minute) + 360
-                    state['scene_minute'] += gap
-                    state['last_calculated_minute'] += gap
-                    state['clock']['uncalculated_minutes'] = state['clock'].get('uncalculated_minutes', 0) + gap
+                    state, gap, night = pass_night(state, hour * 60 + minute, '생략된 밤: 22시까지 깨어 쉼, 이후 06:00까지 수면')
+                    if hour < 6:  # before dawn, the coming morning is still the same date
+                        for key in ('date', 'year', 'relative_day'):
+                            state['clock'][key] = before['clock'].get(key, state['clock'].get(key))
+                    if night is None:
+                        state['clock']['uncalculated_minutes'] = state['clock'].get('uncalculated_minutes', 0) + gap
                 state['clock']['time'] = '06:00'
                 state['clock']['certainty'] = 'estimated'
                 temporal = {**temporal, 'estimated_scene_start':'06:00', 'gap_minutes':gap,
-                            'gap_effects':'not_applied: omitted activity unknown'}
+                            'gap_effects': night or 'not_applied: conditions not initialized'}
             verdict['transition'] = temporal
         if mode == 'scene':
             if policy.explicit_passage and authorization['labels']['transition']=='current':

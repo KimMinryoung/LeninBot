@@ -63,9 +63,13 @@ class PostDraftTests(unittest.TestCase):
         self.assertEqual(state['clock']['date'],'1939-04-28')
         self.assertEqual(state['clock']['daypart'],'morning')
         self.assertEqual(state['clock']['time'],'07:30')
-        self.assertEqual(state['clock']['uncalculated_minutes'],600)
-        self.assertEqual(state['hunger'],34.5)
-        self.assertEqual(state['scene_minute'],690) # Timeline gap retained, no fabricated overnight sleep effects.
+        self.assertNotIn('uncalculated_minutes',state['clock'])
+        # The omitted night counts: 20:00-22:00 quiet waking, 22:00-06:00 sleep, then 90 draft minutes.
+        self.assertEqual(state['hunger'],64.5)
+        self.assertLess(state['fatigue'],self.before['fatigue'])
+        self.assertEqual(state['scene_minute'],690)
+        self.assertEqual({k:prepared['verdict']['transition']['gap_effects'][k] for k in ('rest_minutes','sleep_minutes')},
+                         {'rest_minutes':120,'sleep_minutes':480})
         self.assertEqual(state['resolve_events'][-1]['kind'],'implicating_others')
         self.assertEqual(len(state['resolve_events']),1) # Not 66 penalties, nor 3 stacked event types.
         self.assertEqual(state['scene'],'아침 심문 종료')
