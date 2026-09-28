@@ -31,7 +31,7 @@ CHANGED_BY = 'commulingo-pipeline-event-links'
 MAX_LINKS = 4
 CARD_CHARS = 14_000
 SECTION_CHARS = 1_800
-SUMMARY_CHARS = 240
+SUMMARY_CHARS = 400
 MIN_BASIS_CHARS = 12
 ADULT_AGE = 15
 RESERVATION_USD = 0.05
@@ -50,7 +50,12 @@ SYSTEM = """You link a person card on a Korean-language history site to the site
 You get the person's card and the events whose years overlap the person's adult life. Propose
 a link only when the CARD ITSELF states what this person did or suffered in that event. Your own
 knowledge may tell you where to look, but it is never enough: if the card is silent, do not link.
-A weak or merely contemporaneous connection is not a link. Most people fit one to three events;
+A weak or merely contemporaneous connection is not a link. The card must describe an action
+that belongs to THIS event as its title and summary define it: its country, side, place and
+dates. A broader war, a neighbouring event or a general career fact is not enough (serving in
+the Second World War does not link to a Soviet-front event; commanding the German army does not
+link to a Russian revolution; ordering a surrender is not a conference). Use each card quote for
+one event only. Most people fit one to three events;
 an empty list is a valid answer. At most {max_links} links.
 
 For each link return:
@@ -138,9 +143,10 @@ def parse(text):
     return [link for link in links if isinstance(link, dict)], str(value.get('reason') or '')
 
 
-def screen(links, card, events, acceptable, taken=()):
+def screen(links, card, events, acceptable, taken=(), used=()):
     """Split proposals into (kept, rejected-with-reason) before any paid check."""
     ids, text, kept, rejected, seen = {e['id'] for e in events}, _norm(card), [], [], set()
+    quotes = set(used)
     for link in links[:MAX_LINKS]:
         entry = {k: link.get(k) for k in ('event_id', 'kind', 'relation_ko', 'relation_en', 'note_ko', 'note_en', 'basis')}
         if entry['event_id'] in taken:  # saved by an earlier attempt; a repeat is not a refusal
@@ -149,12 +155,14 @@ def screen(links, card, events, acceptable, taken=()):
         problem = ('unknown or out-of-period event' if entry['event_id'] not in ids
                    else 'basis too short' if len(basis) < MIN_BASIS_CHARS
                    else 'basis is not a quote of the card' if basis not in text
+                   else 'the same quote is already used for another event' if basis in quotes
                    else acceptable(entry)
                    or ('duplicate event' if entry['event_id'] in seen else ''))
         if problem:
             rejected.append({**entry, 'problem': problem})
         else:
             seen.add(entry['event_id'])
+            quotes.add(basis)
             kept.append({**entry, 'basis': basis})
     return kept, rejected
 
@@ -169,9 +177,10 @@ def resubmission(base, previous, rejected, written):
 
 
 def finding(person, event, entry):
-    return (f"{person.get('name_en') or person['id']} ({person.get('years_label') or ''}) was involved in "
-            f"{event.get('title_en') or event['id']} ({event.get('period_label') or ''}) as "
-            f"{entry['relation_en']}: {entry['note_en']}")
+    summary = (event.get('summary_en') or '')[:SUMMARY_CHARS]
+    return (f"{person.get('name_en') or person['id']} ({person.get('years_label') or ''}) took part in the event "
+            f"'{event.get('title_en') or event['id']}' ({event.get('period_label') or ''}"
+            + (f"; {summary}" if summary else '') + f") as {entry['relation_en']}: {entry['note_en']}")
 
 
 class EventLinker:
@@ -241,12 +250,15 @@ class EventLinker:
                 rejected = [{'event_id': None, 'problem': f'reply is not the requested JSON object ({exc})'}]
                 continue
             kept, rejected = screen(links, card, events, self.acceptable,
-                                    taken={e['event_id'] for e in written})
+                                    taken={e['event_id'] for e in written},
+                                    used={e['basis'] for e in written})
             for entry in kept:
                 check = await self.gate(finding(person, by_id[entry['event_id']], entry), entry['basis'], person_id)
                 if check is None:
                     raise RuntimeError('citation gate unavailable')
-                if check.get('support') not in ('supports', 'partially_supports') or check.get('reject'):
+                # Partial support let broad career facts through for specific events
+                # (2026-09-28: Hindenburg's army command linked to the February Revolution).
+                if check.get('support') != 'supports' or check.get('reject'):
                     rejected.append({**entry, 'problem': 'the quoted basis does not support this link '
                                      f"(citation gate: {check.get('support')}, {check.get('confidence')})"})
                     continue
@@ -347,7 +359,9 @@ def default_linker(store, config):
             raise RuntimeError(result)
 
     def mark(person_id, status, reason):
+        revision = service.call({'command': 'read', 'target': 'person', 'id': person_id})['revision']
         service.call({'command': 'enrichment', 'target': 'person', 'id': person_id, 'topic': 'events',
+                      'expectedRevision': revision,
                       'status': status, 'reason': reason, 'sources': [f'person-card:{person_id}'],
                       'changedBy': CHANGED_BY, 'idempotencyKey': f'event-links:{person_id}:{uuid.uuid4().hex}'})
 

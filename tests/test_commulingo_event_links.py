@@ -45,7 +45,8 @@ class PureTests(unittest.TestCase):
         self.assertEqual(len(kept), 1)
         self.assertEqual(kept[0]['basis'], '1939년 8월 모스크바에서 몰로토프와 불가침조약에 서명했다.')
         self.assertEqual([r['problem'] for r in rejected], ['basis is not a quote of the card',
-                                                          'unknown or out-of-period event', 'duplicate event'])
+                                                          'unknown or out-of-period event',
+                                                          'the same quote is already used for another event'])
 
     def test_screen_applies_the_writer_checks(self):
         kept, rejected = screen([LINK], card_text(PERSON, [], []), EVENTS, lambda entry: 'em dash in note_ko')
@@ -117,6 +118,17 @@ class LinkerTests(unittest.TestCase):
         self.assertEqual(linker.calls['settle'], [0.004] * 3)
         self.assertIn('does not support this link', linker.requests[1])
         self.assertIn('Your previous reply', linker.requests[1])
+
+    def test_partial_support_is_not_enough(self):
+        linker = FakeLinker(json.dumps({'links': [LINK]}), check={'support': 'partially_supports', 'confidence': 0.9})
+        result = asyncio.run(linker.link('joachim-von-ribbentrop'))
+        self.assertEqual((result['status'], linker.calls['write']), ('open', []))
+
+    def test_one_quote_cannot_ground_two_events(self):
+        reused = {**LINK, 'event_id': 'world-war-i'}
+        kept, rejected = screen([LINK, reused], card_text(PERSON, [], []), EVENTS, ok)
+        self.assertEqual(([k['event_id'] for k in kept], rejected[0]['problem']),
+                         (['nazi-soviet-pact'], 'the same quote is already used for another event'))
 
     def test_dry_run_neither_writes_nor_marks(self):
         linker = FakeLinker(json.dumps({'links': [LINK]}))
