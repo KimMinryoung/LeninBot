@@ -68,7 +68,7 @@ CREATE TABLE IF NOT EXISTS commulingo_pipeline_fetch_cache (
 );
 CREATE TABLE IF NOT EXISTS commulingo_pipeline_budget (
     id uuid PRIMARY KEY,
-    day date NOT NULL DEFAULT (now() AT TIME ZONE 'UTC')::date,
+    day date NOT NULL DEFAULT ((now() AT TIME ZONE 'Asia/Seoul') - interval '2 hours')::date,
     lane text NOT NULL,
     job_id bigint REFERENCES commulingo_pipeline_jobs(id),
     reserved numeric(12,6) NOT NULL CHECK (reserved >= 0),
@@ -77,15 +77,20 @@ CREATE TABLE IF NOT EXISTS commulingo_pipeline_budget (
     settled_at timestamptz
 );
 CREATE INDEX IF NOT EXISTS commulingo_pipeline_budget_day ON commulingo_pipeline_budget(day);
+-- Budget day starts at 02:00 KST; store.BUDGET_DAY_SQL writes the same value explicitly.
+ALTER TABLE commulingo_pipeline_budget ALTER COLUMN day
+    SET DEFAULT ((now() AT TIME ZONE 'Asia/Seoul') - interval '2 hours')::date;
 CREATE TABLE IF NOT EXISTS commulingo_pipeline_scheduler (
     id integer PRIMARY KEY CHECK (id=1), cursor integer NOT NULL DEFAULT 0
 );
 INSERT INTO commulingo_pipeline_scheduler(id) VALUES (1) ON CONFLICT DO NOTHING;
 CREATE TABLE IF NOT EXISTS commulingo_pipeline_publications (
     job_id bigint PRIMARY KEY REFERENCES commulingo_pipeline_jobs(id),
-    day date NOT NULL DEFAULT (now() AT TIME ZONE 'UTC')::date,
+    day date NOT NULL DEFAULT ((now() AT TIME ZONE 'Asia/Seoul') - interval '2 hours')::date,
     kind text NOT NULL, action text NOT NULL
 );
+ALTER TABLE commulingo_pipeline_publications ALTER COLUMN day
+    SET DEFAULT ((now() AT TIME ZONE 'Asia/Seoul') - interval '2 hours')::date;
 
 CREATE TABLE IF NOT EXISTS commulingo_pipeline_attempts (
     id uuid PRIMARY KEY,

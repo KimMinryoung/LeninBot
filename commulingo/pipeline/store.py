@@ -17,6 +17,12 @@ class BudgetUnavailable(RuntimeError):
     pass
 
 
+# The daily budget and canary publication day start at 02:00 KST (17:00 UTC),
+# so the night's batch opens with a fresh cap (operator decision 2026-09-29).
+BUDGET_DAY_SQL = "((now() AT TIME ZONE 'Asia/Seoul') - interval '2 hours')::date"
+BUDGET_DAY_START_SQL = "((" + BUDGET_DAY_SQL + " + interval '2 hours') AT TIME ZONE 'Asia/Seoul')"
+
+
 # Importance tier (operator decision 2026-09-17): people linked to at least this
 # many history events get the deep section budget and the short re-enrichment grace.
 IMPORTANT_EVENTS = 6
@@ -339,7 +345,7 @@ class Store:
             cur.execute("""WITH spent AS (
                 SELECT coalesce(sum(coalesce(actual,reserved)),0) AS total,
                     coalesce(sum(coalesce(actual,reserved)) FILTER (WHERE lane!='review'),0) AS author
-                FROM commulingo_pipeline_budget WHERE day=(now() AT TIME ZONE 'UTC')::date)
+                FROM commulingo_pipeline_budget WHERE day=""" + BUDGET_DAY_SQL + """)
                 UPDATE commulingo_pipeline_jobs SET status='ready',available_at=now(),last_error='',updated_at=now()
                 FROM spent WHERE status='deferred' AND last_error='daily budget reserved or spent'
                 AND (stage IN ('validate','judge','submit') OR
@@ -500,13 +506,13 @@ class Store:
             cur.execute('''SELECT COALESCE(sum(COALESCE(actual,reserved)),0) AS total,
                 COALESCE(sum(COALESCE(actual,reserved)) FILTER (WHERE lane!='review'),0) AS author
                 FROM commulingo_pipeline_budget
-                WHERE day=(now() AT TIME ZONE 'UTC')::date''')
+                WHERE day=''' + BUDGET_DAY_SQL)
             spent = cur.fetchone()
             if spent['total'] + amount > cap or (lane != 'review' and
                     spent['author'] + amount > cap * (1 - fraction)):
                 raise BudgetUnavailable('daily budget reserved or spent')
-            cur.execute('''INSERT INTO commulingo_pipeline_budget(id,lane,job_id,reserved)
-                VALUES (%s,%s,%s,%s)''', (token, lane, job_id, amount))
+            cur.execute('''INSERT INTO commulingo_pipeline_budget(id,day,lane,job_id,reserved)
+                VALUES (%s,''' + BUDGET_DAY_SQL + ''',%s,%s,%s)''', (token, lane, job_id, amount))
         return token
 
     def settle(self, token, actual):
@@ -625,16 +631,17 @@ class Store:
     def publication_slot(self, job, limit):
         with self.transaction() as cur:
             cur.execute("SELECT pg_advisory_xact_lock(hashtext('commulingo-pipeline-publication'))")
-            cur.execute("SELECT day=(now() AT TIME ZONE 'UTC')::date AS current_day FROM commulingo_pipeline_publications WHERE job_id=%s",(job['id'],))
+            cur.execute("SELECT day=" + BUDGET_DAY_SQL + " AS current_day FROM commulingo_pipeline_publications WHERE job_id=%s",(job['id'],))
             slot = cur.fetchone()
             if slot and slot['current_day']:
                 return
             cur.execute('''SELECT count(*) AS n FROM commulingo_pipeline_publications
-                WHERE day=(now() AT TIME ZONE 'UTC')::date AND kind=%s AND action=%s''',
+                WHERE day=''' + BUDGET_DAY_SQL + ''' AND kind=%s AND action=%s''',
                 (job['kind'],job['action']))
             if cur.fetchone()['n']>=limit:
                 raise BudgetUnavailable('canary publication slots exhausted')
-            cur.execute('''INSERT INTO commulingo_pipeline_publications(job_id,kind,action) VALUES (%s,%s,%s)
+            cur.execute('''INSERT INTO commulingo_pipeline_publications(job_id,day,kind,action)
+                VALUES (%s,''' + BUDGET_DAY_SQL + ''',%s,%s)
                 ON CONFLICT(job_id) DO UPDATE SET day=EXCLUDED.day''',
                         (job['id'],job['kind'],job['action']))
 

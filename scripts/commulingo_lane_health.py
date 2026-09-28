@@ -23,6 +23,8 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+from commulingo.pipeline.store import BUDGET_DAY_SQL, BUDGET_DAY_START_SQL  # noqa: E402
 
 
 def execution_metrics(since: str, path: Path | None = None) -> list[str]:
@@ -34,7 +36,8 @@ def execution_metrics(since: str, path: Path | None = None) -> list[str]:
     hours = int(match[1]) if match else 24
     cutoff = time.time() - hours * 3600
     if since == 'today':
-        cutoff = int(time.time() // 86400) * 86400
+        # Budget day opens at 02:00 KST (17:00 UTC), as in BUDGET_DAY_SQL.
+        cutoff = int((time.time() + 7 * 3600) // 86400) * 86400 - 7 * 3600
     try:
         with sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True) as db:
             rows = db.execute("SELECT stage,target,status,summary FROM runs WHERE ts>? AND status NOT IN ('running','submitted','selected') ORDER BY ts",
@@ -280,7 +283,7 @@ def problems(lane: str, stats: dict) -> list[str]:
 
 def window_boundary(since):
     if since == 'today':
-        return "date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'"
+        return BUDGET_DAY_START_SQL
     match = re.fullmatch(r"-(\d+)h", since.strip())
     if not match:
         raise ValueError("--since supports -Nh or today; all data sources use the same window")
@@ -415,9 +418,9 @@ def pipeline_health(since):
         'pipeline_cost',(SELECT coalesce(sum(actual),0) FROM commulingo_pipeline_budget
             WHERE job_id IS NOT NULL AND created_at>{boundary}),
         'today_actual',(SELECT coalesce(sum(actual),0) FROM commulingo_pipeline_budget
-            WHERE day=(now() AT TIME ZONE 'UTC')::date),
+            WHERE day={BUDGET_DAY_SQL}),
         'today_reserved',(SELECT coalesce(sum(reserved),0) FROM commulingo_pipeline_budget
-            WHERE actual IS NULL AND day=(now() AT TIME ZONE 'UTC')::date),
+            WHERE actual IS NULL AND day={BUDGET_DAY_SQL}),
         'publications',(SELECT coalesce(json_agg(p),'[]'::json) FROM (
             SELECT DISTINCT ON (a.job_id) a.job_id,j.kind,j.action,j.target,j.topic,
                 coalesce(a.value->'value'->'name'->>'ko',a.value->'value'->'term'->>'ko',j.target) AS label,
@@ -449,7 +452,7 @@ def pipeline_health(since):
         '-d','leninbot','-t','-A','-c',sql],capture_output=True,text=True,timeout=30,check=True)
     value = json.loads(result.stdout)
     lines = [f"파이프라인: 기간 내 반영 {value['applied']}건 · 현재 실행 {value['running']} · 실패 재시도 {value['retrying']} · 운영자 확인 {value['escalated']}",
-             f"shared budget (UTC today): spent ${value['today_actual']:.4f}, reserved ${value['today_reserved']:.4f}"]
+             f"shared budget (day from 02:00 KST): spent ${value['today_actual']:.4f}, reserved ${value['today_reserved']:.4f}"]
     lines.append(f"공개 승인 기록 {value.get('approval_records', 0)}건 · 고유 반영 작업 {value['applied']}개 · 마지막 공개 반영 {value.get('last_publication') or '없음'}")
     lines.append(f"기간 내 무편집 완료 {value.get('no_edit', 0)} · 불필요 작업 취소 {value.get('retired', 0)} · 실패 시도 {value.get('failed_attempts', 0)} · 현재 예산 대기 {value.get('budget_waits', 0)}")
     for row in value.get('publications', []):
@@ -488,7 +491,7 @@ def pipeline_health(since):
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--since", default="-24h", help="-Nh or today (UTC)")
+    parser.add_argument("--since", default="-24h", help="-Nh or today (budget day from 02:00 KST)")
     parser.add_argument("--notify", action="store_true",
                         help="send Telegram only when a lane is unhealthy")
     args = parser.parse_args()

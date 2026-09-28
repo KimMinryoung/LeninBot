@@ -16,7 +16,7 @@ def main():
     reconciliation.add_argument('--apply', action='store_true')
     commands.add_parser('metrics')
     efficiency = commands.add_parser('efficiency')
-    efficiency.add_argument('--since',default='today',help='UTC today or -Nh')
+    efficiency.add_argument('--since',default='today',help='budget day (from 02:00 KST) or -Nh')
     plan = commands.add_parser('plan')
     plan.add_argument('--apply',action='store_true')
     plan.add_argument('--workflow',choices=['editor'])
@@ -74,7 +74,10 @@ def main():
         import re
         now = datetime.now(timezone.utc)
         if args.since=='today':
-            since = now.replace(hour=0,minute=0,second=0,microsecond=0)
+            # Same boundary as store.BUDGET_DAY_SQL: the budget day opens at 02:00 KST.
+            kst = timezone(timedelta(hours=9))
+            since = ((now.astimezone(kst)-timedelta(hours=2)).replace(hour=2,minute=0,second=0,microsecond=0)
+                     .astimezone(timezone.utc))
         elif re.fullmatch(r'-[1-9][0-9]*h',args.since):
             since = now-timedelta(hours=int(args.since[1:-1]))
         else:
