@@ -74,6 +74,15 @@
     "json_mode": true,
     "note": "Wikipedia 문장 근거가 확보된 CommUlingo 사건 참여자 batch의 한영 관계 라벨과 참여 유형을 생성. scripts/commulingo_event_evidence_links.py 전용"
   },
+  "commulingo_event_person_links": {
+    "provider": "openai",
+    "model": "tier:low",
+    "max_tokens": 8000,
+    "reasoning_effort": "low",
+    "timeout": 120,
+    "json_mode": true,
+    "note": "CommuLingo 사건 연결이 없는 인물 카드에 기존 사건 링크(관계 종류·한영 관계·한영 메모·카드 원문 인용 basis)를 제안. commulingo/pipeline/event_links.py 전용. basis가 카드 원문 인용인지 코드가, 연결 주장을 뒷받침하는지 commulingo_review_citation_support(Jev)가 판정한 뒤에만 저장한다."
+  },
   "chunk_summary": {
     "provider": "openai",
     "model": "tier:low",

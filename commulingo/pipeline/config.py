@@ -41,6 +41,11 @@ def load():
     if not isinstance(value['term_enrichment_exclude'], list) or any(
             type(v) is not str for v in value['term_enrichment_exclude']):
         raise ValueError('term_enrichment_exclude must be a list of term ids')
+    # People without any history-event link get one linking pass each per tick
+    # (restored 2026-09-28 by operator request; 0 turns it off).
+    value.setdefault('event_links_per_tick', 20)
+    if type(value['event_links_per_tick']) is not int or not 0 <= value['event_links_per_tick'] <= 100:
+        raise ValueError('event_links_per_tick must be an integer 0..100')
     return value
 
 

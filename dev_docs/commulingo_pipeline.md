@@ -13,12 +13,33 @@
 옛 두 RPC 방식의 legacy 단계(`Research`·`Draft`·`Review`·`validate`·`submit`)는 2026-09-24에 제거했다.
 `leninbot-commulingo-pipeline.timer`가 배치를 실행하고, 별도 `leninbot-commulingo-review.timer`는 비활성화되어 있다.
 독립 검토는 editor 안에서 수행한다. 사건 작성·인물-사건 연결의 기존 batch는
-2026-09-20 운영자 결정으로 폐기했으며 pipeline으로 이관하지 않았다.
+2026-09-20 운영자 결정으로 폐기했다. 인물-사건 연결은 2026-09-28 tick 안의 별도 단계로 복원했다(아래).
 사건 작성 전용 runner·agent는 제거했다. `leninbot-commulingo-batch.timer/service`와
 events·links service는 빈 unit 파일로 남겨 systemd에서 masked로 처리한다.
 이는 기존 설치나 전체 unit 복사 시 폐기한 batch가 다시 실행되는 것을 막는 배포 표식이며 실행 코드는 없다.
 기존 사건과 연결 데이터는 보존한다. 인물·용어 pipeline의 gap 완료 처리는 기존처럼
 `resolved_id`를 기록하며 사건 연결을 자동 생성하지 않는다.
+
+### 인물-사건 연결 (2026-09-28 복원)
+
+폐기 뒤 대체 경로가 없어 2026-09-28 기준 인물 2,410명 중 412명이 사건 연결 없이 남았다
+(예: `joachim-von-ribbentrop`과 `nazi-soviet-pact`). 운영자 요청으로 `commulingo/pipeline/event_links.py`를
+tick에 붙였다. `tick`은 과제 선정 뒤 연결이 하나도 없는 인물을 `event_links_per_tick`명(0이면 끔)까지
+처리한다. 처음 보는 인물이 먼저, 재시도 대상은 기록이 오래된 순서다.
+
+- 인물마다 `commulingo_event_person_links`(GPT-6 Luna, `reasoning_effort=low`)에 카드 본문과
+  성인기(15세~사망)와 기간이 겹치는 사건만 준다. 링크는 최대 4개이며, 각 링크의 `basis`는 카드 원문의
+  연속 인용이어야 한다. 모델 자신의 지식만으로는 연결하지 않는다.
+- 코드가 사건 ID·인용 일치·저장 경로 검사(`commulingo_gap_event_links.acceptable`, 관계 64/164자·메모 110/250자)를
+  확인하고, `commulingo_review_citation_support`(Jev)가 인용이 연결 주장을 뒷받침한다고 판정한 링크만
+  공용 저장 경로(`_run_edit`, `history_event_person`)로 저장한다. 프롬프트는 관계 약 12/35자·메모 약 50/130자를
+  기본으로 하고 복잡한 역할만 상한까지 허용한다(기존 3,591건 중앙값 13/37, 57/138).
+- 거절된 링크는 사유와 직전 응답을 돌려줘 같은 tick 안에서 재제출받는다(최대 3회 호출, 저장된 링크는 유지).
+- 결과는 `commulingo_person_enrichment`의 `events` 주제로 남긴다. 링크 저장은 `complete`,
+  모델이 제안 자체를 하지 않으면 `not_applicable`(180일 뒤 재검토), 재제출 뒤에도 남은 거절·장애는
+  `open`으로 기록해 6시간 뒤 재시도한다.
+- 호출마다 파이프라인 일일 예산에 `links` 몫으로 예약·정산한다. 수동 실행은
+  `scripts/commulingo_pipeline.py event-links --person ID [--dry-run]`이다.
 
 운영자는 독립 검토를 통과한 결과의 공개 반영과 향후 자동 실행을 지속 승인했다.
 분류용 설명·라벨과 판정에 필요한 원문 발췌를 기존 TypeSafe/Jev로 전송하는 것도 지속 승인했다.

@@ -27,6 +27,10 @@ def main():
     cleanup.add_argument('--limit', type=int, default=200)
     for name in ('show', 'retry'):
         commands.add_parser(name).add_argument('id', type=int)
+    links = commands.add_parser('event-links', help='link people who have no history event (paid)')
+    links.add_argument('--person', action='append', help='only this person id (repeatable)')
+    links.add_argument('--limit', type=int, default=5)
+    links.add_argument('--dry-run', action='store_true', help='propose and gate, but write nothing')
     add = commands.add_parser('enqueue')
     add.add_argument('kind', choices=['person','term'])
     add.add_argument('action', choices=['create','update'])
@@ -89,6 +93,13 @@ def main():
         result = store.detail(args.id)
     elif args.command == 'retry':
         result = {'retried': store.retry(args.id)}
+    elif args.command == 'event-links':
+        from .config import load
+        from .event_links import default_linker
+        if not 1 <= args.limit <= 100:
+            parser.error('--limit must be 1..100')
+        result = asyncio.run(default_linker(store, load()).run(
+            limit=args.limit, person_ids=args.person, apply=not args.dry_run))
     elif args.command == 'enqueue':
         result = {'id': store.enqueue(**{k:v for k,v in vars(args).items() if k!='command'})}
     else:
@@ -137,6 +148,12 @@ def main():
                         logging.getLogger(__name__).warning('pipeline cleanup skipped: concurrent work; retry next tick')
                 await asyncio.to_thread(Planner(store,concrete=workflow=='editor').plan,apply=True)
                 await asyncio.to_thread(store.expire_sources)
+                if config['phase']=='live' and config['event_links_per_tick']:
+                    from .event_links import default_linker
+                    linked = await default_linker(store, config).run(limit=config['event_links_per_tick'])
+                    logging.getLogger(__name__).warning('pipeline event links: %s', json.dumps(
+                        [{k:r.get(k) for k in ('person','status','attempts','reason','error')} for r in linked],
+                        ensure_ascii=False))
             engine = Engine(store, stages(store,workflow=workflow),cap=config['daily_cap_usd'],
                             stage_budget=config['stage_budget_usd'],review_fraction=config['review_fraction'])
             return await engine.run_batch(limit=args.limit,max_seconds=args.max_seconds,
