@@ -185,7 +185,6 @@ class EventLinker:
     def people(self, limit, person_ids=None):
         with self.store.transaction() as cur:
             cur.execute('''SELECT p.id FROM commulingo_people p
-                WHERE NOT EXISTS (SELECT 1 FROM commulingo_history_event_people e WHERE e.person_id=p.id)
                 LEFT JOIN commulingo_person_enrichment e ON e.person_id=p.id AND e.topic='events'
                 WHERE NOT EXISTS (SELECT 1 FROM commulingo_history_event_people l WHERE l.person_id=p.id)
                   AND (e.person_id IS NULL

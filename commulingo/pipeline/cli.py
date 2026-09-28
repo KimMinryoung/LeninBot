@@ -150,10 +150,13 @@ def main():
                 await asyncio.to_thread(store.expire_sources)
                 if config['phase']=='live' and config['event_links_per_tick']:
                     from .event_links import default_linker
-                    linked = await default_linker(store, config).run(limit=config['event_links_per_tick'])
-                    logging.getLogger(__name__).warning('pipeline event links: %s', json.dumps(
-                        [{k:r.get(k) for k in ('person','status','attempts','reason','error')} for r in linked],
-                        ensure_ascii=False))
+                    try:  # a linking failure never stops the editor batch
+                        linked = await default_linker(store, config).run(limit=config['event_links_per_tick'])
+                        logging.getLogger(__name__).warning('pipeline event links: %s', json.dumps(
+                            [{k:r.get(k) for k in ('person','status','attempts','reason','error')} for r in linked],
+                            ensure_ascii=False))
+                    except Exception:
+                        logging.getLogger(__name__).exception('pipeline event links failed')
             engine = Engine(store, stages(store,workflow=workflow),cap=config['daily_cap_usd'],
                             stage_budget=config['stage_budget_usd'],review_fraction=config['review_fraction'])
             return await engine.run_batch(limit=args.limit,max_seconds=args.max_seconds,
