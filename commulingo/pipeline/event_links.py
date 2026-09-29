@@ -61,7 +61,11 @@ A weak or merely contemporaneous connection is not a link. The card must describ
 that belongs to THIS event as its title and summary define it: its country, side, place and
 dates. A broader war, a neighbouring event or a general career fact is not enough (serving in
 the Second World War does not link to a Soviet-front event; commanding the German army does not
-link to a Russian revolution; ordering a surrender is not a conference). Use each card quote for
+link to a Russian revolution; ordering a surrender is not a conference). A campaign of repression (a purge, a terror, a fabricated case) is the one exception to the
+card having to name the event: an arrest, execution or death in custody at the hands of the
+authorities that ran it, in its country and inside its period, is part of it as target even
+when the card does not name the event, provided the card states that arrest, execution or
+custody death (a bare death date is not enough). Use each card quote for
 one event only. Events in already_linked are linked already: they are not in the event list,
 so propose only further events the card documents. Most people fit one to three events;
 an empty list is a valid answer. At most {max_links} links.
@@ -220,7 +224,13 @@ its period. Answer false when the quote describes:
   - something the caption or role claims but the quote does not say.
 For a historian the test is instead whether the quote names their later study or
 interpretation of THIS event. An event marked before_life ended before the person's adult
-life, so only a historian link can belong to it. Do not use your own knowledge to fill a gap in the quote.
+life, so only a historian link can belong to it.
+For a campaign of repression (a purge, a terror, a fabricated case), a quote stating an
+arrest, execution or death in custody by the authorities that ran it, in its country and
+inside its period, belongs to it as target even without naming the event; a bare death
+date does not. An execution or arrest of someone living in that country counts as the
+authorities' act unless the quote names another perpetrator; a later rehabilitation
+confirms it. Do not use your own knowledge to fill a gap in the quote.
 When unsure, answer false.
 
 2. kind: the one kind that fits what the quote shows, whatever was proposed:
