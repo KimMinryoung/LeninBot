@@ -46,6 +46,11 @@ def load():
     value.setdefault('event_links_per_tick', 20)
     if type(value['event_links_per_tick']) is not int or not 0 <= value['event_links_per_tick'] <= 100:
         raise ValueError('event_links_per_tick must be an integer 0..100')
+    # While more people have never been checked for events than one steady tick
+    # covers, link this many instead (event_links.tick_limit); steps back down itself.
+    value.setdefault('event_links_backlog_per_tick', 50)
+    if type(value['event_links_backlog_per_tick']) is not int or not 0 <= value['event_links_backlog_per_tick'] <= 100:
+        raise ValueError('event_links_backlog_per_tick must be an integer 0..100')
     return value
 
 

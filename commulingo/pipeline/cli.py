@@ -149,9 +149,11 @@ def main():
                 await asyncio.to_thread(Planner(store,concrete=workflow=='editor').plan,apply=True)
                 await asyncio.to_thread(store.expire_sources)
                 if config['phase']=='live' and config['event_links_per_tick']:
-                    from .event_links import default_linker
+                    from .event_links import default_linker, tick_limit
                     try:  # a linking failure never stops the editor batch
-                        linked = await default_linker(store, config).run(limit=config['event_links_per_tick'])
+                        linker = default_linker(store, config)
+                        limit = tick_limit(config, await asyncio.to_thread(linker.never_checked))
+                        linked = await linker.run(limit=limit)
                         logging.getLogger(__name__).warning('pipeline event links: %s', json.dumps(
                             [{k:r.get(k) for k in ('person','status','attempts','reason','error')} for r in linked],
                             ensure_ascii=False))

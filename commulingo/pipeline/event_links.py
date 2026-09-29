@@ -322,6 +322,17 @@ def parse_verdicts(text):
             for v in verdicts if isinstance(v, dict)}
 
 
+def tick_limit(config, never_checked):
+    """People to link this tick: the backlog rate while more people have never been
+    checked than one steady tick covers, then the steady rate. The 2026-09-29 pass
+    over ~2,000 already-linked cards ran at 50 and needed an operator to lower it
+    by hand once drained; this steps down on its own."""
+    steady = config['event_links_per_tick']
+    if not steady:
+        return 0
+    return max(steady, config['event_links_backlog_per_tick']) if never_checked > steady else steady
+
+
 class EventLinker:
     def __init__(self, store, *, cap, review_fraction, generate=None, write=None,
                  mark=None, acceptable=None, reservation=RESERVATION_USD):
@@ -350,6 +361,12 @@ class EventLinker:
                     e.updated_at NULLS FIRST, links.n, p.created_at DESC, p.id LIMIT %(limit)s''',
                 {'ids': person_ids, 'limit': limit, 'retry': RETRY_HOURS})
             return [row['id'] for row in cur.fetchall()]
+
+    def never_checked(self):
+        with self.store.transaction() as cur:
+            cur.execute('''SELECT count(*) AS n FROM commulingo_people p WHERE NOT EXISTS (
+                SELECT 1 FROM commulingo_person_enrichment e WHERE e.person_id=p.id AND e.topic='events')''')
+            return cur.fetchone()['n']
 
     def load(self, person_id):
         with self.store.transaction() as cur:

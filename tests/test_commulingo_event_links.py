@@ -293,3 +293,20 @@ class LinkerTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TickLimitTest(unittest.TestCase):
+    CONFIG = {'event_links_per_tick': 20, 'event_links_backlog_per_tick': 50}
+
+    def test_backlog_rate_while_more_than_a_tick_is_unchecked(self):
+        self.assertEqual(event_links.tick_limit(self.CONFIG, 410), 50)
+
+    def test_steady_rate_once_the_backlog_fits_one_tick(self):
+        self.assertEqual(event_links.tick_limit(self.CONFIG, 20), 20)
+        self.assertEqual(event_links.tick_limit(self.CONFIG, 0), 20)
+
+    def test_zero_steady_rate_keeps_linking_off(self):
+        self.assertEqual(event_links.tick_limit({**self.CONFIG, 'event_links_per_tick': 0}, 410), 0)
+
+    def test_backlog_rate_never_lowers_the_steady_rate(self):
+        self.assertEqual(event_links.tick_limit({**self.CONFIG, 'event_links_backlog_per_tick': 5}, 410), 20)
