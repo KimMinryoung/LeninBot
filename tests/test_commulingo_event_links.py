@@ -120,6 +120,9 @@ class FakeLinker(EventLinker):
     def people(self, limit, person_ids=None):
         return ['joachim-von-ribbentrop']
 
+    def linked(self, person_id):
+        return getattr(self, 'existing', [])
+
 
 class LinkerTests(unittest.TestCase):
     def test_writes_checked_link_and_marks_complete(self):
@@ -140,6 +143,21 @@ class LinkerTests(unittest.TestCase):
         self.assertEqual(linker.calls['settle'], [0.004, 0.001] * 3)
         self.assertIn('not part of this event', linker.requests[1])
         self.assertIn('Your previous reply', linker.requests[1])
+
+    def test_a_linked_person_is_asked_only_for_further_events(self):
+        linker = FakeLinker(json.dumps({'links': []}))
+        linker.existing = [{'event_id': 'world-war-i', 'relation_kind': 'participant', 'title_en': 'World War I'}]
+        result = asyncio.run(linker.link('joachim-von-ribbentrop'))
+        self.assertEqual([e['event_id'] for e in linker.prompt['events']], ['nazi-soviet-pact'])
+        self.assertEqual(linker.prompt['already_linked'][0]['event_id'], 'world-war-i')
+        self.assertEqual((result['status'], linker.calls['mark']), ('complete', ['complete']))
+        self.assertTrue(result['reason'].startswith('no further event'))
+
+    def test_a_linked_person_gains_a_further_link(self):
+        linker = FakeLinker(json.dumps({'links': [LINK]}))
+        linker.existing = [{'event_id': 'world-war-i', 'relation_kind': 'participant', 'title_en': 'World War I'}]
+        result = asyncio.run(linker.link('joachim-von-ribbentrop'))
+        self.assertEqual((result['status'], linker.calls['write']), ('complete', ['nazi-soviet-pact']))
 
     def test_the_event_focus_reaches_both_calls(self):
         linker = FakeLinker(json.dumps({'links': [LINK]}))

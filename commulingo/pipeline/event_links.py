@@ -62,7 +62,8 @@ that belongs to THIS event as its title and summary define it: its country, side
 dates. A broader war, a neighbouring event or a general career fact is not enough (serving in
 the Second World War does not link to a Soviet-front event; commanding the German army does not
 link to a Russian revolution; ordering a surrender is not a conference). Use each card quote for
-one event only. Most people fit one to three events;
+one event only. Events in already_linked are linked already: they are not in the event list,
+so propose only further events the card documents. Most people fit one to three events;
 an empty list is a valid answer. At most {max_links} links.
 
 For each link return:
@@ -142,11 +143,13 @@ def _norm(text):
     return re.sub(r'\s+', ' ', str(text or '')).strip()
 
 
-def prompt(person, card, events):
+def prompt(person, card, events, existing=()):
     return json.dumps({
         'person': {'id': person['id'], 'name_ko': person.get('name_ko'), 'name_en': person.get('name_en'),
                    'years': person.get('years_label')},
         'card': card,
+        **({'already_linked': [{'event_id': r['event_id'], 'title_en': r.get('title_en'), 'kind': r['relation_kind']}
+                               for r in existing]} if existing else {}),
         'events': [{'event_id': e['id'], 'period': e.get('period_label'), 'title_ko': e.get('title_ko'),
                     'title_en': e.get('title_en'), 'focus': focus_text(e),
                     **({'before_life': True} if e.get('before_life') else {}),
@@ -264,17 +267,22 @@ class EventLinker:
     # -- data -------------------------------------------------------------
     def people(self, limit, person_ids=None):
         with self.store.transaction() as cur:
+            # People with links are checked too (2026-09-29): 2,012 linked cards had never
+            # been read for further events (Pepelyayev's 1938 execution in the Great Terror).
             cur.execute('''SELECT p.id FROM commulingo_people p
                 LEFT JOIN commulingo_person_enrichment e ON e.person_id=p.id AND e.topic='events'
-                WHERE NOT EXISTS (SELECT 1 FROM commulingo_history_event_people l WHERE l.person_id=p.id)
-                  AND (e.person_id IS NULL
+                LEFT JOIN LATERAL (SELECT count(*) AS n FROM commulingo_history_event_people l
+                    WHERE l.person_id=p.id) links ON true
+                WHERE (e.person_id IS NULL
                        OR (e.status<>'open' AND e.review_after<=now())
                        OR (e.status='open' AND e.updated_at<=now()-%(retry)s*interval '1 hour'))
                   AND NOT EXISTS (SELECT 1 FROM commulingo_agent_suggestions s WHERE s.target_id=p.id
                       AND s.target_type IN ('person','person_section') AND s.status='pending')
                   AND (%(ids)s::text[] IS NULL OR p.id=ANY(%(ids)s))
-                -- never-tried people first, then retries oldest first
-                ORDER BY e.updated_at NULLS FIRST, p.created_at DESC, p.id LIMIT %(limit)s''',
+                -- unlinked people first (never tried, then retries oldest first), then linked
+                -- people who died in the Great Terror years, then those with fewest links
+                ORDER BY links.n > 0, p.death_year IN (1937, 1938) IS NOT TRUE,
+                    e.updated_at NULLS FIRST, links.n, p.created_at DESC, p.id LIMIT %(limit)s''',
                 {'ids': person_ids, 'limit': limit, 'retry': RETRY_HOURS})
             return [row['id'] for row in cur.fetchall()]
 
@@ -293,6 +301,12 @@ class EventLinker:
             events = cur.fetchall()
         return person, career, sections, events
 
+    def linked(self, person_id):
+        with self.store.transaction() as cur:
+            cur.execute('''SELECT l.event_id, l.relation_kind, e.title_en FROM commulingo_history_event_people l
+                JOIN commulingo_history_events e ON e.id=l.event_id WHERE l.person_id=%s''', (person_id,))
+            return cur.fetchall()
+
     # -- one person -------------------------------------------------------
     async def paid(self, system, request, feature):
         token = await asyncio.to_thread(self.store.reserve, self.reservation, lane=LANE, cap=self.cap,
@@ -309,11 +323,14 @@ class EventLinker:
         if not person:
             return {'person': person_id, 'status': 'missing'}
         card = card_text(person, career, sections)
-        events = candidate_events(person, events)
+        existing = await asyncio.to_thread(self.linked, person_id)
+        have = {row['event_id'] for row in existing}
+        events = [e for e in candidate_events(person, events) if e['id'] not in have]
         if not card or not events:
-            return await self._close(person_id, [], 'no card text or no event in the life span', apply)
+            return await self._close(person_id, [], 'no card text or no further event in the life span',
+                                     apply, status='complete' if have else None)
         system = SYSTEM.format(max_links=MAX_LINKS, kinds=', '.join(KINDS), kind_definitions=definitions_text(), **TEXT_CAPS)
-        base, by_id = prompt(person, card, events), {e['id']: e for e in events}
+        base, by_id = prompt(person, card, events, existing), {e['id']: e for e in events}
         text, written, rejected, reason, cost = '', [], [], '', 0
         for attempt in range(ATTEMPTS):
             request = base if attempt == 0 else resubmission(base, text, rejected, written)
@@ -350,7 +367,7 @@ class EventLinker:
                 break
         # Only the model's own "nothing to link" parks the person (180 days);
         # links still rejected after the resubmissions are retried after RETRY_HOURS.
-        status = None if written or not rejected else 'open'
+        status = 'open' if rejected and not written else 'complete' if written or have else None
         result = await self._close(person_id, written, reason, apply, status=status, rejected=rejected)
         return {**result, 'rejected': rejected, 'cost_usd': cost, 'attempts': attempt + 1}
 
@@ -358,7 +375,8 @@ class EventLinker:
         status = status or ('complete' if written else 'not_applicable')
         note = (f'linked {len(written)} event(s): ' + ', '.join(e['event_id'] for e in written) if written
                 else 'retry: ' + '; '.join(f"{r.get('event_id')}: {r['problem']}" for r in rejected)
-                if rejected else ('retry: ' if status == 'open' else 'no event the card documents: ')
+                if rejected else ('retry: ' if status == 'open' else 'no further event the card documents: '
+                                  if status == 'complete' else 'no event the card documents: ')
                 + (reason or 'none proposed'))[:500]
         if apply:
             await asyncio.to_thread(self.mark, person_id, status, note)
