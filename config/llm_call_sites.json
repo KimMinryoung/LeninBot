@@ -92,6 +92,14 @@
     "json_mode": true,
     "note": "commulingo_event_person_links가 제안한 링크마다 카드 인용이 그 사건(요약·결과로 정의한 나라·진영·기간)의 일부인지 판정. 제안과 분리된 호출이며 불확실하면 false. 2026-09-29 Jev 인용 게이트를 대체(Jev는 인용이 메모를 뒷받침하는지만 봐서 헤스의 1941년 스코틀랜드 비행을 프랑스 침공에 통과시켰다)."
   },
+  "commulingo_event_relation_kind": {
+    "provider": "typesafe",
+    "model": "jev-1.13.0",
+    "timeout": 20,
+    "kind": "system_one",
+    "enabled": true,
+    "note": "기존 인물-사건 링크의 관계 종류(commulingo/relation_kinds.py 7종)를 관계 문구·메모로 재판정하는 Jev choice. 2026-09-29 정의 개정에 따른 일괄 재분류(scripts/commulingo_reclassify_event_kinds.py)용. 결과는 JSONL로만 남기며 DB 반영은 별도 검토 단계가 한다."
+  },
   "chunk_summary": {
     "provider": "openai",
     "model": "tier:low",

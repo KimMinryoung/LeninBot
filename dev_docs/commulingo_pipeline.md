@@ -40,6 +40,14 @@ tick에 붙였다. `tick`은 과제 선정 뒤 연결이 하나도 없는 인물
   기본으로 하고 복잡한 역할만 상한까지 허용한다(기존 3,591건 중앙값 13/37, 57/138).
 - 거절된 링크는 사유와 직전 응답을 돌려줘 같은 tick 안에서 재제출받는다(제안 최대 3회, 저장된 링크는 유지).
   검증 응답이 파손되면 오류로 보고 6시간 뒤 재시도한다.
+- 관계 종류의 정의는 `commulingo/relation_kinds.py` 한 곳에 있고 저장 검증·제안·검증 프롬프트·옛 연결 스크립트가 읽는다.
+  2026-09-29 개정: leader(최상위 결정권자), executor(지도부 결정의 실행·사건 일부의 지휘, 화면 라벨 "집행 · 지휘"),
+  participant, opponent(사건 제목이 가리키는 과정·주체에 맞섬; 같은 편 안의 이견은 participant), target(가해진 행위가
+  메모의 내용이면 opponent보다 우선), witness(당시의 목격·기록), historian(후대 연구·해석, 신설). 검증 호출이 가장 맞는
+  종류를 함께 답하고 제안과 다르면 같은 tick에서 재제출받는다.
+- 기존 링크 3,630건은 `scripts/commulingo_reclassify_event_kinds.py`(Jev `commulingo_event_relation_kind`, $0.093)로
+  재판정해 신뢰도 0.8 이상 변경 657건을 revision과 함께 반영했다(participant→executor 329, witness→historian 157 등).
+  opponent로 옮기는 153건은 여러 세력이 얽힌 사건에서 기준점이 흔들려(카메네프를 권력투쟁의 반대로 판정 등) 보류했다.
 - 결과는 `commulingo_person_enrichment`의 `events` 주제로 남긴다. 링크 저장은 `complete`,
   모델이 제안 자체를 하지 않으면 `not_applicable`(180일 뒤 재검토), 재제출 뒤에도 남은 거절·장애는
   `open`으로 기록해 6시간 뒤 재시도한다.
