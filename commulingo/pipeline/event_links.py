@@ -7,12 +7,15 @@ linking inside the pipeline tick the same day.
 
 One call per person sees the card and the events that overlap the person's
 adult life, and proposes links. A link is written only when its basis is a
-verbatim quote of the card, the quote passes the Jev citation gate for the
-link's claim, and the row passes the shared narrow writer's validation. A
-person for whom the model proposes nothing gets events=not_applicable
-(revisited after 180 days). Proposals lost to validation and malformed replies
-are sent back to the model with the reasons and resubmitted in the same tick
-(ATTEMPTS calls at most). What is still refused after that, and errors,
+verbatim quote of the card, a separate check call (which sees the event's
+summary and outcome) finds the quote describes part of THIS event, and the row
+passes the shared narrow writer's validation. The check replaced the Jev
+citation gate on 2026-09-29: Jev judged whether the quote supported the note,
+not whether the note belonged to the event, and passed Hess's 1941 flight to
+Scotland for the fall of France. A person for whom the model proposes nothing
+gets events=not_applicable (revisited after 180 days). Refused links and
+malformed replies go back to the proposer with the reasons in the same tick
+(ATTEMPTS proposals at most). What is still refused after that, and errors,
 record events=open and are retried after RETRY_HOURS, behind people never tried.
 """
 import asyncio
@@ -26,12 +29,14 @@ from .store import BudgetUnavailable
 logger = logging.getLogger(__name__)
 
 FEATURE = 'commulingo_event_person_links'
+CHECK_FEATURE = 'commulingo_event_person_link_check'
 LANE = 'links'
 CHANGED_BY = 'commulingo-pipeline-event-links'
 MAX_LINKS = 4
 CARD_CHARS = 14_000
 SECTION_CHARS = 1_800
 SUMMARY_CHARS = 400
+EVENT_CONTEXT_CHARS = 1_500  # summary and outcome each, for the check
 MIN_BASIS_CHARS = 12
 ADULT_AGE = 15
 RESERVATION_USD = 0.05
@@ -176,18 +181,55 @@ def resubmission(base, previous, rejected, written):
             "link so it passes, or leave it out if the card does not support it.")
 
 
-def finding(person, event, entry):
-    summary = (event.get('summary_en') or '')[:SUMMARY_CHARS]
-    return (f"{person.get('name_en') or person['id']} ({person.get('years_label') or ''}) took part in the event "
-            f"'{event.get('title_en') or event['id']}' ({event.get('period_label') or ''}"
-            + (f"; {summary}" if summary else '') + f") as {entry['relation_en']}: {entry['note_en']}")
+CHECK_SYSTEM = """You check proposed links on a Korean-language history site between a person and
+one of the site's history events. Each link has the event (title, period, summary, outcome), the
+person's role and caption, and a quote from the person's card.
+
+A link belongs only when the QUOTE describes something the person did or suffered AS PART OF
+THIS EVENT as its summary defines it: the same country or theatre, the same side of it, inside
+its period. Answer false when the quote describes:
+  - a broader war, era or policy the event is only one part of;
+  - a different event near it in time or place (a flight to Britain is not the fall of France;
+    a surrender order is not a conference; a Western-front command is not the Eastern front);
+  - a general position or career fact that does not name an act in this event;
+  - something the caption or role claims but the quote does not say.
+Do not use your own knowledge to fill a gap in the quote. When unsure, answer false.
+
+Reply with one JSON object and nothing else:
+{"verdicts": [{"event_id": "...", "belongs": true, "reason": "one short sentence"}]}"""
+
+
+def check_request(person, pairs):
+    return json.dumps({
+        'person': {'name_en': person.get('name_en'), 'name_ko': person.get('name_ko'),
+                   'years': person.get('years_label')},
+        'links': [{'event_id': event['id'],
+                   'event': {'title_en': event.get('title_en'), 'title_ko': event.get('title_ko'),
+                             'period': event.get('period_label'),
+                             'summary': (event.get('summary_en') or event.get('summary_ko') or '')[:EVENT_CONTEXT_CHARS],
+                             'outcome': (event.get('outcome_en') or event.get('outcome_ko') or '')[:EVENT_CONTEXT_CHARS]},
+                   'kind': entry['kind'], 'relation_en': entry['relation_en'], 'note_en': entry['note_en'],
+                   'quote': entry['basis']} for event, entry in pairs],
+    }, ensure_ascii=False)
+
+
+def parse_verdicts(text):
+    raw = str(text or '').strip()
+    start, end = raw.find('{'), raw.rfind('}')
+    if start == -1 or end < start:
+        raise ValueError('no JSON object in check reply')
+    verdicts = json.loads(raw[start:end + 1]).get('verdicts')
+    if not isinstance(verdicts, list):
+        raise ValueError('check reply has no verdicts list')
+    return {v.get('event_id'): (v.get('belongs') is True, str(v.get('reason') or ''))
+            for v in verdicts if isinstance(v, dict)}
 
 
 class EventLinker:
-    def __init__(self, store, *, cap, review_fraction, generate=None, gate=None, write=None,
+    def __init__(self, store, *, cap, review_fraction, generate=None, write=None,
                  mark=None, acceptable=None, reservation=RESERVATION_USD):
         self.store, self.cap, self.review_fraction = store, cap, review_fraction
-        self.generate, self.gate, self.write, self.mark = generate, gate, write, mark
+        self.generate, self.write, self.mark = generate, write, mark
         self.acceptable, self.reservation = acceptable, reservation
 
     # -- data -------------------------------------------------------------
@@ -217,12 +259,22 @@ class EventLinker:
             cur.execute('''SELECT heading_ko, heading_en, body_ko, body_en FROM commulingo_person_sections
                 WHERE person_id=%s ORDER BY sort_order''', (person_id,))
             sections = cur.fetchall()
-            cur.execute('''SELECT id, period_label, title_ko, title_en, summary_ko, summary_en
-                FROM commulingo_history_events ORDER BY sort_order, id''')
+            cur.execute('''SELECT id, period_label, title_ko, title_en, summary_ko, summary_en,
+                outcome_ko, outcome_en FROM commulingo_history_events ORDER BY sort_order, id''')
             events = cur.fetchall()
         return person, career, sections, events
 
     # -- one person -------------------------------------------------------
+    async def paid(self, system, request, feature):
+        token = await asyncio.to_thread(self.store.reserve, self.reservation, lane=LANE, cap=self.cap,
+                                        review_fraction=self.review_fraction)
+        spent = 0
+        try:
+            text, spent = await self.generate(system, request, feature)
+        finally:
+            await asyncio.to_thread(self.store.settle, token, spent)
+        return text, spent
+
     async def link(self, person_id, *, apply=True):
         person, career, sections, events = await asyncio.to_thread(self.load, person_id)
         if not person:
@@ -236,13 +288,7 @@ class EventLinker:
         text, written, rejected, reason, cost = '', [], [], '', 0
         for attempt in range(ATTEMPTS):
             request = base if attempt == 0 else resubmission(base, text, rejected, written)
-            token = await asyncio.to_thread(self.store.reserve, self.reservation, lane=LANE, cap=self.cap,
-                                            review_fraction=self.review_fraction)
-            spent = 0
-            try:
-                text, spent = await self.generate(system, request)
-            finally:
-                await asyncio.to_thread(self.store.settle, token, spent)
+            text, spent = await self.paid(system, request, FEATURE)
             cost += spent
             try:
                 links, reason = parse(text)
@@ -252,15 +298,16 @@ class EventLinker:
             kept, rejected = screen(links, card, events, self.acceptable,
                                     taken={e['event_id'] for e in written},
                                     used={e['basis'] for e in written})
+            verdicts = {}
+            if kept:
+                reply, spent = await self.paid(CHECK_SYSTEM, check_request(
+                    person, [(by_id[e['event_id']], e) for e in kept]), CHECK_FEATURE)
+                cost += spent
+                verdicts = parse_verdicts(reply)  # an unusable check is an error: retried later
             for entry in kept:
-                check = await self.gate(finding(person, by_id[entry['event_id']], entry), entry['basis'], person_id)
-                if check is None:
-                    raise RuntimeError('citation gate unavailable')
-                # Partial support let broad career facts through for specific events
-                # (2026-09-28: Hindenburg's army command linked to the February Revolution).
-                if check.get('support') != 'supports' or check.get('reject'):
-                    rejected.append({**entry, 'problem': 'the quoted basis does not support this link '
-                                     f"(citation gate: {check.get('support')}, {check.get('confidence')})"})
+                belongs, why = verdicts.get(entry['event_id'], (False, 'the check returned no verdict'))
+                if not belongs:
+                    rejected.append({**entry, 'problem': f'the check found the quote is not part of this event: {why}'})
                     continue
                 if apply:
                     await asyncio.to_thread(self.write, person_id, entry)
@@ -314,7 +361,7 @@ KINDS = ('leader', 'participant', 'executor', 'target', 'opponent', 'witness')
 
 
 def default_linker(store, config):
-    """Production wiring: registry generation, Jev gate, shared narrow writer, enrichment RPC."""
+    """Production wiring: registry generation, shared narrow writer, enrichment RPC."""
     import os
     os.environ.setdefault('COMMULINGO_SUGGESTED_BY', CHANGED_BY)
     from llm.call_registry import generate_detailed, resolve
@@ -322,29 +369,17 @@ def default_linker(store, config):
     from commulingo.people import _HISTORY_RELATION_KINDS, normalize_commulingo_write, _run_edit
     from scripts.commulingo_gap_event_links import acceptable, next_sort_order
     from . import service
-    from .citation_gate import check_review_checks
     assert tuple(_HISTORY_RELATION_KINDS) == KINDS, 'relation kinds drifted from the writer'
 
-    async def generate(system, text):
-        profile = resolve(FEATURE)
-        result = await asyncio.to_thread(generate_detailed, FEATURE, text, system=system, profile=profile)
+    async def generate(system, text, feature):
+        profile = resolve(feature)
+        result = await asyncio.to_thread(generate_detailed, feature, text, system=system, profile=profile)
         semantics = 'anthropic' if profile.provider in {'claude', 'deepseek_anthropic'} else 'openai'
         cost = estimate_cost_usd(profile.model, token_semantics=semantics, **result.usage) or 0
         if result.error or not result.text or result.truncated:
             # Transient: the person stays eligible for the next tick instead of being parked.
-            raise RuntimeError(f'{FEATURE}: {result.error_kind or "truncated"}: {result.error}')
+            raise RuntimeError(f'{feature}: {result.error_kind or "truncated"}: {result.error}')
         return result.text, cost
-
-    async def gate(claim, quote, person_id):
-        item = {'finding': claim, 'quote': quote,
-                'source': f'https://cyber-lenin.com/commulingo/people/{person_id}'}
-        try:
-            checks = await check_review_checks([item])
-        except ValueError as exc:
-            return {'support': 'rejected', 'reject': str(exc)}
-        if not checks:  # gate disabled in the registry: do not write unverified links
-            return None
-        return None if checks[0].get('support') is None else checks[0]
 
     def write(person_id, entry):
         patch = {'personId': person_id, 'sortOrder': next_sort_order(entry['event_id']),
@@ -366,4 +401,4 @@ def default_linker(store, config):
                       'changedBy': CHANGED_BY, 'idempotencyKey': f'event-links:{person_id}:{uuid.uuid4().hex}'})
 
     return EventLinker(store, cap=config['daily_cap_usd'], review_fraction=config['review_fraction'],
-                       generate=generate, gate=gate, write=write, mark=mark, acceptable=acceptable)
+                       generate=generate, write=write, mark=mark, acceptable=acceptable)

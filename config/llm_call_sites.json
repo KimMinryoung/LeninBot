@@ -81,7 +81,16 @@
     "reasoning_effort": "low",
     "timeout": 120,
     "json_mode": true,
-    "note": "CommuLingo 사건 연결이 없는 인물 카드에 기존 사건 링크(관계 종류·한영 관계·한영 메모·카드 원문 인용 basis)를 제안. commulingo/pipeline/event_links.py 전용. basis가 카드 원문 인용인지 코드가, 연결 주장을 뒷받침하는지 commulingo_review_citation_support(Jev)가 판정한 뒤에만 저장한다."
+    "note": "CommuLingo 사건 연결이 없는 인물 카드에 기존 사건 링크(관계 종류·한영 관계·한영 메모·카드 원문 인용 basis)를 제안. commulingo/pipeline/event_links.py 전용. basis가 카드 원문 인용인지는 코드가, 그 인용이 해당 사건의 일부인지는 commulingo_event_person_link_check가 판정한 뒤에만 저장한다."
+  },
+  "commulingo_event_person_link_check": {
+    "provider": "openai",
+    "model": "tier:low",
+    "max_tokens": 8000,
+    "reasoning_effort": "medium",
+    "timeout": 120,
+    "json_mode": true,
+    "note": "commulingo_event_person_links가 제안한 링크마다 카드 인용이 그 사건(요약·결과로 정의한 나라·진영·기간)의 일부인지 판정. 제안과 분리된 호출이며 불확실하면 false. 2026-09-29 Jev 인용 게이트를 대체(Jev는 인용이 메모를 뒷받침하는지만 봐서 헤스의 1941년 스코틀랜드 비행을 프랑스 침공에 통과시켰다)."
   },
   "chunk_summary": {
     "provider": "openai",

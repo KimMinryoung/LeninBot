@@ -67,25 +67,29 @@ class PureTests(unittest.TestCase):
 
 
 class FakeLinker(EventLinker):
-    def __init__(self, reply, check=None, budget=True):
+    def __init__(self, reply, belongs=True, budget=True):
+        """``belongs``: the check's verdict for every link, or a raw check reply string."""
         self.calls = {'write': [], 'mark': [], 'settle': []}
         store = type('S', (), {})()
         store.reserve = lambda *a, **k: self._reserve(budget)
         store.settle = lambda token, cost: self.calls['settle'].append(cost)
 
         replies = list(reply) if isinstance(reply, list) else [reply]
-        self.requests = []
+        self.requests, self.checks = [], []
 
-        async def generate(system, text):
+        async def generate(system, text, feature):
+            if feature == event_links.CHECK_FEATURE:
+                self.checks.append(json.loads(text))
+                if isinstance(belongs, str):
+                    return belongs, 0.001
+                return json.dumps({'verdicts': [{'event_id': l['event_id'], 'belongs': belongs, 'reason': 'r'}
+                                                 for l in self.checks[-1]['links']]}), 0.001
             self.requests.append(text)
             if len(self.requests) == 1:
                 self.prompt = json.loads(text)
             return replies[min(len(self.requests), len(replies)) - 1], 0.004
 
-        async def gate(claim, quote, person_id):
-            return check or {'support': 'supports', 'confidence': 0.97}
-
-        super().__init__(store, cap=4, review_fraction=0.3, generate=generate, gate=gate,
+        super().__init__(store, cap=4, review_fraction=0.3, generate=generate,
                          write=lambda pid, entry: self.calls['write'].append(entry['event_id']),
                          mark=lambda pid, status, reason: self.calls['mark'].append(status),
                          acceptable=ok)
@@ -103,26 +107,35 @@ class FakeLinker(EventLinker):
 
 
 class LinkerTests(unittest.TestCase):
-    def test_writes_gated_link_and_marks_complete(self):
+    def test_writes_checked_link_and_marks_complete(self):
         linker = FakeLinker(json.dumps({'links': [LINK], 'reason': 'pact'}))
         result = asyncio.run(linker.link('joachim-von-ribbentrop'))
         self.assertEqual(result['status'], 'complete')
-        self.assertEqual(linker.calls, {'write': ['nazi-soviet-pact'], 'mark': ['complete'], 'settle': [0.004]})
+        self.assertEqual(linker.calls, {'write': ['nazi-soviet-pact'], 'mark': ['complete'], 'settle': [0.004, 0.001]})
         self.assertEqual([e['event_id'] for e in linker.prompt['events']], ['world-war-i', 'nazi-soviet-pact'])
+        check = linker.checks[0]['links'][0]
+        self.assertEqual((check['event_id'], check['quote'], check['event']['title_en']),
+                         ('nazi-soviet-pact', LINK['basis'], 'Nazi–Soviet Pact'))
 
-    def test_gate_rejection_is_resubmitted_then_queued(self):
-        linker = FakeLinker(json.dumps({'links': [LINK]}), check={'support': 'unrelated', 'confidence': 0.6})
+    def test_check_refusal_is_resubmitted_then_queued(self):
+        linker = FakeLinker(json.dumps({'links': [LINK]}), belongs=False)
         result = asyncio.run(linker.link('joachim-von-ribbentrop'))
         self.assertEqual((result['status'], result['attempts'], linker.calls['write'], linker.calls['mark']),
                          ('open', 3, [], ['open']))
-        self.assertEqual(linker.calls['settle'], [0.004] * 3)
-        self.assertIn('does not support this link', linker.requests[1])
+        self.assertEqual(linker.calls['settle'], [0.004, 0.001] * 3)
+        self.assertIn('not part of this event', linker.requests[1])
         self.assertIn('Your previous reply', linker.requests[1])
 
-    def test_partial_support_is_not_enough(self):
-        linker = FakeLinker(json.dumps({'links': [LINK]}), check={'support': 'partially_supports', 'confidence': 0.9})
+    def test_a_link_without_a_verdict_is_refused(self):
+        linker = FakeLinker(json.dumps({'links': [LINK]}), belongs=json.dumps({'verdicts': []}))
         result = asyncio.run(linker.link('joachim-von-ribbentrop'))
         self.assertEqual((result['status'], linker.calls['write']), ('open', []))
+        self.assertIn('no verdict', result['rejected'][0]['problem'])
+
+    def test_nothing_proposed_needs_no_check(self):
+        linker = FakeLinker(json.dumps({'links': []}))
+        asyncio.run(linker.link('joachim-von-ribbentrop'))
+        self.assertEqual((linker.checks, linker.calls['settle']), ([], [0.004]))
 
     def test_one_quote_cannot_ground_two_events(self):
         reused = {**LINK, 'event_id': 'world-war-i'}
@@ -155,11 +168,8 @@ class LinkerTests(unittest.TestCase):
         result = asyncio.run(linker.link('joachim-von-ribbentrop'))
         self.assertEqual((result['status'], linker.calls['mark']), ('not_applicable', ['not_applicable']))
 
-    def test_errors_queue_a_retry(self):
-        linker = FakeLinker(json.dumps({'links': [LINK]}), check=None)
-        async def unavailable(*args):
-            return None
-        linker.gate = unavailable
+    def test_an_unusable_check_is_an_error_queued_for_retry(self):
+        linker = FakeLinker(json.dumps({'links': [LINK]}), belongs='no json')
         results = asyncio.run(linker.run(limit=5))
         self.assertEqual(([r['status'] for r in results], linker.calls['mark']), (['error'], ['open']))
 
