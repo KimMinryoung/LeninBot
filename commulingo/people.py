@@ -272,6 +272,14 @@ _FAMILY_FIRST: dict[str, dict[str, str | None]] = {
     "cambodia": {"ko": " ", "en": " "},
 }
 
+# Nations whose people carry no surname: the personal name lives alone in
+# familyName and givenName stays empty. Mongolian names are "father's name in
+# the genitive + own name" (Yumjaagiin Tsedenbal) and people are called by the
+# own name (체덴발, 수흐바타르); the genitive form goes to aliases in full
+# (발링기인 체렌도르지), never into name parts or the native-name line.
+# Port of frontend data/commulingo/native-script.js (SINGLE_NAME).
+_SINGLE_NAME = frozenset({"mongolia"})
+
 
 def _family_first_joiner(lang: str, codes) -> str | None:
     """The joiner between family and given when one of these citizenship codes
@@ -1757,6 +1765,56 @@ def _check_person_embedded_patronymic(
     return None
 
 
+def _check_person_single_name(cur, action: str, target_id: str, patch: dict,
+                              patronymic_state: dict) -> str | None:
+    """No-surname nations (Mongolia) keep givenName empty; a given part is a
+    genitive patronymic split off as a name (수흐바타르 수흐바타르). Family-first
+    and no-surname nations also take no patronymic: the page composes it
+    Western-style (호른 줄러 + János → 줄러 야노시 호른). Mirrors frontend
+    people-admin-validation.js assertSingleName / assertNoPatronymicForNameOrder."""
+    name_touched = any(k in patch for k in ("name", "givenName", "familyName"))
+    if not name_touched and "citizenship" not in patch and "patronymic" not in patch \
+            and "cyrillicPatronymic" not in patch:
+        return None
+    stored = {}
+    if action != "create":
+        cur.execute(
+            """SELECT given_name_ko, given_name_en, family_name_ko, family_name_en, citizenship_code
+               FROM commulingo_people WHERE id = %s""",
+            (target_id,),
+        )
+        stored = dict(cur.fetchone() or {})
+    codes = _name_order_codes(patch, stored)
+    ordered = any(code in _SINGLE_NAME or code in _FAMILY_FIRST for code in codes)
+    pat = next((patronymic_state.get(k) for k in ("ko", "en", "native") if patronymic_state.get(k)), "")
+    if ordered and pat:
+        return (
+            f"Error: '{codes[0]}' names take no patronymic ('{pat}' given): the page would "
+            "compose it Western-style between given and family name. Put a second given name, "
+            "courtesy name or genitive patronymic form in aliases and send patronymic: null."
+        )
+    for lang in ("ko", "en"):
+        given, _, _ = _patch_name_parts(patch, lang, stored, codes)
+        if patronymic_state.get(lang) and not given:
+            # With no given part the patronymic leads the name (아르샤코비치 카모).
+            return (
+                f"Error: patronymic.{lang} '{patronymic_state[lang]}' needs a given name: with "
+                f"givenName.{lang} empty it renders in front of the family name. Put the full "
+                "form in aliases and send patronymic: null."
+            )
+    if not any(code in _SINGLE_NAME for code in codes):
+        return None
+    for lang in ("ko", "en"):
+        given, _, _ = _patch_name_parts(patch, lang, stored, codes)
+        if given:
+            return (
+                f"Error: '{codes[0]}' names have no surname: put only the personal name in "
+                f"familyName.{lang} and leave givenName.{lang} empty ('{given}' given). The "
+                "genitive patronymic form (발링기인 체렌도르지, Balingiin Tserendorj) belongs in aliases."
+            )
+    return None
+
+
 def _check_person_text_fields(patch: dict) -> str | None:
     for key in _LOCALIZED_PERSON_KEYS:
         if key in patch and patch[key] is not None and not isinstance(patch[key], dict):
@@ -1885,7 +1943,7 @@ def _check_person_create(cur, target_id: str, patch: dict) -> str | None:
             return (
                 "Error: person create requires a name per language — either "
                 "name {ko,en} or givenName/familyName {ko,en} (single-token "
-                "East Asian names go wholly in familyName)."
+                "East Asian names and Mongolian personal names go wholly in familyName)."
             )
     for key in ("bio", "epithet"):
         value = patch.get(key) or {}
@@ -1959,6 +2017,9 @@ def _validate_person(cur, action: str, target_id: str, patch: dict) -> str | Non
     if error is not None:
         return error
     error = _check_person_embedded_patronymic(cur, action, target_id, patch, patronymic_state)
+    if error is not None:
+        return error
+    error = _check_person_single_name(cur, action, target_id, patch, patronymic_state)
     if error is not None:
         return error
     error = _check_person_text_fields(patch)
