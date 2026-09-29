@@ -165,6 +165,7 @@ _SCRIPT_RANGES = (
     ("arabic", re.compile(r"[؀-ۿ]")),
     ("devanagari", re.compile(r"[ऀ-ॿ]")),
     ("bengali", re.compile(r"[ঀ-৿]")),
+    ("ethiopic", re.compile(r"[\u1200-\u139F\u2D80-\u2DDF]")),
     ("latin", re.compile(r"[A-Za-zÀ-ɏḀ-ỿ]")),
 )
 
@@ -247,6 +248,11 @@ _NATION_SCRIPTS: dict[str, tuple[str, ...]] = {
     "korea": ("hangul", "han"),
     "israel": ("hebrew",),
     "afghanistan": ("arabic",),
+    # Amharic/Tigrinya in Ge'ez; Oromo and Somali write Latin; older Somali and
+    # Eritrean names also appear in Arabic.
+    "ethiopia": ("ethiopic", "latin"),
+    "eritrea": ("ethiopic", "latin", "arabic"),
+    "somalia": ("latin", "arabic"),
 }
 
 # Nations whose people write the family name first, and the joiner between
@@ -272,13 +278,16 @@ _FAMILY_FIRST: dict[str, dict[str, str | None]] = {
     "cambodia": {"ko": " ", "en": " "},
 }
 
-# Nations whose people carry no surname: the personal name lives alone in
-# familyName and givenName stays empty. Mongolian names are "father's name in
-# the genitive + own name" (Yumjaagiin Tsedenbal) and people are called by the
-# own name (체덴발, 수흐바타르); the genitive form goes to aliases in full
-# (발링기인 체렌도르지), never into name parts or the native-name line.
+# Nations whose people carry no surname: the name as people call it lives
+# whole in familyName and givenName stays empty. Mongolia: "genitive father's
+# name + own name", called by the own name alone (체덴발; the genitive form
+# 발링기인 체렌도르지 goes to aliases, never into parts or the native line).
+# Ethiopia/Eritrea/Somalia: "own name + father's (+ grandfather's)", called by
+# the whole chain (멩기스투 하일레 마리암), stored whole. Monarchs keep the
+# regnal shape (하일레 셀라시에 + 1세).
 # Port of frontend data/commulingo/native-script.js (SINGLE_NAME).
-_SINGLE_NAME = frozenset({"mongolia"})
+_SINGLE_NAME = frozenset({"mongolia", "ethiopia", "eritrea", "somalia"})
+_REGNAL_NUMBER_RE = re.compile(r"^(?:[IVXLCDM]+|\d+세)$")
 
 
 def _family_first_joiner(lang: str, codes) -> str | None:
@@ -1412,6 +1421,8 @@ def _split_full_name(full: str, lang: str = "en", codes=()) -> tuple[str, str]:
         return "", ""
     if " " not in name:
         return "", name
+    if any(code in _SINGLE_NAME for code in codes or ()):
+        return "", name
     if _family_first_joiner(lang, codes) is not None:
         family, given = name.split(" ", 1)
         return given, family
@@ -1805,12 +1816,13 @@ def _check_person_single_name(cur, action: str, target_id: str, patch: dict,
     if not any(code in _SINGLE_NAME for code in codes):
         return None
     for lang in ("ko", "en"):
-        given, _, _ = _patch_name_parts(patch, lang, stored, codes)
-        if given:
+        given, family, _ = _patch_name_parts(patch, lang, stored, codes)
+        if given and not _REGNAL_NUMBER_RE.match(family):
             return (
-                f"Error: '{codes[0]}' names have no surname: put only the personal name in "
-                f"familyName.{lang} and leave givenName.{lang} empty ('{given}' given). The "
-                "genitive patronymic form (발링기인 체렌도르지, Balingiin Tserendorj) belongs in aliases."
+                f"Error: '{codes[0]}' names have no surname: put the name as people call it in "
+                f"familyName.{lang} and leave givenName.{lang} empty ('{given}' given) — Mongolian: "
+                "the own name alone (체렌도르지; the genitive form goes to aliases); "
+                "Ethiopian/Eritrean/Somali: the whole chain (멩기스투 하일레 마리암)."
             )
     return None
 
