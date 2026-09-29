@@ -40,8 +40,15 @@ def commission(job, current):
                 issues.append({'id':f'missing:{field}', 'field':field, 'topic':topic,
                     'problem':'Missing value or language.', 'done_when':'Supply the missing supported value/language, preserving existing facts.'})
     payload = job.get('payload') or {}
-    explicit = payload.get('gap_id') or payload.get('gap_ids') or payload.get('review_feedback') or not job['reason'].startswith(('Commissioned ', 'Bundled enrichment:'))
+    automatic = ('Commissioned ', 'Bundled enrichment:')
+    # consolidate() rewrites a bundled job's reason to "Bundled enrichment: ..." and keeps
+    # each original reason under payload.commissions; an operator request bundled that way
+    # was read as automatic and closed with nothing to do (job 63870, 2026-09-29).
+    requests = [c['reason'] for c in payload.get('commissions', [])
+                if isinstance(c, dict) and str(c.get('reason') or '') and not str(c['reason']).startswith(automatic)]
+    explicit = (payload.get('gap_id') or payload.get('gap_ids') or payload.get('review_feedback')
+                or requests or not job['reason'].startswith(automatic))
     if explicit:
-        issues.append({'id':'requested', 'field':'*', 'problem':job['reason'],
+        issues.append({'id':'requested', 'field':'*', 'problem':'\n'.join(requests) or job['reason'],
                        'done_when':'Address the explicit request with supported minimal changes, or explain why no change is warranted.'})
     return list({issue['id']: issue for issue in issues}.values())

@@ -168,6 +168,14 @@ class SourceAndIssueTests(EditorCase):
         self.assertEqual(commission(person,{'sections':[{'slug':'existing-theme'}]}), [])
         explicit = {**person,'reason':'Add the documented 1930 trial section.'}
         self.assertEqual({i['id'] for i in commission(explicit,{})}, {'missing:sections','requested'})
+        # An explicit request survives consolidation into a bundle.
+        bundled = {**person,'topic':'enrichment','reason':'Bundled enrichment: sections',
+                   'payload':{'topics':['sections'],'commissions':[{'topic':'sections','reason':'Add the 1938 execution.'}]}}
+        requested = commission(bundled,{'sections':[{'slug':'existing-theme'}]})
+        self.assertEqual([(i['id'],i['problem']) for i in requested], [('requested','Add the 1938 execution.')])
+        automatic = {**bundled,'payload':{**bundled['payload'],'commissions':[
+            {'topic':'sections','reason':'Commissioned missing information or evidence: sections'}]}}
+        self.assertEqual(commission(automatic,{'sections':[{'slug':'existing-theme'}]}), [])
         # Missing provenance on existing prose is not a commission (2026-09-20).
         self.assertEqual(commission(JOB,{**full,'evidence':[]}), [])
         complete_person = {'years':'1900–1980','epithet':{'ko':'역사가','en':'Historian'},
