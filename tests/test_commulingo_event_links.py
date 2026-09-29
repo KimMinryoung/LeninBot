@@ -101,7 +101,7 @@ class FakeLinker(EventLinker):
                                                  for l in self.checks[-1]['links']]}), 0.001
             self.requests.append(text)
             if len(self.requests) == 1:
-                self.prompt = json.loads(text)
+                self.prompt, self.system = json.loads(text), system
             return replies[min(len(self.requests), len(replies)) - 1], 0.004
 
         super().__init__(store, cap=4, review_fraction=0.3, generate=generate,
@@ -130,7 +130,7 @@ class LinkerTests(unittest.TestCase):
         result = asyncio.run(linker.link('joachim-von-ribbentrop'))
         self.assertEqual(result['status'], 'complete')
         self.assertEqual(linker.calls, {'write': ['nazi-soviet-pact'], 'mark': ['complete'], 'settle': [0.004, 0.001]})
-        self.assertEqual([e['event_id'] for e in linker.prompt['events']], ['world-war-i', 'nazi-soviet-pact'])
+        self.assertEqual(linker.prompt['candidates'], ['world-war-i', 'nazi-soviet-pact'])
         check = linker.checks[0]['links'][0]
         self.assertEqual((check['event_id'], check['quote'], check['event']['title_en']),
                          ('nazi-soviet-pact', LINK['basis'], 'Nazi–Soviet Pact'))
@@ -148,7 +148,7 @@ class LinkerTests(unittest.TestCase):
         linker = FakeLinker(json.dumps({'links': []}))
         linker.existing = [{'event_id': 'world-war-i', 'relation_kind': 'participant', 'title_en': 'World War I'}]
         result = asyncio.run(linker.link('joachim-von-ribbentrop'))
-        self.assertEqual([e['event_id'] for e in linker.prompt['events']], ['nazi-soviet-pact'])
+        self.assertEqual(linker.prompt['candidates'], ['nazi-soviet-pact'])
         self.assertEqual(linker.prompt['already_linked'][0]['event_id'], 'world-war-i')
         self.assertEqual((result['status'], linker.calls['mark']), ('complete', ['complete']))
         self.assertTrue(result['reason'].startswith('no further event'))
@@ -165,10 +165,22 @@ class LinkerTests(unittest.TestCase):
                    for e in EVENTS]
         linker.load = lambda person_id: (PERSON, [], [], focused)
         asyncio.run(linker.link('joachim-von-ribbentrop'))
-        by_id = {e['event_id']: e['focus'] for e in linker.prompt['events']}
+        catalogue = json.loads(linker.system.split('Event catalogue:\n', 1)[1])
+        by_id = {e['event_id']: e['focus'] for e in catalogue}
         self.assertEqual(by_id['nazi-soviet-pact'], 'The Soviet Union')
         self.assertTrue(by_id['world-war-i'].startswith('none'))
         self.assertEqual(linker.checks[0]['links'][0]['event']['focus'], 'The Soviet Union')
+
+    def test_the_system_prompt_is_the_same_for_every_person(self):
+        linker = FakeLinker(json.dumps({'links': []}))
+        asyncio.run(linker.link('joachim-von-ribbentrop'))
+        first = linker.system
+        other = {**PERSON, 'id': 'someone-else', 'years_label': '1950–2010', 'birth_year': 1950, 'death_year': 2010}
+        linker.load = lambda person_id: (other, [], [], EVENTS)
+        linker.requests = []
+        asyncio.run(linker.link('someone-else'))
+        self.assertEqual(linker.system, first)
+        self.assertEqual(linker.prompt['before_life'], ['world-war-i', 'nazi-soviet-pact'])
 
     def test_a_kind_the_check_disputes_is_resubmitted(self):
         fixed = {**LINK, 'kind': 'executor'}

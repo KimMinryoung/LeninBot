@@ -54,7 +54,9 @@ TEXT_CAPS = {'relation_ko': 64, 'relation_en': 164, 'note_ko': 110, 'note_en': 2
 
 SYSTEM = """You link a person card on a Korean-language history site to the site's history events.
 
-You get the person's card and the events whose years overlap the person's adult life. Propose
+The event catalogue at the end of these instructions lists every event on the site. The request
+gives one person's card and `candidates`, the ids of the catalogue events you may link for this
+person (those before `before_life` ended before the person's adult life). Propose
 a link only when the CARD ITSELF states what this person did or suffered in that event. Your own
 knowledge may tell you where to look, but it is never enough: if the card is silent, do not link.
 A weak or merely contemporaneous connection is not a link. The card must describe an action
@@ -147,18 +149,35 @@ def _norm(text):
     return re.sub(r'\s+', ' ', str(text or '')).strip()
 
 
+def catalogue(events):
+    """Every site event in a fixed order: identical for every person, so it caches.
+
+    The event list was ~8k of each proposal's ~10.7k input tokens and sat after the
+    person's card, so no two requests shared a prefix (684 cached tokens on average,
+    2026-09-29, $1.68 for 1,234 calls). Here it ends the system message instead.
+    """
+    return json.dumps([{'event_id': e['id'], 'period': e.get('period_label'), 'title_en': e.get('title_en'),
+                        'title_ko': e.get('title_ko'), 'focus': focus_text(e),
+                        'summary': (e.get('summary_en') or e.get('summary_ko') or '')[:SUMMARY_CHARS]}
+                       for e in events], ensure_ascii=False)
+
+
+def system_prompt(all_events):
+    return (SYSTEM.format(max_links=MAX_LINKS, kinds=', '.join(KINDS), kind_definitions=definitions_text(), **TEXT_CAPS)
+            + '\n\nEvent catalogue:\n' + catalogue(all_events))
+
+
 def prompt(person, card, events, existing=()):
+    """The per-person part: everything that differs between requests comes after the catalogue."""
     return json.dumps({
         'person': {'id': person['id'], 'name_ko': person.get('name_ko'), 'name_en': person.get('name_en'),
                    'years': person.get('years_label')},
         'card': card,
         **({'already_linked': [{'event_id': r['event_id'], 'title_en': r.get('title_en'), 'kind': r['relation_kind']}
                                for r in existing]} if existing else {}),
-        'events': [{'event_id': e['id'], 'period': e.get('period_label'), 'title_ko': e.get('title_ko'),
-                    'title_en': e.get('title_en'), 'focus': focus_text(e),
-                    **({'before_life': True} if e.get('before_life') else {}),
-                    'summary': (e.get('summary_en') or e.get('summary_ko') or '')[:SUMMARY_CHARS]}
-                   for e in events],
+        'candidates': [e['id'] for e in events],
+        **({'before_life': [e['id'] for e in events if e.get('before_life')]}
+           if any(e.get('before_life') for e in events) else {}),
     }, ensure_ascii=False)
 
 
@@ -329,17 +348,17 @@ class EventLinker:
         return text, spent
 
     async def link(self, person_id, *, apply=True):
-        person, career, sections, events = await asyncio.to_thread(self.load, person_id)
+        person, career, sections, all_events = await asyncio.to_thread(self.load, person_id)
         if not person:
             return {'person': person_id, 'status': 'missing'}
         card = card_text(person, career, sections)
         existing = await asyncio.to_thread(self.linked, person_id)
         have = {row['event_id'] for row in existing}
-        events = [e for e in candidate_events(person, events) if e['id'] not in have]
+        events = [e for e in candidate_events(person, all_events) if e['id'] not in have]
         if not card or not events:
             return await self._close(person_id, [], 'no card text or no further event in the life span',
                                      apply, status='complete' if have else None)
-        system = SYSTEM.format(max_links=MAX_LINKS, kinds=', '.join(KINDS), kind_definitions=definitions_text(), **TEXT_CAPS)
+        system = system_prompt(all_events)
         base, by_id = prompt(person, card, events, existing), {e['id']: e for e in events}
         text, written, rejected, reason, cost = '', [], [], '', 0
         for attempt in range(ATTEMPTS):
