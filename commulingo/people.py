@@ -255,7 +255,8 @@ _NATION_SCRIPTS: dict[str, tuple[str, ...]] = {
 # Hungarian (도쿠다 규이치, 카다르 야노시 — Korean orthography follows the
 # Hungarian order); English follows each nation's own romanization — family
 # first for Korean/Chinese/Vietnamese (Kim Mu-chong, Peng Dehuai, Le Duan),
-# given first for Japanese and Hungarian (Sen Katayama, János Kádár). Keyed on
+# given first for Japanese and Hungarian (Sen Katayama, János Kádár); Khmer
+# names are family first and spaced in both (노로돔 시아누크, Hun Sen). Keyed on
 # citizenship alone: Tőkés (Romanian papers) and 허가이 (Soviet) follow their
 # citizenship's order; mononyms and fused tokens go wholly to familyName.
 # Port of frontend data/commulingo/native-script.js (FAMILY_FIRST) — keep the
@@ -268,6 +269,7 @@ _FAMILY_FIRST: dict[str, dict[str, str | None]] = {
     "vietnam": {"ko": "", "en": " "},
     "japan": {"ko": " ", "en": None},
     "hungary": {"ko": " ", "en": None},
+    "cambodia": {"ko": " ", "en": " "},
 }
 
 
