@@ -67,7 +67,7 @@ class PureTests(unittest.TestCase):
 
 
 class FakeLinker(EventLinker):
-    def __init__(self, reply, belongs=True, budget=True):
+    def __init__(self, reply, belongs=True, budget=True, kind=None):
         """``belongs``: the check's verdict for every link, or a raw check reply string."""
         self.calls = {'write': [], 'mark': [], 'settle': []}
         store = type('S', (), {})()
@@ -82,7 +82,8 @@ class FakeLinker(EventLinker):
                 self.checks.append(json.loads(text))
                 if isinstance(belongs, str):
                     return belongs, 0.001
-                return json.dumps({'verdicts': [{'event_id': l['event_id'], 'belongs': belongs, 'reason': 'r'}
+                return json.dumps({'verdicts': [{'event_id': l['event_id'], 'belongs': belongs,
+                                                  'kind': kind or l['proposed_kind'], 'reason': 'r'}
                                                  for l in self.checks[-1]['links']]}), 0.001
             self.requests.append(text)
             if len(self.requests) == 1:
@@ -125,6 +126,13 @@ class LinkerTests(unittest.TestCase):
         self.assertEqual(linker.calls['settle'], [0.004, 0.001] * 3)
         self.assertIn('not part of this event', linker.requests[1])
         self.assertIn('Your previous reply', linker.requests[1])
+
+    def test_a_kind_the_check_disputes_is_resubmitted(self):
+        fixed = {**LINK, 'kind': 'executor'}
+        linker = FakeLinker([json.dumps({'links': [LINK]}), json.dumps({'links': [fixed]})], kind='executor')
+        result = asyncio.run(linker.link('joachim-von-ribbentrop'))
+        self.assertEqual((result['attempts'], linker.calls['write']), (2, ['nazi-soviet-pact']))
+        self.assertIn('kind should be executor, not leader', linker.requests[1])
 
     def test_a_link_without_a_verdict_is_refused(self):
         linker = FakeLinker(json.dumps({'links': [LINK]}), belongs=json.dumps({'verdicts': []}))

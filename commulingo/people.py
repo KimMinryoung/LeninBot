@@ -73,7 +73,7 @@ _TARGET_TYPES = (
     "history_event", "history_event_section",
 )
 
-_HISTORY_RELATION_KINDS = ("leader", "participant", "executor", "target", "opponent", "witness")
+from commulingo.relation_kinds import HISTORY_RELATION_KINDS as _HISTORY_RELATION_KINDS  # noqa: E402
 _ACTIONS = ("create", "update", "delete")
 
 _FATE_KINDS = (

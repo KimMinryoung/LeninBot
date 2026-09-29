@@ -24,6 +24,8 @@ import logging
 import re
 import uuid
 
+from commulingo.relation_kinds import HISTORY_RELATION_KINDS, definitions_text
+
 from .store import BudgetUnavailable
 
 logger = logging.getLogger(__name__)
@@ -65,10 +67,9 @@ an empty list is a valid answer. At most {max_links} links.
 
 For each link return:
   event_id: one id from the event list, exactly as given.
-  kind: one of {kinds}.
-      leader (directed it), participant (took part), executor (carried out orders),
-      target (it was done to them), opponent (worked against it), witness (recorded or
-      observed it, including scholars who later wrote about it).
+  kind: one of {kinds}, by what the quote shows the person doing or suffering in this event.
+{kind_definitions}
+      A historian is linked only when the card names their study of THIS event.
   relation_ko / relation_en: the person's position in THIS event as a short noun phrase
       (예: 조약에 서명한 외무장관, 진압 지휘, 첫 희생자). Usually about 12 Korean characters /
       35 English; a complex role may run longer, never more than {relation_ko} / {relation_en}.
@@ -183,9 +184,9 @@ def resubmission(base, previous, rejected, written):
 
 CHECK_SYSTEM = """You check proposed links on a Korean-language history site between a person and
 one of the site's history events. Each link has the event (title, period, summary, outcome), the
-person's role and caption, and a quote from the person's card.
+person's proposed kind, role and caption, and a quote from the person's card.
 
-A link belongs only when the QUOTE describes something the person did or suffered AS PART OF
+1. belongs: true only when the QUOTE describes something the person did or suffered AS PART OF
 THIS EVENT as its summary defines it: the same country or theatre, the same side of it, inside
 its period. Answer false when the quote describes:
   - a broader war, era or policy the event is only one part of;
@@ -193,10 +194,15 @@ its period. Answer false when the quote describes:
     a surrender order is not a conference; a Western-front command is not the Eastern front);
   - a general position or career fact that does not name an act in this event;
   - something the caption or role claims but the quote does not say.
-Do not use your own knowledge to fill a gap in the quote. When unsure, answer false.
+For a historian the test is instead whether the quote names their later study or
+interpretation of THIS event. Do not use your own knowledge to fill a gap in the quote.
+When unsure, answer false.
+
+2. kind: the one kind that fits what the quote shows, whatever was proposed:
+""" + definitions_text('  ') + """
 
 Reply with one JSON object and nothing else:
-{"verdicts": [{"event_id": "...", "belongs": true, "reason": "one short sentence"}]}"""
+{"verdicts": [{"event_id": "...", "belongs": true, "kind": "...", "reason": "one short sentence"}]}"""
 
 
 def check_request(person, pairs):
@@ -208,7 +214,7 @@ def check_request(person, pairs):
                              'period': event.get('period_label'),
                              'summary': (event.get('summary_en') or event.get('summary_ko') or '')[:EVENT_CONTEXT_CHARS],
                              'outcome': (event.get('outcome_en') or event.get('outcome_ko') or '')[:EVENT_CONTEXT_CHARS]},
-                   'kind': entry['kind'], 'relation_en': entry['relation_en'], 'note_en': entry['note_en'],
+                   'proposed_kind': entry['kind'], 'relation_en': entry['relation_en'], 'note_en': entry['note_en'],
                    'quote': entry['basis']} for event, entry in pairs],
     }, ensure_ascii=False)
 
@@ -221,7 +227,7 @@ def parse_verdicts(text):
     verdicts = json.loads(raw[start:end + 1]).get('verdicts')
     if not isinstance(verdicts, list):
         raise ValueError('check reply has no verdicts list')
-    return {v.get('event_id'): (v.get('belongs') is True, str(v.get('reason') or ''))
+    return {v.get('event_id'): (v.get('belongs') is True, v.get('kind'), str(v.get('reason') or ''))
             for v in verdicts if isinstance(v, dict)}
 
 
@@ -283,7 +289,7 @@ class EventLinker:
         events = candidate_events(person, events)
         if not card or not events:
             return await self._close(person_id, [], 'no card text or no event in the life span', apply)
-        system = SYSTEM.format(max_links=MAX_LINKS, kinds=', '.join(KINDS), **TEXT_CAPS)
+        system = SYSTEM.format(max_links=MAX_LINKS, kinds=', '.join(KINDS), kind_definitions=definitions_text(), **TEXT_CAPS)
         base, by_id = prompt(person, card, events), {e['id']: e for e in events}
         text, written, rejected, reason, cost = '', [], [], '', 0
         for attempt in range(ATTEMPTS):
@@ -305,9 +311,14 @@ class EventLinker:
                 cost += spent
                 verdicts = parse_verdicts(reply)  # an unusable check is an error: retried later
             for entry in kept:
-                belongs, why = verdicts.get(entry['event_id'], (False, 'the check returned no verdict'))
+                belongs, kind, why = verdicts.get(entry['event_id'], (False, None, 'the check returned no verdict'))
                 if not belongs:
                     rejected.append({**entry, 'problem': f'the check found the quote is not part of this event: {why}'})
+                    continue
+                if kind in KINDS and kind != entry['kind']:
+                    rejected.append({**entry, 'problem': f"the check found the kind should be {kind}, "
+                                                         f"not {entry['kind']}: {why}. Resubmit with that kind "
+                                                         "and a role and caption that fit it"})
                     continue
                 if apply:
                     await asyncio.to_thread(self.write, person_id, entry)
@@ -357,7 +368,7 @@ class EventLinker:
         return results
 
 
-KINDS = ('leader', 'participant', 'executor', 'target', 'opponent', 'witness')
+KINDS = HISTORY_RELATION_KINDS
 
 
 def default_linker(store, config):

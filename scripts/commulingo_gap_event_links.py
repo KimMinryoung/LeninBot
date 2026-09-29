@@ -23,6 +23,7 @@ os.environ.setdefault("COMMULINGO_SUGGESTED_BY", "commulingo-gap-event-links")
 from bot_config import _deepseek_anthropic_client  # noqa: E402
 from db import get_conn  # noqa: E402
 from psycopg2.extras import RealDictCursor  # noqa: E402
+from commulingo.relation_kinds import definitions_text  # noqa: E402
 from commulingo.people import (  # noqa: E402
     _HISTORY_RELATION_KINDS,
     normalize_commulingo_write,
@@ -46,9 +47,7 @@ For each item return four short strings and one kind:
       already on the person's own card. Count before you answer; a note over the limit
       is thrown away and the person stays unlinked.
   kind — exactly one of: {kinds}
-      leader (directed it), participant (took part), executor (carried out orders),
-      target (it was done to them), opponent (worked against it), witness (recorded or
-      observed it, including scholars who later wrote about it).
+{kind_definitions}
 
 Writing rules, both languages:
   - No em dash (—) anywhere. Use a comma, a colon, or a new sentence.
@@ -123,7 +122,7 @@ async def describe(rows: list[dict], model: str) -> list[dict]:
         # disables it for exactly this reason on every one-shot generation; a
         # script that reaches for the client directly has to say so itself.
         thinking={"type": "disabled"},
-        messages=[{"role": "user", "content": PROMPT.format(kinds=", ".join(_HISTORY_RELATION_KINDS)) + items}],
+        messages=[{"role": "user", "content": PROMPT.format(kinds=", ".join(_HISTORY_RELATION_KINDS), kind_definitions=definitions_text()) + items}],
     )
     if reservation:
         store, token = reservation
