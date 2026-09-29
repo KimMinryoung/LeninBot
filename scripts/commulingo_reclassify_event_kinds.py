@@ -30,7 +30,8 @@ QUESTIONS = {'kind': {
     'type': 'choice',
     'instructions': ("How does this person relate to the event in `event`, judged from the person's "
                      "relation and caption? `event.focus` is the side the event centres on: opponents "
-                     "are the people on the side against it, and there are none when it says none."),
+                     "are the people on the side against it; when it says none, only people who tried to stop "
+                     "the event itself are opponents."),
     'criteria': HISTORY_RELATION_KIND_DEFINITIONS,
 }}
 
@@ -65,7 +66,7 @@ async def main():
         state, questions = fan_out({cid: item_state(l) for cid, l in ids.items()}, QUESTIONS,
                                    event={'title': event['title_en'], 'period': event['period'],
                                           'focus': (event.get('focus') or {}).get('en')
-                                          or 'none: no single focus, so no one is an opponent',
+                                          or 'none: no single focus; opponents are only those who tried to stop the event itself',
                                           'summary': event.get('summary_en') or ''})
         async with gate:
             decision = await decide(FEATURE, state, questions)

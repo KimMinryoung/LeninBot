@@ -48,6 +48,15 @@ tick에 붙였다. `tick`은 과제 선정 뒤 연결이 하나도 없는 인물
 - 기존 링크 3,630건은 `scripts/commulingo_reclassify_event_kinds.py`(Jev `commulingo_event_relation_kind`, $0.093)로
   재판정해 신뢰도 0.8 이상 변경 657건을 revision과 함께 반영했다(participant→executor 329, witness→historian 157 등).
   opponent로 옮기는 153건은 여러 세력이 얽힌 사건에서 기준점이 흔들려(카메네프를 권력투쟁의 반대로 판정 등) 보류했다.
+- 같은 날 운영자 결정으로 사건마다 중심 주체 `commulingo_history_events.focus`({ko,en}, 프런트엔드 migration 192)를 두었다.
+  78개 사건에 중심 주체를 적고, 쌍방 충돌·두 과정을 묶은 제목·회담·재난 29개는 비웠다(우크라이나 혁명과 전쟁,
+  프랑스 침공과 비시 정부, 톈안먼 포함). opponent는 중심 주체에 맞선 진영의 사람이며 역할과 무관하다. 중심 주체가 없는
+  사건에서는 사건 자체(전쟁·조약·계획·쿠데타)를 막으려 한 사람만 opponent다. 같은 편 안의 이견과 사건 밖에서 반응만
+  한 사람은 participant다. 중심 주체는 제안·검증 호출과 재분류 Jev 판정에 함께 넘긴다.
+- 중심 주체를 넣어 전체 3,777건을 다시 판정했다($0.108). opponent가 드나드는 변경 184건 중 같은 편 이견 등 15건
+  (플레하노프, 페트롭스키·추바르, 자이코프, 천윈 등)을 사람이 빼고 169건을 반영했다. 중심 주체가 없는 사건에 남은
+  opponent 32건은 개정 정의로 재판정한 뒤 사건 자체에 반대한 16건(1차대전 반전 운동가, 8월 쿠데타 저항자 등)을 남기고
+  16건을 participant·leader로 옮겼다. 모든 변경은 `commulingo_people_revisions`에 이전 행과 함께 남아 있다.
 - 결과는 `commulingo_person_enrichment`의 `events` 주제로 남긴다. 링크 저장은 `complete`,
   모델이 제안 자체를 하지 않으면 `not_applicable`(180일 뒤 재검토), 재제출 뒤에도 남은 거절·장애는
   `open`으로 기록해 6시간 뒤 재시도한다.

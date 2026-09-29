@@ -116,7 +116,7 @@ def candidate_events(person, events):
 def focus_text(event):
     """The side the event centres on, or a marker that it has none (no opponents)."""
     focus = event.get('focus') or {}
-    return focus.get('en') or focus.get('ko') or 'none: no single focus, so no one is an opponent'
+    return focus.get('en') or focus.get('ko') or 'none: no single focus; opponents are only those who tried to stop the event itself'
 
 
 def card_text(person, career, sections):
