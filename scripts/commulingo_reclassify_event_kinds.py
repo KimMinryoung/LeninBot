@@ -29,7 +29,8 @@ CONCURRENCY = 6
 QUESTIONS = {'kind': {
     'type': 'choice',
     'instructions': ("How does this person relate to the event in `event`, judged from the person's "
-                     "relation and caption? Use the event's framing to decide who is an opponent."),
+                     "relation and caption? `event.focus` is the side the event centres on: opponents "
+                     "are the people on the side against it, and there are none when it says none."),
     'criteria': HISTORY_RELATION_KIND_DEFINITIONS,
 }}
 
@@ -63,6 +64,8 @@ async def main():
         ids = {f'c{i + 1}': link for i, link in enumerate(links)}
         state, questions = fan_out({cid: item_state(l) for cid, l in ids.items()}, QUESTIONS,
                                    event={'title': event['title_en'], 'period': event['period'],
+                                          'focus': (event.get('focus') or {}).get('en')
+                                          or 'none: no single focus, so no one is an opponent',
                                           'summary': event.get('summary_en') or ''})
         async with gate:
             decision = await decide(FEATURE, state, questions)

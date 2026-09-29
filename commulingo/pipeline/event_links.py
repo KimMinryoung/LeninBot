@@ -113,6 +113,12 @@ def candidate_events(person, events):
     return out
 
 
+def focus_text(event):
+    """The side the event centres on, or a marker that it has none (no opponents)."""
+    focus = event.get('focus') or {}
+    return focus.get('en') or focus.get('ko') or 'none: no single focus, so no one is an opponent'
+
+
 def card_text(person, career, sections):
     parts = [person.get(k) or '' for k in ('epithet_ko', 'epithet_en', 'bio_ko', 'bio_en', 'moment_ko', 'moment_en')]
     parts += [' '.join(filter(None, (c.get('period_label'), c.get('role_ko'), c.get('role_en')))) for c in career]
@@ -132,7 +138,8 @@ def prompt(person, card, events):
                    'years': person.get('years_label')},
         'card': card,
         'events': [{'event_id': e['id'], 'period': e.get('period_label'), 'title_ko': e.get('title_ko'),
-                    'title_en': e.get('title_en'), 'summary': (e.get('summary_en') or e.get('summary_ko') or '')[:SUMMARY_CHARS]}
+                    'title_en': e.get('title_en'), 'focus': focus_text(e),
+                    'summary': (e.get('summary_en') or e.get('summary_ko') or '')[:SUMMARY_CHARS]}
                    for e in events],
     }, ensure_ascii=False)
 
@@ -211,7 +218,7 @@ def check_request(person, pairs):
                    'years': person.get('years_label')},
         'links': [{'event_id': event['id'],
                    'event': {'title_en': event.get('title_en'), 'title_ko': event.get('title_ko'),
-                             'period': event.get('period_label'),
+                             'period': event.get('period_label'), 'focus': focus_text(event),
                              'summary': (event.get('summary_en') or event.get('summary_ko') or '')[:EVENT_CONTEXT_CHARS],
                              'outcome': (event.get('outcome_en') or event.get('outcome_ko') or '')[:EVENT_CONTEXT_CHARS]},
                    'proposed_kind': entry['kind'], 'relation_en': entry['relation_en'], 'note_en': entry['note_en'],
@@ -266,7 +273,7 @@ class EventLinker:
                 WHERE person_id=%s ORDER BY sort_order''', (person_id,))
             sections = cur.fetchall()
             cur.execute('''SELECT id, period_label, title_ko, title_en, summary_ko, summary_en,
-                outcome_ko, outcome_en FROM commulingo_history_events ORDER BY sort_order, id''')
+                outcome_ko, outcome_en, focus FROM commulingo_history_events ORDER BY sort_order, id''')
             events = cur.fetchall()
         return person, career, sections, events
 

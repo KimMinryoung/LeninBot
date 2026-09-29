@@ -127,6 +127,17 @@ class LinkerTests(unittest.TestCase):
         self.assertIn('not part of this event', linker.requests[1])
         self.assertIn('Your previous reply', linker.requests[1])
 
+    def test_the_event_focus_reaches_both_calls(self):
+        linker = FakeLinker(json.dumps({'links': [LINK]}))
+        focused = [dict(e, focus={'ko': '소련', 'en': 'The Soviet Union'}) if e['id'] == 'nazi-soviet-pact' else e
+                   for e in EVENTS]
+        linker.load = lambda person_id: (PERSON, [], [], focused)
+        asyncio.run(linker.link('joachim-von-ribbentrop'))
+        by_id = {e['event_id']: e['focus'] for e in linker.prompt['events']}
+        self.assertEqual(by_id['nazi-soviet-pact'], 'The Soviet Union')
+        self.assertTrue(by_id['world-war-i'].startswith('none'))
+        self.assertEqual(linker.checks[0]['links'][0]['event']['focus'], 'The Soviet Union')
+
     def test_a_kind_the_check_disputes_is_resubmitted(self):
         fixed = {**LINK, 'kind': 'executor'}
         linker = FakeLinker([json.dumps({'links': [LINK]}), json.dumps({'links': [fixed]})], kind='executor')

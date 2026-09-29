@@ -5,8 +5,10 @@ data/commulingo/event-presentation.js holds the labels). Revised 2026-09-29:
 executor had been labelled "주도 · 집행" on the page and defined as "carried out
 orders" in the linking prompts, so content used it for prime movers and the
 prompts for enforcers; commanders were spread over four kinds; opponent had no
-reference point; witness mixed eyewitnesses with historians writing decades
-later, which is why historian was added.
+reference point (fixed the same day by commulingo_history_events.focus, migration
+192: opponents are the camp against the focus, and events without one have none);
+witness mixed eyewitnesses with historians writing decades later, which is why
+historian was added.
 """
 
 HISTORY_RELATION_KIND_DEFINITIONS = {
@@ -19,12 +21,14 @@ HISTORY_RELATION_KIND_DEFINITIONS = {
     'participant': (
         "Acted inside the event without directing it or being charged with carrying it out: "
         "delegate, soldier, member, signatory, author of one of its documents. A dispute inside "
-        "the same side is participation, not opposition."),
+        "the same side is participation, not opposition, and so is an outside government or figure "
+        "who only reacted (diplomacy, statements, sanctions) without taking the opposing side."),
     'opponent': (
-        "Fought, resisted or tried to stop the process or side the event's title names: the old "
-        "regime against a revolution, the enemy side in a war the event frames from one side, the "
-        "counter-movement against a policy. In a clash with no central side, each side's people "
-        "are leader, executor or participant."),
+        "Stood on the side against the event's focus (given with the event), whatever their role "
+        "there: the old regime against a revolution, the enemy army in a war, the counter-movement "
+        "against a policy, the authorities who crushed an uprising. When the event has no focus, "
+        "never opponent: each side's people are leader, executor or participant. Leader, executor "
+        "and participant describe people on the focus side, or on any side when there is no focus."),
     'target': (
         "The event's action was done to them: arrested, tried, purged, executed, deported, deposed "
         "or attacked. When the caption says what happened to the person, this wins over opponent."),
