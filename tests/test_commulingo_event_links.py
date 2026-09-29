@@ -34,7 +34,21 @@ class PureTests(unittest.TestCase):
         unknown = {'id': 'x', 'years_label': ''}
         self.assertEqual(len(candidate_events(unknown, EVENTS)), 3)
         from_label = {'id': 'y', 'years_label': '1950–2010'}
-        self.assertEqual([e['id'] for e in candidate_events(from_label, EVENTS)], ['perestroika'])
+        late = candidate_events(from_label, EVENTS)
+        self.assertEqual([(e['id'], e['before_life']) for e in late],
+                         [('world-war-i', True), ('nazi-soviet-pact', True), ('perestroika', False)])
+        early = {'id': 'z', 'years_label': '1850–1900'}
+        self.assertEqual(candidate_events(early, EVENTS), [])
+
+    def test_an_event_before_the_life_takes_only_a_historian(self):
+        historian_card = {**PERSON, 'id': 'h', 'years_label': '1961–', 'birth_year': 1961, 'death_year': None}
+        events = candidate_events(historian_card, EVENTS)
+        card = card_text(PERSON, [], [])
+        kept, rejected = screen([LINK], card, events, ok)
+        self.assertEqual((kept, rejected[0]['problem']),
+                         ([], "an event before the person's adult life can only take a historian link"))
+        kept, rejected = screen([{**LINK, 'kind': 'historian'}], card, events, ok)
+        self.assertEqual(([k['event_id'] for k in kept], rejected), (['nazi-soviet-pact'], []))
 
     def test_screen_requires_a_verbatim_card_quote_and_known_event(self):
         card = card_text(PERSON, [], [])

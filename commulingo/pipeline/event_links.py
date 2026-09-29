@@ -69,7 +69,8 @@ For each link return:
   event_id: one id from the event list, exactly as given.
   kind: one of {kinds}, by what the quote shows the person doing or suffering in this event.
 {kind_definitions}
-      A historian is linked only when the card names their study of THIS event.
+      A historian is linked only when the card names their study of THIS event. An event
+      marked before_life ended before the person's adult life: it can only take a historian link.
   relation_ko / relation_en: the person's position in THIS event as a short noun phrase
       (예: 조약에 서명한 외무장관, 진압 지휘, 첫 희생자). Usually about 12 Korean characters /
       35 English; a complex role may run longer, never more than {relation_ko} / {relation_en}.
@@ -99,7 +100,14 @@ def _years(text):
 
 
 def candidate_events(person, events):
-    """Events whose period overlaps the person's adult life; all of them when the life is unknown."""
+    """Events up to the person's death; all of them when the life is unknown.
+
+    Events that ended before the person's adult life carry before_life=True and
+    can only take a historian link. They used to be left out, which made a
+    historian of an earlier event impossible to link (2026-09-29: Leonid
+    Naumov, b. 1961, a historian of the NKVD, came back "no such event" for the
+    Great Terror).
+    """
     birth, death = person.get('birth_year'), person.get('death_year')
     if birth is None and death is None:
         birth, death = _years(person.get('years_label'))
@@ -108,8 +116,10 @@ def candidate_events(person, events):
     out = []
     for event in events:
         first, last = _years(event.get('period_label'))
-        if first is None or ((start is None or last >= start) and (end is None or first <= end)):
-            out.append(event)
+        if first is not None and end is not None and first > end:
+            continue
+        before = first is not None and start is not None and last < start
+        out.append({**event, 'before_life': before})
     return out
 
 
@@ -139,6 +149,7 @@ def prompt(person, card, events):
         'card': card,
         'events': [{'event_id': e['id'], 'period': e.get('period_label'), 'title_ko': e.get('title_ko'),
                     'title_en': e.get('title_en'), 'focus': focus_text(e),
+                    **({'before_life': True} if e.get('before_life') else {}),
                     'summary': (e.get('summary_en') or e.get('summary_ko') or '')[:SUMMARY_CHARS]}
                    for e in events],
     }, ensure_ascii=False)
@@ -159,6 +170,7 @@ def parse(text):
 def screen(links, card, events, acceptable, taken=(), used=()):
     """Split proposals into (kept, rejected-with-reason) before any paid check."""
     ids, text, kept, rejected, seen = {e['id'] for e in events}, _norm(card), [], [], set()
+    before = {e['id']: e.get('before_life') for e in events}
     quotes = set(used)
     for link in links[:MAX_LINKS]:
         entry = {k: link.get(k) for k in ('event_id', 'kind', 'relation_ko', 'relation_en', 'note_ko', 'note_en', 'basis')}
@@ -168,6 +180,8 @@ def screen(links, card, events, acceptable, taken=(), used=()):
         problem = ('unknown or out-of-period event' if entry['event_id'] not in ids
                    else 'basis too short' if len(basis) < MIN_BASIS_CHARS
                    else 'basis is not a quote of the card' if basis not in text
+                   else 'an event before the person\'s adult life can only take a historian link'
+                   if before.get(entry['event_id']) and entry['kind'] != 'historian'
                    else 'the same quote is already used for another event' if basis in quotes
                    else acceptable(entry)
                    or ('duplicate event' if entry['event_id'] in seen else ''))
@@ -202,7 +216,8 @@ its period. Answer false when the quote describes:
   - a general position or career fact that does not name an act in this event;
   - something the caption or role claims but the quote does not say.
 For a historian the test is instead whether the quote names their later study or
-interpretation of THIS event. Do not use your own knowledge to fill a gap in the quote.
+interpretation of THIS event. An event marked before_life ended before the person's adult
+life, so only a historian link can belong to it. Do not use your own knowledge to fill a gap in the quote.
 When unsure, answer false.
 
 2. kind: the one kind that fits what the quote shows, whatever was proposed:
@@ -219,6 +234,7 @@ def check_request(person, pairs):
         'links': [{'event_id': event['id'],
                    'event': {'title_en': event.get('title_en'), 'title_ko': event.get('title_ko'),
                              'period': event.get('period_label'), 'focus': focus_text(event),
+                             **({'before_life': True} if event.get('before_life') else {}),
                              'summary': (event.get('summary_en') or event.get('summary_ko') or '')[:EVENT_CONTEXT_CHARS],
                              'outcome': (event.get('outcome_en') or event.get('outcome_ko') or '')[:EVENT_CONTEXT_CHARS]},
                    'proposed_kind': entry['kind'], 'relation_en': entry['relation_en'], 'note_en': entry['note_en'],
