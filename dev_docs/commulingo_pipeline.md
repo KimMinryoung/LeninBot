@@ -57,6 +57,21 @@ tick에 붙였다. `tick`은 과제 선정 뒤 연결이 하나도 없는 인물
   (플레하노프, 페트롭스키·추바르, 자이코프, 천윈 등)을 사람이 빼고 169건을 반영했다. 중심 주체가 없는 사건에 남은
   opponent 32건은 개정 정의로 재판정한 뒤 사건 자체에 반대한 16건(1차대전 반전 운동가, 8월 쿠데타 저항자 등)을 남기고
   16건을 participant·leader로 옮겼다. 모든 변경은 `commulingo_people_revisions`에 이전 행과 함께 남아 있다.
+- 같은 날 운영자 결정으로 중심 주체를 하나로 정할 수 없는 사건은 진영을 이름 짓는다(프런트엔드 migration 193,
+  `dev_docs/commulingo-event-sides-20260929.md`). `commulingo_history_events.sides`([{id, label}], focus와 배타)와
+  `commulingo_history_event_people.side`(그 사건의 진영 id 또는 NULL)다. 29개 사건에 진영을 붙였고(1차 대전·한국전쟁·
+  소련 해체·중월전쟁 등), 볼가 대기근·체르노빌·민족위기·코민테른 창설은 진영 없이 남았다. 진영이 있는 사건에는 opponent를
+  쓰지 않는다: 반대편은 다른 진영이고, 역할은 자기 진영 안의 역할이다. 사건 자체가 분명한 사건(대숙청 등)은
+  focus + opponent를 그대로 쓴다.
+  - 연결 단계(`commulingo/pipeline/event_links.py`): 사건 목록(캐시되는 system 메시지)에 진영을 싣고, 제안은 진영이 있는
+    사건에 `side`를 답한다(`relation_kinds.SIDE_RULE`). `screen()`이 목록에 없는 진영과 진영 있는 사건의 opponent를
+    거부하고, 검증 호출도 진영을 답해 제안과 다르면 같은 tick에서 재제출받는다. 진영이 없는 사건에서 온 side는 버린다.
+  - 작성기(`commulingo/people.py` `history_event_person`): `side`를 받아 사건 진영과 대조하고, 진영 있는 사건의 opponent와
+    진영 없는 사건의 side를 거부한다. side가 빠진 수정 요청은 저장된 진영을 유지하고, `side: null`만 지운다.
+    `commulingo_event_link` 도구와 사건 읽기(`get_event`)도 side·sides를 다룬다.
+  - SQL로 직접 넣는 운영자 일괄 스크립트(`commulingo_backfill_event_links.py`, `commulingo_event_evidence_links.py`)는
+    진영을 고를 수 없으므로 진영 있는 사건의 opponent를 거부한다. 재분류 스크립트 지시문도 진영이 있으면 opponent를 빼게 했다.
+  - 테스트: `tests/test_commulingo_event_links.py`(진영 선별·검증 교정), `tests/test_commulingo_event_sides.py`(작성기 검증).
 - 링크가 이미 있는 인물도 `events` 판정 기록이 없으면 보강 검사를 받는다(2026-09-29). 연결 단계가 링크 0명만 보던
   탓에, 콘텐츠·옛 배치로 링크 하나를 얻은 2,012명이 다른 사건을 검사받지 못했다(페펠랴예프의 1938년 총살과 대숙청 등).
   이미 연결된 사건은 후보에서 빼고 `already_linked`로 알린다. 링크 0명을 먼저, 다음 1937~1938년 사망자, 다음 링크가

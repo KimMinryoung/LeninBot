@@ -24,7 +24,7 @@ import logging
 import re
 import uuid
 
-from commulingo.relation_kinds import HISTORY_RELATION_KINDS, definitions_text
+from commulingo.relation_kinds import HISTORY_RELATION_KINDS, SIDE_RULE, definitions_text
 
 from .store import BudgetUnavailable
 
@@ -78,6 +78,8 @@ For each link return:
 {kind_definitions}
       A historian is linked only when the card names their study of THIS event. An event
       marked before_life ended before the person's adult life: it can only take a historian link.
+  side: only for a catalogue event that lists `sides`: {side_rule}
+      Give one of that event's side ids exactly, or null. Leave side out for other events.
   relation_ko / relation_en: the person's position in THIS event as a short noun phrase
       (예: 조약에 서명한 외무장관, 진압 지휘, 첫 희생자). Usually about 12 Korean characters /
       35 English; a complex role may run longer, never more than {relation_ko} / {relation_en}.
@@ -97,8 +99,9 @@ Writing rules, both languages:
   - The two languages say the same thing, each as natural prose.
 
 Reply with one JSON object and nothing else:
-{{"links": [{{"event_id": "...", "kind": "...", "relation_ko": "...", "relation_en": "...",
-  "note_ko": "...", "note_en": "...", "basis": "..."}}], "reason": "one sentence"}}"""
+{{"links": [{{"event_id": "...", "kind": "...", "side": "... or null, only for events with sides",
+  "relation_ko": "...", "relation_en": "...", "note_ko": "...", "note_en": "...", "basis": "..."}}],
+  "reason": "one sentence"}}"""
 
 
 def _years(text):
@@ -132,8 +135,21 @@ def candidate_events(person, events):
 
 def focus_text(event):
     """The side the event centres on, or a marker that it has none (no opponents)."""
+    if side_ids(event):
+        return 'none: the event names its sides; each person takes the side they acted for, and opponent is not used'
     focus = event.get('focus') or {}
     return focus.get('en') or focus.get('ko') or 'none: no single focus; opponents are only those who tried to stop the event itself'
+
+
+def side_ids(event):
+    """The ids of the camps an event names (frontend migration 193), or [] when it names none."""
+    return [s['id'] for s in (event.get('sides') or []) if isinstance(s, dict) and s.get('id')]
+
+
+def sides_brief(event):
+    """The event's camps as the prompts show them: id and English label."""
+    return [{'id': s['id'], 'label': (s.get('label') or {}).get('en') or (s.get('label') or {}).get('ko')}
+            for s in (event.get('sides') or []) if isinstance(s, dict) and s.get('id')]
 
 
 def card_text(person, career, sections):
@@ -158,12 +174,14 @@ def catalogue(events):
     """
     return json.dumps([{'event_id': e['id'], 'period': e.get('period_label'), 'title_en': e.get('title_en'),
                         'title_ko': e.get('title_ko'), 'focus': focus_text(e),
+                        **({'sides': sides_brief(e)} if side_ids(e) else {}),
                         'summary': (e.get('summary_en') or e.get('summary_ko') or '')[:SUMMARY_CHARS]}
                        for e in events], ensure_ascii=False)
 
 
 def system_prompt(all_events):
-    return (SYSTEM.format(max_links=MAX_LINKS, kinds=', '.join(KINDS), kind_definitions=definitions_text(), **TEXT_CAPS)
+    return (SYSTEM.format(max_links=MAX_LINKS, kinds=', '.join(KINDS), kind_definitions=definitions_text(),
+                          side_rule=SIDE_RULE, **TEXT_CAPS)
             + '\n\nEvent catalogue:\n' + catalogue(all_events))
 
 
@@ -197,9 +215,13 @@ def screen(links, card, events, acceptable, taken=(), used=()):
     """Split proposals into (kept, rejected-with-reason) before any paid check."""
     ids, text, kept, rejected, seen = {e['id'] for e in events}, _norm(card), [], [], set()
     before = {e['id']: e.get('before_life') for e in events}
+    sides = {e['id']: side_ids(e) for e in events}
     quotes = set(used)
     for link in links[:MAX_LINKS]:
         entry = {k: link.get(k) for k in ('event_id', 'kind', 'relation_ko', 'relation_en', 'note_ko', 'note_en', 'basis')}
+        camps = sides.get(entry['event_id']) or []
+        if camps:  # only events that name sides carry one; elsewhere a side is ignored
+            entry['side'] = link.get('side') or None
         if entry['event_id'] in taken:  # saved by an earlier attempt; a repeat is not a refusal
             continue
         basis = _norm(entry['basis'])
@@ -209,6 +231,11 @@ def screen(links, card, events, acceptable, taken=(), used=()):
                    else 'an event before the person\'s adult life can only take a historian link'
                    if before.get(entry['event_id']) and entry['kind'] != 'historian'
                    else 'the same quote is already used for another event' if basis in quotes
+                   else f"this event names its sides ({', '.join(camps)}): give the person's own side "
+                        "and their role in it instead of opponent"
+                   if camps and entry['kind'] == 'opponent'
+                   else f"side must be one of {', '.join(camps)} or null"
+                   if camps and entry['side'] is not None and entry['side'] not in camps
                    else acceptable(entry)
                    or ('duplicate event' if entry['event_id'] in seen else ''))
         if problem:
@@ -255,8 +282,13 @@ When unsure, answer false.
 2. kind: the one kind that fits what the quote shows, whatever was proposed:
 """ + definitions_text('  ') + """
 
+3. side: only when the event lists sides. """ + SIDE_RULE + """
+Give the side id the quote shows the person acting for (or null), whatever was proposed.
+Omit side for an event without sides.
+
 Reply with one JSON object and nothing else:
-{"verdicts": [{"event_id": "...", "belongs": true, "kind": "...", "reason": "one short sentence"}]}"""
+{"verdicts": [{"event_id": "...", "belongs": true, "kind": "...", "side": "... (events with sides only)",
+  "reason": "one short sentence"}]}"""
 
 
 def check_request(person, pairs):
@@ -266,10 +298,13 @@ def check_request(person, pairs):
         'links': [{'event_id': event['id'],
                    'event': {'title_en': event.get('title_en'), 'title_ko': event.get('title_ko'),
                              'period': event.get('period_label'), 'focus': focus_text(event),
+                             **({'sides': sides_brief(event)} if side_ids(event) else {}),
                              **({'before_life': True} if event.get('before_life') else {}),
                              'summary': (event.get('summary_en') or event.get('summary_ko') or '')[:EVENT_CONTEXT_CHARS],
                              'outcome': (event.get('outcome_en') or event.get('outcome_ko') or '')[:EVENT_CONTEXT_CHARS]},
-                   'proposed_kind': entry['kind'], 'relation_en': entry['relation_en'], 'note_en': entry['note_en'],
+                   'proposed_kind': entry['kind'],
+                   **({'proposed_side': entry.get('side')} if side_ids(event) else {}),
+                   'relation_en': entry['relation_en'], 'note_en': entry['note_en'],
                    'quote': entry['basis']} for event, entry in pairs],
     }, ensure_ascii=False)
 
@@ -282,7 +317,8 @@ def parse_verdicts(text):
     verdicts = json.loads(raw[start:end + 1]).get('verdicts')
     if not isinstance(verdicts, list):
         raise ValueError('check reply has no verdicts list')
-    return {v.get('event_id'): (v.get('belongs') is True, v.get('kind'), str(v.get('reason') or ''))
+    return {v.get('event_id'): (v.get('belongs') is True, v.get('kind'), str(v.get('reason') or ''),
+                                v.get('side', MISSING))
             for v in verdicts if isinstance(v, dict)}
 
 
@@ -326,7 +362,8 @@ class EventLinker:
                 WHERE person_id=%s ORDER BY sort_order''', (person_id,))
             sections = cur.fetchall()
             cur.execute('''SELECT id, period_label, title_ko, title_en, summary_ko, summary_en,
-                outcome_ko, outcome_en, focus FROM commulingo_history_events ORDER BY sort_order, id''')
+                outcome_ko, outcome_en, focus, to_jsonb(e)->'sides' AS sides
+                FROM commulingo_history_events e ORDER BY sort_order, id''')
             events = cur.fetchall()
         return person, career, sections, events
 
@@ -380,7 +417,8 @@ class EventLinker:
                 cost += spent
                 verdicts = parse_verdicts(reply)  # an unusable check is an error: retried later
             for entry in kept:
-                belongs, kind, why = verdicts.get(entry['event_id'], (False, None, 'the check returned no verdict'))
+                belongs, kind, why, side = verdicts.get(entry['event_id'],
+                                                        (False, None, 'the check returned no verdict', MISSING))
                 if not belongs:
                     rejected.append({**entry, 'problem': f'the check found the quote is not part of this event: {why}'})
                     continue
@@ -388,6 +426,11 @@ class EventLinker:
                     rejected.append({**entry, 'problem': f"the check found the kind should be {kind}, "
                                                          f"not {entry['kind']}: {why}. Resubmit with that kind "
                                                          "and a role and caption that fit it"})
+                    continue
+                camps = side_ids(by_id[entry['event_id']])
+                if camps and side is not MISSING and (side or None) != entry.get('side') and (side is None or side in camps):
+                    rejected.append({**entry, 'problem': f"the check found the side should be {side}, "
+                                                         f"not {entry.get('side')}: {why}. Resubmit with that side"})
                     continue
                 if apply:
                     await asyncio.to_thread(self.write, person_id, entry)
@@ -439,6 +482,7 @@ class EventLinker:
 
 
 KINDS = HISTORY_RELATION_KINDS
+MISSING = object()  # a verdict without a side key (events without sides)
 
 
 def default_linker(store, config):
@@ -467,6 +511,8 @@ def default_linker(store, config):
                  'relationKind': entry['kind'],
                  'relation': {'ko': entry['relation_ko'].strip(), 'en': entry['relation_en'].strip()},
                  'note': {'ko': entry['note_ko'].strip(), 'en': entry['note_en'].strip()}}
+        if 'side' in entry:  # set by screen() for events that name sides
+            patch['side'] = entry['side']
         citations = [f"인물 카드 {person_id}: {entry['basis'][:300]}"]
         patch, citations, _confidence, _repairs = normalize_commulingo_write(
             'history_event_person', entry['event_id'], patch, citations, None)

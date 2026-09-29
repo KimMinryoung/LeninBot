@@ -242,6 +242,50 @@ class LinkerTests(unittest.TestCase):
         self.assertEqual([r['status'] for r in results], ['budget_wait'])
         self.assertEqual(linker.calls['mark'], [])
 
+    def test_an_event_with_sides_takes_a_side_and_no_opponent(self):
+        sided = [dict(e, sides=[{'id': 'germany', 'label': {'ko': '독일', 'en': 'Germany'}},
+                                {'id': 'soviet', 'label': {'ko': '소련', 'en': 'Soviet Union'}}])
+                 if e['id'] == 'nazi-soviet-pact' else e for e in EVENTS]
+        card = card_text(PERSON, [], [])
+        kept, rejected = screen([{**LINK, 'side': 'germany'}], card, sided, ok)
+        self.assertEqual((kept[0]['side'], rejected), ('germany', []))
+        kept, rejected = screen([{**LINK, 'side': 'japan'}], card, sided, ok)
+        self.assertIn('side must be one of germany, soviet', rejected[0]['problem'])
+        kept, rejected = screen([{**LINK, 'kind': 'opponent', 'side': 'germany'}], card, sided, ok)
+        self.assertIn('instead of opponent', rejected[0]['problem'])
+        kept, _ = screen([{**LINK, 'side': 'germany'}], card, EVENTS, ok)
+        self.assertNotIn('side', kept[0], 'no side is carried for an event without sides')
+
+    def test_sides_reach_both_calls_and_the_check_can_correct_the_side(self):
+        sided = [dict(e, sides=[{'id': 'germany', 'label': {'ko': '독일', 'en': 'Germany'}},
+                                {'id': 'soviet', 'label': {'ko': '소련', 'en': 'Soviet Union'}}])
+                 if e['id'] == 'nazi-soviet-pact' else e for e in EVENTS]
+        first, fixed = {**LINK, 'side': 'soviet'}, {**LINK, 'side': 'germany'}
+        linker = FakeLinker([json.dumps({'links': [first]}), json.dumps({'links': [fixed]})])
+        linker.load = lambda person_id: (PERSON, [], [], sided)
+        written = []
+        linker.write = lambda pid, entry: written.append((entry['event_id'], entry.get('side')))
+        verdict_sides = iter(['germany', 'germany'])
+
+        async def generate(system, text, feature, inner=linker.generate):
+            if feature == event_links.CHECK_FEATURE:
+                request = json.loads(text)
+                linker.checks.append(request)
+                side = next(verdict_sides)
+                return json.dumps({'verdicts': [{'event_id': l['event_id'], 'belongs': True,
+                                                 'kind': l['proposed_kind'], 'side': side, 'reason': 'r'}
+                                                for l in request['links']]}), 0.001
+            return await inner(system, text, feature)
+        linker.generate = generate
+        result = asyncio.run(linker.link('joachim-von-ribbentrop'))
+        catalogue = {e['event_id']: e for e in json.loads(linker.system.split('Event catalogue:\n', 1)[1])}
+        self.assertEqual([s['id'] for s in catalogue['nazi-soviet-pact']['sides']], ['germany', 'soviet'])
+        self.assertNotIn('sides', catalogue['world-war-i'])
+        self.assertIn('names its sides', catalogue['nazi-soviet-pact']['focus'])
+        self.assertEqual(linker.checks[0]['links'][0]['proposed_side'], 'soviet')
+        self.assertIn('side should be germany, not soviet', linker.requests[1])
+        self.assertEqual((result['attempts'], written), (2, [('nazi-soviet-pact', 'germany')]))
+
     def test_kinds_match_the_writer(self):
         from commulingo.people import _HISTORY_RELATION_KINDS
         self.assertEqual(tuple(_HISTORY_RELATION_KINDS), event_links.KINDS)

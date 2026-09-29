@@ -250,8 +250,19 @@ def propose(client, event: dict, roster: list[dict], linked_ids: list[str]) -> l
     return links
 
 
+def refuse_opponent_on_sided_event(event_id: str, kind: str) -> None:
+    """These batch scripts insert directly, bypassing the writer's side rules (frontend
+    migration 193): an event that names its sides takes no opponent, and a direct insert
+    cannot choose the person's side, so such a link goes through the writer instead."""
+    row = db_query("SELECT to_jsonb(e)->'sides' AS sides FROM commulingo_history_events e WHERE id = %s",
+                   (event_id,))
+    if row and row[0]["sides"] and kind == "opponent":
+        raise ValueError(f"{event_id} names its sides; link through the writer with a side instead of opponent")
+
+
 def apply_link(event_id: str, person_id: str, relation_ko: str, relation_en: str, kind: str) -> None:
     kind = kind if kind in VALID_KINDS else FALLBACK_KIND
+    refuse_opponent_on_sided_event(event_id, kind)
     row = db_query(
         "SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM commulingo_history_event_people WHERE event_id = %s",
         (event_id,),

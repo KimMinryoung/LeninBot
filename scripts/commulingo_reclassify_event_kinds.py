@@ -31,7 +31,8 @@ QUESTIONS = {'kind': {
     'instructions': ("How does this person relate to the event in `event`, judged from the person's "
                      "relation and caption? `event.focus` is the side the event centres on: opponents "
                      "are the people on the side against it; when it says none, only people who tried to stop "
-                     "the event itself are opponents."),
+                     "the event itself are opponents. When `event.sides` is given the event names its camps "
+                     "and opponent is never the answer: choose the person's role inside their own camp."),
     'criteria': HISTORY_RELATION_KIND_DEFINITIONS,
 }}
 
@@ -67,6 +68,8 @@ async def main():
                                    event={'title': event['title_en'], 'period': event['period'],
                                           'focus': (event.get('focus') or {}).get('en')
                                           or 'none: no single focus; opponents are only those who tried to stop the event itself',
+                                          **({'sides': [(s.get('label') or {}).get('en') for s in event['sides']]}
+                                             if event.get('sides') else {}),
                                           'summary': event.get('summary_en') or ''})
         async with gate:
             decision = await decide(FEATURE, state, questions)

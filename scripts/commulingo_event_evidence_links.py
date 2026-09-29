@@ -37,6 +37,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from db import query as db_query, execute as db_execute
 from runtime_tools.wiki import _exec_wiki_get
 from scripts.commulingo_backfill_event_links import (
+    refuse_opponent_on_sided_event,
     VALID_KINDS, FALLBACK_KIND, normalize_label, resolve_person_id,
 )
 
@@ -206,6 +207,7 @@ def label_batch(cfg: dict, people: list[dict]) -> list[dict]:
 def apply_link(event_id: str, person_id: str, relation_ko: str, relation_en: str,
                kind: str, evidence: list[str]) -> None:
     kind = kind if kind in VALID_KINDS else FALLBACK_KIND
+    refuse_opponent_on_sided_event(event_id, kind)
     nxt = db_query(
         "SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM commulingo_history_event_people WHERE event_id = %s",
         (event_id,),

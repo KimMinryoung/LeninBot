@@ -295,8 +295,9 @@ _SECTION_PATCH_KEYS = frozenset({"slug", "heading", "body", "sortOrder", "source
 _SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,60}$")
 
 _HISTORY_EVENT_PERSON_PATCH_KEYS = frozenset({
-    "personId", "sortOrder", "relationKind", "relation", "note",
+    "personId", "sortOrder", "relationKind", "relation", "note", "side",
 })
+_SIDE_ID_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 
 # The event card's short fields (frontend /commulingo/events/<id>). Title and
 # period are deliberately absent: they are the id's public identity and the
@@ -841,8 +842,9 @@ def _get_event(event_id: str) -> dict | None:
     event = db_query_one(
         """SELECT id, period_label, title_ko, title_en, question_ko, question_en,
                   summary_ko, summary_en, outcome_ko, outcome_en,
-                  body_ko, body_en, timeline, sources
-             FROM commulingo_history_events WHERE id = %s""",
+                  body_ko, body_en, timeline, sources,
+                  to_jsonb(e)->'focus' AS focus, to_jsonb(e)->'sides' AS sides
+             FROM commulingo_history_events e WHERE id = %s""",
         (event_id,),
     )
     if not event:
@@ -863,11 +865,12 @@ def _get_event(event_id: str) -> dict | None:
             "personId": row["person_id"],
             "sortOrder": row["sort_order"],
             "relationKind": row["relation_kind"],
+            "side": row["side"],
             "relation": {"ko": row["relation_ko"], "en": row["relation_en"]},
             "note": {"ko": row["note_ko"], "en": row["note_en"]},
         }
         for row in db_query(
-            """SELECT person_id, sort_order, relation_kind,
+            """SELECT person_id, sort_order, relation_kind, side,
                       relation_ko, relation_en, note_ko, note_en
                  FROM commulingo_history_event_people
                 WHERE event_id = %s ORDER BY sort_order, person_id""",
@@ -2046,12 +2049,27 @@ def _validate_person_section(cur, action: str, target_id: str, patch: dict) -> s
 def _validate_history_event_person(cur, action: str, target_id: str, patch: dict) -> str | None:
     if action == "delete":
         return "Error: history_event_person deletion is not available to the unattended curator."
-    cur.execute("SELECT 1 FROM commulingo_history_events WHERE id = %s", (target_id,))
-    if not cur.fetchone():
+    cur.execute(
+        "SELECT to_jsonb(e)->'sides' AS sides FROM commulingo_history_events e WHERE id = %s",
+        (target_id,),
+    )
+    event_row = cur.fetchone()
+    if not event_row:
         return (
             f"Error: history event {target_id} not found. Find the id with "
             f"{_reader_call('list_events')}."
         )
+    # Named sides (frontend migration 193): the camp this person acted for.
+    side_ids = [s.get("id") for s in (event_row["sides"] or []) if isinstance(s, dict)]
+    side = patch.get("side")
+    if side is not None:
+        if not isinstance(side, str) or not _SIDE_ID_RE.match(side):
+            return "Error: side must be one of the event's side ids, or null."
+        if side not in side_ids:
+            return (
+                f"Error: side '{side}' is not one of this event's sides"
+                + (f" ({', '.join(side_ids)})." if side_ids else "; this event names no sides, so omit side.")
+            )
     person_id = str(patch.get("personId") or "").strip()
     if not person_id:
         return "Error: history_event_person patch.personId is required."
@@ -2064,6 +2082,11 @@ def _validate_history_event_person(cur, action: str, target_id: str, patch: dict
     kind = str(patch.get("relationKind") or "").strip()
     if kind not in _HISTORY_RELATION_KINDS:
         return f"Error: relationKind must be one of {', '.join(_HISTORY_RELATION_KINDS)}."
+    if side_ids and kind == "opponent":
+        return (
+            f"Error: this event names its sides ({', '.join(side_ids)}); use the person's own "
+            "side with their role in it (leader, executor, participant, target) instead of opponent."
+        )
     for key in ("relation", "note"):
         value = patch.get(key)
         if not isinstance(value, dict) or not value.get("ko") or not value.get("en"):
@@ -2809,7 +2832,7 @@ def apply_edit(cur, target_type: str, action: str, target_id: str, patch: dict, 
         entity_id = f"{target_id}/{person_id}"
         cur.execute(
             """SELECT event_id, person_id, sort_order, relation_kind,
-                      relation_ko, relation_en, note_ko, note_en
+                      relation_ko, relation_en, note_ko, note_en, side
                  FROM commulingo_history_event_people
                 WHERE event_id = %s AND person_id = %s""",
             (target_id, person_id),
@@ -2827,20 +2850,25 @@ def apply_edit(cur, target_type: str, action: str, target_id: str, patch: dict, 
             sort_order = cur.fetchone()["next_sort"]
         relation = patch["relation"]
         note = patch["note"]
+        # A patch without "side" keeps the stored side (an update of the caption
+        # must not drop the person out of their camp); "side": null clears it.
         cur.execute(
             """INSERT INTO commulingo_history_event_people
                       (event_id, person_id, sort_order, relation_kind,
-                       relation_ko, relation_en, note_ko, note_en)
-                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                       relation_ko, relation_en, note_ko, note_en, side)
+                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                  ON CONFLICT (event_id, person_id) DO UPDATE SET
                      sort_order = EXCLUDED.sort_order,
                      relation_kind = EXCLUDED.relation_kind,
                      relation_ko = EXCLUDED.relation_ko,
                      relation_en = EXCLUDED.relation_en,
                      note_ko = EXCLUDED.note_ko,
-                     note_en = EXCLUDED.note_en""",
+                     note_en = EXCLUDED.note_en,
+                     side = CASE WHEN %s THEN EXCLUDED.side
+                                 ELSE commulingo_history_event_people.side END""",
             (target_id, person_id, sort_order, patch["relationKind"],
-             relation["ko"], relation["en"], note["ko"], note["en"]),
+             relation["ko"], relation["en"], note["ko"], note["en"], patch.get("side"),
+             "side" in patch),
         )
         after = {**patch, "eventId": target_id, "sortOrder": sort_order}
         _write_revision(cur, "history_event_person", entity_id,
@@ -3418,6 +3446,8 @@ _COMMULINGO_FIELD_SCHEMA = {
         # for `years` in _validate, not through this schema.
         "personId": {"type": "string"},
         "relationKind": {"type": "string", "enum": list(_HISTORY_RELATION_KINDS)},
+        "side": {"type": ["string", "null"],
+                 "description": "History event link only: the camp id from the event's sides, when it names them."},
         "relation": _BILINGUAL_TEXT_SCHEMA,
         "note": _BILINGUAL_TEXT_SCHEMA,
         "office_rows": {"type": "array", "items": {"type": "object"}},
@@ -3907,6 +3937,9 @@ COMMULINGO_EVENT_LINK_TOOL = {
             "event_id": {"type": "string"},
             "person_id": {"type": "string"},
             "relation_kind": {"type": "string", "enum": list(_HISTORY_RELATION_KINDS)},
+            "side": {"type": ["string", "null"],
+                     "description": "When the event names sides: the id of the camp the person acted for "
+                                    "(null for a witness, historian or someone on no side). Omit otherwise."},
             "relation": _BILINGUAL_TEXT_SCHEMA,
             "note": _EVENT_NOTE_SCHEMA,
             "sort_order": {"type": ["integer", "null"], "description": "Omit or null to append."},
@@ -4123,7 +4156,7 @@ async def _exec_commulingo_section_save(
 
 async def _exec_commulingo_event_link(
     event_id: str, person_id: str, relation_kind: str, relation: dict, note: dict,
-    citations: list, sort_order: int | None = None,
+    citations: list, sort_order: int | None = None, side: str | None = None,
 ) -> str:
     fields = {
         "personId": person_id, "relationKind": relation_kind,
@@ -4131,6 +4164,8 @@ async def _exec_commulingo_event_link(
     }
     if sort_order is not None:
         fields["sortOrder"] = sort_order
+    if side is not None:
+        fields["side"] = side
     return await _exec_commulingo_write("history_event_person", "create", event_id, citations, fields, None)
 
 

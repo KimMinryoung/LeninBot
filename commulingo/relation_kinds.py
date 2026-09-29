@@ -10,6 +10,11 @@ reference point (fixed the same day by commulingo_history_events.focus, migratio
 those who tried to stop the event itself);
 witness mixed eyewitnesses with historians writing decades later, which is why
 historian was added.
+
+Named sides (frontend migration 193, 2026-09-29): an event with no single focus
+may name its camps (commulingo_history_events.sides). There each person also
+carries the side they acted for, and opponent is not used: the opposing camp is
+simply another side. Events whose subject is clear keep focus + opponent.
 """
 
 HISTORY_RELATION_KIND_DEFINITIONS = {
@@ -31,7 +36,8 @@ HISTORY_RELATION_KIND_DEFINITIONS = {
         "the only opponents are people who tried to stop the event itself (the war, the treaty, "
         "the plan, the coup), such as anti-war campaigners; people inside one camp who fought "
         "another camp are leader, executor or participant. Leader, executor and participant "
-        "describe people on the focus side, or on any side when there is no focus."),
+        "describe people on the focus side, or on any side when there is no focus. Never use "
+        "opponent on an event that names its sides: there the opposing camp is another side."),
     'target': (
         "The event's action was done to them: arrested, tried, purged, executed, deported, deposed "
         "or attacked. When the caption says what happened to the person, this wins over opponent."),
@@ -49,3 +55,11 @@ HISTORY_RELATION_KINDS = tuple(HISTORY_RELATION_KIND_DEFINITIONS)
 def definitions_text(indent='      '):
     """The definitions as prompt lines, one kind per line."""
     return '\n'.join(f'{indent}{kind}: {text}' for kind, text in HISTORY_RELATION_KIND_DEFINITIONS.items())
+
+
+SIDE_RULE = (
+    "An event that names sides (camps) takes a side for every person: the id of the camp they "
+    "acted for, whatever their kind. Use null only for a witness, a historian, or someone who took "
+    "no side (a mediator, a neutral government that only reacted). The kind is still their role "
+    "inside that camp (a camp's own head is its leader, its commanders executors); opponent is "
+    "never used there.")
