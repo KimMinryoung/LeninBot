@@ -70,7 +70,6 @@
       },
       "evidence": {
         "type": "array",
-        "minItems": 1,
         "items": {
           "type": "object",
           "additionalProperties": false,
@@ -98,7 +97,19 @@
               "minLength": 1
             }
           }
-        }
+        },
+        "description": "At least one cited excerpt. Only an existing activity with basis 'legacy-classification' may have none."
+      },
+      "basis": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "enum": [
+          "legacy-classification",
+          null
+        ],
+        "description": "Set only by migration 215 for activities carried over from the retired role classification without evidence. Never add one; keep an existing one unchanged or replace it with a documented activity."
       }
     }
   }
