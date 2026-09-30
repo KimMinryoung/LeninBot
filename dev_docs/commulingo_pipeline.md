@@ -198,7 +198,7 @@ required_corrections를 요구한다. coverage.sufficient=false인 결과는 승
 | 세션 내부 도구 | 역할 |
 |---|---|
 | `commulingo_pipeline_submit_draft` | 값·근거·과제 판단 제출과 부분 수정. 완성된 작은 초안은 한 번에 제출한다 |
-| `commulingo_pipeline_no_edit` | 사유와 모든 과제의 판단을 남기고 무편집 종료. 저장된 초안은 이력에 보존한다 |
+| `commulingo_pipeline_no_edit` | 사유와 모든 과제의 판단을 남기고 무편집 종료. 저장된 초안은 이력에 보존한다. 대상이 없는 create에서는 `complete`를 거부하고, 그런 결과가 judge에 오면 held로 멈춘다 |
 | `commulingo_pipeline_cached_passages` | 캐시 목록과 원문을 네트워크 없이 조회. 한 번에 라벨 8개까지 보여 주고 나머지를 안내한다 |
 | `commulingo_pipeline_context` | 필요한 현재 값과 편집 가능한 필드의 schema 조회. 편집 범위를 넓히지는 않는다 |
 

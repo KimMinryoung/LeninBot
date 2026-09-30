@@ -270,6 +270,30 @@ class EditorTests(EditorCase):
             result = await Editor(store)(JOB, [], Usage(), .2)
         self.assertEqual(latest([{'stage':'research', 'value':result.value}], 'research')['status'], 'not_applicable')
 
+    async def test_create_cannot_finish_as_already_complete(self):
+        store = store_mock()
+        job = {**JOB, 'action': 'create'}
+        async def model(**kwargs):
+            _, no_edit, _ = next(t for t in kwargs['local_tools']
+                                 if t[0]['name'] == 'commulingo_pipeline_no_edit')
+            with self.assertRaisesRegex(ValueError, 'contradicts a create job'):
+                await no_edit(status='complete',
+                    reason='The bilingual entry content is already saved in the draft.',
+                    issues={'register': {'status':'resolved', 'reason':'The draft identifies the requested entry.'}})
+            await no_edit(status='not_applicable',
+                reason='The sources do not establish this as a distinct entry.',
+                issues={'register': {'status':'deferred', 'reason':'Not a distinct documented entry.'}})
+        with patch('commulingo.pipeline.service.call', return_value=None), \
+             patch('commulingo.pipeline.stages.model_call', side_effect=model):
+            result = await Editor(store)(job, [], Usage(), .2)
+        self.assertEqual(result.value['research']['status'], 'not_applicable')
+
+    async def test_judge_holds_create_reported_complete_without_entry(self):
+        from commulingo.pipeline.stages import judge
+        research = {'current':None,'baseline':'','status':'complete','reason':'saved','inspected_sources':[]}
+        result = await judge({**JOB,'action':'create','payload':{}}, [{'stage':'research','value':{'editor_version':2,'research':research}}], Usage(), .2)
+        self.assertEqual((result.next_stage, result.status), ('complete', 'escalated'))
+
     async def test_saved_error_survives_restart_without_a_research_reopen_step(self):
         store = store_mock()
         async def first(**kwargs):

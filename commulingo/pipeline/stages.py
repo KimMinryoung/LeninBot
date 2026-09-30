@@ -250,6 +250,9 @@ async def judge(job, artifacts, usage, budget):
             raise
     if research['status']=='sources_unavailable':
         return Result({'status':research['status']},'research','deferred',90*86400)
+    if job.get('action')=='create' and research['status']=='complete' and not research.get('current'):
+        return Result({'research':research,'hold_reason':'create judged complete but the entry does not exist'},
+                      'complete','escalated')
     value = advance(job, {'status':research['status']})
     return Result(value,'research' if value.get('remaining_topics') else 'complete',
                   'ready' if value.get('remaining_topics') else 'complete')

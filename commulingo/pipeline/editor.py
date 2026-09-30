@@ -326,6 +326,14 @@ class Editor:
                 raise ValueError('sources_unavailable contradicts the sources read in this session ('
                                  + ', '.join(inspected[:3]) + ') and the draft saved from them. '
                                  'Fix the values the last validation rejected and resubmit the draft.')
+            # complete means "already satisfied", which a create job whose target
+            # does not exist can never be. Job 63954 (Nathalie Le Mel, 2026-09-30)
+            # reported its unvalidated draft as the registered entry and the job
+            # closed with nothing published.
+            if value['status']=='complete' and job['action']=='create' and not current:
+                raise ValueError('complete contradicts a create job: the entry does not exist and nothing is registered'
+                                 + (f' (last validation error: {last_error})' if last_error else '')
+                                 + '. Fix the rejected values and resubmit the draft, or use not_applicable/sources_unavailable.')
             # Preserve the last draft and its evidence for audit/recovery. This
             # decision is a distinct artifact, never a mutation of draft status.
             await save_checkpoint()
