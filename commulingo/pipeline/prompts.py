@@ -38,7 +38,10 @@ that changes how a fact should be read.
 Use card definitions/biographies for concise explanation and body/sections for depth. Do not
 expand to a character target. Preserve existing information and complete replacement lists.
 For terms, explain meaning, historical context, distinctions or examples only as commissioned.
-Aliases drive automatic links: do not add everyday ambiguous words merely to increase matches.
+Aliases drive automatic links. An alias names only its own entry (its own name, a variant
+spelling, abbreviation or transliteration), never a common noun or generic institution name
+that another country or context also uses (최고사령부, 국방위원회, 제2공화국, 6조, 집단농장);
+the database refuses such aliases.
 Use dictionary spellings in the supplied snapshot. Omit unsupported relationships.
 Keep patronymics separate from given/family names and native names.
 Use the official Korean transcription for Russian names, including ш before consonants as 시,

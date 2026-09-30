@@ -161,7 +161,9 @@ Workflow:
    definition {{ko,en}} (2-3 sentences, the card paragraph — a dense sentence costs
    ~{DENSE_KO} Korean characters against a {DEFINITION_KO}-character ceiling, so a third
    sentence only fits when the first two stay tight; depth goes to body), aliases {{ko,en}}
-   including the EXACT spelling the material uses plus common variants, and related
+   including the EXACT spelling the material uses plus common variants (never a common noun
+   or generic institution name another country also uses, such as 최고사령부, 국방위원회,
+   제2공화국 or 6조: the database refuses them), and related
    people/events ids when clearly applicable (verify ids via search_people/list_events).
    Also required, because the glossary sorts and groups on them:
    - period as {{ko,en}}, both languages written out ({{"ko": "1980년대–현재", "en":

@@ -136,7 +136,9 @@ Content rules:
   has its own office page. `definition` is one card paragraph (2-3 sentences, both
   languages); depth goes in `body` (markdown). `aliases` are the exact strings prose uses
   and drive site-wide auto-linking: include variant spellings, NEVER a string that is also
-  an ordinary everyday word. Check `list_terms` with a `q` for the candidate before any
+  an ordinary everyday word or a generic institution name another country also uses
+  (최고사령부, 국방위원회, 제2공화국, 6조, 집단농장 — the database refuses these; the same
+  applies to person aliases). Check `list_terms` with a `q` for the candidate before any
   term create; the unfiltered list is long enough to be cut off mid-result.
 - Distinguish documented fact from interpretation. Do not sanitize repression, colonial
   violence, political responsibility, or historiographical dispute; do not sensationalize.
