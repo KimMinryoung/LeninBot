@@ -1,5 +1,5 @@
 {
-  "version": 17,
+  "version": 18,
   "functions": [
     {
       "id": "political-leadership",
@@ -1007,15 +1007,66 @@
       },
       "countryCode": "ukraine",
       "icon": "landmark",
-      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify.",
+      "criteria": "Actual service for independent Ukraine (from 1991) or its armed forces. For 1917–1921 use ukraine-peoples-republic, ukraine-hetmanate or soviet-ukraine; for the Ukrainian SSR inside the Soviet Union use state-soviet. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify.",
+      "periods": [
+        [
+          1991,
+          null
+        ]
+      ]
+    },
+    {
+      "id": "ukraine-peoples-republic",
+      "kind": "state",
+      "label": {
+        "ko": "우크라이나 인민공화국",
+        "en": "Ukrainian People's Republic"
+      },
+      "countryCode": "ukraine",
+      "icon": "landmark",
+      "parentId": null,
+      "criteria": "Documented service for the Ukrainian Central Rada and its General Secretariat (1917–1918), the Ukrainian People's Republic, the Directorate (1918–1921) or the Ukrainian People's Army. NOT the Hetmanate of 1918 (ukraine-hetmanate) and NOT the Soviet Ukrainian governments (soviet-ukraine). Do NOT infer from citizenship, ethnicity, residence or nationalist sympathy.",
       "periods": [
         [
           1917,
           1921
-        ],
+        ]
+      ]
+    },
+    {
+      "id": "ukraine-hetmanate",
+      "kind": "state",
+      "label": {
+        "ko": "우크라이나국 (헤트만국)",
+        "en": "Ukrainian State (Hetmanate)"
+      },
+      "countryCode": "ukraine",
+      "icon": "crown",
+      "parentId": null,
+      "criteria": "Documented service for Pavlo Skoropadskyi's Ukrainian State (April–December 1918), its government, institutions or armed forces. NOT the Ukrainian People's Republic before or after it. Do NOT infer from citizenship, residence or sympathy.",
+      "periods": [
         [
-          1991,
-          null
+          1918,
+          1918
+        ]
+      ]
+    },
+    {
+      "id": "soviet-ukraine",
+      "kind": "state",
+      "label": {
+        "ko": "소비에트 우크라이나",
+        "en": "Soviet Ukraine"
+      },
+      "countryCode": "ukraine",
+      "icon": "landmark",
+      "parentId": "state-soviet",
+      "socialistSystem": true,
+      "criteria": "Documented service for the Soviet Ukrainian governments before the 1922 Union Treaty: the People's Secretariat (1917–1918), the Provisional Workers' and Peasants' Government (1918–1919), the Council of People's Commissars of the Ukrainian SSR, its Red Army formations, and leadership of the Communist Party (Bolsheviks) of Ukraine as part of that system. From the Union (1923) the Ukrainian SSR belongs to state-soviet. Makhnovists and insurgent otamans qualify only for documented formal service. Do NOT infer from citizenship, residence or ideology.",
+      "periods": [
+        [
+          1917,
+          1922
         ]
       ]
     },
