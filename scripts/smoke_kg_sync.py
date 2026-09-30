@@ -59,16 +59,13 @@ def fixture(sync):
     return sync.Source(
         people=[
             {"id": "smoke-a", "group_id": "smoke-era", "name_ko": "스모크 인물 알파", "name_en": "Smoke Person Alpha",
-             "cyrillic": "Смоук Альфа", "years_label": "1900–1950", "bio_ko": "스모크 테스트용 인물."},
+             "cyrillic": "Смоук Альфа", "years_label": "1900–1950", "bio_ko": "스모크 테스트용 인물.",
+             "activities": [{"functionId": "government", "officeId": "smoke-office", "primary": True}]},
             {"id": "smoke-b", "group_id": "smoke-era", "name_ko": "스모크 인물 베타", "name_en": "Smoke Person Beta"},
             {"id": "smoke-b-old", "group_id": "smoke-era", "name_ko": "스모크 인물 베타 구버전", "name_en": "Smoke Person Beta Old"},
         ],
         person_aliases=[{"person_id": "smoke-a", "lang": "en", "alias": "S. Alpha"}],
         career=[{"person_id": "smoke-a", "sort_order": 0, "period_label": "1930–35", "role_ko": "스모크 위원"}],
-        person_roles=[{"person_id": "smoke-a", "office_id": "smoke-office", "label_ko": "스모크 수장", "category_id": None},
-                      {"person_id": "smoke-b", "office_id": None, "label_ko": "", "category_id": None},
-                      {"person_id": "smoke-b-old", "office_id": None, "label_ko": "", "category_id": None}],
-        role_categories=[],
         people_groups=[{"id": "smoke-era", "range_label": "1900–1950", "title_ko": "스모크 시대의 사람들", "title_en": "Smoke era"}],
         offices=[{"id": "smoke-office", "title_ko": "스모크 기관", "title_en": "Smoke office", "blurb_ko": "테스트 기관"}],
         office_rows=[{"id": 990001, "office_id": "smoke-office", "period_label": "1930–1935", "start_year": 1930,

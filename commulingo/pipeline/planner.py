@@ -46,7 +46,7 @@ class Planner:
                 NULL::boolean AS body_empty
                 FROM commulingo_people p CROSS JOIN LATERAL (VALUES
                     ('basics',20,p.years_label='' OR p.epithet_ko='' OR p.epithet_en=''
-                        OR NOT EXISTS (SELECT 1 FROM commulingo_person_roles r WHERE r.person_id=p.id)
+                        OR NOT coalesce(p.activities,'[]'::jsonb) @> '[{"primary": true}]'::jsonb
                         OR NOT EXISTS (SELECT 1 FROM commulingo_person_career_entries c WHERE c.person_id=p.id)),
                     ('bio',30,p.bio_ko='' OR p.bio_en=''),
                     ('nationality',35,p.citizenship_code='' OR p.origin_code=''),

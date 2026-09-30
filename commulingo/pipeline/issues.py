@@ -1,7 +1,7 @@
 """Concrete editorial defects: empty values and explicit requests. Quotas and missing provenance never commission new prose."""
 from .bundles import work_topics
 
-PERSON = {'basics': ('years', 'epithet', 'role', 'career'), 'bio': ('bio',),
+PERSON = {'basics': ('years', 'epithet', 'activities', 'career'), 'bio': ('bio',),
           'nationality': ('citizenship', 'nationalOrigin'), 'moment': ('moment',)}
 TERM = {'definition': ('definition',), 'history': ('body',)}
 FACTS = {'person': {'bio','years','moment','citizenship','nationalOrigin'},
@@ -31,7 +31,7 @@ def commission(job, current):
         for field in fields:
             value = current.get(field)
             missing = not value
-            if isinstance(value, dict) and field not in {'role'}:
+            if isinstance(value, dict):
                 text = value.get('label', value)
                 missing = any(not str(text.get(lang) or '').strip() for lang in ('ko','en')) if isinstance(text,dict) else not text
             # Existing prose without recorded evidence is not an issue: attaching

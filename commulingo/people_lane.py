@@ -207,7 +207,7 @@ def select_sparse_person(
       WITH topic_edits AS MATERIALIZED (
         SELECT q.target_id AS person_id, t.topic, MAX(q.created_at) AS edited_at
         FROM commulingo_agent_suggestions q
-        CROSS JOIN (VALUES ('basics', ARRAY['years','career','role','epithet']),
+        CROSS JOIN (VALUES ('basics', ARRAY['years','career','activities','epithet']),
           ('bio', ARRAY['bio']), ('nationality', ARRAY['citizenship','nationalOrigin','origin']),
           ('moment', ARRAY['moment']), ('sections', ARRAY['body'])) AS t(topic, fields)
         WHERE q.status='approved' AND q.target_type IN ('person','person_section')
@@ -228,7 +228,7 @@ def select_sparse_person(
         SELECT p.*, p.group_id AS group_id_copy,
           LENGTH(p.bio_ko) AS bio_chars, (p.epithet_ko<>'')::int AS has_epithet,
           (p.moment_ko<>'')::int AS has_moment,
-          EXISTS(SELECT 1 FROM commulingo_person_roles r WHERE r.person_id=p.id)::int AS has_role,
+          (COALESCE(p.activities,'[]'::jsonb) @> '[{"primary": true}]'::jsonb)::int AS has_activity,
           (SELECT COUNT(*) FROM commulingo_person_career_entries c WHERE c.person_id=p.id)::int AS career_count,
           (SELECT COUNT(*) FROM commulingo_person_sections s WHERE s.person_id=p.id)::int AS section_count,
           (SELECT COUNT(*) FROM commulingo_history_event_people e WHERE e.person_id=p.id)::int AS event_count,
@@ -250,13 +250,12 @@ def select_sparse_person(
             WHERE split_part(r.entity_id,'/',1)=p.id AND r.changed_by LIKE 'commulingo-maintainer%%') AS last_edit
         FROM commulingo_people p
         WHERE (%(forced)s='' OR p.id=%(forced)s) AND NOT(p.id=ANY(%(excluded)s))
-          AND (%(non_soviet)s OR NOT EXISTS(SELECT 1 FROM commulingo_person_roles r
-              WHERE r.person_id=p.id AND r.category_id='non-soviet-revolutionary'))
+          AND (%(non_soviet)s OR p.group_id<>'international-revolutionary')
           AND NOT EXISTS(SELECT 1 FROM commulingo_agent_suggestions q WHERE q.target_id=p.id
               AND q.target_type IN ('person','person_section') AND q.status='pending')
       ), ranked AS MATERIALIZED (
         SELECT *, CASE
-          WHEN (bio_chars=0 OR has_epithet=0 OR career_count=0 OR has_role=0) AND NOT(editorial_states ? 'basics') THEN 1
+          WHEN (bio_chars=0 OR has_epithet=0 OR career_count=0 OR has_activity=0) AND NOT(editorial_states ? 'basics') THEN 1
           WHEN cardinality(missing_evidence_fields)>0 THEN 7
           WHEN ((bio_ko<>'' AND bio_en='') OR (moment_ko<>'' AND moment_en='') OR (epithet_ko<>'' AND epithet_en='')) AND NOT(editorial_states ? 'bio') THEN 8
           WHEN (citizenship_code='' OR origin_code='') AND NOT(editorial_states ? 'nationality') THEN 2
@@ -383,7 +382,7 @@ def enrich_step(candidate: dict) -> int:
         candidate["bio_chars"] == 0
         or not candidate["has_epithet"]
         or candidate["career_count"] == 0
-        or not candidate["has_role"]
+        or not candidate["has_activity"]
     ):
         return 1
     if not (candidate.get("citizenship_code") or "") or not (candidate.get("origin_code") or ""):
@@ -421,13 +420,14 @@ def _build_task(mode: str, candidate: dict | None) -> str:
 
 Identify one historically important person missing from CommuLingo whose inclusion would
 materially improve coverage of revolutionary or Soviet history. Inspect list_groups,
-list_categories and list_offices, then search_people under the proposed name and aliases to
+list_activity_catalog and list_offices, then search_people under the proposed name and aliases to
 prove there is no duplicate. Research with the free wiki_search/wiki_get tools first (Russian
 Wikipedia when available), then open at least one source outside Wikipedia — an archive or
 document collection, marxists.org, a journal or university page, or a published reference work —
 before writing. Wikipedia alone is acceptable only for a minor figure whose card is routine dates
 and posts. Never cite cyber-lenin.com or any page on this site. Create one
-complete bilingual person card with a correct group and one primary role, including a bio and a
+complete bilingual person card whose cited career/bio evidence documents its primary activity
+(the runner assigns the group and activity from it), including a bio and a
 one-line `moment` that follow the style rules below, via one `commulingo_person_create` call.
 Then stop. Event links can be added by a later enrichment run. Do not create a section or office
 row in this run.
@@ -518,7 +518,7 @@ Target exactly this person and no one else:
 - detail sections: {candidate['section_count']}
 - linked historical events: {candidate['event_count']}
 - has moment: {bool(candidate['has_moment'])}
-- has primary role: {bool(candidate['has_role'])}
+- has primary activity: {bool(candidate['has_activity'])}
 - citizenship flag code: {candidate.get('citizenship_code') or '(unset)'}
 - national/ethnic background flag code: {candidate.get('origin_code') or '(unset)'}
 {tier_line}
@@ -549,7 +549,7 @@ commissioned reads and research the step honestly needs no write, finish with on
 
 
 _STEP_BASIC = """BASIC COMPLETENESS: bio or epithet is empty, career has no rows, or the primary
-   role is missing. Make one `commulingo_person_update` that fills every such missing basic field
+   activity is missing (activities, per the activity schema, with cited evidence). Make one `commulingo_person_update` that fills every such missing basic field
    (bio and moment written to the style rules below). Do not create a section."""
 
 _STEP_NATIONALITY_TEMPLATE = """NATIONALITY: either the citizenship or nationalOrigin flag code is
@@ -811,7 +811,7 @@ CURRENT SELECTION FOCUS:
 """
     return """MODE: NEW PERSON DISCOVERY ONLY
 
-Do not create or edit anything in this stage. Inspect list_groups, list_categories and
+Do not create or edit anything in this stage. Inspect list_groups, list_activity_catalog and
 list_offices, then use search_people under a proposed name and aliases to prove the person
 is absent. Prefer a historically important gap in revolutionary or Soviet history.
 If your selection is rejected for sharing a surname with existing cards, read those cards
@@ -1070,10 +1070,10 @@ Create exactly this pre-verified missing person and no one else:
 - starting source: {candidate['source_url']}
 
 Re-check search_people for the exact names, fetch the starting source, inspect groups and
-roles, then create one complete bilingual card, including a bio and a one-line `moment` that
+the activity catalog, then create one complete bilingual card, including a bio and a one-line `moment` that
 follow the style rules below. Use ONLY the canonical person patch keys
 documented by commulingo_person_create: givenName, familyName (given
-name + surname ONLY, patronymic never embedded), bio, epithet, fate, role, groupId, years,
+name + surname ONLY, patronymic never embedded), bio, epithet, fate, years,
 aliases, career, cyrillic, cyrillicPatronymic, patronymic, moment, scenes, sortOrder,
 including both citizenship and nationalOrigin. Both nationality fields are mandatory for every
 new person; nationalOrigin may equal citizenship only with evidence. If unknown, research or defer registration; never guess.

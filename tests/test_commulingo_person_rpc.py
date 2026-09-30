@@ -24,7 +24,11 @@ class SharedPersonRPC(unittest.TestCase):
         suffix = uuid.uuid4().hex[:8]
         person_id = 'python-rpc-' + suffix
         fields = {'groupId': 'rpc-test-group', 'name': {'ko': '검증 작가 ' + suffix, 'en': 'RPC Author ' + suffix},
-                  'role': {'icon': 'book-open'}, 'bio': {'ko': '원래 소개', 'en': 'Original biography'},
+                  'activities': [{'functionId': 'arts', 'affiliationId': None, 'affiliationStatus': 'independent',
+                                  'relation': 'independent', 'primary': True,
+                                  'evidence': [{'source': source, 'locator': 'p. 1', 'claim': 'Author',
+                                                'excerpt': 'The author wrote the original work.'}]}],
+                  'bio': {'ko': '원래 소개', 'en': 'Original biography'},
                   'evidence': [{'field': 'bio', 'claim': 'Original biography', 'source': source, 'locator': 'p. 1'}]}
         with patch.object(people, 'direct_apply_enabled', return_value=True):
             result = asyncio.run(people._exec_commulingo_write('person', 'create', person_id, [source], fields))

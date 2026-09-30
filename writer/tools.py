@@ -184,7 +184,7 @@ try:
             "fictional canon. Actions: `search_people` (q matches id/name/cyrillic; "
             "optional group_id), `get_person` (full record), `get_sections` (a person's "
             "long-form detail sections), `list_groups` (era groups), `list_offices` / "
-            "`get_office` (institution leadership timelines), `list_categories`, "
+            "`get_office` (institution leadership timelines), "
             "`list_events` / `get_event` (historical events and who was involved)."
         ),
     }

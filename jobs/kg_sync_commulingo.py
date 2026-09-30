@@ -5,19 +5,22 @@ so re-runs are idempotent and full passes can expire vanished rows):
 
   commulingo:person:<id>         Person     name=name_ko, aliases=name_en/cyrillic/person_aliases
   commulingo:office:<id>         Role       title_ko (office lineage, e.g. 국가보안 기관)
-  commulingo:role-category:<id>  Role       role category (이론가, 좌익 반대파 …)
   commulingo:people-group:<id>   Concept    era group (스탈린 시대의 사람들 …)
   commulingo:event:<id>          Incident   title_ko, summary_ko, period_label
   commulingo:location:<slug>     Location   event map pins (label.ko / label.en)
   commulingo:term:<id>           Concept    term_ko, aliases term_en/original/term_aliases
   commulingo:term-category:<id>  Concept    term category (이념·이론 …)
 
-  Person→Role       Affiliation   person_roles.category_id / office_id, office_rows (valid_at/invalid_at)
+  Person→Role       Affiliation   primary activity officeId, office_rows (valid_at/invalid_at)
   Person→Concept    Reference     people_group, person_term
   Person→Incident   Involvement   history_event_people (role_in_incident = relation_kind)
   Incident→Location Presence      history_events.locations
   Concept→Concept   Reference     term_relations (related_term), parent_id (parent_term), category
   Concept→Incident  Reference     term_events (event_term)
+
+The legacy person role (role categories) was retired on 2026-09-30; the
+office lineage now comes from the primary activity's officeId, and the old
+person_role edges expire on the next full pass.
 
 Career entries (17k free-text rows) are folded into the Person summary, not
 materialized as edges. ``commulingo_id_redirects`` are honoured: a node still
@@ -162,14 +165,18 @@ def office_side(o: dict) -> dict:
     }
 
 
-def role_category_side(c: dict) -> dict:
-    name = _clean(c.get("label_ko")) or _clean(c.get("label_en")) or c["id"]
-    return {
-        "name": name, "type": "Role", "external_id": ext_id("role-category", c["id"]),
-        "aliases": [a for a in [_clean(c.get("label_en"))] if a and a != name],
-        "summary": f"CommuLingo 인물 역할 범주: {name}",
-        "name_ko": _clean(c.get("label_ko")) or None, "name_en": _clean(c.get("label_en")) or None,
-    }
+def primary_office_id(p: dict) -> str | None:
+    """officeId of the person's primary activity (activities is a JSONB array)."""
+    activities = p.get("activities") or []
+    if isinstance(activities, str):
+        try:
+            activities = json.loads(activities)
+        except ValueError:
+            return None
+    for a in activities if isinstance(activities, list) else []:
+        if isinstance(a, dict) and a.get("primary") is True:
+            return a.get("officeId") or None
+    return None
 
 
 def people_group_side(g: dict) -> dict:
@@ -246,8 +253,6 @@ class Source:
         self.career: dict[str, list[dict]] = {}
         for c in sorted(tables.get("career", []), key=lambda r: (r.get("sort_order") or 0)):
             self.career.setdefault(c["person_id"], []).append(c)
-        self.roles = {r["person_id"]: r for r in tables.get("person_roles", [])}
-        self.role_categories = {c["id"]: c for c in tables.get("role_categories", [])}
         self.groups = {g["id"]: g for g in tables.get("people_groups", [])}
         self.offices = {o["id"]: o for o in tables.get("offices", [])}
         self.office_rows = tables.get("office_rows", [])
@@ -285,30 +290,19 @@ def build_facts(src: Source, *, changed: dict[str, set[str]] | None = None) -> l
 
     facts: list[dict] = []
 
-    # people → role category / office lineage / era group
+    # people → office lineage (primary activity) / era group
     for pid, p in src.people.items():
         if not touched("person", pid):
             continue
         ps = src.person(pid)
-        role = src.roles.get(pid) or {}
         produced = 0
-        cat = src.role_categories.get(role.get("category_id"))
-        if cat:
-            facts.append(make_fact(
-                ps, "Affiliation", role_category_side(cat),
-                f"{ps['name']}: {_clean(role.get('label_ko')) or cat.get('label_ko')}",
-                sync_key=sync_key("person_role", pid),
-                attributes={"position": _clean(role.get("label_ko")), "affiliation_type": "role_category"},
-            ))
-            produced += 1
-        office = src.offices.get(role.get("office_id"))
+        office = src.offices.get(primary_office_id(p))
         if office:
             facts.append(make_fact(
                 ps, "Affiliation", office_side(office),
-                f"{ps['name']}{josa(ps['name'], '은/는')} {office_side(office)['name']} 계보에 속한다"
-                + (f" — {_clean(role.get('label_ko'))}" if role.get("label_ko") else ""),
+                f"{ps['name']}{josa(ps['name'], '은/는')} {office_side(office)['name']} 계보에 속한다",
                 sync_key=sync_key("person_office", pid, office['id']),
-                attributes={"position": _clean(role.get("label_ko")), "affiliation_type": "office_lineage"},
+                attributes={"affiliation_type": "office_lineage"},
             ))
             produced += 1
         group = src.groups.get(p.get("group_id"))
@@ -460,8 +454,6 @@ def load_source() -> Source:
         people=q("SELECT * FROM commulingo_people"),
         person_aliases=q("SELECT person_id, lang, alias FROM commulingo_person_aliases ORDER BY sort_order"),
         career=q("SELECT person_id, sort_order, period_label, start_year, end_year, role_ko, role_en FROM commulingo_person_career_entries"),
-        person_roles=q("SELECT * FROM commulingo_person_roles"),
-        role_categories=q("SELECT * FROM commulingo_role_categories"),
         people_groups=q("SELECT * FROM commulingo_people_groups"),
         offices=q("SELECT id, sort_order, range_label, title_ko, title_en, blurb_ko, blurb_en FROM commulingo_offices"),
         office_rows=q("SELECT * FROM commulingo_office_rows"),
@@ -495,7 +487,6 @@ def changed_since(since: datetime) -> dict[str, set[str]]:
         ("office", "SELECT id FROM commulingo_offices WHERE updated_at > %s"),
         ("office", "SELECT office_id AS id FROM commulingo_office_rows WHERE updated_at > %s"),
         ("person", "SELECT person_id AS id FROM commulingo_office_rows WHERE updated_at > %s AND person_id IS NOT NULL"),
-        ("person", "SELECT person_id AS id FROM commulingo_person_roles WHERE updated_at > %s"),
         ("person", "SELECT person_id AS id FROM commulingo_person_career_entries WHERE updated_at > %s"),
     ):
         for r in db_query(sql, (since,)):

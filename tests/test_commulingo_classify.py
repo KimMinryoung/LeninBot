@@ -1,4 +1,4 @@
-"""Person classification at registration: the runner assigns group/role from the drafted card."""
+"""Person classification at registration: the runner assigns group and primary activity from the drafted card."""
 import unittest
 from unittest.mock import patch
 
@@ -8,21 +8,36 @@ from commulingo import classify as cc
 GROUPS = [{'id': 'thaw', 'title_en': 'Thaw', 'range_label': '1953–1985'},
           {'id': 'international-revolutionary', 'title_en': 'Non-Soviet', 'range_label': ''}]
 OFFICES = [{'id': 'nationalities-federal', 'title_en': 'Nationalities', 'range_label': '1917–1991'}]
-CATS = [{'id': 'socialist-bloc-leader', 'label_en': 'Bloc leader', 'label_ko': '사회주의권 지도자'},
-        {'id': 'scholar', 'label_en': 'Scholar', 'label_ko': '연구자'}]
-CATALOGS = (GROUPS, OFFICES, CATS)
+CATALOGS = (GROUPS, OFFICES)
 PROFILE = CallSiteProfile(feature=cc.FEATURE, provider='openrouter', model='typesafe/jev-1.13',
                           extra={'thresholds': {'accept': 0.7}})
 FIELDS = {'givenName': {'ko': '야노시', 'en': 'János'}, 'familyName': {'ko': '카다르', 'en': 'Kádár'}, 'years': '1912–1989',
           'epithet': {'ko': '헝가리 지도자', 'en': 'Hungarian leader'}, 'citizenship': {'code': 'hungary', 'label': {}},
           'career': [{'y': '1956–1988', 'r': {'ko': '헝가리 사회주의노동자당 제1서기', 'en': 'First Secretary'}}],
           'bio': {'ko': ['첫 문장.', '둘째 문장.'], 'en': ['First.', 'Second.']}}
+EVIDENCE = [{'field': 'career', 'source': 'https://example.org/kadar', 'locator': 'Career',
+             'claim': 'First Secretary of the Hungarian party 1956–1988',
+             'excerpt': 'Kádár led the Hungarian Socialist Workers\' Party from 1956 to 1988.'}]
 
 
-def result(group, role, gconf=0.95, rconf=0.9):
+def answers(**choices):
     return DecisionResult(decision=Decision(answers={
-        'group': {'choice': group, 'confidence': gconf, 'probabilities': {group: gconf}},
-        'role': {'choice': role, 'confidence': rconf, 'probabilities': {role: rconf}}}, model='typesafe/jev-test'))
+        k: {'choice': c, 'confidence': p, 'probabilities': {c: p}} for k, (c, p) in choices.items()}, model='typesafe/jev-test'))
+
+
+def activity_decide(seen=None, **card):
+    """Answers the three dependent activity requests; ``card`` adds the first request's answers."""
+    def decide(feature, state, questions, label=None):
+        if seen is not None:
+            seen.setdefault('labels', []).append(label)
+            seen.setdefault('questions', {})[label] = questions
+            seen.setdefault('states', {})[label] = dict(state)
+        if label == 'person-activity-basis':
+            return answers(activity_basis=('0', 0.95))
+        if label == 'person-activity-affiliation':
+            return answers(activity_affiliation=('unresolved', 0.9))
+        return answers(group=('international-revolutionary', 0.95), activity_function=('political-leadership', 0.92), **card)
+    return decide
 
 
 class ClassifyTests(unittest.TestCase):
@@ -44,59 +59,52 @@ class ClassifyTests(unittest.TestCase):
         self.assertEqual(labels['moment_ko'], '1956년 소련군 진주 뒤 집권.')
         self.assertEqual(labels['fate'], ' · 자연사')
 
-    def test_non_soviet_person_gets_categories_only_and_fill_replaces_writer_values(self):
+    def test_group_and_activity_replace_writer_values_and_no_role_is_asked_or_filled(self):
         seen = {}
-        def decide(feature, state, questions, label=None):
-            seen.update(feature=feature, roles=set(questions['role']['criteria']))
-            return result('international-revolutionary', 'socialist-bloc-leader')
-        out = cc.classify_person(FIELDS, legacy=True, catalogs=CATALOGS, decide=decide)
-        self.assertEqual(seen['feature'], cc.FEATURE)
-        self.assertEqual(seen['roles'], {'socialist-bloc-leader', 'scholar'})
+        out = cc.classify_person({**FIELDS, 'evidence': EVIDENCE}, catalogs=CATALOGS, decide=activity_decide(seen))
+        first = seen['questions']['person-classification']
+        self.assertEqual(set(first), {'group', 'activity_function'})
         self.assertEqual(out['groupId'], 'international-revolutionary')
-        self.assertEqual(out['role'], {'category': 'socialist-bloc-leader'})
+        self.assertNotIn('role', out)
+        self.assertEqual(out['activities'][0]['functionId'], 'political-leadership')
+        self.assertTrue(out['activities'][0]['primary'])
         self.assertFalse(out['low_confidence'])
         filled = cc.fill_classification({**FIELDS, 'groupId': 'thaw', 'role': {'category': 'scholar'}}, out)
-        self.assertEqual((filled['groupId'], filled['role']), ('international-revolutionary', {'category': 'socialist-bloc-leader'}))
+        self.assertEqual(filled['groupId'], 'international-revolutionary')
+        self.assertNotIn('role', filled)
+        self.assertEqual(filled['activities'], out['activities'])
 
     def test_research_excerpts_for_bio_and_career_join_the_state(self):
         seen = {}
-        def decide(feature, state, questions, label=None):
-            seen.update(state=state)
-            return result('international-revolutionary', 'socialist-bloc-leader')
         claims = {'career': [{'claim': 'First Secretary 1956–1988', 'excerpt': 'x' * 2000}],
                   'bio': [{'claim': 'b', 'excerpt': 'short'}], 'citizenship': [{'claim': 'c', 'excerpt': 'ignored here'}]}
-        cc.classify_person(FIELDS, legacy=True, catalogs=CATALOGS, claims=claims, decide=decide)
-        ex = seen['state']['research_excerpts']
+        cc.classify_person({**FIELDS, 'evidence': EVIDENCE}, catalogs=CATALOGS, claims=claims, decide=activity_decide(seen))
+        ex = seen['states']['person-classification']['research_excerpts']
         self.assertEqual([e['field'] for e in ex], ['bio', 'career'])
         self.assertEqual(len(ex[1]['excerpt']), cc.EVIDENCE_CHARS)
-        cc.classify_person(FIELDS, legacy=True, catalogs=CATALOGS, decide=decide)
-        self.assertNotIn('research_excerpts', seen['state'])
-
-    def test_soviet_and_successor_citizens_may_receive_an_office(self):
-        def decide(feature, state, questions, label=None):
-            self.assertIn('nationalities-federal', questions['role']['criteria'])
-            self.assertIn('Union-republic first secretaries', questions['role']['criteria']['nationalities-federal'])
-            return result('thaw', 'nationalities-federal', rconf=0.6)
-        for code in ('soviet', 'azerbaijan'):
-            out = cc.classify_person({**FIELDS, 'citizenship': {'code': code}}, legacy=True, catalogs=CATALOGS, decide=decide)
-            self.assertEqual(out['role'], {'officeId': 'nationalities-federal'})
-            self.assertTrue(out['low_confidence'])
+        seen.clear()
+        cc.classify_person({**FIELDS, 'evidence': EVIDENCE}, catalogs=CATALOGS, decide=activity_decide(seen))
+        self.assertNotIn('research_excerpts', seen['states']['person-classification'])
 
     def test_unavailable_or_unknown_choice_returns_none_and_keeps_writer_values(self):
         def down(feature, state, questions, label=None):
             return DecisionResult(error_kind='transport', error='down')
-        self.assertIsNone(cc.classify_person(FIELDS, legacy=True, catalogs=CATALOGS, decide=down))
+        self.assertIsNone(cc.classify_person({**FIELDS, 'evidence': EVIDENCE}, catalogs=CATALOGS, decide=down))
         def odd(feature, state, questions, label=None):
-            return result('no-such-group', 'scholar')
-        self.assertIsNone(cc.classify_person(FIELDS, legacy=True, catalogs=CATALOGS, decide=odd))
-        writer = {**FIELDS, 'groupId': 'thaw', 'role': {'category': 'scholar'}}
+            if label == 'person-activity-basis':
+                return answers(activity_basis=('0', 0.95))
+            if label == 'person-activity-affiliation':
+                return answers(activity_affiliation=('unresolved', 0.9))
+            return answers(group=('no-such-group', 0.9), activity_function=('political-leadership', 0.9))
+        self.assertIsNone(cc.classify_person({**FIELDS, 'evidence': EVIDENCE}, catalogs=CATALOGS, decide=odd))
+        writer = {**FIELDS, 'groupId': 'thaw'}
         self.assertEqual(cc.fill_classification(writer, None), writer)
 
     def test_disabled_entry_makes_no_call(self):
         with patch('llm.call_registry.resolve', return_value=CallSiteProfile(
                 feature=cc.FEATURE, provider='openrouter', model='m', extra={'enabled': False})):
             def boom(*a, **k): raise AssertionError('must not be called')
-            self.assertIsNone(cc.classify_person(FIELDS, legacy=True, catalogs=CATALOGS, decide=boom))
+            self.assertIsNone(cc.classify_person({**FIELDS, 'evidence': EVIDENCE}, catalogs=CATALOGS, decide=boom))
 
 
 if __name__ == '__main__':
@@ -163,60 +171,25 @@ class ClassifyCardTests(unittest.TestCase):
     def setUp(self):
         p = patch('llm.call_registry.resolve', return_value=PROFILE); p.start(); self.addCleanup(p.stop)
 
-    def test_one_request_asks_codes_group_and_both_role_variants_and_consumes_by_citizenship(self):
+    def test_one_card_request_asks_codes_group_and_activity_function(self):
         card = {k: v for k, v in FIELDS.items() if k != 'citizenship'}
-        card.update(citizenship={'label': {'ko': '소련', 'en': 'Soviet'}}, fate={'label': {'ko': '자연사', 'en': 'Natural'}})
+        card.update(citizenship={'label': {'ko': '소련', 'en': 'Soviet'}}, fate={'label': {'ko': '자연사', 'en': 'Natural'}},
+                    evidence=EVIDENCE)
         seen = {}
-        def decide(feature, state, questions, label=None):
-            seen.update(feature=feature, state=state, questions=questions, label=label)
-            answers = {'citizenship': ('soviet', 0.98), 'fate': ('natural', 0.9), 'group': ('thaw', 0.95),
-                       'role_soviet': ('nationalities-federal', 0.9), 'role_non_soviet': ('socialist-bloc-leader', 0.8)}
-            return DecisionResult(decision=Decision(answers={k: {'choice': c, 'confidence': p, 'probabilities': {c: p}}
-                                                             for k, (c, p) in answers.items()}, model='typesafe/jev-test'))
-        out = cc.classify_person_card(card, legacy=True, catalogs=CATALOGS, claims={'fate': [{'claim': 'died at home', 'excerpt': 'умер'}]}, decide=decide)
-        self.assertEqual(seen['feature'], cc.FEATURE)
-        self.assertEqual(seen['label'], 'person-card')
-        self.assertEqual(set(seen['questions']), {'citizenship', 'fate', 'group', 'role_soviet', 'role_china', 'role_non_soviet'})
-        self.assertIn('nationalities-federal', seen['questions']['role_soviet']['criteria'])
-        self.assertNotIn('nationalities-federal', seen['questions']['role_non_soviet']['criteria'])
-        self.assertEqual(seen['state']['fate_claims'][0]['excerpt'], 'умер')
-        self.assertIn('bio_ko', seen['state']); self.assertIn('career', seen['state'])
-        # Citizenship decided in the same request is soviet, so the office variant of the role counts.
+        decide = activity_decide(seen, citizenship=('soviet', 0.98), fate=('natural', 0.9))
+        out = cc.classify_person_card(card, catalogs=CATALOGS, claims={'fate': [{'claim': 'died at home', 'excerpt': 'умер'}]},
+                                      decide=decide)
+        self.assertEqual(seen['labels'], ['person-card', 'person-activity-basis', 'person-activity-affiliation'])
+        self.assertEqual(set(seen['questions']['person-card']), {'citizenship', 'fate', 'group', 'activity_function'})
+        state = seen['states']['person-card']
+        self.assertEqual(state['fate_claims'][0]['excerpt'], 'умер')
+        self.assertIn('bio_ko', state); self.assertIn('career', state)
         self.assertEqual(out['codes']['citizenship']['code'], 'soviet')
         self.assertEqual(out['codes']['fate']['kind'], 'natural')
-        self.assertEqual(out['person']['role'], {'officeId': 'nationalities-federal'})
-        self.assertEqual(out['person']['confidence'], {'group': 0.95, 'role': 0.9})
-        # A citizenship outside the Soviet state and its successors takes the categories-only answer.
-        def foreign(feature, state, questions, label=None):
-            answers = {'citizenship': ('hungary', 0.97), 'fate': ('natural', 0.9), 'group': ('international-revolutionary', 0.95),
-                       'role_soviet': ('nationalities-federal', 0.9), 'role_non_soviet': ('socialist-bloc-leader', 0.85)}
-            return DecisionResult(decision=Decision(answers={k: {'choice': c, 'confidence': p, 'probabilities': {c: p}}
-                                                             for k, (c, p) in answers.items()}, model='m'))
-        out = cc.classify_person_card(card, legacy=True, catalogs=CATALOGS, decide=foreign)
-        self.assertEqual(out['person']['role'], {'category': 'socialist-bloc-leader'})
-        self.assertEqual(out['person']['confidence']['role'], 0.85)
-        self.assertIsNone(cc.classify_person_card(card, legacy=True, catalogs=CATALOGS,
+        self.assertEqual(out['person']['groupId'], 'international-revolutionary')
+        self.assertNotIn('role', out['person'])
+        self.assertIsNone(cc.classify_person_card(card, catalogs=CATALOGS,
                                                   decide=lambda *a, **k: DecisionResult(error_kind='server', error='503')))
-
-
-class ChinaCardTests(unittest.TestCase):
-    def test_chinese_role_is_consumed_for_known_and_inferred_citizenship(self):
-        groups = GROUPS + [{'id': 'china-mao-era', 'title_en': 'Mao era', 'range_label': '1949–1976'}]
-        categories = CATS + [{'id': 'ccp-security', 'label_en': 'CCP security', 'label_ko': '중공 보안·정보'}]
-        for citizenship in ({'code': 'china'}, {'label': {'en': 'China'}}):
-            with self.subTest(citizenship=citizenship), patch('llm.call_registry.resolve', return_value=PROFILE):
-                def decide(feature, state, questions, label=None):
-                    key = 'role' if 'role' in questions else 'role_china'
-                    self.assertEqual(set(questions[key]['criteria']), {'ccp-security', 'scholar'})
-                    return codes_result(citizenship=('china', 0.99), group=('china-mao-era', 0.96),
-                                        **{key: ('ccp-security', 0.94),
-                                           'role_soviet': ('nationalities-federal', 0.99),
-                                           'role_non_soviet': ('socialist-bloc-leader', 0.99)})
-                out = cc.classify_person_card({**FIELDS, 'citizenship': citizenship}, legacy=True,
-                                               catalogs=(groups, OFFICES, categories), decide=decide)
-                self.assertEqual(out['person']['groupId'], 'china-mao-era')
-                self.assertEqual(out['person']['role'], {'category': 'ccp-security'})
-                self.assertEqual(out['person']['confidence']['role'], 0.94)
 
 
 class ClassifyCodesTests(unittest.TestCase):
@@ -286,10 +259,12 @@ class ClassifyCodesTests(unittest.TestCase):
 
 
 class ReviewRiskTests(unittest.TestCase):
-    def test_unsure_group_role_still_lands_and_is_left_to_the_reviewer(self):
-        unsure = {'groupId': 'thaw', 'role': {'category': 'scholar'}, 'confidence': {'group': 0.5, 'role': 0.4}, 'low_confidence': True}
-        filled = cc.fill_classification({**FIELDS, 'groupId': 'stale', 'role': {'category': 'stale'}}, unsure)
-        self.assertEqual((filled['groupId'], filled['role']), ('thaw', {'category': 'scholar'}))
+    def test_unsure_classification_still_lands_and_is_left_to_the_reviewer(self):
+        activity = {'functionId': 'scholarship', 'affiliationId': None, 'affiliationStatus': 'unresolved',
+                    'relation': 'unresolved', 'primary': True, 'evidence': EVIDENCE}
+        unsure = {'groupId': 'thaw', 'activities': [activity], 'confidence': {'group': 0.5}, 'low_confidence': True}
+        filled = cc.fill_classification({**FIELDS, 'groupId': 'stale'}, unsure)
+        self.assertEqual((filled['groupId'], filled['activities']), ('thaw', [activity]))
 
 
 class GroupEraTests(unittest.TestCase):
@@ -329,5 +304,5 @@ class GroupEraTests(unittest.TestCase):
         from commulingo.classify import person_card_questions, groups_for_years
         groups = [{"id": g["id"], "title_en": g["id"], "range_label": ""} for g in self.GROUPS]
         kept = groups_for_years(groups, "1758–1794", today=2026)
-        q = person_card_questions({"years": "1758–1794", "citizenship": {"code": "france"}}, kept, [], [{"id": "writer-artist", "label_en": "Writer", "label_ko": "작가"}], ["france"], [], codes=False)
+        q = person_card_questions({"years": "1758–1794", "citizenship": {"code": "france"}}, kept, ["france"], [], codes=False)
         self.assertNotIn("international-revolutionary", q["group"]["criteria"])

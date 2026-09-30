@@ -86,9 +86,10 @@ _PERSON_PATCH_KEYS = frozenset({
     "id", "group", "groupId", "sortOrder", "cyrillic", "years",
     "name", "givenName", "familyName",
     "epithet", "bio", "moment", "fate", "patronymic", "cyrillicPatronymic",
-    "aliases", "scenes", "career", "role", "activities", "citizenship", "origin", "nationalOrigin",
+    "aliases", "scenes", "career", "activities", "citizenship", "origin", "nationalOrigin",
     "expectedRevision", "evidence", "reviewFlags", "aliasEdits", "careerEdits", "sceneEdits",
     "office_rows", "sections",  # read-only echoes from get_person; tolerated and ignored
+    "role",  # the retired legacy role; tolerated so old records round-trip, dropped before submit
 })
 
 # Flag codes the frontend has vendored SVGs for (data/commulingo/flag-icons.js).
@@ -652,23 +653,13 @@ def _search_people(q: str, group_id: str, limit: int, function_id: str = "", aff
             """SELECT p.id, p.group_id, p.name_ko, p.name_en, p.cyrillic,
                       p.years_label, p.epithet_ko, p.fate_kind
                FROM commulingo_people p
-               LEFT JOIN commulingo_person_roles r ON r.person_id = p.id
                WHERE (%(q)s = '' OR p.id ILIKE '%%' || %(q)s || '%%'
                       OR p.name_ko ILIKE '%%' || %(q)s || '%%'
                       OR p.name_en ILIKE '%%' || %(q)s || '%%'
                       OR p.cyrillic ILIKE '%%' || %(q)s || '%%')
                  AND (%(g)s = '' OR p.group_id = %(g)s)
                  AND EXISTS (
-                   SELECT 1 FROM jsonb_array_elements(
-                     CASE WHEN jsonb_array_length(p.activities) > 0 THEN p.activities
-                     WHEN %(legacy)s::jsonb ? COALESCE(r.office_id, r.category_id)
-                     THEN jsonb_build_array(jsonb_build_object(
-                       'functionId', %(legacy)s::jsonb -> COALESCE(r.office_id, r.category_id) -> 0,
-                       'affiliationId', CASE
-                         WHEN p.death_year < (%(legacy_before_state)s::jsonb -> COALESCE(r.office_id, r.category_id) ->> 'startYear')::int
-                         THEN %(legacy_before_state)s::jsonb -> COALESCE(r.office_id, r.category_id) -> 'affiliationId'
-                         ELSE %(legacy)s::jsonb -> COALESCE(r.office_id, r.category_id) -> 1 END))
-                     ELSE '[]'::jsonb END
+                   SELECT 1 FROM jsonb_array_elements(COALESCE(p.activities, '[]'::jsonb)
                    ) a WHERE (%(function)s = '' OR a->>'functionId' = %(function)s)
                      AND (%(affiliation)s = '' OR a->>'affiliationId' = ANY(%(descendants)s::text[]))
                  ) ORDER BY p.sort_order, p.id LIMIT %(limit)s""", params)
@@ -808,17 +799,6 @@ def _get_office(office_id: str) -> dict | None:
     with get_conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             return _office_snapshot(cur, office_id)
-
-
-def _list_categories() -> list[dict]:
-    return db_query(
-        """SELECT c.id, c.icon, c.label_ko, c.label_en,
-                  COUNT(r.person_id) AS people_count
-           FROM commulingo_role_categories c
-           LEFT JOIN commulingo_person_roles r ON r.category_id = c.id
-           GROUP BY c.id, c.sort_order, c.icon, c.label_ko, c.label_en
-           ORDER BY c.sort_order, c.id"""
-    )
 
 
 def _get_sections(person_id: str) -> list[dict] | None:
@@ -1016,11 +996,10 @@ COMMULINGO_PEOPLE_TOOL = {
         "`list_activity_catalog` (shared functions and activity affiliations; activities bind function + organization + period + evidence, separate from citizenship), "
         "`list_groups` (era groups on the Soviet, China and world shelves + people counts), "
         "`search_people` (q matches id/name/cyrillic; optional group_id/function_id/affiliation_id; function and affiliation must match the same activity), "
-        "`get_person` (full record in the person-writer field shape; office_rows, "
-        "sections and role.resolvedIcon are read-only), "
+        "`get_person` (full record in the person-writer field shape; office_rows "
+        "and sections are read-only), "
         "`list_offices` (institution timelines + row counts), "
         "`get_office` (one institution's full leadership timeline), "
-        "`list_categories` (office-less role categories for role {category}: general role categories and Chinese party-state functions; Soviet leadership timelines use offices), "
         "`get_sections` (a person's detail sections in the section patch shape), "
         "`list_events` (historical event ids, titles, and linked-person counts), "
         "`get_event` (one event and all current person relationships), "
@@ -1038,7 +1017,7 @@ COMMULINGO_PEOPLE_TOOL = {
                 "type": "string",
                 "enum": [
                     "list_activity_catalog", "search", "list_groups", "search_people", "get_person",
-                    "list_offices", "get_office", "list_categories",
+                    "list_offices", "get_office",
                     "get_sections", "list_events", "get_event",
                     "list_terms", "get_term", "list_suggestions",
                 ],
@@ -1114,8 +1093,6 @@ async def _exec_commulingo_people(
                 return f"Error: person '{person_id}' not found. Use search_people to find the id."
         elif action == "list_offices":
             result = await asyncio.to_thread(_list_offices)
-        elif action == "list_categories":
-            result = await asyncio.to_thread(_list_categories)
         elif action == "get_sections":
             if not person_id:
                 return "Error: person_id is required for get_sections."
@@ -1963,14 +1940,11 @@ def _check_person_create(cur, target_id: str, patch: dict) -> str | None:
             return f"Error: patch.{key}.ko and patch.{key}.en are required for person create."
     if not patch.get("career"):
         return "Error: at least one bilingual career entry is required for person create."
-    role = patch.get("role")
-    if not isinstance(role, dict) or not (
-        role.get("officeId") or role.get("category") or role.get("categoryId") or role.get("icon")
+    activities = patch.get("activities")
+    if not isinstance(activities, list) or not any(
+        isinstance(a, dict) and a.get("primary") is True for a in activities
     ):
-        return (
-            "Error: a primary role with officeId, category, or categoryId "
-            "is required for person create."
-        )
+        return "Error: a primary activity is required for person create."
     return None
 
 
@@ -1989,33 +1963,10 @@ def _check_person_existing(cur, action: str, target_id: str, patch: dict) -> str
     return None
 
 
-def _check_person_fate_kind_and_role(cur, patch: dict) -> str | None:
+def _check_person_fate_kind(cur, patch: dict) -> str | None:
     fate = patch.get("fate")
     if isinstance(fate, dict) and fate.get("kind") and fate["kind"] not in _FATE_KINDS:
         return f"Error: fate.kind must be one of {', '.join(_FATE_KINDS)}."
-    if "role" in patch and patch["role"] is not None:
-        role = patch["role"]
-        if not isinstance(role, dict):
-            return "Error: role must be {officeId} or {category}, or null to clear."
-        office_id = role.get("officeId") or ""
-        category = role.get("category") or role.get("categoryId") or ""
-        if office_id and category:
-            return "Error: role takes exactly one of officeId or category, not both."
-        if not office_id and not category and not (patch.get("activities") and role.get("icon")):
-            return (
-                "Error: role needs officeId or category (icon/label render from "
-                "them — see commulingo_people action='list_categories' / 'list_offices')."
-            )
-        if office_id:
-            cur.execute("SELECT 1 FROM commulingo_offices WHERE id = %s", (office_id,))
-            if not cur.fetchone():
-                return f"Error: role.officeId '{office_id}' does not exist."
-        else:
-            cur.execute("SELECT 1 FROM commulingo_role_categories WHERE id = %s", (category,))
-            if not cur.fetchone():
-                cur.execute("SELECT id FROM commulingo_role_categories ORDER BY sort_order")
-                valid = ", ".join(r["id"] for r in cur.fetchall())
-                return f"Error: unknown role category '{category}'. Valid: {valid}."
     return None
 
 
@@ -2046,7 +1997,7 @@ def _validate_person(cur, action: str, target_id: str, patch: dict) -> str | Non
         error = _check_person_existing(cur, action, target_id, patch)
     if error is not None:
         return error
-    return _check_person_fate_kind_and_role(cur, patch)
+    return _check_person_fate_kind(cur, patch)
 
 
 def _validate_person_section(cur, action: str, target_id: str, patch: dict) -> str | None:
@@ -3040,16 +2991,16 @@ def _run_edit(target_type: str, action: str, target_id: str, patch: dict,
                                   for e in fields.get("evidence", [])]
         # Existing normalization/terminology repairs run before this boundary;
         # all persistence validation, locks, evidence and suggestions run in JS.
-        if isinstance(fields.get("role"), dict) and "categoryId" in fields["role"]:
-            fields["role"] = {**fields["role"], "category": fields["role"]["categoryId"]}
-            fields["role"].pop("categoryId")
+        # The legacy person role was retired (activities replace it); the
+        # service ignores the key, so it is never forwarded.
+        fields.pop("role", None)
         activity_review_required = False
         if target_type == "person":
             from commulingo.classify import (classify_person, classify_person_card, classify_person_codes,
                                                           fill_classification, fill_person_codes, missing_person_codes)
             needs_codes = bool(missing_person_codes(fields))
             # A new person is registered with documented activities (the frontend
-            # refuses a create without them); a writer-supplied legacy role does
+            # refuses a create without them); a writer-supplied legacy role never
             # not skip the activity classification.
             needs_group = action == "create" and not (fields.get("groupId") and fields.get("activities"))
             if needs_codes and needs_group:
@@ -3376,7 +3327,7 @@ _COMMULINGO_FIELD_SCHEMA = {
     "description": (
         "Canonical patch. Scalar fields are strings; bilingual fields are {ko,en}. "
         "Person create includes givenName/familyName (or legacy name), bio, epithet, "
-        "groupId, role, years, aliases, career and native-script name fields. "
+        "groupId, activities, years, aliases, career and native-script name fields. "
         "Empty object only for delete."
     ),
     "properties": {
@@ -3484,22 +3435,7 @@ _COMMULINGO_FIELD_SCHEMA = {
                 "required": ["y", "r"],
             },
         },
-        # Exactly one key, enforced in the schema rather than only at the write
-        # boundary: "role takes exactly one of officeId or category, not both"
-        # was 41 rejected person_create calls, and min/maxProperties stops those
-        # before the call is spent. null (to clear the role) still validates
-        # because the property constraints only apply to the object form.
         "activities": json.loads(commulingo_data_file("activity-schema.json", "COMMULINGO_ACTIVITY_SCHEMA").read_text()),
-        "role": {
-            "type": ["object", "null"], "additionalProperties": False,
-            "minProperties": 1, "maxProperties": 1,
-            "description": (
-                "Legacy classification, optional and being retired: new people are "
-                "registered with documented activities instead. Exactly one of officeId or "
-                "category (categoryId aliases category). null clears the role."
-            ),
-            "properties": {"officeId": {"type": "string"}, "category": {"type": "string"}, "categoryId": {"type": "string"}, "icon": {"type": "string"}},
-        },
         "fate": {
             "type": "object", "additionalProperties": False,
             "properties": {
@@ -3555,7 +3491,7 @@ def _classify_validation_error(message: str) -> str:
     text = str(message or "").lower()
     if "already exists" in text or "already registered" in text or "same person" in text:
         return "duplicate"
-    if "not found" in text or "does not exist" in text or "unknown group" in text or "unknown role" in text:
+    if "not found" in text or "does not exist" in text or "unknown group" in text:
         return "invalid_reference"
     if "required" in text or "needs " in text:
         return "missing_required"
@@ -3708,14 +3644,6 @@ def normalize_commulingo_write(
             fate["kind"] = normalized.pop("fateKind")
             normalized["fate"] = fate
             repairs.append("fateKind->fate.kind")
-        if "category" in normalized or "officeId" in normalized:
-            role = normalized.get("role") if isinstance(normalized.get("role"), dict) else {}
-            if "officeId" in normalized:
-                role["officeId"] = normalized.pop("officeId")
-            elif "category" in normalized:
-                role["category"] = normalized.pop("category")
-            normalized["role"] = role
-            repairs.append("category/officeId->role")
         if normalized.get("slug") == target_id:
             normalized.pop("slug", None)
             repairs.append("dropped redundant slug")
@@ -3870,7 +3798,7 @@ def _narrow_fields_schema(keys: tuple[str, ...], *, required: tuple[str, ...] = 
 _PERSON_NARROW_KEYS = (
     "groupId", "sortOrder", "cyrillic", "cyrillicPatronymic", "years",
     "givenName", "familyName", "epithet", "bio", "moment", "patronymic",
-    "citizenship", "nationalOrigin", "aliases", "career", "role", "activities", "fate", "scenes",
+    "citizenship", "nationalOrigin", "aliases", "career", "activities", "fate", "scenes",
     "expectedRevision", "evidence", "reviewFlags", "aliasEdits", "careerEdits", "sceneEdits",
 )
 _TERM_NARROW_KEYS = (
@@ -3926,10 +3854,10 @@ def _person_write_tool(name: str, action: str) -> dict:
     update_only = {'expectedRevision', 'aliasEdits', 'careerEdits', 'sceneEdits'}
     field_keys = tuple(key for key in _PERSON_NARROW_KEYS
                        if action != 'create' or key not in update_only)
-    # groupId and role are assigned by the runner (commulingo_classify): the
+    # groupId and activities are assigned by the runner (commulingo_classify): the
     # model never classifies, so a create does not even carry the fields.
     if action == "create":
-        field_keys = tuple(key for key in field_keys if key not in {"group", "groupId", "role", "activities"})
+        field_keys = tuple(key for key in field_keys if key not in {"group", "groupId", "activities"})
     required_fields = (
         "epithet", "bio", "career", "citizenship", "nationalOrigin", "evidence",
     ) if action == "create" else ("expectedRevision", "evidence")
@@ -3950,7 +3878,7 @@ def _person_write_tool(name: str, action: str) -> dict:
             f"{action.title()} one CommuLingo person card. Person fields only; citations are a "
             "separate top-level argument. Public text is bilingual {ko,en}. evidence and reviewFlags "
             "go inside fields; expectedRevision and collection edits are update-only. The runner "
-            "assigns group, role and the citizenship/nationalOrigin/fate codes from labels and text: "
+            "assigns group, primary activity and the citizenship/nationalOrigin/fate codes from labels and text: "
             "write labels only. Read the record and reference lists first. On create, citizenship "
             "and nationalOrigin need evidence; if unknown, research or defer, never guess. Soviet "
             "and Yugoslav codes are citizenship-only. nationalOrigin is national/ethnic background, "

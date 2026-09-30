@@ -49,7 +49,7 @@ CommuLingo의 필요한 설명·라벨·원문 발췌 전송과 자동 실행은
 판정 장애와 낮은 신뢰도는 다르다. editor는 장애로 초안을 버리거나 작성 LLM에 분류를 떠넘기지 않는다.
 직접 등록 도구도 공통 분류 함수를 사용하지만 editor의 체크포인트 복구는 editor 전용이다.
 
-현재 등록·보강 경로는 `commulingo/activities.py`와 frontend의 `activity-catalog.json`을 공유한다. 국적별 role 목록 대신 기능 13개와 실제 활동 소속을 판정하고, 같은 경력을 지지하는 출처 발췌를 함께 선택한다. 발췌가 없거나 선택이 허용 목록 밖이면 초안을 보존하고 보류한다. `legacy=True`는 이전 분류의 명시적 호환 검사에만 쓰며 운영 작성 경로는 사용하지 않는다. 직접 도구의 낮은 신뢰도 활동 배정은 공통 편집 검토 대기로 보낸다.
+현재 등록·보강 경로는 `commulingo/activities.py`와 frontend의 `activity-catalog.json`을 공유한다. 국적별 role 목록 대신 기능 13개와 실제 활동 소속을 판정하고, 같은 경력을 지지하는 출처 발췌를 함께 선택한다. 발췌가 없거나 선택이 허용 목록 밖이면 초안을 보존하고 보류한다. 옛 role(사무국 계열·역할 범주) 분류와 `legacy=True` 경로는 2026-09-30 frontend의 role 테이블 폐기와 함께 제거했다. 분류 결과는 `groupId`와 대표 활동(`activities`)뿐이며 `role`을 만들지 않는다. 직접 도구의 낮은 신뢰도 활동 배정은 공통 편집 검토 대기로 보낸다.
 
 일당제 현실 사회주의 체제 내의 집권당·국가기관 활동은 국가 이름과 `kind=state`인 소속 ID로 판정하며, 국가 관계는 `service`로 저장한다. 건국 전 정당 활동과 체제 반대파는 해당 정당·세력 또는 미확정 소속으로 구분한다. 정당 카탈로그의 `governingState`와 criteria가 적용 기간을 명시하며, 국가에 `membership`을 쓰는 요청은 frontend가 거부한다. 옛 역할 매핑도 국가 ID를 사용하지만 건국 전에 사망한 인물은 `legacyBeforeState`에 따라 정당에 남긴다.
 
@@ -62,7 +62,7 @@ venv/bin/python scripts/audit_person_activities.py --function government --concu
 
 `--limit`으로 소규모 검사를 할 수 있다. JSONL은 완료 순서로 즉시 저장하며 동일 인물·입력·카탈로그·질문·모델 설정·문턱값 결과를 재사용하고 오류는 재시도한다. `.md`는 변경 후보와 미확정 사례, `.summary.json`은 상태별 수·이번 실행 호출 수와 보고된 비용을 기록한다. `source_supported_candidate`도 Jev의 근거 선택 결과이며 독립 검토·저장 승인이 아니다. `low_confidence`, `unsupported`, `needs_source`, `error`를 구분한다. 기존 출처가 빈약하거나 편향되어 있으면 실제 대표 경력을 놓칠 수 있으므로 후보는 원문 검토 후 공통 편집 서비스로 정정한다. DB 접근·자동 반영 옵션은 없다.
 
-`scripts/commulingo_classification_audit.py`는 저장값과 고신뢰 판정이 다른 인물을 보고한다.
+`scripts/commulingo_classification_audit.py`는 저장된 시대 그룹(`groupId`)과 고신뢰 판정이 다른 인물을 보고한다(role 감사는 role 폐기와 함께 제거).
 감사 자체는 쓰지 않는다. 정정은 근거를 갖춘 공통 편집 서비스의 제출·승인을 거친다.
 
 ## 인용 지지 게이트

@@ -131,6 +131,8 @@ DB의 research/draft 단계명은 호환용이며 둘 다 Editor를 실행한다
 검증된 수정안은 독립 검토로 넘어간다. 분류는 `decisions.py`가 Jev에 맡기며 작성 schema에서
 분류 코드를 제거한다. 기존 인물 분류는 보존하고 신규·누락 분류와 변경된 라벨의 코드를 채운다.
 분류 장애 때는 초안을 저장해 재시도하며 LLM 분류로 대체하지 않는다.
+옛 인물 role(`commulingo_person_roles`·역할 범주)은 2026-09-30 폐기됐다. 분류는 `groupId`와 대표 활동만 채우고,
+'기본 정보' 누락 판정(planner·issues·people_lane)은 role 대신 `primary: true` 활동의 유무를 본다.
 
 출처가 있는 인물 활동은 기능 → 그 기능을 대표 경력으로 기록한 근거 발췌 → 소속 순서로
 Jev에 질의한다. 질문별 판정은 독립적이므로 후속 질의 state에 앞선 선택을 명시한다.

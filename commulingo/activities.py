@@ -20,7 +20,7 @@ def load_catalog():
 def activity_evidence(fields, claims=None):
     out = []
     for e in fields.get('evidence') or []:
-        if e.get('field') not in {'bio','career','moment','role','activities','epithet'}:
+        if e.get('field') not in {'bio','career','moment','activities','epithet'}:
             continue
         if all(isinstance(e.get(k), str) and e[k].strip() for k in ('source','locator','claim','excerpt')):
             out.append({k: e[k] for k in ('source','locator','claim','excerpt')})
@@ -114,7 +114,7 @@ def activity_person_from(decision, catalog, evidence, group_ids, accept=0.7):
     activity = {'functionId':function,'affiliationId':affiliation if status=='confirmed' else None,
                 'affiliationStatus':status,'relation':relation,'primary':True,
                 'startYear':None,'endYear':None,'evidence':[e]}
-    return {'groupId':group,'role':{'icon':functions[function]['icon']},'activities':[activity],
+    return {'groupId':group,'activities':[activity],
             'confidence':confidence,'low_confidence':min(confidence.values())<accept,'model':decision.model}
 
 
@@ -136,5 +136,4 @@ def activity_search_params(function_id, affiliation_id, catalog=None):
             seen.add(current)
             current = affiliations.get(current, {}).get('parentId')
     return {'function': function_id, 'affiliation': affiliation_id,
-            'descendants': descendants, 'legacy': json.dumps(catalog['legacy']),
-            'legacy_before_state': json.dumps(catalog.get('legacyBeforeState', {}))}
+            'descendants': descendants}

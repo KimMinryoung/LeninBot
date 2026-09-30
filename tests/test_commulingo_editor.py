@@ -180,7 +180,7 @@ class SourceAndIssueTests(EditorCase):
         # Missing provenance on existing prose is not a commission (2026-09-20).
         self.assertEqual(commission(JOB,{**full,'evidence':[]}), [])
         complete_person = {'years':'1900–1980','epithet':{'ko':'역사가','en':'Historian'},
-                           'role':{'category':'scholar'},'career':[{'y':'1930'}],'evidence':[{'field':'years'}]}
+                           'activities':[{'functionId':'political-leadership','primary':True}],'career':[{'y':'1930'}],'evidence':[{'field':'years'}]}
         self.assertEqual(commission({**person,'topic':'basics'},complete_person), [])
 
     async def test_same_url_pages_are_cached_individually_without_merging(self):
@@ -415,9 +415,9 @@ class EditorTests(EditorCase):
     async def test_create_person_and_term_use_jev_classification(self):
         from commulingo.people import _COMMULINGO_FIELD_SCHEMA
         group = [{'id':'fixture-group'}]
-        catalogs = (group, [], [{'id':'fixture-role'}])
+        catalogs = (group, [])
         person_fields = {'givenName':{'ko':'검증','en':'Fixture'},'groupId':'fixture-group',
-            'role':{'category':'fixture-role'},'epithet':{'ko':'역사가','en':'Historian'},
+            'activities':[{'functionId':'political-leadership','primary':True}],'epithet':{'ko':'역사가','en':'Historian'},
             'bio':{'ko':'자료로 확인한 인물이다.','en':'A documented historical person.'},'career':[],
             'citizenship':{'code':'france','label':{'ko':'프랑스','en':'France'}},
             'nationalOrigin':{'code':'france','label':{'ko':'프랑스','en':'France'}}}
@@ -439,7 +439,7 @@ class EditorTests(EditorCase):
                         'issue_results':[{'id':'register','status':'resolved','reason':'Registered a supported bilingual entry.'}]}))
                 with patch('commulingo.pipeline.service.call',return_value=None), \
                      patch('commulingo.classify.load_catalogs',return_value=catalogs), \
-                     patch('commulingo.classify.classify_person_card',return_value={'codes':{'citizenship':{'code':'france'},'nationalOrigin':{'code':'france'}},'person':{'groupId':'fixture-group','role':{'category':'fixture-role'}}}) as classifier, \
+                     patch('commulingo.classify.classify_person_card',return_value={'codes':{'citizenship':{'code':'france'},'nationalOrigin':{'code':'france'}},'person':{'groupId':'fixture-group','activities':[{'functionId':'political-leadership','primary':True}]}}) as classifier, \
                      patch('commulingo.classify.classify_term',return_value={'category':'culture'}), \
                      patch('commulingo.pipeline.stages.model_call',side_effect=model):
                     result = await Editor(store_mock())(job,[],Usage(),.2)
@@ -611,9 +611,10 @@ class EditorTests(EditorCase):
         self.assertEqual(result.next_stage,'judge'); model.assert_not_called()
 
 
-CATALOGS = ([{'id':'bolshevik','title_ko':'볼셰비키','blurb_ko':'설명'}], [], [{'id':'bolshevik'}])
-PERSON_VERDICT = {'person':{'groupId':'bolshevik','role':{'category':'bolshevik'},
-                            'confidence':{'group':0.9,'role':0.8},'low_confidence':False},
+ACTIVITIES = [{'functionId':'political-leadership','primary':True}]
+CATALOGS = ([{'id':'bolshevik','title_ko':'볼셰비키','blurb_ko':'설명'}], [])
+PERSON_VERDICT = {'person':{'groupId':'bolshevik','activities':ACTIVITIES,
+                            'confidence':{'group':0.9,'activity_function':0.8},'low_confidence':False},
                   'codes':{'citizenship':{'code':'soviet','confidence':1.0,'low_confidence':False},
                            'nationalOrigin':{'code':'russia','confidence':0.9,'low_confidence':False}}}
 PERSON_FIELDS = {'epithet':{'ko':'수식','en':'Epithet'},'bio':{'ko':'문장이다.','en':'A sentence.'},'career':[],
@@ -708,7 +709,7 @@ class EditorContractTests(EditorCase):
         update = {**JOB,'kind':'person','action':'update','topic':'basics','target':'fixture'}
         canonical = schema_for(update,None,CATALOGS)
         self.assertEqual(canonical['properties']['groupId']['enum'],['bolshevik'])
-        self.assertEqual(canonical['properties']['role']['properties']['category']['enum'],['bolshevik'])
+        self.assertNotIn('role',canonical['properties'])
         validator = Draft202012Validator(canonical)
         for collection,edits in (('aliases','aliasEdits'),('career','careerEdits'),('scenes','sceneEdits')):
             errors = list(validator.iter_errors({collection:[],edits:[]}))
@@ -749,7 +750,8 @@ class EditorContractTests(EditorCase):
         self.assertEqual(result.next_stage,'review')
         self.assertEqual(len(calls),1)
         fields = result.value['draft']['fields']
-        self.assertEqual((fields['groupId'],fields['role']),('bolshevik',{'category':'bolshevik'}))
+        self.assertEqual((fields['groupId'],fields['activities']),('bolshevik',ACTIVITIES))
+        self.assertNotIn('role',fields)
         self.assertEqual((fields['citizenship']['code'],fields['nationalOrigin']['code']),('soviet','russia'))
         self.assertEqual(result.value['draft']['classification']['person']['groupId'],'bolshevik')
         # The verdict is memoised on the classified inputs, not on the call.
@@ -781,14 +783,14 @@ class EditorContractTests(EditorCase):
         self.assertEqual([c.args[0]['command'] for c in rpc.call_args_list],['read'])
         saved = store.save_editor_checkpoint.call_args.args[1]['draft']['args']['fields']
         self.assertEqual(saved['epithet'],PERSON_FIELDS['epithet'])
-        self.assertFalse({'groupId','role'} & set(saved))
+        self.assertFalse({'groupId','activities'} & set(saved))
         self.assertEqual(store.save_editor_checkpoint.call_args.args[1]['error_kind'],
                          'classification_unavailable')
 
     async def test_incomplete_code_cache_is_evicted_and_retried(self):
         from commulingo.pipeline.decisions import ClassificationUnavailable, Decisions
         job = {**JOB, 'kind': 'person', 'action': 'update'}
-        current = {'groupId': 'bolshevik', 'role': {'category': 'bolshevik'}}
+        current = {'groupId': 'bolshevik', 'activities': ACTIVITIES}
         decisions = Decisions(job, current, CATALOGS, Usage())
         fields = {'citizenship': {'label': {'ko': '소련', 'en': 'Soviet'}}}
         with patch('commulingo.classify.classify_person_codes', side_effect=[
@@ -857,9 +859,9 @@ class EditorContractTests(EditorCase):
         page = snapshot(URL,BODY)
         sources = {page['id']:page}
         job = {**JOB,'kind':'person','action':'update','topic':'basics','target':'stalin'}
-        current = {'revision':'v1','groupId':'bolshevik','role':{'officeId':'party-leadership','category':''}}
+        current = {'revision':'v1','groupId':'bolshevik','activities':ACTIVITIES}
         decisions = Decisions(job,current,CATALOGS,Usage())
-        self.assertFalse({'role','group','groupId'} & set(decisions.author_schema(schema_for(job,current,CATALOGS))['properties']))
+        self.assertFalse({'activities','group','groupId'} & set(decisions.author_schema(schema_for(job,current,CATALOGS))['properties']))
         fields = {'citizenship':{'label':{'ko':'소련','en':'Soviet'}}}
         claim = [{'field':'citizenship','claim':'x','source_id':page['id'],'start':0,'end':20}]
         with patch('commulingo.classify.classify_person_codes',return_value={'citizenship':{'code':'soviet'}}), \
@@ -868,11 +870,11 @@ class EditorContractTests(EditorCase):
         card.assert_not_called()
         self.assertEqual(out,{'citizenship':{'label':{'ko':'소련','en':'Soviet'},'code':'soviet'}})
         # A person without any classification receives one from the runner.
-        bare = Decisions({**job,'target':'new'},{'revision':'v1','role':{}},CATALOGS,Usage())
+        bare = Decisions({**job,'target':'new'},{'revision':'v1'},CATALOGS,Usage())
         claim = [{'field':'bio','claim':'x','source_id':page['id'],'start':0,'end':20}]
         with patch('commulingo.classify.classify_person_card',return_value=deepcopy(PERSON_VERDICT)):
             out, _ = await bare.classify({'bio':{'ko':'문장이다.','en':'A sentence.'}},claim,sources)
-        self.assertEqual((out['groupId'],out['role']),('bolshevik',{'category':'bolshevik'}))
+        self.assertEqual((out['groupId'],out['activities']),('bolshevik',ACTIVITIES))
 
     async def test_section_is_one_topic_and_notes_stay_out_of_fields(self):
         # Job 5432 (2026-09-19): the author's work plan went live as a section.
@@ -1182,7 +1184,7 @@ class ReviewAndPublishTests(EditorCase):
 
     async def test_low_confidence_classification_becomes_a_review_risk(self):
         artifacts = self.artifacts()
-        classification = {'person':{'groupId':'bolshevik','confidence':{'group':0.95,'role':0.41},'low_confidence':True}}
+        classification = {'person':{'groupId':'bolshevik','confidence':{'group':0.95,'activity_function':0.41},'low_confidence':True}}
         artifacts[0]['value']['draft']['classification'] = classification
         prompts, proposals = [], []
         await self.run_review(JOB,artifacts,self.verdict('approve'),prompts,proposals)

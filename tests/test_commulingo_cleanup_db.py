@@ -33,8 +33,7 @@ class CleanupDatabaseTests(unittest.TestCase):
             cur.execute(Path('commulingo/pipeline/schema.sql').read_text())
             cur.execute('''CREATE TABLE commulingo_people(id text PRIMARY KEY,years_label text,
                 epithet_ko text,epithet_en text,bio_ko text,bio_en text,moment_ko text,moment_en text,
-                citizenship_label_ko text,citizenship_label_en text,origin_label_ko text,origin_label_en text);
-                CREATE TABLE commulingo_person_roles(person_id text);
+                citizenship_label_ko text,citizenship_label_en text,origin_label_ko text,origin_label_en text,activities jsonb);
                 CREATE TABLE commulingo_person_career_entries(person_id text);
                 CREATE TABLE commulingo_terms(id text PRIMARY KEY,definition_ko text,definition_en text,body_ko text,body_en text)''')
 
@@ -48,7 +47,7 @@ class CleanupDatabaseTests(unittest.TestCase):
             cur.execute('''TRUNCATE commulingo_pipeline_jobs,commulingo_pipeline_attempts,
                 commulingo_pipeline_artifacts,commulingo_pipeline_budget,commulingo_pipeline_job_sources,
                 commulingo_pipeline_publications,commulingo_pipeline_sources,commulingo_pipeline_fetch_cache,
-                commulingo_terms,commulingo_people,commulingo_person_roles,commulingo_person_career_entries CASCADE''')
+                commulingo_terms,commulingo_people,commulingo_person_career_entries CASCADE''')
 
     def job(self, target, *, body='Body', payload=None):
         with self.store.transaction() as cur:

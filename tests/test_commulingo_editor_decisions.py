@@ -23,12 +23,12 @@ class DecisionTests(HermeticAsyncCase):
 
     async def test_existing_classification_is_preserved_during_code_assignment(self):
         helper = Decisions({'kind':'person','action':'update'},
-            {'groupId':'existing','role':{'category':'scholar'}},None,Usage())
+            {'groupId':'existing','activities':[{'functionId':'scholarship','primary':True}]},None,Usage())
         with patch('commulingo.classify.classify_person_codes',return_value={'citizenship':{'code':'france'}}), \
              patch('commulingo.classify.classify_person_card') as card:
             result,_ = await helper.classify({'citizenship':{'label':{'ko':'프랑스','en':'France'}}},[],{})
         card.assert_not_called()
-        self.assertNotIn('groupId',result); self.assertNotIn('role',result)
+        self.assertNotIn('groupId',result); self.assertNotIn('activities',result)
         self.assertEqual(result['citizenship']['code'],'france')
 
     def test_jev_cost_is_added_to_stage_ledger(self):

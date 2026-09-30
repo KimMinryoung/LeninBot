@@ -100,7 +100,7 @@ class Editor:
         needed.update(saved_fields)
         needed.update(previous_patch.get('fields',{}))
         needed.update(field_schema.get('required',[]))
-        if 'role' in needed:
+        if 'activities' in needed:
             needed.update({'bio', 'career'})
         if '*' in needed:
             needed = set(field_schema['properties']) - {'aliasEdits', 'careerEdits', 'sceneEdits'}
@@ -339,7 +339,7 @@ class Editor:
                            if k in needed | {'id','revision','name','term','evidence','notes','sections'}}
         background_fields = ({'definition','original','aliases','period','startYear','endYear'}
                              if job['kind']=='term' else
-                             {'givenName','familyName','cyrillic','years','epithet','bio','role'})
+                             {'givenName','familyName','cyrillic','years','epithet','bio','activities'})
         surrounding_context = {k:v for k,v in (current or {}).items()
                                if k in background_fields and k not in focused_current}
         context_fields = set(field_schema['properties']) | {'sections','notes'}

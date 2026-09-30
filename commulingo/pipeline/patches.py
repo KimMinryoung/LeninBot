@@ -56,24 +56,17 @@ def schema_for(job, current, catalogs=None):
     # The author chooses from real closed sets; no hidden classifier rewrites a
     # reviewed fact or prevents a format repair when a second provider is down.
     if job['kind']=='person':
-        for field in ('citizenship','nationalOrigin','fate','groupId','role','activities'):
+        for field in ('citizenship','nationalOrigin','fate','groupId','activities'):
             schema['properties'][field] = deepcopy(canonical_fields[field])
-        groups, offices, roles = catalogs or ([], [], [])
-        if not groups or not roles:
+        groups = (catalogs or ([],))[0]
+        if not groups:
             raise ValueError('classification catalogs unavailable')
         schema['properties']['groupId']['enum'] = [row['id'] for row in groups]
-        for key in ('category','categoryId'):
-            schema['properties']['role']['properties'][key]['enum'] = [row['id'] for row in roles]
-        if offices:
-            schema['properties']['role']['properties']['officeId']['enum'] = [row['id'] for row in offices]
         if job['action']=='create':
-            schema['required'] = [*schema.get('required', []), 'groupId', 'role']
+            schema['required'] = [*schema.get('required', []), 'groupId']
             schema.setdefault('allOf', []).append({'anyOf':[{'required':['givenName']},{'required':['familyName']}]})
-        else:
-            if (current or {}).get('groupId'):
-                schema['properties'].pop('groupId',None)
-            if (current or {}).get('role'):
-                schema['properties'].pop('role',None)
+        elif (current or {}).get('groupId'):
+            schema['properties'].pop('groupId',None)
     elif job['action']=='create':
         schema['properties']['category'] = deepcopy(canonical_fields['category'])
         schema['required'] = [*schema.get('required', []), 'category']

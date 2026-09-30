@@ -30,7 +30,7 @@ class Decisions:
 
     def author_schema(self, schema):
         out = deepcopy(schema)
-        assigned = {'group','groupId','role','activities'} if self.job['kind']=='person' else {'category'}
+        assigned = {'group','groupId','activities'} if self.job['kind']=='person' else {'category'}
         for field in assigned:
             out['properties'].pop(field,None)
         out['required'] = [f for f in out.get('required',[]) if f not in assigned]
@@ -42,6 +42,7 @@ class Decisions:
         return out
 
     def strip_assigned(self, fields):
+        # 'role' is the retired legacy person role; older saved drafts may still carry it.
         for key in ('group','groupId','role','activities') if self.job['kind']=='person' else ('category',):
             fields.pop(key,None)
         for field,key in (('citizenship','code'),('nationalOrigin','code'),('fate','kind')):
@@ -59,7 +60,7 @@ class Decisions:
         merged = {**self.current, **fields}
         kind = self.job['kind']
         person = kind=='person' and (self.job['action']=='create' or
-            not self.current.get('groupId') or not self.current.get('role') or (not self.current.get('activities') and any(excerpts.get(k) for k in ('career','bio','moment'))))
+            not self.current.get('groupId') or (not self.current.get('activities') and any(excerpts.get(k) for k in ('career','bio','moment'))))
         codes = kind=='person' and any(k in fields for k in ('citizenship','nationalOrigin','fate'))
         term = kind=='term' and self.job['action']=='create'
         if not (person or codes or term):
@@ -88,7 +89,7 @@ class Decisions:
                 raise ClassificationUnavailable('Jev returned incomplete codes; saved draft retained for retry')
             if person:
                 classified = c.fill_classification(out,verdict['person'])
-                for key in ('groupId','role','activities'):
+                for key in ('groupId','activities'):
                     if key in classified and (self.job['action']=='create' or not self.current.get(key)):
                         out[key] = classified[key]
         self.cache[cache_key] = verdict

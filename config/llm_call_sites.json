@@ -427,7 +427,7 @@
     "thresholds": {
       "accept": 0.7
     },
-    "note": "인물 등록 시 groupId·role 자동 배정(commulingo/classify.py::classify_person). 작성 모델은 두 값을 내지 않고 실행기가 초안의 이름·생몰·국적·별칭·경력·bio로 Jev choice 판정을 받아 채운다(관직은 소련·후계국 국적에만 제시). confidence<thresholds.accept면 그래도 채우고 검토 단계가 classification_low_confidence 위험 항목으로 확인 요청. criteria는 2026-09-19 운영자 확정 규칙. 판정 불가면 작업을 미뤄 재시도(작성 모델에게 넘기지 않음). dev_docs/commulingo_editorial.md 2026-09-20: 신규 인물은 classify_person_card가 코드(citizenship/origin/fate)·group·role(소련용·비소련용 두 벌, citizenship 답으로 선택)을 한 요청으로 묻는다(라벨 person-card, 요청당 ~9k 토큰)."
+    "note": "인물 등록 시 groupId·대표 활동 자동 배정(commulingo/classify.py::classify_person_card). 작성 모델은 두 값을 내지 않고 실행기가 초안과 인용 발췌로 Jev choice 판정을 받아 채운다: 첫 요청(라벨 person-card/person-classification)이 누락 코드(citizenship/origin/fate)·group·activity_function을 묻고, 이어서 근거 발췌(person-activity-basis)와 소속(person-activity-affiliation)을 차례로 묻는다. 인용 발췌가 없으면 판정하지 않는다. confidence<thresholds.accept면 그래도 채우고 검토 단계가 classification_low_confidence 위험 항목으로 확인 요청. group criteria는 2026-09-19 운영자 확정 규칙. 판정 불가면 작업을 미뤄 재시도(작성 모델에게 넘기지 않음). 옛 role(관직·역할 범주) 배정은 2026-09-30 폐기."
   },
   "commulingo_term_classification": {
     "provider": "typesafe",
@@ -456,7 +456,7 @@
     "model": "jev-1.13.0",
     "timeout": 20,
     "kind": "system_one",
-    "note": "scripts/commulingo_classification_audit.py 전용: 인물 전원의 groupId·role을 Jev choice로 재판정해 저장값과 다른 고신뢰 건을 큐레이터 보고서로 뽑는다(쓰기 없음). criteria에 2026-09-19 운영자 확정 규칙(공화국 제1서기=nationalities-federal, 지방 서기=party-secretariat-cadres, ideology-propaganda=친소련 이데올로그, 비소련 인물은 시대 그룹 금지, scholar=이 역사의 연구자)이 들어 있고 인정된 경계 쌍은 보고에서 제외. 인물당 ~$0.00012, 2,341명 $0.31. dev_docs/jev_system_one_adoption.md 4.11"
+    "note": "scripts/commulingo_classification_audit.py 전용: 인물 전원의 groupId를 Jev choice로 재판정해 저장값과 다른 고신뢰 건을 큐레이터 보고서로 뽑는다(쓰기 없음; role 감사는 2026-09-30 role 폐기로 제거, scripts/audit_person_activities.py도 이 항목 사용). criteria에 2026-09-19 운영자 확정 규칙(비소련 인물은 시대 그룹 금지, scholar=이 역사의 연구자)이 들어 있고 인정된 경계 쌍은 보고에서 제외. 인물당 ~$0.00012, 2,341명 $0.31. dev_docs/jev_system_one_adoption.md 4.11"
   },
   "task_routing_decision": {
     "provider": "typesafe",

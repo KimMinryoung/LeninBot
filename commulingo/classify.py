@@ -1,21 +1,21 @@
-"""Assign a CommuLingo person's group and role with a System One model.
+"""Assign a CommuLingo person's group and primary activity with a System One model.
 
 The person create API used to require the writing model to pick ``groupId``
-and ``role`` (a Soviet office or a role category) beside the prose.
+and a ``role`` (a Soviet office or a role category) beside the prose.
 Those are closed-set editorial judgements: on 2026-09-19 a Jev audit of all
 2,341 stored people found 106 misfiled ones, and the operator decided the
 runner should assign the classification after the draft instead of the
-writer choosing it. Since 2026-09-21 the dictionary has a China shelf (four
-china-* groups) and function categories for the Chinese party-state, offered
-to Chinese citizens the way the offices are offered to Soviet ones. ``classify_person`` takes the drafted fields (name,
-years, citizenship, epithet, career, bio) and returns the group and role
-with confidences; the pipeline draft stage and the person create tool fill
-them in when the writer left them out. Offices are only offered for Soviet
-and successor-state citizens (offices are Soviet institutions).
+writer choosing it. The legacy role was retired on 2026-09-30 (the frontend
+dropped the person role tables): every person now carries sourced
+``activities`` with exactly one primary activity. ``classify_person`` takes
+the drafted fields (name, years, citizenship, epithet, career, bio) and the
+cited evidence and returns the group and the primary activity (function,
+affiliation, evidence) with confidences; the pipeline and the person create
+tool fill them in when the writer left them out.
 
-The criteria carry the editorial rules the operator confirmed on 2026-09-19
-(dev_docs/jev_system_one_adoption.md 4.11.1); the audit script imports the
-same rules so the two never drift.
+The group criteria carry the editorial rules the operator confirmed on
+2026-09-19 (dev_docs/jev_system_one_adoption.md 4.11.1); the audit script
+imports the same rules so the two never drift.
 """
 from __future__ import annotations
 
@@ -26,21 +26,7 @@ from datetime import date
 logger = logging.getLogger(__name__)
 
 FEATURE = "commulingo_person_classification"
-SOVIET_CITIZENSHIP = frozenset({"soviet", "russia"})
-# Successor states of union republics: their citizens may legitimately hold a
-# Soviet office (a republic first secretary coded with today's state).
-SOVIET_SUCCESSORS = frozenset({"armenia", "azerbaijan", "belarus", "estonia", "georgia", "kazakhstan", "kyrgyzstan",
-                               "latvia", "lithuania", "moldova", "tajikistan", "turkmenistan", "ukraine", "uzbekistan"})
 DEFAULT_ACCEPT = 0.7
-# The Chinese party-state has its own function categories (frontend migration
-# 183): they are offered only to Chinese citizens, the way the offices are
-# offered only to Soviet ones, and the camp categories that describe the
-# world beyond both states are withheld from Chinese citizens.
-CHINA_CITIZENSHIP = frozenset({"china"})
-CHINA_CATEGORIES = frozenset({"ccp-leadership", "prc-government", "ccp-security", "ccp-ideology-propaganda",
-                              "prc-economy-planning", "prc-foreign-affairs", "qing-kuomintang-warlords"})
-CAMP_CATEGORIES = frozenset({"socialist-bloc-leader", "socialist-bloc-reform-leader", "foreign-statesman",
-                             "counterrevolution", "imperial-white", "left-opposition"})
 
 GROUP_RULES = {
     "old-regime": "Inside the Russian Empire before October 1917: tsarist officials and generals, White commanders of the "
@@ -84,65 +70,6 @@ GROUP_RULES = {
     "scholar": "ONLY historians and social scientists who researched and interpreted this history (Soviet studies, Marxist "
                "theory scholarship). NOT natural scientists, engineers or physicians — those belong to the era group of their "
                "Soviet career.",
-}
-
-OFFICE_RULES = {
-    "party-leadership": "Politburo/Presidium members and Central Committee secretaries at the all-union top, and the General "
-                        "Secretary; Lenin belongs here.",
-    "party-secretariat-cadres": "The Secretariat, Orgburo and cadres apparatus, AND regional/oblast/city first secretaries "
-                                "(Moscow, Leningrad, Sverdlovsk...) and Komsomol leaders — the party machine below the top.",
-    "nationalities-federal": "Union-republic first secretaries and republic heads of government (Ukraine, Kazakhstan, "
-                             "the Baltics, Caucasus, Central Asia, Moldova...) and the institutions managing nationalities "
-                             "and the federal structure.",
-    "ideology-propaganda": "Pro-Soviet ideologues who ran ideology, censorship and propaganda for the party (Suslov, Zhdanov "
-                           "line). Never a dissident or a scientist who published critical essays.",
-    "science-nuclear-space": "Scientists, chief designers and administrators of the atomic, missile and space programmes, "
-                             "including physicists who later dissented (Sakharov).",
-    "state-security": "Cheka/GPU/NKVD/MGB/KGB command line, military counter-intelligence (Special Departments, SMERSH) "
-                      "and GRU chiefs.",
-    "defence": "War Commissariat and Ministry of Defence: commanders and marshals, not intelligence chiefs.",
-    "head-of-government": "Chairmen of Sovnarkom / Council of Ministers and their deputies; an ambiguous line — prefer the "
-                          "person's defining office when they also held one.",
-    "comintern": "Comintern functionaries of any nationality (Dimitrov, Kolarov, Manuilsky).",
-}
-
-
-CATEGORY_RULES = {
-    "ccp-leadership": "Chinese Communist Party leadership: chairmen and general secretaries, Politburo and Secretariat "
-                      "members, the founders and the successive party heads (Chen Duxiu, Qu Qiubai, Wang Ming, Mao, Liu "
-                      "Shaoqi, Deng, Hu Yaobang, Zhao Ziyang, Jiang Zemin) — the function they are known for is running "
-                      "the party.",
-    "prc-government": "State Council and state organs of the People's Republic: premiers and vice-premiers, state "
-                      "chairmen and vice-chairmen, NPC chairmen, ministers known for their government office (Zhou Enlai, "
-                      "Li Peng, Wan Li, Soong Ching-ling).",
-    "ccp-security": "Party and state security, intelligence and the guard: Social Affairs Department, Ministry of Public "
-                    "Security, Central Guard Bureau (Kang Sheng, Luo Ruiqing, Wang Dongxing).",
-    "ccp-ideology-propaganda": "Ideology, propaganda, the party press and the arts as instruments of the line (Chen Boda, "
-                               "Yao Wenyuan, Deng Tuo, Jiang Qing, Zhang Chunqiao). Never a dissident.",
-    "prc-economy-planning": "Planning, finance and economic management of the People's Republic (Chen Yun, Li Xiannian, "
-                            "Bo Yibo, Gao Gang).",
-    "prc-foreign-affairs": "Foreign ministers and diplomats of the People's Republic (Chen Yi).",
-    "qing-kuomintang-warlords": "The side the Communists fought inside China: late-Qing officials and emperors, warlords, "
-                                "Kuomintang politicians, diplomats and generals (Yuan Shikai, Puyi, Zhang Zuolin, Chiang "
-                                "Kai-shek, Wang Jingwei, T. V. Soong). Not Sun Yat-sen, who stays a revolutionary.",
-    "military-commander": "Commanders and marshals of an army outside the Soviet one: PLA marshals and generals, Giap, "
-                          "partisan generals. Soviet commanders use the defence OFFICE instead.",
-    "dissident": "People known for opposing the party-state from outside it after it took power: Democracy Wall and "
-                 "1989 figures (Wei Jingsheng, Fang Lizhi). Not a purged official.",
-    "non-soviet-revolutionary": "Revolutionaries and socialists outside the Soviet and Chinese state apparatus, and the "
-                                "Chinese revolutionaries without a party-state function (Sun Yat-sen), "
-                                "Comintern advisers abroad (Borodin, Otto Braun).",
-    "socialist-bloc-leader": "Leaders and officials of socialist states other than the USSR and China (Poland, Hungary, "
-                             "East Germany, Cuba, Vietnam, Korea...).",
-    "socialist-bloc-reform-leader": "Reformers inside those socialist states (Nagy, Dubček, Kádár's reformers).",
-    "foreign-statesman": "Non-communist politicians, diplomats and generals of other states who dealt with the USSR.",
-    "counterrevolution": "Rulers and soldiers outside the USSR and China who fought a revolution at home by force "
-                         "(Franco, Mannerheim).",
-    "imperial-white": "The Russian imperial establishment and the White movement.",
-    "left-opposition": "The Left Opposition inside the Bolshevik party.",
-    "theorist": "The movement's own theorists and intellectuals (Gramsci, Hu Shih as a public thinker).",
-    "writer-artist": "Writers, artists and cultural figures known for their work, not for running culture.",
-    "scholar": "Historians and social scientists who study this history (Schram, MacFarquhar, Yang Jisheng, Gao Hua).",
 }
 
 
@@ -378,41 +305,6 @@ def missing_person_codes(fields: dict) -> list[str]:
     return missing
 
 
-def offices_allowed(citizenship_code: str | None) -> bool:
-    return (citizenship_code or "") in SOVIET_CITIZENSHIP | SOVIET_SUCCESSORS
-
-
-def role_scope(citizenship_code: str | None) -> str:
-    """Which role catalogue a citizenship opens: 'soviet' (offices + categories),
-    'china' (the Chinese party-state categories) or 'other' (categories only)."""
-    code = citizenship_code or ""
-    if code in SOVIET_CITIZENSHIP | SOVIET_SUCCESSORS:
-        return "soviet"
-    if code in CHINA_CITIZENSHIP:
-        return "china"
-    return "other"
-
-
-def role_categories_for(categories: list[dict], scope: str) -> list[dict]:
-    """The office-less categories a scope may choose from: the Chinese
-    party-state categories only for Chinese citizens, and the camp categories
-    (bloc leader, foreign statesman...) for everyone but them."""
-    if scope == "china":
-        return [c for c in categories if c["id"] not in CAMP_CATEGORIES]
-    return [c for c in categories if c["id"] not in CHINA_CATEGORIES]
-
-
-ROLE_INSTRUCTIONS = {
-    "soviet": "Which single role identifies this person? Choose a catalogued OFFICE only when the career shows they held "
-              "it; otherwise the closest CATEGORY.",
-    "china": "Which single category identifies this Chinese person's function in the party-state (leadership, "
-             "government, security, ideology, economy, diplomacy, the Qing/Kuomintang side), or their craft "
-             "(commander, writer, theorist, scholar, dissident)? A revolutionary without a party-state function is "
-             "non-soviet-revolutionary.",
-    "other": "Which category best identifies this non-Soviet, non-Chinese person's role in this history?",
-}
-
-
 # Stage one of the group decision is arithmetic, not a model call. The
 # groups span three centuries — the French Revolution, the Soviet and Chinese
 # eras, the wider modern world — and a person's life years already rule most of
@@ -479,24 +371,14 @@ def groups_for_years(groups: list[dict], years, today: int | None = None) -> lis
     return kept or groups
 
 
-def build_questions(groups: list[dict], offices: list[dict], categories: list[dict], soviet: bool, scope: str | None = None) -> dict:
-    """The group and role questions for one role scope. ``soviet`` is the
-    older boolean form (True → 'soviet', False → 'other'); ``scope`` wins."""
-    scope = scope or ("soviet" if soviet else "other")
+def group_question(groups: list[dict]) -> dict:
+    """The dictionary group question over the (era-filtered) groups."""
     group_criteria = {g["id"]: f"{g['title_en']} ({g.get('range_label') or ''}). {GROUP_RULES.get(g['id'], g.get('blurb_en') or '')}"
                       for g in groups}
-    role_criteria = {c["id"]: f"CATEGORY {c['label_en']} / {c['label_ko']}: {CATEGORY_RULES.get(c['id'], '')}".rstrip(": ")
-                     for c in role_categories_for(categories, scope)}
-    if scope == "soviet":
-        role_criteria.update({o["id"]: f"OFFICE {o['title_en']} ({o.get('range_label') or ''}): {OFFICE_RULES.get(o['id'], '')}"
-                              for o in offices})
-    return {
-        "group": {"type": "choice", "criteria": group_criteria,
-                  "instructions": "Which dictionary group does this person belong to? Soviet citizens go to the era in which "
-                                  "their public role peaked; Chinese citizens go to the china-* group of their era or side; "
-                                  "people outside both states go to a world group; people of the French Revolution and Napoleon go to france-revolution. Historians researching this history use scholar regardless of nationality; actors or targets in historical events can retain the era of their activity."},
-        "role": {"type": "choice", "criteria": role_criteria, "instructions": ROLE_INSTRUCTIONS[scope]},
-    }
+    return {"type": "choice", "criteria": group_criteria,
+            "instructions": "Which dictionary group does this person belong to? Soviet citizens go to the era in which "
+                            "their public role peaked; Chinese citizens go to the china-* group of their era or side; "
+                            "people outside both states go to a world group; people of the French Revolution and Napoleon go to france-revolution. Historians researching this history use scholar regardless of nationality; actors or targets in historical events can retain the era of their activity."}
 
 
 def _text(value, lang: str) -> str:
@@ -527,9 +409,10 @@ def state_from_fields(fields: dict) -> dict:
             "fate": (fate.get("kind") or "") + (" · " + _text(fate.get("label"), "ko") if fate.get("label") else "")}
 
 
-def load_catalogs() -> tuple[list[dict], list[dict], list[dict]]:
-    from commulingo.people import _list_categories, _list_groups, _list_offices
-    return _list_groups(), _list_offices(), _list_categories()
+def load_catalogs() -> tuple[list[dict], list[dict]]:
+    """(groups, offices). The role categories were retired with the legacy person role."""
+    from commulingo.people import _list_groups, _list_offices
+    return _list_groups(), _list_offices()
 
 
 CLASSIFY_EVIDENCE_FIELDS = ("bio", "career", "moment", "years")
@@ -548,33 +431,22 @@ def evidence_for(claims: dict | None, fields=CLASSIFY_EVIDENCE_FIELDS) -> list[d
     return out
 
 
-def _person_from(decision, role_key, groups, offices, categories, accept) -> dict | None:
-    """The group/role verdict of a decision, or None when a choice is off the catalogs."""
-    group, role = decision.choice("group"), decision.choice(role_key)
-    office_ids = {o["id"] for o in offices}
-    if group not in {g["id"] for g in groups} or role not in office_ids | {c["id"] for c in categories}:
-        return None
-    conf = {"group": round(decision.confidence("group") or 0.0, 3), "role": round(decision.confidence(role_key) or 0.0, 3)}
-    return {"groupId": group, "role": {"officeId": role} if role in office_ids else {"category": role},
-            "confidence": conf, "low_confidence": min(conf.values()) < accept, "model": decision.model}
+def classify_person(fields: dict, *, catalogs=None, claims: dict | None = None, decide=None) -> dict | None:
+    """Group and primary activity for a drafted person whose codes are settled,
+    or None when the model is unavailable or the card has no cited activity
+    evidence: the card request without its code questions.
 
-
-def classify_person(fields: dict, *, catalogs=None, claims: dict | None = None, decide=None, legacy=False) -> dict | None:
-    """Group and role for a drafted person whose codes are settled, or None when
-    the model is unavailable: the card request without its code questions.
-
-    Returns {"groupId", "role": {"officeId"|"category"}, "confidence": {"group", "role"},
-    "low_confidence": bool, "model"}. ``low_confidence`` (below the entry's
+    Returns {"groupId", "activities": [primary], "confidence", "low_confidence": bool, "model"}. ``low_confidence`` (below the entry's
     ``thresholds.accept``) means the caller should have the independent
     reviewer confirm the classification rather than drop it: the best choice
     still beats the writer guessing.
     """
-    card = classify_person_card(fields, catalogs=catalogs, claims=claims, decide=decide, codes=False, legacy=legacy)
+    card = classify_person_card(fields, catalogs=catalogs, claims=claims, decide=decide, codes=False)
     return card["person"] if card else None
 
 
 def person_card_state(fields: dict, claims: dict | None) -> dict:
-    """The group/role state plus the code labels and their excerpts: one state for the whole card."""
+    """The group/activity state plus the code labels and their excerpts: one state for the whole card."""
     state = state_from_fields(fields)
     evidence = evidence_for(claims)
     if evidence:
@@ -585,32 +457,19 @@ def person_card_state(fields: dict, claims: dict | None) -> dict:
     return state
 
 
-def person_card_questions(fields: dict, groups, offices, categories, citizenship_codes, origin_codes, codes=True) -> dict:
-    """The card's questions: missing codes, group, and role. The role's options
-    depend on the citizenship (offices are Soviet institutions): when the card
-    already carries the code, one role question fits it; when this request
-    decides the citizenship, the role is asked for each scope and the decided code picks one."""
+def person_card_questions(fields: dict, groups, citizenship_codes, origin_codes, codes=True) -> dict:
+    """The card's questions: missing codes and the group. The activity
+    questions are added by ``classify_person_card`` from the cited evidence."""
     questions = person_code_questions(fields, citizenship_codes, origin_codes) if codes else {}
-    questions["group"] = build_questions(groups, offices, categories, soviet=True)["group"]
-    if "citizenship" in questions:
-        for scope in ("soviet", "china", "other"):
-            questions[ROLE_KEYS[scope]] = build_questions(groups, offices, categories, soviet=False, scope=scope)["role"]
-    else:
-        scope = role_scope((fields.get("citizenship") or {}).get("code"))
-        questions["role"] = build_questions(groups, offices, categories, soviet=False, scope=scope)["role"]
+    questions["group"] = group_question(groups)
     return questions
 
 
-# One role question per scope when the citizenship is decided in the same
-# request; the decided code then picks which answer counts.
-ROLE_KEYS = {"soviet": "role_soviet", "china": "role_china", "other": "role_non_soviet"}
-
-
-def classify_person_card(fields: dict, *, catalogs=None, claims: dict | None = None, decide=None, codes=True, legacy=False) -> dict | None:
+def classify_person_card(fields: dict, *, catalogs=None, claims: dict | None = None, decide=None, codes=True) -> dict | None:
     """Classify a card, returning codes and a person assignment, or None.
 
-    Legacy cards use one request. Sourced activities select the function,
-    then its affiliation, then supporting evidence in dependent requests.
+    Sourced activities select the function, then the supporting evidence,
+    then its affiliation in dependent requests.
     Each stage sees the preceding choice; Jev question heads are independent.
     """
     from llm.call_registry import decide_detailed, Decision
@@ -619,26 +478,22 @@ def classify_person_card(fields: dict, *, catalogs=None, claims: dict | None = N
     enabled, accept = _profile(FEATURE)
     if not enabled:
         return None
-    groups, offices, categories = catalogs or load_catalogs()
-    if not groups or not categories:
+    groups = (catalogs or load_catalogs())[0]
+    if not groups:
         return None
     # Stage one: the life years narrow the era groups; the model picks among them.
     groups = groups_for_years(groups, fields.get("years"))
-    questions = person_card_questions(fields, groups, offices, categories, sorted(_NATIONALITY_CODES),
+    questions = person_card_questions(fields, groups, sorted(_NATIONALITY_CODES),
                                       sorted(_NATIONAL_ORIGIN_CODES), codes=codes)
     from commulingo.activities import activity_evidence, activity_questions, activity_person_from, activity_basis_question, excerpt_years, load_catalog
     basis = activity_evidence(fields, claims)
-    if not basis and not legacy:
-        logger.warning("activity classification requires cited career/bio evidence excerpts; no legacy fallback")
+    if not basis:
+        logger.warning("activity classification requires cited career/bio evidence excerpts")
         return None
-    activity_catalog = load_catalog() if basis else None
-    if basis:
-        questions = {k: v for k, v in questions.items() if not k.startswith('role')}
-        activity_q = activity_questions(activity_catalog, basis)
-        questions['activity_function'] = activity_q['activity_function']
+    activity_catalog = load_catalog()
+    questions['activity_function'] = activity_questions(activity_catalog, basis)['activity_function']
     state = person_card_state(fields, claims)
-    if basis:
-        state['cited_activity_evidence'] = basis
+    state['cited_activity_evidence'] = basis
     result = (decide or decide_detailed)(FEATURE, state, questions,
                                          label="person-card" if codes else "person-classification")
     decision = result.decision
@@ -646,55 +501,48 @@ def classify_person_card(fields: dict, *, catalogs=None, claims: dict | None = N
         logger.warning("person card classification unavailable: %s", result.error)
         return None
     verdicts = _codes_from(decision, questions, fields, accept) if codes else {}
-    if basis:
-        # Jev questions run independently. Later choices must see the actual
-        # earlier answer, never instructions referring to another parallel question.
-        function = decision.choice('activity_function')
-        if function not in {f['id'] for f in activity_catalog['functions']}:
-            return None
-        state['selected_activity_function'] = function
-        # Evidence first, then the organization: the chosen excerpt's years
-        # (or the adult life when it names none) decide which affiliations
-        # existed and are offered, so an 1830 excerpt is never read as service
-        # to the First Republic (job 63829, Lafayette, 2026-09-26).
-        basis_q = activity_basis_question(activity_catalog, basis, function, decision.choice('group'))
-        basis_result = (decide or decide_detailed)(FEATURE, state,
-            {'activity_basis': basis_q}, label='person-activity-basis')
-        if basis_result.decision is None:
-            return None
-        basis_choice = basis_result.decision.choice('activity_basis')
-        if not isinstance(basis_choice, str) or not basis_choice.isdigit() or int(basis_choice) >= len(basis):
-            return None
-        chosen = basis[int(basis_choice)]
-        state['selected_activity_evidence'] = chosen
-        span = active_span(fields.get("years"))
-        years = excerpt_years(chosen.get('excerpt'), span)
-        window = (years[0], years[-1]) if years else span
-        state['selected_activity_years'] = list(window) if window else None
-        affiliation_q = activity_questions(activity_catalog, basis, window)['activity_affiliation']
-        affiliation_q['instructions'] += ' The function and excerpt are fixed by selected_activity_function and selected_activity_evidence in the state.'
-        affiliation_result = (decide or decide_detailed)(FEATURE, state,
-            {'activity_affiliation': affiliation_q}, label='person-activity-affiliation')
-        if affiliation_result.decision is None:
-            return None
-        affiliation = affiliation_result.decision.choice('activity_affiliation')
-        if affiliation not in set(affiliation_q['criteria']):
-            return None
-        decision = Decision(answers={**decision.answers,
-            'activity_affiliation': affiliation_result.decision.answers['activity_affiliation'],
-            'activity_basis': basis_result.decision.answers['activity_basis']}, model=decision.model)
-        person = activity_person_from(decision, activity_catalog, basis, {g['id'] for g in groups}, accept)
-        return {"codes": verdicts, "person": person}
-    if "role" in questions:
-        role_key = "role"
-    else:
-        citizenship = (verdicts.get("citizenship") or {}).get("code")
-        role_key = ROLE_KEYS[role_scope(citizenship)]
-    return {"codes": verdicts, "person": _person_from(decision, role_key, groups, offices, categories, accept)}
+    # Jev questions run independently. Later choices must see the actual
+    # earlier answer, never instructions referring to another parallel question.
+    function = decision.choice('activity_function')
+    if function not in {f['id'] for f in activity_catalog['functions']}:
+        return None
+    state['selected_activity_function'] = function
+    # Evidence first, then the organization: the chosen excerpt's years
+    # (or the adult life when it names none) decide which affiliations
+    # existed and are offered, so an 1830 excerpt is never read as service
+    # to the First Republic (job 63829, Lafayette, 2026-09-26).
+    basis_q = activity_basis_question(activity_catalog, basis, function, decision.choice('group'))
+    basis_result = (decide or decide_detailed)(FEATURE, state,
+        {'activity_basis': basis_q}, label='person-activity-basis')
+    if basis_result.decision is None:
+        return None
+    basis_choice = basis_result.decision.choice('activity_basis')
+    if not isinstance(basis_choice, str) or not basis_choice.isdigit() or int(basis_choice) >= len(basis):
+        return None
+    chosen = basis[int(basis_choice)]
+    state['selected_activity_evidence'] = chosen
+    span = active_span(fields.get("years"))
+    years = excerpt_years(chosen.get('excerpt'), span)
+    window = (years[0], years[-1]) if years else span
+    state['selected_activity_years'] = list(window) if window else None
+    affiliation_q = activity_questions(activity_catalog, basis, window)['activity_affiliation']
+    affiliation_q['instructions'] += ' The function and excerpt are fixed by selected_activity_function and selected_activity_evidence in the state.'
+    affiliation_result = (decide or decide_detailed)(FEATURE, state,
+        {'activity_affiliation': affiliation_q}, label='person-activity-affiliation')
+    if affiliation_result.decision is None:
+        return None
+    affiliation = affiliation_result.decision.choice('activity_affiliation')
+    if affiliation not in set(affiliation_q['criteria']):
+        return None
+    decision = Decision(answers={**decision.answers,
+        'activity_affiliation': affiliation_result.decision.answers['activity_affiliation'],
+        'activity_basis': basis_result.decision.answers['activity_basis']}, model=decision.model)
+    person = activity_person_from(decision, activity_catalog, basis, {g['id'] for g in groups}, accept)
+    return {"codes": verdicts, "person": person}
 
 
 def fill_classification(fields: dict, classification: dict | None) -> dict:
-    """Copy of ``fields`` with the assigned group/role. The writer never
+    """Copy of ``fields`` with the assigned group and primary activity. The writer never
     classifies: the schema it drafts against has no such fields, so a
     classification that came back always lands, low confidence included
     (the review stage gets that as a risk line)."""
@@ -703,7 +551,7 @@ def fill_classification(fields: dict, classification: dict | None) -> dict:
         return out
     out.pop("group", None)
     out["groupId"] = classification["groupId"]
-    out["role"] = dict(classification["role"])
+    out.pop("role", None)  # the legacy person role was retired; activities replace it
     if classification.get("activities"):
         out["activities"] = classification["activities"]
     return out

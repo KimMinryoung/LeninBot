@@ -35,7 +35,9 @@ class ReviewDatabase(unittest.TestCase):
         queue.query("INSERT INTO commulingo_people_groups(id,title_ko,title_en) VALUES ('review-test','검증','Review') ON CONFLICT DO NOTHING")
         suffix=uuid.uuid4().hex[:8];self.id='review-'+suffix;self.source='https://archive.example/'+suffix
         rpc({'command':'submit','target':'person','action':'create','id':self.id,'sources':[self.source],
-            'fields':{'name':{'ko':'검증 인물 '+suffix,'en':'Review Person '+suffix},'groupId':'review-test','role':{'icon':'book-open'}}})
+            'fields':{'name':{'ko':'검증 인물 '+suffix,'en':'Review Person '+suffix},'groupId':'review-test',
+                'activities':[{'functionId':'arts','affiliationId':None,'affiliationStatus':'independent','relation':'independent',
+                    'primary':True,'evidence':[{'source':self.source,'locator':'p. 1','claim':'Author','excerpt':'The author wrote the work.'}]}]}})
     def propose(self):
         current=rpc({'command':'read','id':self.id})
         result=rpc({'command':'submit','target':'person','action':'update','id':self.id,'sources':[self.source],
