@@ -1,5 +1,5 @@
 {
-  "version": 15,
+  "version": 16,
   "functions": [
     {
       "id": "political-leadership",
@@ -1265,6 +1265,150 @@
           ]
         ]
       }
+    },
+    {
+      "id": "soviet-left-communists",
+      "kind": "force",
+      "label": {
+        "ko": "좌익공산주의자",
+        "en": "Left Communists"
+      },
+      "countryCode": "soviet",
+      "icon": "flag",
+      "parentId": "soviet-party",
+      "criteria": "Only documented membership, leadership or organizational activity in the Left Communists faction of the Bolshevik party (opposition to the Treaty of Brest-Litovsk, 1918). Being accused of it in a show trial, sympathy, or persecution alone does NOT qualify. Never infer it from nationality or ideology.",
+      "periods": [
+        [
+          1918,
+          1918
+        ]
+      ]
+    },
+    {
+      "id": "soviet-democratic-centralists",
+      "kind": "force",
+      "label": {
+        "ko": "민주집중파",
+        "en": "Democratic Centralists (Decists)"
+      },
+      "countryCode": "soviet",
+      "icon": "flag",
+      "parentId": "soviet-party",
+      "criteria": "Only documented membership, leadership or organizational activity in the Democratic Centralists (Decists) (including the 1926–27 Group of 15). Being accused of it in a show trial, sympathy, or persecution alone does NOT qualify. Never infer it from nationality or ideology.",
+      "periods": [
+        [
+          1919,
+          1927
+        ]
+      ]
+    },
+    {
+      "id": "soviet-workers-opposition",
+      "kind": "force",
+      "label": {
+        "ko": "노동자 반대파",
+        "en": "Workers' Opposition"
+      },
+      "countryCode": "soviet",
+      "icon": "flag",
+      "parentId": "soviet-party",
+      "criteria": "Only documented membership, leadership or organizational activity in the Workers' Opposition. Being accused of it in a show trial, sympathy, or persecution alone does NOT qualify. Never infer it from nationality or ideology.",
+      "periods": [
+        [
+          1920,
+          1922
+        ]
+      ]
+    },
+    {
+      "id": "soviet-workers-group",
+      "kind": "force",
+      "label": {
+        "ko": "노동자 그룹",
+        "en": "Workers' Group"
+      },
+      "countryCode": "soviet",
+      "icon": "flag",
+      "parentId": "soviet-party",
+      "criteria": "Only documented membership, leadership or organizational activity in the Workers' Group of the Russian Communist Party (Myasnikov's group). Being accused of it in a show trial, sympathy, or persecution alone does NOT qualify. Never infer it from nationality or ideology.",
+      "periods": [
+        [
+          1922,
+          1923
+        ]
+      ]
+    },
+    {
+      "id": "soviet-left-opposition",
+      "kind": "force",
+      "label": {
+        "ko": "좌익반대파",
+        "en": "Left Opposition"
+      },
+      "countryCode": "soviet",
+      "icon": "flag",
+      "parentId": "soviet-party",
+      "criteria": "Only documented membership, leadership or organizational activity in the Left Opposition inside the Soviet party, including the 1926–27 United Opposition and the exiled or underground Trotskyist opposition until 1933. Trotskyist activity abroad belongs to that country's own organization. Being accused of it in a show trial, sympathy, or persecution alone does NOT qualify. Never infer it from nationality or ideology.",
+      "periods": [
+        [
+          1923,
+          1933
+        ]
+      ]
+    },
+    {
+      "id": "soviet-ryutin-group",
+      "kind": "force",
+      "label": {
+        "ko": "마르크스-레닌주의자 동맹(류틴 그룹)",
+        "en": "Union of Marxist-Leninists (Ryutin group)"
+      },
+      "countryCode": "soviet",
+      "icon": "flag",
+      "parentId": "soviet-party",
+      "criteria": "Only documented membership, leadership or organizational activity in the Union of Marxist-Leninists (Ryutin group). Being accused of it in a show trial, sympathy, or persecution alone does NOT qualify. Never infer it from nationality or ideology.",
+      "periods": [
+        [
+          1932,
+          1932
+        ]
+      ]
+    },
+    {
+      "id": "kronstadt-revolutionary-committee",
+      "kind": "force",
+      "label": {
+        "ko": "크론시타트 임시혁명위원회",
+        "en": "Kronstadt Provisional Revolutionary Committee"
+      },
+      "countryCode": "russia",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented membership, leadership or organizational activity in the Kronstadt Provisional Revolutionary Committee that led the 1921 Kronstadt rebellion. Being accused of it in a show trial, sympathy, or persecution alone does NOT qualify. Never infer it from nationality or ideology.",
+      "periods": [
+        [
+          1921,
+          1921
+        ]
+      ]
+    },
+    {
+      "id": "party-us-swp",
+      "kind": "party",
+      "label": {
+        "ko": "미국 사회주의노동자당",
+        "en": "Socialist Workers Party (United States)"
+      },
+      "countryCode": "usa",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented membership, leadership or organizational activity in the Socialist Workers Party (United States) (the American Trotskyist party). Being accused of it in a show trial, sympathy, or persecution alone does NOT qualify. Never infer it from nationality or ideology.",
+      "periods": [
+        [
+          1938,
+          null
+        ]
+      ]
     },
     {
       "id": "comintern",

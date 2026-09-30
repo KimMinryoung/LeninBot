@@ -42,6 +42,13 @@
           "unresolved"
         ]
       },
+      "officeId": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "Optional commulingo_offices id (Soviet institution line) this activity was carried out in. Only with the state-soviet, soviet-party or comintern affiliation."
+      },
       "startYear": {
         "type": [
           "integer",
