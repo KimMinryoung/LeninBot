@@ -6,7 +6,7 @@ from llm.call_registry import CallSiteProfile, Decision, DecisionResult
 from commulingo import classify as cc
 
 GROUPS = [{'id': 'thaw', 'title_en': 'Thaw', 'range_label': '1953–1985'},
-          {'id': 'international-revolutionary', 'title_en': 'Non-Soviet', 'range_label': ''}]
+          {'id': 'world-interwar', 'title_en': 'Non-Soviet', 'range_label': ''}]
 OFFICES = [{'id': 'nationalities-federal', 'title_en': 'Nationalities', 'range_label': '1917–1991'}]
 CATALOGS = (GROUPS, OFFICES)
 PROFILE = CallSiteProfile(feature=cc.FEATURE, provider='openrouter', model='typesafe/jev-1.13',
@@ -36,7 +36,7 @@ def activity_decide(seen=None, **card):
             return answers(activity_basis=('0', 0.95))
         if label == 'person-activity-affiliation':
             return answers(activity_affiliation=('unresolved', 0.9))
-        return answers(group=('international-revolutionary', 0.95), activity_function=('political-leadership', 0.92), **card)
+        return answers(group=('world-interwar', 0.95), activity_function=('political-leadership', 0.92), **card)
     return decide
 
 
@@ -64,13 +64,13 @@ class ClassifyTests(unittest.TestCase):
         out = cc.classify_person({**FIELDS, 'evidence': EVIDENCE}, catalogs=CATALOGS, decide=activity_decide(seen))
         first = seen['questions']['person-classification']
         self.assertEqual(set(first), {'group', 'activity_function'})
-        self.assertEqual(out['groupId'], 'international-revolutionary')
+        self.assertEqual(out['groupId'], 'world-interwar')
         self.assertNotIn('role', out)
         self.assertEqual(out['activities'][0]['functionId'], 'political-leadership')
         self.assertTrue(out['activities'][0]['primary'])
         self.assertFalse(out['low_confidence'])
         filled = cc.fill_classification({**FIELDS, 'groupId': 'thaw', 'role': {'category': 'scholar'}}, out)
-        self.assertEqual(filled['groupId'], 'international-revolutionary')
+        self.assertEqual(filled['groupId'], 'world-interwar')
         self.assertNotIn('role', filled)
         self.assertEqual(filled['activities'], out['activities'])
 
@@ -186,7 +186,7 @@ class ClassifyCardTests(unittest.TestCase):
         self.assertIn('bio_ko', state); self.assertIn('career', state)
         self.assertEqual(out['codes']['citizenship']['code'], 'soviet')
         self.assertEqual(out['codes']['fate']['kind'], 'natural')
-        self.assertEqual(out['person']['groupId'], 'international-revolutionary')
+        self.assertEqual(out['person']['groupId'], 'world-interwar')
         self.assertNotIn('role', out['person'])
         self.assertIsNone(cc.classify_person_card(card, catalogs=CATALOGS,
                                                   decide=lambda *a, **k: DecisionResult(error_kind='server', error='503')))
@@ -270,8 +270,8 @@ class ReviewRiskTests(unittest.TestCase):
 class GroupEraTests(unittest.TestCase):
     """Stage one of the group decision: life years rule eras out before any model call."""
     GROUPS = [{"id": g} for g in ("old-regime", "bolshevik", "stalin-era", "thaw", "perestroika", "china-reform",
-                                   "france-revolution", "international-revolutionary",
-                                   "foreign-statesmen", "international-counterrevolutionary", "scholar", "unlisted")]
+                                   "france-revolution", "world-before-1917", "world-interwar",
+                                   "world-cold-war", "scholar", "unlisted")]
 
     def ids(self, years):
         from commulingo.classify import groups_for_years
@@ -283,12 +283,13 @@ class GroupEraTests(unittest.TestCase):
     def test_modern_revolutionary_never_sees_the_french_eras(self):
         ids = self.ids("1842–1911")
         self.assertNotIn("france-revolution", ids)
-        self.assertIn("international-revolutionary", ids)
+        self.assertIn("world-interwar", ids)
 
     def test_bridging_lives_keep_both_sides_for_the_model(self):
         ids = self.ids("1788–1856")
         self.assertIn("france-revolution", ids)
-        self.assertIn("international-revolutionary", ids)
+        self.assertIn("world-before-1917", ids)
+        self.assertNotIn("world-interwar", ids)
 
     def test_living_and_open_labels(self):
         from commulingo.classify import active_span
@@ -305,4 +306,4 @@ class GroupEraTests(unittest.TestCase):
         groups = [{"id": g["id"], "title_en": g["id"], "range_label": ""} for g in self.GROUPS]
         kept = groups_for_years(groups, "1758–1794", today=2026)
         q = person_card_questions({"years": "1758–1794", "citizenship": {"code": "france"}}, kept, ["france"], [], codes=False)
-        self.assertNotIn("international-revolutionary", q["group"]["criteria"])
+        self.assertNotIn("world-interwar", q["group"]["criteria"])

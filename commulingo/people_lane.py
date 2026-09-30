@@ -250,7 +250,7 @@ def select_sparse_person(
             WHERE split_part(r.entity_id,'/',1)=p.id AND r.changed_by LIKE 'commulingo-maintainer%%') AS last_edit
         FROM commulingo_people p
         WHERE (%(forced)s='' OR p.id=%(forced)s) AND NOT(p.id=ANY(%(excluded)s))
-          AND (%(non_soviet)s OR p.group_id<>'international-revolutionary')
+          AND (%(non_soviet)s OR p.group_id NOT LIKE 'world-%%')
           AND NOT EXISTS(SELECT 1 FROM commulingo_agent_suggestions q WHERE q.target_id=p.id
               AND q.target_type IN ('person','person_section') AND q.status='pending')
       ), ranked AS MATERIALIZED (
@@ -601,12 +601,12 @@ If that applies, the bio rewrite IS your one write and you are done. Otherwise:
 ROSTER_GROUPS_BY_FOCUS = {
     "soviet_institutions": ("bolshevik", "stalin-era", "thaw", "perestroika"),
     # Era boundaries are fuzzy: an 1905-era activist may already be filed under
-    # the revolution generation or as a non-Soviet revolutionary, so the roster
+    # the revolution generation or on the world shelf before 1917, so the roster
     # keeps those groups to prove absence.
-    "old_regime": ("old-regime", "bolshevik", "international-revolutionary"),
+    "old_regime": ("old-regime", "bolshevik", "world-before-1917"),
     # The China shelf (frontend migration 182); foreign advisers to the
-    # Chinese revolution are filed as international revolutionaries.
-    "china": ("china-old-regime", "china-revolution", "china-mao-era", "china-reform", "international-revolutionary"),
+    # Chinese revolution are filed on the world shelf by era (migration 218).
+    "china": ("china-old-regime", "china-revolution", "china-mao-era", "china-reform", "world-interwar", "world-cold-war"),
 }
 
 

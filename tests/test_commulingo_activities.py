@@ -8,7 +8,7 @@ from tests.test_commulingo_classify import PROFILE, CATALOGS, FIELDS
 EVIDENCE=[{'field':'career','source':'https://example.org/kang','locator':'Career','claim':'Party intelligence work','excerpt':'Kang Sheng directed the party intelligence apparatus.'}]
 
 def verdict(**overrides):
-    choices={'group':'international-revolutionary','activity_function':'security','activity_affiliation':'china-ccp','activity_basis':'0'}|overrides
+    choices={'group':'world-interwar','activity_function':'security','activity_affiliation':'china-ccp','activity_basis':'0'}|overrides
     return Decision(answers={k:{'choice':v,'confidence':.98,'probabilities':{v:.98}} for k,v in choices.items()},model='test')
 
 class ActivitiesTests(unittest.TestCase):
@@ -59,18 +59,18 @@ class ActivitiesTests(unittest.TestCase):
             if affiliation.get('governingState'):
                 state = next(a for a in catalog['affiliations'] if a['id'] == affiliation['governingState']['id'])
                 self.assertEqual(state['kind'], 'state')
-                out = activity_person_from(verdict(activity_affiliation=state['id']), catalog, EVIDENCE, {'international-revolutionary'})
+                out = activity_person_from(verdict(activity_affiliation=state['id']), catalog, EVIDENCE, {'world-interwar'})
                 self.assertEqual(out['activities'][0]['relation'], 'service')
                 self.assertEqual(out['activities'][0]['affiliationId'], state['id'])
-        party = activity_person_from(verdict(activity_affiliation='china-ccp'), catalog, EVIDENCE, {'international-revolutionary'})
+        party = activity_person_from(verdict(activity_affiliation='china-ccp'), catalog, EVIDENCE, {'world-interwar'})
         self.assertEqual(party['activities'][0]['relation'], 'membership')
 
     def test_unknown_affiliation_stays_unknown_and_unsupported_is_rejected(self):
-        out=activity_person_from(verdict(activity_affiliation='unresolved'),load_catalog(),EVIDENCE,{'international-revolutionary'})
+        out=activity_person_from(verdict(activity_affiliation='unresolved'),load_catalog(),EVIDENCE,{'world-interwar'})
         self.assertIsNone(out['activities'][0]['affiliationId'])
         self.assertEqual(out['activities'][0]['affiliationStatus'],'unresolved')
         for overrides in ({'activity_basis':'unsupported'},{'activity_basis':'19'},{'activity_affiliation':'not-in-catalog'}):
-            self.assertIsNone(activity_person_from(verdict(**overrides),load_catalog(),EVIDENCE,{'international-revolutionary'}))
+            self.assertIsNone(activity_person_from(verdict(**overrides),load_catalog(),EVIDENCE,{'world-interwar'}))
 
     def test_evidence_driven_card_uses_activity_questions_and_preserves_citation(self):
         stages = []
@@ -207,4 +207,4 @@ class FrenchRevolutionBasisTests(unittest.TestCase):
         self.assertIn('role in the Revolution', self.basis_instructions('france-revolution'))
 
     def test_other_groups_keep_the_plain_rule(self):
-        self.assertNotIn('role in the Revolution', self.basis_instructions('international-revolutionary'))
+        self.assertNotIn('role in the Revolution', self.basis_instructions('world-interwar'))

@@ -39,7 +39,10 @@ from commulingo.classify import group_question, groups_for_years  # noqa: E402  
 
 # stored→judged pairs the operator has accepted as boundary judgements; a
 # disagreement on these lines is not reported (2026-09-19 decisions).
-ACCEPTED_PAIRS = {("old-regime", "international-counterrevolutionary")}
+# The world shelf is sorted by era since frontend migration 218, so the
+# 2026-09-19 old-regime/foreign-counterrevolution boundary now falls on the
+# world groups of those years.
+ACCEPTED_PAIRS = {("old-regime", "world-before-1917"), ("old-regime", "world-interwar")}
 
 
 def load_people(limit: int | None) -> list[dict]:

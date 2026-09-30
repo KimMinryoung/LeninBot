@@ -57,16 +57,24 @@ GROUP_RULES = {
                          "republican armies, Napoleon and his marshals and administrators, the Restoration kings to the July "
                          "Revolution, and foreign commanders of the coalition wars (Howe, Nelson). Socialists of the 1830s and "
                          "after (Cabet, Blanqui) are world groups.",
-    "international-revolutionary": "Anyone OUTSIDE the Soviet and Chinese state apparatus on the revolutionary or socialist "
-                                   "side: communists, socialists, leaders and officials of socialist states (Poland, Hungary, "
-                                   "Czechoslovakia, East Germany, Cuba, Vietnam...), their reformers and dissidents, and "
-                                   "foreign advisers to the Chinese revolution (Borodin, Otto Braun). A non-Soviet citizen "
-                                   "never belongs to a Soviet era group; Chinese historical actors belong to a china-* group; historians studying history belong to scholar regardless of citizenship.",
-    "foreign-statesmen": "Non-communist politicians, diplomats and generals of other states who negotiated with or confronted "
-                         "the USSR: presidents, prime ministers, foreign ministers, ambassadors, monarchs.",
-    "international-counterrevolutionary": "Rulers, soldiers and movements outside the USSR that fought revolution and the "
-                                          "socialist camp by force: fascists, military dictators, anti-communist insurgents. "
-                                          "Not Russian Whites (old-regime).",
+    # The world shelf (migration 218) is sorted by era like the Soviet one, not by camp: revolutionaries,
+    # statesmen and their opponents of one era sit together. Camp is the person's activities and the
+    # position collections (counterrevolution, dissident, ...), not the group.
+    "world-before-1917": "People outside the Soviet, Chinese and French Revolution shelves whose public role peaked before "
+                         "1917: early socialists and 1848, the First and Second Internationals and the Paris Commune "
+                         "(Marx, Engels, Bakunin, Bebel, Jaurès), and the statesmen, generals and monarchs of the imperial "
+                         "age (Bismarck, Wilhelm II). A party founder whose defining role is leading it after 1917 goes to "
+                         "world-interwar. A non-Soviet citizen never belongs to a Soviet era group.",
+    "world-interwar": "People outside the Soviet and Chinese shelves whose public role peaked 1917–1945: the revolutionary "
+                      "wave after October (Luxemburg, Béla Kun, Gramsci), Comintern and interwar communists and socialists, "
+                      "interwar statesmen and diplomats, fascism and Nazism, the Spanish Civil War and the Second World War "
+                      "(Hitler, Churchill, Franco), and foreign advisers to the Chinese revolution (Borodin, Otto Braun). "
+                      "A Second World War leader stays here even when he lived long after. A non-Soviet citizen never "
+                      "belongs to a Soviet era group.",
+    "world-cold-war": "People outside the Soviet and Chinese shelves whose public role peaked after 1945: the people's "
+                      "democracies and their reformers and dissidents, decolonization and national liberation (Ho Chi Minh, "
+                      "Castro, Guevara, Cabral), Cold War statesmen and anti-communist regimes (Pinochet), 1956, 1968 "
+                      "and 1989, and anyone later. A non-Soviet citizen never belongs to a Soviet era group.",
     "scholar": "ONLY historians and social scientists who researched and interpreted this history (Soviet studies, Marxist "
                "theory scholarship). NOT natural scientists, engineers or physicians — those belong to the era group of their "
                "Soviet career.",
@@ -320,8 +328,8 @@ GROUP_ERAS = {
     "china-old-regime": (1880, 1949), "china-revolution": (1895, 1949), "china-mao-era": (1940, 1976),
     "china-reform": (1970, None),
     "france-revolution": (1774, 1830),
-    "international-revolutionary": (1830, None), "foreign-statesmen": (1830, None),
-    "international-counterrevolutionary": (1830, None), "scholar": (1850, None),
+    "world-before-1917": (1800, 1930), "world-interwar": (1895, 1960), "world-cold-war": (1925, None),
+    "scholar": (1850, None),
 }
 ADULT_AGE = 16
 
@@ -378,7 +386,7 @@ def group_question(groups: list[dict]) -> dict:
     return {"type": "choice", "criteria": group_criteria,
             "instructions": "Which dictionary group does this person belong to? Soviet citizens go to the era in which "
                             "their public role peaked; Chinese citizens go to the china-* group of their era or side; "
-                            "people outside both states go to a world group; people of the French Revolution and Napoleon go to france-revolution. Historians researching this history use scholar regardless of nationality; actors or targets in historical events can retain the era of their activity."}
+                            "people outside both states go to the world group of the era in which their public role peaked; people of the French Revolution and Napoleon go to france-revolution. Historians researching this history use scholar regardless of nationality; actors or targets in historical events can retain the era of their activity."}
 
 
 def _text(value, lang: str) -> str:

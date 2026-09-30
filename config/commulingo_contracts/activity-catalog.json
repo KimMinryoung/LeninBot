@@ -1,5 +1,5 @@
 {
-  "version": 16,
+  "version": 17,
   "functions": [
     {
       "id": "political-leadership",
@@ -116,6 +116,7 @@
         "en": "Scholarship and theory"
       },
       "icon": "library",
+      "affiliationOptional": true,
       "criteria": "Historical, social-scientific, philosophical and theoretical research. Legal scholarship and legal theory belong to law. Research subjects and citizenship are not political affiliations."
     },
     {
@@ -143,6 +144,7 @@
         "en": "Literature and arts"
       },
       "icon": "feather",
+      "affiliationOptional": true,
       "criteria": "Literary, visual, musical and performing arts. Administration of censorship belongs to propaganda."
     },
     {
