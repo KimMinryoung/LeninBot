@@ -4,6 +4,10 @@ from copy import deepcopy
 from .patches import canonical
 
 
+class ClassificationUnavailable(RuntimeError):
+    """A dependency failure the author cannot repair by resubmitting prose."""
+
+
 class Decisions:
     def __init__(self, job, current, catalogs, usage, cache=None):
         self.job, self.current, self.catalogs, self.usage = job,current or {},catalogs,usage
@@ -62,8 +66,8 @@ class Decisions:
             return fields, {}
         state = c.term_state(merged) if term else c.person_card_state(merged,excerpts)
         from commulingo.activities import load_catalog
-        key = canonical({'state':state,'person':person,'codes':codes,'term':term,'activity_catalog':load_catalog() if person else None})
-        verdict = self.cache.get(key)
+        cache_key = canonical({'state':state,'person':person,'codes':codes,'term':term,'activity_catalog':load_catalog() if person else None})
+        verdict = self.cache.get(cache_key)
         if verdict is None:
             if term:
                 verdict = await asyncio.to_thread(c.classify_term,merged,decide=self.detailed)
@@ -73,18 +77,19 @@ class Decisions:
             else:
                 verdict = await asyncio.to_thread(c.classify_person_codes,merged,claims=excerpts,decide=self.detailed)
             if verdict is None or (person and verdict.get('person') is None):
-                raise RuntimeError('Jev classification unavailable; saved draft retained for retry, no LLM fallback')
-            self.cache[key] = verdict
+                raise ClassificationUnavailable('Jev classification unavailable; saved draft retained for retry, no LLM fallback')
         out = deepcopy(fields)
         if term:
             out = c.fill_term_category(out,verdict)
         else:
             out = c.fill_person_codes(out,verdict.get('codes') if person else verdict)
             if c.missing_person_codes(out):
-                raise RuntimeError('Jev returned incomplete codes; saved draft retained for retry')
+                self.cache.pop(cache_key, None)
+                raise ClassificationUnavailable('Jev returned incomplete codes; saved draft retained for retry')
             if person:
                 classified = c.fill_classification(out,verdict['person'])
                 for key in ('groupId','role','activities'):
                     if key in classified and (self.job['action']=='create' or not self.current.get(key)):
                         out[key] = classified[key]
+        self.cache[cache_key] = verdict
         return out, verdict

@@ -51,6 +51,22 @@ class LaneHealth(unittest.TestCase):
         self.assertEqual(''.join(chunks),text)
         self.assertTrue(all(len(c.encode('utf-16-le'))//2<=3500 for c in chunks))
 
+    def test_partial_saves_do_not_trigger_rejection_alerts(self):
+        for errors in (0, 30):
+            rows = [{'tool_name': 'commulingo_pipeline_submit_draft', 'result_status': status,
+                     'calls': count, 'scopes': 4, 'reason': reason}
+                    for status, count, reason in [('ok', 123, ''),
+                        ('continued', 13, 'Saved to the draft.'),
+                        ('error', errors, 'Jev classification unavailable')]]
+            with self.subTest(errors=errors), patch.object(health, 'query_json', return_value=rows):
+                lines, alerts = health.tool_rejections('-24h')
+            self.assertEqual(alerts, [])
+            self.assertIn(f'{errors}/{136 + errors}', lines[0])
+            self.assertIn('정상 부분 저장·계속 13회', lines[1])
+            self.assertNotIn('Saved to the draft.', '\n'.join(lines))
+            if errors:
+                self.assertIn('Jev classification unavailable', '\n'.join(lines))
+
     def test_report_separates_window_results_from_current_queue(self):
         value={'applied':1,'escalated':2,'retrying':0,'running':0,'expired_leases':0,
                'pipeline_cost':.2,'today_actual':.8,'today_reserved':0,

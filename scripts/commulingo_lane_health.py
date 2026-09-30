@@ -312,17 +312,21 @@ def tool_rejections(since: str) -> tuple[list[str], list[str]]:
         return [f"도구 통계 조회 실패: {type(exc).__name__}"], ['tool metrics unavailable']
     by_tool = {}
     for row in rows:
-        item = by_tool.setdefault(row['tool_name'], {'total':0,'failed':0,'reasons':[]})
+        item = by_tool.setdefault(row['tool_name'], {'total':0,'failed':0,'continued':0,'reasons':[]})
         item['total'] += row['calls']
-        if row['result_status'] != 'ok':
+        if row['result_status'] == 'continued':
+            item['continued'] += row['calls']
+        elif row['result_status'] != 'ok':
             item['failed'] += row['calls']
             item['reasons'].append(row)
     lines, alerts = [], []
     for tool,item in sorted(by_tool.items(),key=lambda pair:-pair[1]['failed']):
-        if not item['failed']:
+        if not item['failed'] and not item['continued']:
             continue
         rate = item['failed']/item['total']
         lines.append(f"{tool}: 비성공 {item['failed']}/{item['total']} ({rate:.1%})")
+        if item['continued']:
+            lines.append(f"  정상 부분 저장·계속 {item['continued']}회 (비성공 제외)")
         for row in sorted(item['reasons'],key=lambda r:-r['calls'])[:3]:
             reason = ' '.join(row['reason'].split()) or '(상세 사유 없음)'
             lines.append(f"  {row['calls']}회 · {row['result_status']} · {row['scopes']}개 실행 범위: {reason}")
@@ -392,7 +396,18 @@ def bio_length_drift() -> tuple[list[str], list[str]]:
 def pipeline_health(since):
     """Queue and budget state via the digest's existing read-only psql path."""
     boundary = window_boundary(since)
-    sql = f"""SELECT json_build_object(
+    sql = f"""WITH waiting_jobs AS (
+        SELECT j.*,coalesce(nullif(j.last_error,''),a.reason,'') AS wait_reason
+        FROM commulingo_pipeline_jobs j
+        LEFT JOIN LATERAL (
+            SELECT coalesce(nullif(value->>'error',''),nullif(value->>'preflight_error',''),
+                            nullif(value->>'hold_reason',''),nullif(value->>'reason','')) AS reason
+            FROM commulingo_pipeline_artifacts WHERE job_id=j.id
+              AND stage NOT IN ('editor_checkpoint','fetch_failures')
+            ORDER BY id DESC LIMIT 1
+        ) a ON true
+        WHERE j.status IN ('deferred','escalated')
+    ) SELECT json_build_object(
         'approval_records',(SELECT count(*) FROM commulingo_pipeline_artifacts
             WHERE stage='submit' AND value->>'status'='approved' AND created_at>{boundary}),
         'last_publication',(SELECT max(created_at) FROM commulingo_pipeline_artifacts
@@ -432,14 +447,12 @@ def pipeline_health(since):
             WHERE a.stage='submit' AND a.value->>'status'='approved' AND a.created_at>{boundary}
             ORDER BY a.job_id,a.created_at DESC LIMIT 12) p),
         'waiting',(SELECT coalesce(json_agg(w),'[]'::json) FROM (
-            SELECT status,stage,last_error,count(*) AS jobs FROM commulingo_pipeline_jobs
-            WHERE status IN ('deferred','escalated') GROUP BY 1,2,3 ORDER BY count(*) DESC LIMIT 10) w),
+            SELECT status,stage,wait_reason AS last_error,count(*) AS jobs FROM waiting_jobs
+            GROUP BY 1,2,3 ORDER BY count(*) DESC LIMIT 10) w),
         'attention',(SELECT coalesce(json_agg(w),'[]'::json) FROM (
             SELECT id,target,coalesce(payload->>'label',target) AS label,stage,status,attempts,
-                left(coalesce(nullif(last_error,''),(SELECT a.value->>'error'
-                    FROM commulingo_pipeline_artifacts a WHERE a.job_id=j.id AND a.value ? 'error'
-                    ORDER BY a.id DESC LIMIT 1),''),240) AS error,
-                available_at,updated_at FROM commulingo_pipeline_jobs j
+                left(wait_reason,240) AS error,
+                available_at,updated_at FROM waiting_jobs
             WHERE status='escalated' OR (status='deferred' AND attempts>0 AND last_error NOT IN
                 ('draft-only execution','daily budget unavailable','daily budget reserved or spent','canary publication slots exhausted'))
             ORDER BY updated_at DESC LIMIT 6) w),

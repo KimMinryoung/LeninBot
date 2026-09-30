@@ -19,7 +19,7 @@ from .issues import commission, FACTS
 from .patches import canonical, changes, patch_hash, schema_for
 from .source_session import Sources
 from .editor_context import prose_budgets, work_status
-from .decisions import Decisions
+from .decisions import ClassificationUnavailable, Decisions
 
 EDITOR_MAX_ROUNDS = 24
 
@@ -284,6 +284,13 @@ class Editor:
                 research.update(claims=claims,status='ready',reason=value['reason'])
                 box.update(editor_version=2, draft=candidate, research=research)
                 return 'OK: validated patch recorded for independent review'
+            except ClassificationUnavailable as exc:
+                error_kind, last_error = 'classification_unavailable', str(exc)
+                await save_checkpoint()
+                box['dependency_error'] = str(exc)
+                # Complete the tool loop before raising to Engine. A tool-level
+                # exception is otherwise fed back to the author as a repair.
+                return 'Stopped: classification unavailable; draft saved for a later retry.'
             except ValueError as exc:
                 last_error = author.author_error(str(exc))
                 usage.tracker['preflight_failures'] = usage.tracker.get('preflight_failures',0)+1
@@ -380,6 +387,8 @@ class Editor:
             usage=usage,budget=budget,read_wrap=session.wrap,max_rounds=EDITOR_MAX_ROUNDS,
             local_tools=[(author.no_edit_tool,no_edit,True),session.cached_tool(on_read=save_checkpoint),(context_tool,read_context,False)],
             scope_id=f'commulingo_pipeline:{job["id"]}:editor',job=job)
+        if box.get('dependency_error'):
+            raise ClassificationUnavailable(box['dependency_error'])
         if box.get('rebase'):
             return Result(box,'research')
         if box.get('hold_reason'):

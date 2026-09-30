@@ -305,6 +305,13 @@ Jev는 주장과 인용, 검토 finding과 인용의 지지 관계를 판정한�
 `Store`와 engine은 PostgreSQL 대기열, SKIP LOCKED lease, heartbeat, fencing을 공유한다.
 lease를 잃은 작업자는 결과를 저장하지 못한다. 실패는 제한된 횟수만 재시도하고 초과하면 escalated로 남긴다.
 `retry`는 deferred/escalated 작업을 재개한다. editor의 완료 단계 보류도 조사 단계로 복구한다.
+Jev 분류 불가·필수 코드 누락은 초안과 사유를 체크포인트에 저장하고 작성 도구 루프를 종료한 뒤
+engine의 실패 재시도로 넘긴다. 같은 세션에서 작성자에게 재제출을 요구하지 않는다.
+불완전한 코드 판정은 캐시하지 않으며 구 체크포인트에 남은 불완전 캐시도 제거한다.
+`finish_stage`는 deferred/escalated 결과의 error·preflight_error·hold_reason·reason 순으로
+사유를 `last_error`에 보존한다. 정상 진행·완료 시에는 이전 오류를 지운다. 과거 빈 사유는 소급 변경하지 않는다.
+lane health는 과거 `last_error`가 비어 있으면 마지막 단계 artifact의 같은 사유 필드를 읽는다.
+체크포인트·URL 실패 artifact는 제외하며, 마지막 판정 이전의 오래된 검증 오류를 현재 사유로 표시하지 않는다.
 
 예산은 예약과 실제 사용 원장을 기준으로 한다. 비용 미확정 요청의 예약은 임의로 해제하지 않는다.
 일일 한도·검토 몫·단계 예약액은 운영 설정을 따르며 `legacy_shared_budget=true`로 기존 lane과 공유한다.
@@ -386,6 +393,8 @@ Jev 호출 수와 비용은 `jev_calls`·`jev_cost_usd`로 분리한다.
 해결 과제 수는 작성자가 보고하고 검토자가 승인한 값이다. 독립 사후 표본 감사의 오류율은 아직 계측하지 않는다.
 첫 저장 검증률은 처음 전체 검증을 시도한 초안의 `preflight_passed`와 `preflight_failures`로 계산한다.
 부분 저장 호출 수를 반려로 간주하지 않으며, 전체 검증 전 중단은 검증률 분모에 넣지 않는다.
+lane health의 도구 비성공률도 `continued`를 실패에서 제외하고 정상 부분 저장·계속 횟수로
+별도 표시한다. 전체 호출 분모에는 포함하며 rejected/error 등 실제 비성공만 경고 분자에 넣는다.
 `partial_submissions`와 OpenAI 호환 도구 루프의 `malformed_json_calls`·`malformed_json_reasons`를
 시도에 보존한다. JSON 파손은 일반 응답과 강제 최종 응답 모두에서 집계하며, journal에는
 원문 대신 JSON 오류 종류·인자 길이·오류 위치를 남긴다. 효율 보고서의 두 신규 카운터는 배포 후

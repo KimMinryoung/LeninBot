@@ -1,6 +1,7 @@
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import json
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 from commulingo_test_support import EditorCase, citation_result
@@ -769,7 +770,8 @@ class EditorContractTests(EditorCase):
         job = {**JOB,'kind':'person','action':'create','topic':'basics','target':'new-person'}
         async def model(**kwargs):
             await fetch_fixture(kwargs)
-            await kwargs['handler'](person_submission(PERSON_FIELDS))
+            result = await kwargs['handler'](person_submission(PERSON_FIELDS))
+            self.assertIn('Stopped: classification unavailable', result)
         with patch('commulingo.pipeline.service.call',return_value=None) as rpc, \
              patch('commulingo.classify.load_catalogs',return_value=CATALOGS), \
              patch('commulingo.classify.classify_person_card',return_value=None), \
@@ -780,6 +782,74 @@ class EditorContractTests(EditorCase):
         saved = store.save_editor_checkpoint.call_args.args[1]['draft']['args']['fields']
         self.assertEqual(saved['epithet'],PERSON_FIELDS['epithet'])
         self.assertFalse({'groupId','role'} & set(saved))
+        self.assertEqual(store.save_editor_checkpoint.call_args.args[1]['error_kind'],
+                         'classification_unavailable')
+
+    async def test_incomplete_code_cache_is_evicted_and_retried(self):
+        from commulingo.pipeline.decisions import ClassificationUnavailable, Decisions
+        job = {**JOB, 'kind': 'person', 'action': 'update'}
+        current = {'groupId': 'bolshevik', 'role': {'category': 'bolshevik'}}
+        decisions = Decisions(job, current, CATALOGS, Usage())
+        fields = {'citizenship': {'label': {'ko': '소련', 'en': 'Soviet'}}}
+        with patch('commulingo.classify.classify_person_codes', side_effect=[
+                {}, {'citizenship': {'code': 'soviet'}}]) as classify:
+            with self.assertRaises(ClassificationUnavailable):
+                await decisions.classify(fields, [], {})
+            self.assertEqual(decisions.cache, {})
+            out, _ = await decisions.classify(fields, [], {})
+            self.assertEqual(out['citizenship']['code'], 'soviet')
+            self.assertEqual(classify.call_count, 2)
+            # Checkpoints written by the old code may contain incomplete results.
+            key = next(iter(decisions.cache))
+            decisions.cache[key] = {}
+            with self.assertRaises(ClassificationUnavailable):
+                await decisions.classify(fields, [], {})
+            self.assertNotIn(key, decisions.cache)
+
+    async def test_classification_outage_finishes_tool_loop_before_engine_retry(self):
+        from commulingo.pipeline.decisions import ClassificationUnavailable
+        from commulingo.pipeline.stages import model_call
+        from commulingo.pipeline.engine import Engine
+        store, usage = store_mock(), Usage()
+        job = {**JOB, 'kind': 'person', 'action': 'create', 'topic': 'basics',
+               'target': 'new-person', 'attempts': 1}
+
+        async def chat(messages, **kwargs):
+            terminal = kwargs['tool_handlers']['commulingo_pipeline_submit_draft']
+            self.assertIn('Stopped:', await terminal(**person_submission(PERSON_FIELDS)))
+            with self.assertRaisesRegex(ToolRejection, 'stage already completed'):
+                await terminal(**person_submission(PERSON_FIELDS))
+
+        async def model(**kwargs):
+            await fetch_fixture(kwargs)
+            kwargs['reads'] = ()
+            await model_call(**kwargs)
+
+        binding = SimpleNamespace(chat=chat, client=None, model='fixture',
+                                  render_provider='deepseek', reasoning={})
+        with patch('bot_config.resolve_agent_tool_loop', return_value=binding), \
+             patch('commulingo.pipeline.service.call', return_value=None), \
+             patch('commulingo.classify.load_catalogs', return_value=CATALOGS), \
+             patch('commulingo.classify.classify_person_card', return_value=None) as classify, \
+             patch('commulingo.pipeline.stages.model_call', side_effect=model):
+            with self.assertRaises(ClassificationUnavailable):
+                await Editor(store)(job, [], usage, .2)
+        self.assertTrue(usage.complete)
+        self.assertEqual(classify.call_count, 1)
+        self.assertNotIn('preflight_failures', usage.tracker)
+
+        # The dependency exception reaches the bounded engine retry policy.
+        store.claim.return_value = job
+        store.detail.return_value = {'artifacts': []}
+        async def failed_stage(job, artifacts, usage, budget):
+            raise ClassificationUnavailable('Jev classification unavailable')
+        result = await Engine(store, {'research': failed_stage}).run_one()
+        self.assertEqual(result['status'], 'error')
+        self.assertFalse(store.defer.call_args.kwargs['escalate'])
+        store.finish_stage.assert_not_called()
+        job['attempts'] = 3
+        await Engine(store, {'research': failed_stage}).run_one()
+        self.assertTrue(store.defer.call_args.kwargs['escalate'])
 
     async def test_existing_person_classification_is_not_reassigned(self):
         from commulingo.pipeline.decisions import Decisions

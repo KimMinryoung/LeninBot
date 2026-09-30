@@ -364,13 +364,15 @@ class Store:
                 raise LostLease(str(job['id']))
 
     def finish_stage(self, job, value, *, next_stage, status='ready', usage=None, delay_seconds=0):
+        reason = (value.get('error') or value.get('preflight_error') or value.get('hold_reason')
+                  or value.get('reason') or '') if status in {'deferred', 'escalated'} else ''
         with self.transaction() as cur:
             cur.execute('''UPDATE commulingo_pipeline_jobs SET stage=%s,status=%s,
-                lease_token=NULL,lease_until=NULL,last_error='',updated_at=now(),attempts=0,
+                lease_token=NULL,lease_until=NULL,last_error=%s,updated_at=now(),attempts=0,
                 available_at=now()+%s*interval '1 second'
                 WHERE id=%s AND lease_token=%s AND status='running'
                   AND lease_until>now() RETURNING id''',
-                (next_stage, status, delay_seconds,job['id'], job['lease_token']))
+                (next_stage, status, str(reason)[:2000], delay_seconds,job['id'], job['lease_token']))
             if not cur.fetchone():
                 raise LostLease(str(job['id']))
             metrics = {k:v for k,v in (usage or {}).items() if k in

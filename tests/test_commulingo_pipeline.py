@@ -15,6 +15,29 @@ from commulingo.pipeline.engine import Engine, Result
 from commulingo.pipeline.store import Store, LostLease, BudgetUnavailable
 
 
+class StageReasonTests(unittest.TestCase):
+    def test_waiting_reason_is_saved_but_progress_clears_it(self):
+        cursor = Mock()
+        @contextmanager
+        def transaction():
+            yield cursor
+        store = Store(connect=Mock())
+        store.transaction = transaction
+        job = {'id': 42, 'lease_token': 'lease', 'stage': 'review', 'payload': {}}
+        for status, value, expected in (
+                ('escalated', {'hold_reason': 'unchanged rejected patch'}, 'unchanged rejected patch'),
+                ('escalated', {'reason': 'conflicting sources'}, 'conflicting sources'),
+                ('deferred', {'error': 'dependency unavailable'}, 'dependency unavailable'),
+                ('ready', {'reason': 'previous issue'}, ''),
+                ('complete', {'reason': 'no edit needed'}, '')):
+            with self.subTest(status=status, value=value):
+                cursor.reset_mock()
+                store.finish_stage(job, value, next_stage='complete', status=status)
+                sql, params = cursor.execute.call_args_list[0].args
+                self.assertIn('last_error=%s', sql)
+                self.assertEqual(params[2], expected)
+
+
 class EvidenceTests(unittest.TestCase):
     def test_person_create_rejects_update_only_fields_in_tool_schema(self):
         from jsonschema import Draft202012Validator
