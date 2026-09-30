@@ -3048,7 +3048,10 @@ def _run_edit(target_type: str, action: str, target_id: str, patch: dict,
             from commulingo.classify import (classify_person, classify_person_card, classify_person_codes,
                                                           fill_classification, fill_person_codes, missing_person_codes)
             needs_codes = bool(missing_person_codes(fields))
-            needs_group = action == "create" and not (fields.get("groupId") and fields.get("role"))
+            # A new person is registered with documented activities (the frontend
+            # refuses a create without them); a writer-supplied legacy role does
+            # not skip the activity classification.
+            needs_group = action == "create" and not (fields.get("groupId") and fields.get("activities"))
             if needs_codes and needs_group:
                 card = classify_person_card(fields) or {}   # one request for the whole card
                 codes, classification = card.get("codes"), card.get("person")
@@ -3491,9 +3494,9 @@ _COMMULINGO_FIELD_SCHEMA = {
             "type": ["object", "null"], "additionalProperties": False,
             "minProperties": 1, "maxProperties": 1,
             "description": (
-                "Exactly one of officeId or category (categoryId aliases category). "
-                "Category ids: commulingo_people(action='list_categories'); office ids: "
-                "action='list_offices'. null clears the role."
+                "Legacy classification, optional and being retired: new people are "
+                "registered with documented activities instead. Exactly one of officeId or "
+                "category (categoryId aliases category). null clears the role."
             ),
             "properties": {"officeId": {"type": "string"}, "category": {"type": "string"}, "categoryId": {"type": "string"}, "icon": {"type": "string"}},
         },
