@@ -29,6 +29,7 @@ transient retry absorbs restart blips.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -407,6 +408,13 @@ def normalize_billing_response(provider: str, payload: dict, days: int) -> dict:
     }
 
 
+# SSE events that end a complete response (OpenAI chat, Anthropic, Responses).
+_STREAM_TERMINAL_MARKERS = (
+    b"data: [DONE]", b"event: message_stop", b"event: response.completed",
+)
+_TERMINAL_TAIL_BYTES = max(len(m) for m in _STREAM_TERMINAL_MARKERS)
+
+
 async def relay_and_record(
     upstream: httpx.Response, *, caller: str | None, provider: str | None,
     model: str | None, label: str, started: float,
@@ -423,18 +431,29 @@ async def relay_and_record(
     """
     bytes_out = 0
     outcome = None
+    tail = b""
+    terminal_seen = False
     try:
         async for chunk in upstream.aiter_raw():
             bytes_out += len(chunk)
+            if not terminal_seen:
+                window = tail + chunk
+                terminal_seen = any(m in window for m in _STREAM_TERMINAL_MARKERS)
+                tail = window[-_TERMINAL_TAIL_BYTES:]
             yield chunk
     except GeneratorExit:
-        outcome = "client disconnected mid-stream"
+        if not terminal_seen:
+            outcome = "client disconnected mid-stream"
         raise
     except BaseException as e:  # CancelledError included — the row must be truthful
-        detail = str(e)
-        outcome = f"stream aborted: {e.__class__.__name__}" + (
-            f": {detail}" if detail else ""
-        )
+        # A client that closes right after the terminal event (SDKs stop at
+        # [DONE]/message_stop) cancels us while upstream is still closing;
+        # the response was delivered whole, so that is not a failure.
+        if not (terminal_seen and isinstance(e, asyncio.CancelledError)):
+            detail = str(e)
+            outcome = f"stream aborted: {e.__class__.__name__}" + (
+                f": {detail}" if detail else ""
+            )
         raise
     finally:
         await upstream.aclose()

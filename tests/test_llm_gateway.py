@@ -5,6 +5,7 @@ No DB, no API keys: the DB sink is disabled via LENINBOT_LLM_AUDIT_DB=0
 lookups are patched.
 """
 
+import asyncio
 import json
 import os
 import sys
@@ -628,6 +629,32 @@ class TestProxyStreamAudit(unittest.TestCase):
         kwargs = rec.call_args.kwargs
         self.assertEqual(kwargs["status"], "error")
         self.assertIn("client disconnected", kwargs["error_excerpt"])
+
+
+    def _cancel_after(self, upstream, n):
+        async def consume():
+            gen = self._relay(upstream)
+            for _ in range(n):
+                await gen.__anext__()
+            await gen.athrow(asyncio.CancelledError())
+
+        with patch("llm_proxy.app.record_llm_call") as rec:
+            with self.assertRaises(asyncio.CancelledError):
+                self._run(consume())
+        return rec.call_args.kwargs
+
+    def test_cancel_after_terminal_event_records_ok(self):
+        # The marker is split across chunks, as TCP framing may deliver it.
+        upstream = _FakeUpstream([b'data: {"x":1}\n\ndata: [DO', b"NE]\n\n", b""])
+        kwargs = self._cancel_after(upstream, 2)
+        self.assertEqual(kwargs["status"], "ok")
+        self.assertIsNone(kwargs["error_excerpt"])
+
+    def test_cancel_before_terminal_event_records_error(self):
+        upstream = _FakeUpstream([b'data: {"x":1}\n\n', b"data: [DONE]\n\n"])
+        kwargs = self._cancel_after(upstream, 1)
+        self.assertEqual(kwargs["status"], "error")
+        self.assertIn("stream aborted: CancelledError", kwargs["error_excerpt"])
 
 
 class TestPolicyLoading(unittest.TestCase):

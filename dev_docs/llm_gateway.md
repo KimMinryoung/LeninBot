@@ -197,6 +197,10 @@ Gemini는 `models/{model}:method` URL 경로(퍼센트 인코딩 포함)에서 �
 결말을 반영하고(업스트림 중단 `stream aborted: …`와 클라이언트 이탈
 `client disconnected mid-stream`을 error_excerpt로 구분), latency_ms는 스트림
 전체 시간이다. 헤더 도착·스트림 종료는 각각 journald 로그 라인도 남긴다.
+종료 이벤트(`data: [DONE]`, `event: message_stop`, `event: response.completed`)를
+이미 전달한 뒤의 클라이언트 이탈·취소는 ok로 기록한다(2026-10-01). SDK가 종료
+이벤트에서 읽기를 멈추고 연결을 닫아 upstream 종료 대기 중인 relay가 취소되던
+경우로, 응답은 완전히 전달됐는데 주 30여 건이 `stream aborted: CancelledError`로 남았다.
 
 ## 운영 CLI
 
