@@ -65,7 +65,7 @@ def fixture(sync):
             {"id": "smoke-b-old", "group_id": "smoke-era", "name_ko": "스모크 인물 베타 구버전", "name_en": "Smoke Person Beta Old"},
         ],
         person_aliases=[{"person_id": "smoke-a", "lang": "en", "alias": "S. Alpha"}],
-        career=[{"person_id": "smoke-a", "sort_order": 0, "period_label": "1930–35", "role_ko": "스모크 위원"}],
+        career=[{"person_id": "smoke-a", "sort_order": 0, "start_year": 1930, "end_year": 1935, "role_ko": "스모크 위원"}],
         people_groups=[{"id": "smoke-era", "range_label": "1900–1950", "title_ko": "스모크 시대의 사람들", "title_en": "Smoke era"}],
         offices=[{"id": "smoke-office", "title_ko": "스모크 기관", "title_en": "Smoke office", "blurb_ko": "테스트 기관"}],
         office_rows=[{"id": 990001, "office_id": "smoke-office", "period_label": "1930–1935", "start_year": 1930,

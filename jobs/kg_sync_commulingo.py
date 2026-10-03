@@ -28,6 +28,7 @@ carrying the old id is merged into the canonical one.
 """
 
 from __future__ import annotations
+from commulingo.periods import format_period
 
 import json
 import logging
@@ -124,7 +125,7 @@ def person_summary(p: dict, career: list[dict]) -> str:
         role = _clean(c.get("role_ko"))
         if not role:
             continue
-        period = _clean(c.get("period_label"))
+        period = _clean(format_period(c))
         lines.append(f"{period} {role}".strip())
     if lines:
         parts.append("주요 경력: " + "; ".join(lines))
@@ -337,7 +338,7 @@ def build_facts(src: Source, *, changed: dict[str, set[str]] | None = None) -> l
             continue
         ps = src.person(pid)
         os_ = office_side(office)
-        period = _clean(row.get("period_label"))
+        period = _clean(format_period(row))
         body = _clean(row.get("body_ko") or row.get("body_en"))
         facts.append(make_fact(
             ps, "Affiliation", os_,
@@ -453,7 +454,7 @@ def load_source() -> Source:
     return Source(
         people=q("SELECT * FROM commulingo_people"),
         person_aliases=q("SELECT person_id, lang, alias FROM commulingo_person_aliases ORDER BY sort_order"),
-        career=q("SELECT person_id, sort_order, period_label, start_year, end_year, role_ko, role_en FROM commulingo_person_career_entries"),
+        career=q("SELECT * FROM commulingo_person_career_entries"),
         people_groups=q("SELECT * FROM commulingo_people_groups"),
         offices=q("SELECT id, sort_order, range_label, title_ko, title_en, blurb_ko, blurb_en FROM commulingo_offices"),
         office_rows=q("SELECT * FROM commulingo_office_rows"),

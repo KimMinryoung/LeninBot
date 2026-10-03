@@ -18,6 +18,7 @@ from urllib.request import urlopen
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from commulingo.activities import activity_questions, activity_evidence, activity_basis_question, load_catalog
+from commulingo.periods import career_period_text
 from llm.call_registry import decide_detailed
 
 FEATURE = 'commulingo_classification_audit'
@@ -28,7 +29,7 @@ PUBLIC_URL = 'https://cyber-lenin.com/en/commulingo/api/people'
 def prepare(person, catalog, threshold):
     # Only public biography fields reach Jev. Existing assignments are excluded.
     state = {k: person.get(k) for k in ('name', 'years', 'epithet', 'bio')}
-    state['career'] = [{'y': c.get('y'), 'r': c.get('r')} for c in person.get('career', [])]
+    state['career'] = [{'y': career_period_text(c), 'r': c.get('r')} for c in person.get('career', [])]
     evidence = activity_evidence({'evidence': [
         {**e, 'field': 'activities'} for a in person.get('activities', [])
         for e in a.get('evidence', [])]})

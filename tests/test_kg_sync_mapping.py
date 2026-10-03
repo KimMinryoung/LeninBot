@@ -33,13 +33,13 @@ def _source():
         ],
         person_aliases=[{"person_id": "khrushchev", "lang": "en", "alias": "Khrushchev"},
                         {"person_id": "khrushchev", "lang": "ko", "alias": "흐루쇼프"}],
-        career=[{"person_id": "khrushchev", "sort_order": 0, "period_label": "1953–64", "role_ko": "제1서기"},
-                {"person_id": "khrushchev", "sort_order": 1, "period_label": "1958–64", "role_ko": "각료회의 의장"}],
+        career=[{"person_id": "khrushchev", "sort_order": 0, "start_year": 1953, "end_year": 1964, "role_ko": "제1서기"},
+                {"person_id": "khrushchev", "sort_order": 1, "start_year": 1958, "end_year": 1964, "role_ko": "각료회의 의장"}],
         people_groups=[{"id": "thaw", "range_label": "1953–1985", "title_ko": "해빙과 정체의 사람들", "title_en": "People of the thaw"},
                        {"id": "stalin-era", "range_label": "1929–1953", "title_ko": "스탈린 시대의 사람들", "title_en": "Stalin era"}],
         offices=[{"id": "party-leadership", "title_ko": "당 지도부", "title_en": "Party leadership", "blurb_ko": "서기장 계보"},
                  {"id": "state-security", "title_ko": "국가보안 기관", "title_en": "State security agencies"}],
-        office_rows=[{"id": 2, "office_id": "party-leadership", "period_label": "1953–1964", "start_year": 1953,
+        office_rows=[{"id": 2, "office_id": "party-leadership", "start_year": 1953,
                       "start_month": None, "end_year": 1964, "end_month": 10, "body_ko": "제1서기 · 각료회의 의장",
                       "person_id": "khrushchev"}],
         events=[{"id": "great-terror", "period_label": "1936–1938", "title_ko": "대숙청", "title_en": "The Great Terror",
@@ -69,7 +69,7 @@ class SideTests(unittest.TestCase):
             self.assertIn(alias, ps["aliases"])
         self.assertNotIn("니키타 흐루쇼프", ps["aliases"])
         self.assertIn("1894–1971", ps["summary"])
-        self.assertIn("주요 경력: 1953–64 제1서기; 1958–64 각료회의 의장", ps["summary"])
+        self.assertIn("주요 경력: 1953–1964 제1서기; 1958–1964 각료회의 의장", ps["summary"])
         self.assertIn("최후: 실각", ps["summary"])
         self.assertEqual(ps["name_en"], "Nikita Khrushchev")
 

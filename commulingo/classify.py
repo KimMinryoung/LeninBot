@@ -18,6 +18,7 @@ The group criteria carry the editorial rules the operator confirmed on
 imports the same rules so the two never drift.
 """
 from __future__ import annotations
+from commulingo.periods import career_period_text
 
 import logging
 import re
@@ -415,7 +416,7 @@ def state_from_fields(fields: dict) -> dict:
             "citizenship": (fields.get("citizenship") or {}).get("code") or _text((fields.get("citizenship") or {}).get("label"), "en"),
             "national_origin": origin.get("code") or _text(origin.get("label"), "en"),
             "epithet": _text(fields.get("epithet"), "ko"),
-            "career": [f"{_text(c.get('r'), 'ko')} ({c.get('y')})" for c in career if isinstance(c, dict)],
+            "career": [f"{_text(c.get('r'), 'ko')} ({career_period_text(c)})" for c in career if isinstance(c, dict)],
             "bio_ko": joined(fields.get("bio"), "ko"), "bio_en": joined(fields.get("bio"), "en"),
             "moment_ko": joined(fields.get("moment"), "ko"),
             "fate": (fate.get("kind") or "") + (" · " + _text(fate.get("label"), "ko") if fate.get("label") else "")}

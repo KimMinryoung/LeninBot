@@ -36,6 +36,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 FEATURE = "commulingo_classification_audit"
 from commulingo.classify import group_question, groups_for_years  # noqa: E402  shared editorial rules
+from commulingo.periods import format_period  # noqa: E402
 
 # stored→judged pairs the operator has accepted as boundary judgements; a
 # disagreement on these lines is not reported (2026-09-19 decisions).
@@ -48,8 +49,8 @@ ACCEPTED_PAIRS = {("old-regime", "world-before-1917"), ("old-regime", "world-int
 def load_people(limit: int | None) -> list[dict]:
     from db import query
     sql = """SELECT p.id, p.name_ko, p.years_label, p.epithet_ko, p.bio_ko, p.bio_en, p.group_id, p.citizenship_code,
-                    (SELECT json_agg(json_build_object('t', e.role_ko, 'y', e.period_label) ORDER BY e.sort_order)
-                       FROM (SELECT role_ko, period_label, sort_order FROM commulingo_person_career_entries
+                    (SELECT json_agg(json_build_object('t', e.role_ko, 'row', to_jsonb(e)) ORDER BY e.sort_order)
+                       FROM (SELECT * FROM commulingo_person_career_entries
                              WHERE person_id = p.id ORDER BY sort_order LIMIT 8) e) AS career
              FROM commulingo_people p
              WHERE p.bio_ko IS NOT NULL ORDER BY p.id""" + (f" LIMIT {int(limit)}" if limit else "")
@@ -58,7 +59,7 @@ def load_people(limit: int | None) -> list[dict]:
 
 def state_of(p: dict) -> dict:
     return {"name": p["name_ko"], "years": p["years_label"], "citizenship": p["citizenship_code"], "epithet": p["epithet_ko"],
-            "career": [f"{c.get('t')} ({c.get('y')})" for c in (p.get("career") or [])],
+            "career": [f"{c.get('t')} ({format_period(c.get('row'))})" for c in (p.get("career") or [])],
             "bio_ko": p["bio_ko"], "bio_en": p["bio_en"]}
 
 

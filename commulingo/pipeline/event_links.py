@@ -24,6 +24,7 @@ import logging
 import re
 import uuid
 
+from commulingo.periods import format_period
 from commulingo.relation_kinds import HISTORY_RELATION_KINDS, SIDE_RULE, definitions_text
 
 from .store import BudgetUnavailable
@@ -154,7 +155,7 @@ def sides_brief(event):
 
 def card_text(person, career, sections):
     parts = [person.get(k) or '' for k in ('epithet_ko', 'epithet_en', 'bio_ko', 'bio_en', 'moment_ko', 'moment_en')]
-    parts += [' '.join(filter(None, (c.get('period_label'), c.get('role_ko'), c.get('role_en')))) for c in career]
+    parts += [' '.join(filter(None, (c.get('period'), c.get('role_ko'), c.get('role_en')))) for c in career]
     for s in sections:
         parts += [s.get('heading_ko') or '', (s.get('body_ko') or '')[:SECTION_CHARS],
                   s.get('heading_en') or '', (s.get('body_en') or '')[:SECTION_CHARS]]
@@ -372,9 +373,9 @@ class EventLinker:
         with self.store.transaction() as cur:
             cur.execute('SELECT * FROM commulingo_people WHERE id=%s', (person_id,))
             person = cur.fetchone()
-            cur.execute('''SELECT period_label, role_ko, role_en FROM commulingo_person_career_entries
+            cur.execute('''SELECT * FROM commulingo_person_career_entries
                 WHERE person_id=%s ORDER BY sort_order, start_year NULLS LAST''', (person_id,))
-            career = cur.fetchall()
+            career = [{**row, 'period': format_period(row)} for row in cur.fetchall()]
             cur.execute('''SELECT heading_ko, heading_en, body_ko, body_en FROM commulingo_person_sections
                 WHERE person_id=%s ORDER BY sort_order''', (person_id,))
             sections = cur.fetchall()

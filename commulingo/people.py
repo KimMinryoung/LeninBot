@@ -41,6 +41,7 @@ from psycopg2.extras import RealDictCursor, execute_values
 from db import query as db_query, query_one as db_query_one, get_conn
 from ops.paths import COMMULINGO_DATA_DIR, commulingo_data_file
 from tool_gateway.results import ToolFailure
+from commulingo.periods import PERIOD_COLUMNS, PERIOD_SCHEMA, format_period, period_columns
 from commulingo.person_service import call_person_service
 
 logger = logging.getLogger(__name__)
@@ -307,7 +308,7 @@ _LOCALIZED_PERSON_KEYS = ("name", "givenName", "familyName", "epithet", "bio", "
 _LOCALIZED_OFFICE_ROW_KEYS = ("body", "name", "note")
 
 _OFFICE_ROW_PATCH_KEYS = frozenset({
-    "sortOrder", "years", "period", "body", "personId", "name", "note",
+    "sortOrder", "period", "body", "personId", "name", "note",
 })
 
 # Long-form detail sections rendered on /commulingo/people/<id>.
@@ -690,13 +691,13 @@ def _office_snapshot(cur, office_id: str) -> dict | None:
         return None
     office = dict(office)
     cur.execute(
-        """SELECT id AS row_id, period_label, body_ko, body_en, person_id,
+        f"""SELECT id AS row_id, {', '.join(PERIOD_COLUMNS)}, body_ko, body_en, person_id,
                   name_ko, name_en, note_ko, note_en
            FROM commulingo_office_rows
            WHERE office_id = %s ORDER BY sort_order, id""",
         (office_id,),
     )
-    office["rows"] = [dict(r) for r in cur.fetchall()]
+    office["rows"] = [{**dict(r), "years": format_period(r)} for r in cur.fetchall()]
     return office
 
 
@@ -706,7 +707,7 @@ def _get_person(person_id: str) -> dict | None:
     if person:
         person["office_rows"] = [
             {"row_id": r["id"], "office_id": r["officeId"], "office_title_ko": r["officeTitle"]["ko"],
-             "period_label": r["years"], "body_ko": r["body"]["ko"], "note_ko": r["note"]["ko"]}
+             "period": r.get("period"), "years": (r.get("years") or {}).get("ko", ""), "body_ko": r["body"]["ko"], "note_ko": r["note"]["ko"]}
             for r in person.get("institutionRows", [])
         ]
         person["sections"] = [
@@ -1503,34 +1504,6 @@ def _existing_person_match(cur, target_id: str, patch: dict) -> dict | None:
     return None
 
 
-def _parse_date_token(token: str, fallback_year: int | None):
-    token = (token or "").strip()
-    if not token:
-        return None
-    if re.match(r"^\d{1,2}$", token) and fallback_year:
-        return {"year": fallback_year, "month": int(token)}
-    m = re.match(r"^(\d{3,4})(?:\.(\d{1,2}))?$", token)
-    if not m:
-        return None
-    return {"year": int(m.group(1)), "month": int(m.group(2)) if m.group(2) else None}
-
-
-def _period_columns(label: str) -> tuple:
-    """(start_year, start_month, end_year, end_month) — port of parsePeriod."""
-    first = (label or "").split(",")[0].strip()
-    parts = [p.strip() for p in re.split(r"[–-]", first) if p.strip()]
-    if not parts:
-        return None, None, None, None
-    start = _parse_date_token(parts[0], None)
-    end = _parse_date_token(parts[1] if len(parts) > 1 else "", start["year"] if start else None)
-    return (
-        start["year"] if start else None,
-        start["month"] if start else None,
-        end["year"] if end else None,
-        end["month"] if end else None,
-    )
-
-
 def _write_revision(cur, entity_type: str, entity_id: str, note: str, snapshot, changed_by: str):
     cur.execute(
         """INSERT INTO commulingo_people_revisions
@@ -1557,16 +1530,15 @@ def _apply_office_row_create(cur, office_id: str, patch: dict) -> int:
     )
     next_sort = cur.fetchone()["next_sort"]
     sort_order = patch["sortOrder"] if isinstance(patch.get("sortOrder"), int) else next_sort
-    label = patch.get("years") or patch.get("period") or ""
-    sy, sm, ey, em = _period_columns(label)
+    period = period_columns(patch.get("period"))
     cur.execute(
-        """INSERT INTO commulingo_office_rows
-              (office_id, sort_order, period_label, start_year, start_month, end_year, end_month,
+        f"""INSERT INTO commulingo_office_rows
+              (office_id, sort_order, {', '.join(PERIOD_COLUMNS)},
                body_ko, body_en, person_id, name_ko, name_en, note_ko, note_en, updated_at)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NULLIF(%s, ''), %s, %s, %s, %s, NOW())
+           VALUES (%s, %s, {', '.join(['%s'] * len(PERIOD_COLUMNS))}, %s, %s, NULLIF(%s, ''), %s, %s, %s, %s, NOW())
            RETURNING id""",
         (
-            office_id, sort_order, label, sy, sm, ey, em,
+            office_id, sort_order, *(period[c] for c in PERIOD_COLUMNS),
             _localized(patch.get("body"), "ko"), _localized(patch.get("body"), "en"),
             patch.get("personId") or "",
             _localized(patch.get("name"), "ko"), _localized(patch.get("name"), "en"),
@@ -1588,14 +1560,9 @@ def _apply_office_row_update(cur, row_id: int, patch: dict) -> None:
             set_col("sort_order", int(patch.get("sortOrder")))
         except (TypeError, ValueError):
             set_col("sort_order", 0)
-    if "years" in patch or "period" in patch:
-        label = patch.get("years") or patch.get("period") or ""
-        sy, sm, ey, em = _period_columns(label)
-        set_col("period_label", label)
-        set_col("start_year", sy)
-        set_col("start_month", sm)
-        set_col("end_year", ey)
-        set_col("end_month", em)
+    if "period" in patch:
+        for column, value in period_columns(patch["period"]).items():
+            set_col(column, value)
     if "body" in patch:
         set_col("body_ko", _localized(patch.get("body"), "ko"))
         set_col("body_en", _localized(patch.get("body"), "en"))
@@ -1863,16 +1830,18 @@ def _check_person_structured_fields(patch: dict) -> str | None:
             )
     if "career" in patch and patch["career"] is not None:
         if not isinstance(patch["career"], list):
-            return "Error: career must be a list of {y, r} entries."
+            return "Error: career must be a list of {period, r} entries."
         for i, entry in enumerate(patch["career"]):
-            if (not isinstance(entry, dict)
-                    or not (entry.get("y") or entry.get("period"))
-                    or not isinstance(entry.get("r") or entry.get("role"), dict)):
+            if not isinstance(entry, dict) or not isinstance(entry.get("r") or entry.get("role"), dict):
                 return (
-                    f"Error: career[{i}] must be {{\"y\": \"1922–1953\", "
-                    "\"r\": {\"ko\": \"...\", \"en\": \"...\"}}} — other shapes would "
-                    "be stored as empty rows."
+                    f"Error: career[{i}] must be {{\"period\": {{\"start\": [1922], \"end\": [1953]}}, "
+                    "\"r\": {\"ko\": \"...\", \"en\": \"...\"}}}."
                 )
+            try:
+                period_columns(entry.get("period"))
+            except ValueError as exc:
+                return f"Error: career[{i}].{exc}"
+
     if "fate" in patch and patch["fate"] is not None:
         fate = patch["fate"]
         if not isinstance(fate, dict):
@@ -2508,6 +2477,13 @@ def _validate_term(cur, action: str, target_id: str, patch: dict) -> str | None:
 
 
 def _validate_office_row(cur, action: str, target_id: str, patch: dict) -> str | None:
+    if "years" in patch:
+        return "Error: office row years is read-only text; send period {start: [year, month?, day?], end, ...}."
+    if action == "create" or "period" in patch:
+        try:
+            period_columns(patch.get("period"))
+        except ValueError as exc:
+            return f"Error: {exc}"
     for key in _LOCALIZED_OFFICE_ROW_KEYS:
         if key in patch and patch[key] is not None and not isinstance(patch[key], dict):
             return (
@@ -3444,8 +3420,8 @@ _COMMULINGO_FIELD_SCHEMA = {
             "type": "array",
             "items": {
                 "type": "object", "additionalProperties": False,
-                "properties": {"y": {"type": "string"}, "r": _BILINGUAL_TEXT_SCHEMA},
-                "required": ["y", "r"],
+                "properties": {"period": PERIOD_SCHEMA, "r": _BILINGUAL_TEXT_SCHEMA},
+                "required": ["period", "r"],
             },
         },
         "activities": json.loads(commulingo_data_file("activity-schema.json", "COMMULINGO_ACTIVITY_SCHEMA").read_text()),
@@ -3786,7 +3762,7 @@ _COLLECTION_SCHEMAS = {
     "aliasEdits": {"lang": {"type": "string", "enum": ["ko", "en"]}, "value": {"type": "string"}, "replacement": {"type": "string"}},
     "sceneEdits": {"scene": _PAIR_SCHEMA, "replacement": _PAIR_SCHEMA},
     "careerEdits": {"id": {"type": "string"}, "entry": {"type": "object", "properties": {
-        "y": {"type": "string"}, "r": _BILINGUAL_TEXT_SCHEMA}, "additionalProperties": False}},
+        "period": PERIOD_SCHEMA, "r": _BILINGUAL_TEXT_SCHEMA}, "additionalProperties": False}},
 }
 for _key, _properties in _COLLECTION_SCHEMAS.items():
     _COMMULINGO_FIELD_SCHEMA["properties"][_key] = {"type": "array", "maxItems": 100,
@@ -3823,7 +3799,7 @@ _TERM_NARROW_KEYS = (
 # means to replace it — hence 'sources' is writable only on update.
 _TERM_UPDATE_NARROW_KEYS = _TERM_NARROW_KEYS + ("sources",)
 _OFFICE_ROW_NARROW_KEYS = (
-    "sortOrder", "years", "body", "personId", "name", "note",
+    "sortOrder", "body", "personId", "name", "note",
 )
 
 _CITATIONS_SCHEMA = {
@@ -3979,7 +3955,8 @@ COMMULINGO_OFFICE_ROW_SAVE_TOOL = {
         "properties": {
             "action": {"type": "string", "enum": ["create", "update"]},
             "target_id": {"type": "string"},
-            "fields": _narrow_fields_schema(_OFFICE_ROW_NARROW_KEYS),
+            "fields": (lambda schema: {**schema, "properties": {**schema["properties"], "period": PERIOD_SCHEMA}})(
+                _narrow_fields_schema(_OFFICE_ROW_NARROW_KEYS)),
             "citations": _CITATIONS_SCHEMA,
             "confidence": {"type": "number", "minimum": 0, "maximum": 1},
         },
