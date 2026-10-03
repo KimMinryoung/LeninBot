@@ -16,6 +16,7 @@ class WriteContractTests(unittest.TestCase):
         self.cursor.fetchone.return_value = None
         self.term = {
             'term': {'ko': '전시 공산주의', 'en': 'War communism'},
+            'original': 'Военный коммунизм',
             'definition': {'ko': '전시 경제정책이다.', 'en': 'A wartime economic policy.'},
             'aliases': {'ko': [], 'en': []},
             'period': {'ko': '1918–1921', 'en': '1918–1921'},
@@ -39,6 +40,11 @@ class WriteContractTests(unittest.TestCase):
                 if category is None:
                     fields.pop('category')
                 self.assertIn(message, people._validate(self.cursor, 'term', 'create', 'fixture', fields))
+
+    def test_term_create_requires_original(self):
+        for original in (None, '', '  '):
+            patch = {**self.term, 'original': original}
+            self.assertIn('patch.original is required', people._validate(self.cursor, 'term', 'create', 'fixture', patch))
 
     def test_dated_terms_require_ordered_years_and_bilingual_period(self):
         for update, message in (({'period': None}, 'period is required'),

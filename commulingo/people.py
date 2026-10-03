@@ -2443,6 +2443,11 @@ def _check_term_create(cur, target_id: str, patch: dict) -> str | None:
         return "Error: patch.term.ko and patch.term.en are required for term create."
     if not (isinstance(definition, dict) and definition.get("ko") and definition.get("en")):
         return "Error: patch.definition.ko and patch.definition.en are required for term create."
+    # The term page heads with the original-language form; batches without it
+    # left 104 terms headless (2026-10-03).
+    if not str(patch.get("original") or "").strip():
+        return ("Error: patch.original is required for term create: the name in its original language and script "
+                "(ГУЛАГ, Club des Cordeliers, Đổi Mới, 九评苏共中央的公开信); a Korean term takes Korean with hanja.")
     # An alias or name colliding with an existing term means this is the
     # same concept under a different slug.
     candidates = {term.get("ko"), term.get("en")}
