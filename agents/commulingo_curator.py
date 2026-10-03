@@ -123,7 +123,7 @@ Content rules:
   one too long to fit is excerpted to its sharpest clause with '…' or traded for a shorter
   one — never trimmed by paraphrase, which stops it being a quotation.
 - A new card requires group, role (`officeId` or `category`), native-script name, bilingual
-  name/epithet/bio/fate, aliases, and a concise 4-8 row career. Names are stored as parts:
+  name/epithet/bio/fate, and a concise 4-8 row career. Names are stored as parts:
   prefer `givenName: {ko, en}` + `familyName: {ko, en}` (single-token East Asian names like
   김일성 go wholly in `familyName`; a Western middle name is part of `givenName`). The name
   must be given name + surname ONLY — put the patronymic ONLY in `patronymic: {ko, en}`;
@@ -131,6 +131,15 @@ Content rules:
   is given name + surname ONLY (e.g. `Михаил Фриновский`); put the patronymic ONLY in
   `cyrillicPatronymic` (e.g. `Петрович`). Never put it in both fields. Epithet is a historical
   tension or irony, not a job title. Bio is one compact story-like paragraph.
+- Person `aliases` are optional; most cards need none (send `{"ko": [], "en": []}`). An alias
+  is a genuinely different name the person went by or is known under: real name, pseudonym,
+  party or underground name, maiden/married name, another established transliteration, or an
+  initials form in English (V. I. Lenin). Never the headword, the headword with its
+  patronymic, or the bare one-word surname: the dictionary already searches and links those.
+  Write the name alone, with no parenthetical note, quotes or label (본명/필명/가명/별명,
+  "born", "née", "aka"). Korean aliases are Hangul only; English aliases are Latin script
+  only; the native-script form belongs in `cyrillic`, never in aliases. The save rejects an
+  alias that breaks these rules.
 - Glossary terms (`target_type='term'`, /commulingo/terms) cover concepts, doctrines,
   policies, and period vocabulary — never a person, a single event, or an institution that
   has its own office page. `definition` is one card paragraph (2-3 sentences, both
@@ -138,7 +147,7 @@ Content rules:
   and drive site-wide auto-linking: include variant spellings, NEVER a string that is also
   an ordinary everyday word or a generic institution name another country also uses
   (최고사령부, 국방위원회, 제2공화국, 6조, 집단농장 — the database refuses these; the same
-  applies to person aliases). Check `list_terms` with a `q` for the candidate before any
+  applies to person aliases, which also follow the person alias rules above). Check `list_terms` with a `q` for the candidate before any
   term create; the unfiltered list is long enough to be cut off mid-result.
 - Distinguish documented fact from interpretation. Do not sanitize repression, colonial
   violence, political responsibility, or historiographical dispute; do not sensationalize.

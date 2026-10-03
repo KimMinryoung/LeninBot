@@ -1858,8 +1858,8 @@ def _check_person_structured_fields(patch: dict) -> str | None:
                 or not set(aliases) <= {"ko", "en"}
                 or not all(isinstance(v, list) for v in aliases.values())):
             return (
-                "Error: aliases must be {\"ko\": [\"수슬로프\"], \"en\": [\"Suslov\"]} — "
-                "lists per language of the exact strings used in book text."
+                "Error: aliases must be {\"ko\": [\"코바\"], \"en\": [\"Koba\"]} — "
+                "lists per language of genuinely different names (never the headword or bare surname)."
             )
     if "career" in patch and patch["career"] is not None:
         if not isinstance(patch["career"], list):
@@ -3426,6 +3426,14 @@ _COMMULINGO_FIELD_SCHEMA = {
         "events": {"type": "array", "items": {"type": "string"}, "description": "term: related history event ids."},
         "aliases": {
             "type": "object", "additionalProperties": False,
+            "description": (
+                "Person: optional; {\"ko\": [], \"en\": []} when the person has no other name. "
+                "Only genuinely different names (real name, pseudonym, maiden/married name, other "
+                "established transliteration, English initials form); never the headword, the "
+                "name with patronymic or the bare one-word surname; no parenthetical note, quotes "
+                "or label (본명, born, aka); ko in Hangul, en in Latin script, no native script. "
+                "Term: the exact variant strings prose uses."
+            ),
             "properties": {
                 "ko": {"type": "array", "items": {"type": "string"}},
                 "en": {"type": "array", "items": {"type": "string"}},
