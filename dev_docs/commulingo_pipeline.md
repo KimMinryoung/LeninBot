@@ -6,6 +6,16 @@
 
 ## 운영 경로와 승인 범위
 
+2026-10-01 운영자 요청으로 비용 절감을 위해 정기 자동 보강을 잠시 중단했다.
+설치된 `leninbot-commulingo-pipeline.timer`를 stop·disable했으며 service도 inactive이고
+실행 중인 프로세스는 없다. 재부팅 후에도 자동 실행하지 않는다. 이 중단은 timer가 함께
+실행하던 인물·용어 편집과 인물-사건 연결 보강에 적용된다. 공개 데이터·초안·대기열은 보존했고,
+아래의 `phase=live` 등 편집 설정값은 재개 시 사용할 값으로 유지한다. 수동 실행 경로는 남아 있다.
+`leninbot-commulingo-health.timer`는 비용을 발생시키는 보강 없이 상태만 점검하므로 유지했다.
+재개를 요청받으면 `sudo systemctl enable leninbot-commulingo-pipeline.timer`와
+`sudo systemctl start leninbot-commulingo-pipeline.timer`로 복원하고 실제 상태를 확인한다.
+unit 설치·배포만으로 일시 중단한 timer를 다시 활성화하지 않는다.
+
 운영 설정은 `workflow=editor`, `phase=live`다. 작성 모델은 GPT-6 Luna (`provider=openai`,
 `model=gpt6luna`, `thinking_policy=disabled` → Responses `reasoning.effort=none`)이며 제출·무편집
 도구는 strict로 전달한다. 기본 AgentSpec·설정 예제·운영 agent_runtime 설정을 같은 값으로 유지한다.
@@ -13,14 +23,34 @@
 옛 두 RPC 방식의 legacy 단계(`Research`·`Draft`·`Review`·`validate`·`submit`)는 2026-09-24에 제거했다.
 `leninbot-commulingo-pipeline.timer`가 배치를 실행하고, 별도 `leninbot-commulingo-review.timer`는 비활성화되어 있다.
 독립 검토는 editor 안에서 수행한다. 사건 작성·인물-사건 연결의 기존 batch는
-2026-09-20 운영자 결정으로 폐기했다. 인물-사건 연결은 2026-09-28 tick 안의 별도 단계로 복원했다(아래).
+2026-09-20 운영자 결정으로 폐기했다. 인물-사건 연결은 2026-09-28 tick 안의 별도 단계로 복원했으나
+2026-10-01 다시 비활성화했다(아래).
 사건 작성 전용 runner·agent는 제거했다. `leninbot-commulingo-batch.timer/service`와
 events·links service는 빈 unit 파일로 남겨 systemd에서 masked로 처리한다.
 이는 기존 설치나 전체 unit 복사 시 폐기한 batch가 다시 실행되는 것을 막는 배포 표식이며 실행 코드는 없다.
 기존 사건과 연결 데이터는 보존한다. 인물·용어 pipeline의 gap 완료 처리는 기존처럼
 `resolved_id`를 기록하며 사건 연결을 자동 생성하지 않는다.
 
-### 인물-사건 연결 (2026-09-28 복원)
+### 인물-사건 연결 (2026-10-01 사건 중심 수동 보강으로 전환)
+
+운영자 요청으로 `event_links_per_tick=0`, `event_links_backlog_per_tick=0`으로 설정했다.
+일반 편집 timer를 재개해도 인물 카드에서 사건을 찾는 자동 연결 단계는 실행하지 않는다.
+앞으로 연결 보강은 사건을 선택하고 각 진영의 누락 인물을 자료에서 조사하는 수동 작업으로 한다.
+전투 지휘뿐 아니라 근거가 확인된 선전·동원·점령지 학살·군수·지원 활동도 검토한다.
+기존 인물 카드를 재사용하며, 사건과 시기·행동의 관계를 확인한 한·영 역할·메모와 출처를
+공통 저장 경로(`_run_edit`, `history_event_person`)로 기록한다. 중복 연결을 덮어쓰지 않는다.
+named sides가 있는 사건은 `side`와 해당 진영 안의 역할을 쓰고, focus만 있는 사건은 기존
+관계 계약을 따른다. 진영별 조사와 사건의 sides 데이터 변경은 별개의 작업이다.
+
+첫 수동 적용은 `great-patriotic-war`: 독일 6명(괴벨스·하이드리히·힘러·괴링·요들·파울루스),
+핀란드 1명(만네르헤임), 소련 1명(올레크 안토노프), 영국·미국 지원 인물 각 1명(처칠·루스벨트)을
+추가했다. 승인 기록 #20697–20706과 revision에 출처를 보존했다. 헤스는 침공 전 영국에서
+억류되었으므로 확인되지 않은 독소전쟁 중 역할을 추정해 연결하지 않았다.
+인물의 `events=complete/not_applicable`은 당시 카드·등록 사건에 대한 검토 결과이며,
+모든 역사 사건의 참여자 조사가 끝났다는 뜻이 아니다. 새 연결이 확인되면 이전
+`not_applicable` 표시는 공통 인물 서비스로 수정하고 조사 범위를 사유에 남긴다.
+
+아래는 비활성화한 자동 연결 구현과 과거 운영 기록이다.
 
 폐기 뒤 대체 경로가 없어 2026-09-28 기준 인물 2,410명 중 412명이 사건 연결 없이 남았다
 (예: `joachim-von-ribbentrop`과 `nazi-soviet-pact`). 운영자 요청으로 `commulingo/pipeline/event_links.py`를
@@ -427,6 +457,14 @@ Editor `tick`은 실행 전에 미착수 자동 보강을 최대 200건 재평�
 유지한 후보도 `updated_at`을 갱신해 다음 배치가 뒤의 후보를 확인할 수 있게 한다.
 적용은 관련 queue·원장·대상 테이블의 짧은 NOWAIT 잠금 아래 DB 조회만 수행한다.
 동시 쓰기가 있으면 해당 tick의 정리를 건너뛰고 정상 작업을 계속한다.
+
+수동 대기열 정리는 `cleanup`과 별개다. 이미 등록된 생성 gap은 실제 공개 항목과
+요청 범위를 대조한 뒤 `done`·`resolved_id`·확인 사유를 기록한다. 기존 인물의 특정 시기
+보강 요청은 카드가 존재한다는 이유만으로 닫지 않는다. 수동 편집이 묶음의 과제를 해결하면
+공통 저장 경로의 승인·revision을 확인하고 `remaining_topics`에서 해결된 주제만 제거한다.
+원래 commissions와 시도·비용·자료 이력은 보존하며 운영자 정리 근거를 payload에 남긴다.
+민족·출신 배경은 국적이나 출생지로 추정하지 않는다. 확인한 자료가 이를 밝히지 않으면
+`nationality=sources_unavailable`과 사유를 기록하고 미확정 값을 유지한다.
 
 캐시 조회 도구는 빈 인자 `{}` 또는 `passages: []`로 현재 사용 가능한 페이지·ID·라벨을 나열하며,
 본문 조회에는 기존 `passages` 또는 `source_id` 중 하나를 받는다.

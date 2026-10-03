@@ -7,8 +7,8 @@
   "legacy_shared_budget": true,
   "term_editorial_service": true,
   "discovery": false,
-  "event_links_per_tick": 20,
-  "event_links_backlog_per_tick": 50,
+  "event_links_per_tick": 0,
+  "event_links_backlog_per_tick": 0,
   "term_event_overlap_allow": [
     "battle-of-lake-khasan"
   ],
