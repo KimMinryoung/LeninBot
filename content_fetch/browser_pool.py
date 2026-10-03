@@ -64,6 +64,10 @@ _apw_browser = None
 _apw_context = None
 _apw_init_lock: _Optional[asyncio.Lock] = None
 _apw_cookies_lock: _Optional[asyncio.Lock] = None
+_APW_IDLE_SECONDS = max(0, int(os.environ.get("FETCH_BROWSER_IDLE_SECONDS", "300")))
+_apw_active_fetches = 0
+_apw_idle_handle = None
+_apw_cleanup_task = None
 
 
 def _ensure_pw_loop() -> asyncio.AbstractEventLoop:
@@ -177,12 +181,59 @@ async def _save_apw_cookies():
             pass
 
 
-async def _playwright_fetch_async(url: str, max_chars: int = 10000) -> _Optional[str]:
-    """Async Playwright fetch. Many invocations on the same loop run concurrently."""
-    context = await _get_apw_context()
-    if context is None:
-        return None
+async def _close_idle_browser():
+    """Release Chromium and its driver without interrupting active fetches."""
+    global _apw_context, _apw_browser, _apw_instance
+    if _apw_init_lock is None:
+        return
+    # A new fetch increments its lease before waiting for this lock. If cleanup
+    # already started, it waits until closing completes and creates a new pool.
+    async with _apw_init_lock:
+        if _apw_active_fetches or _apw_browser is None:
+            return
+        await _save_apw_cookies()
+        try:
+            await _apw_browser.close()
+        except Exception as exc:
+            logger.warning("[Playwright] Idle browser close failed: %s", exc)
+        finally:
+            if _apw_instance is not None:
+                try:
+                    await _apw_instance.stop()
+                except Exception as exc:
+                    logger.warning("[Playwright] Idle driver stop failed: %s", exc)
+            _apw_context = _apw_browser = _apw_instance = None
+        logger.info("[Playwright] Released browser after %ss idle", _APW_IDLE_SECONDS)
 
+
+def _start_idle_cleanup():
+    global _apw_idle_handle, _apw_cleanup_task
+    _apw_idle_handle = None
+    _apw_cleanup_task = asyncio.create_task(_close_idle_browser())
+
+
+async def _playwright_fetch_async(url: str, max_chars: int = 10000) -> _Optional[str]:
+    """Hold a lease through page close; release the pool after idle timeout."""
+    global _apw_active_fetches, _apw_idle_handle
+    if _apw_idle_handle is not None:
+        _apw_idle_handle.cancel()
+        _apw_idle_handle = None
+    _apw_active_fetches += 1
+    try:
+        context = await _get_apw_context()
+        if context is None:
+            return None
+        return await _fetch_apw_page(context, url, max_chars)
+    finally:
+        _apw_active_fetches -= 1
+        if not _apw_active_fetches and _apw_browser is not None and _APW_IDLE_SECONDS:
+            _apw_idle_handle = asyncio.get_running_loop().call_later(
+                _APW_IDLE_SECONDS, _start_idle_cleanup,
+            )
+
+
+async def _fetch_apw_page(context, url: str, max_chars: int) -> _Optional[str]:
+    """Fetch on the dedicated loop while the caller holds a browser lease."""
     page = None
     try:
         page = await context.new_page()

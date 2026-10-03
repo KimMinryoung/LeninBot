@@ -28,6 +28,17 @@ content_fetch/urls.py: Playwright → 무료 HTTP → client.extract → POST /e
 서버는 임의 upstream/path/API 인자를 받는 프록시가 아니다. 허용된 요청 모델만 받으며
 추가 필드·잘못된 depth·결과 수를 거부한다. POST 본문은 32 KiB 이하로 제한한다.
 
+## 로컬 브라우저 수명
+
+`content_fetch/browser_pool.py`는 프로세스마다 전용 이벤트 루프에서 Chromium을 재사용한다.
+마지막 본문 수집이 페이지를 닫은 뒤 300초 동안 새 요청이 없으면 쿠키를 저장하고
+Chromium과 Playwright 드라이버를 종료한다. 다음 요청은 저장된 쿠키로 브라우저를 다시 만든다.
+`FETCH_BROWSER_IDLE_SECONDS`로 유휴 시간을 조정하며, 0은 자동 종료를 끈다.
+진행 중인 수집은 lease 카운터로 보호한다. 종료가 이미 시작된 경우 새 요청은 초기화 lock을
+기다린 뒤 새 context를 받는다. 실행 중인 요청 수가 0이 된 시점부터 유휴 시간을 계산하므로
+긴 수집이나 동시 요청을 타이머가 끊지 않는다. 별도 `browser.worker`의 사용자 자동화 세션과는
+독립된 본문 수집 전용 pool이다. Python 변경 적용에는 이를 import한 서비스 재시작이 필요하다.
+
 ## 키 격리와 API 경계
 
 서비스는 `DynamicUser=yes`, `SupplementaryGroups=grass`, `ProtectSystem=strict`,

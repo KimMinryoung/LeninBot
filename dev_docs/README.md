@@ -53,7 +53,7 @@
 | `secret_management.md` | systemd credential 기반 시크릿 로딩 |
 | `db_migration_plan.md` | 현재 PostgreSQL 구성·백업·복구·쓰기 가드와 이전 후 미확인 항목 (파일명은 기존 참조 유지) |
 | `standby_operations.md` | 스트리밍 스탠바이 활용법, 승격 런북, 재시드 절차 |
-| `monitoring.md` | 감시·알림 체계 — 외부 워치독, 복제 점검, 알림 채널, 사각지대 |
+| `monitoring.md` | 감시·알림 체계 — 외부 워치독, 복제 점검, 알림 채널, 사각지대, 서버 자원 진단 |
 | `knowledge_graph_design.md` | Neo4j/Graphiti KG 런타임 구조 |
 | `knowledge_graph_schema.md` | KG typed entity/edge schema |
 | `translation_pipeline.md` | 사료(RU/ZH/EN/DE/FR/IT→KO)·사이트(KO→EN) 공통 실행, 검증·캐시·TM, 원문 최신성, DB 적용 상태와 평가 |
