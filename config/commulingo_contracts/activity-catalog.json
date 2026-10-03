@@ -16,7 +16,7 @@
         "ko": "정부·행정",
         "en": "Government and administration"
       },
-      "icon": "briefcase",
+      "icon": "stamp",
       "criteria": "Cross-policy executive management and administrative coordination of a government or territory must define the career. A head-of-state, premier, deputy-premier, minister or regional-office title alone is insufficient. Prefer agriculture, economy, industry, diplomacy, law, security, military or another specific function when that field defines the career, including specialized ministers. Party or movement leadership belongs to political-leadership. Reigning monarchs, regents and royal consorts belong to monarchy. Ceremonial or nominal non-monarchical head-of-state office and presiding over a legislature belong to legislature; legislative membership and being a public official do not by themselves qualify. Never use government as a catch-all when evidence is unclear."
     },
     {
@@ -25,7 +25,7 @@
         "ko": "입법·국가 대표",
         "en": "Legislature and state representation"
       },
-      "icon": "building",
+      "icon": "town-hall",
       "criteria": "Presiding over a legislature or its presidium, or holding a ceremonial or nominal non-monarchical head-of-state office (such as a figurehead president), when that office defines the career and real executive power lay elsewhere. Ordinary legislative membership alone does not qualify. A head of state or premier who actually directed the executive belongs to government; leading a party or movement belongs to political-leadership. Monarchs, including constitutional monarchs, belong to monarchy."
     },
     {
@@ -106,7 +106,7 @@
         "ko": "사회운동·조직",
         "en": "Social movements and organizing"
       },
-      "icon": "flame",
+      "icon": "users",
       "criteria": "Labor, peasant, civic or underground political organizing, activism and resistance. Not a catch-all for everyone called a revolutionary or dissident. Running official mass organizations of a ruling system (Komsomol, official trade unions, state friendship societies) is not organizing."
     },
     {
