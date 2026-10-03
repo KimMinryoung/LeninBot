@@ -4,10 +4,6 @@
 
 Cyber-Lenin's knowledge graph is the **hub across the project's knowledge stores**: CommuLingo people/terms/events, published research and archival documents, and news/analysis facts written by agents all live in one Neo4j graph. Every mirrored node carries stable external ids, so the same real-world entity converges on one node regardless of which store or agent mentioned it first. The public runtime talks through `kg_runtime/`; Graphiti/Neo4j implementation details live under `graph_memory/`.
 
-## Why the 2026-09-03 redesign
-
-Measured on 2026-09-03: growth had collapsed (new edges/month 2,917 in March → 192 in August), 105 searches in 11 weeks against 95k CommuLingo tool calls, 13% orphan nodes, 42% empty summaries, the same entity split across `group_id`s (Donald Trump ×5), Korean webchat queries against an English news graph, and search results that showed facts without subject/object/date/source. The redesign attacks each: an identity layer, deterministic mirror jobs, an upgraded read path, publish hooks, and health metrics. Design rationale and the full before/after plan: `~/.claude/plans/cozy-whistling-tower.md` (session record).
-
 ## Ownership Boundary
 
 | Layer | Modules | Responsibility |

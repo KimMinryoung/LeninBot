@@ -144,35 +144,3 @@ CREATE UNIQUE INDEX idx_telegram_missions_one_active_per_user
 
 ALTER TABLE telegram_tasks ADD COLUMN mission_id INTEGER REFERENCES telegram_missions(id);
 ```
-
-### SQLite (Local Agent)
-```sql
-CREATE TABLE missions (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    title       TEXT NOT NULL,
-    status      TEXT DEFAULT 'active',
-    created_at  TEXT DEFAULT (datetime('now', 'localtime')),
-    closed_at   TEXT
-);
-
-CREATE TABLE mission_events (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    mission_id  INTEGER NOT NULL REFERENCES missions(id),
-    source      TEXT NOT NULL,
-    event_type  TEXT NOT NULL,
-    content     TEXT NOT NULL,
-    created_at  TEXT DEFAULT (datetime('now', 'localtime'))
-);
-CREATE INDEX idx_mission_events_timeline ON mission_events(mission_id, created_at);
-
-ALTER TABLE tasks ADD COLUMN mission_id INTEGER;
-```
-
-## 10. Revision History
-
-| Date | Change |
-|------|--------|
-| 2026-03-21 | Initial implementation: telegram agent system |
-| 2026-03-21 | Explicit mission_id inheritance across all task paths |
-| 2026-03-21 | Agent close tool, /mission command, 24h auto-expire |
-| 2026-03-21 | State machine spec document created |

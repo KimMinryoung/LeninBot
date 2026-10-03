@@ -109,32 +109,9 @@ curl -s "https://leninbot-watchdog.minryoung93.workers.dev/status/$(cat .watchdo
 
 ## 서버 자원 진단
 
-2026-10-03 04:48–04:52 UTC 운영 서버 관찰: 8 vCPU, 메모리 15.24 GiB,
-사용 약 6.6 GiB·available 약 8.6 GiB, swap 약 752 MiB, 루트 디스크 301 GB 중
-138 GB 사용(48%). `sar`의 10월 2일 CPU 평균 사용은 약 4.0%, 3일 04:50까지는
-약 5.6%였다. 짧은 `vmstat` 관찰에서 swap-in/out은 0이었다. 낮은 free만으로
-메모리 부족을 판단하지 말고 available·swap 입출력·CPU iowait를 함께 본다.
-이 수치는 당시 관찰이며 현재 용량/부하 보장이 아니다.
-
-| 프로세스/컨테이너 | 관찰 메모리 | 비고 |
-|---|---:|---|
-| embedding | PSS 약 2,347 MiB | CPU BGE-M3, reranker 미로딩 |
-| API | PSS 약 601 MiB | Chromium/Playwright 자식 포함 |
-| Telegram | PSS 약 576 MiB | Chromium/Playwright 자식 포함 |
-| roleplay | PSS 약 170 MiB | 별도 봇 |
-| LLM proxy / web gateway | PSS 약 46 / 41 MiB | 각각 별도 서비스 |
-| A2A / email / writer / browser worker | PSS 약 14 / 5 / 4 / 1 MiB | 각각 swap 약 17 / 31 / 30 / 11 MiB |
-| Neo4j | Docker working set 약 1,842 MiB | heap 최대 1 GiB, page cache 512 MiB |
-| PostgreSQL | Docker working set 약 1,115 MiB | shared_buffers 2 GiB 설정, DB cache hit 높음 |
-| frontend / Redis | Docker working set 약 354 / 15 MiB | frontend는 별도 저장소 |
-
-PSS는 shared page를 비례 배분한 실제 상주량이다. Docker stats는 inactive file cache를
-뺀 cgroup working set이므로 위 두 지표를 정밀 합산하지 않는다. 서비스의 `MemoryCurrent`는
-페이지 회계/스왑 때문에 프로세스 RSS와 다를 수 있다. 15초간 개별 Python 서비스 CPU는
-한 코어 기준 0–0.21%였고, Docker 순간 관찰은 PostgreSQL 8.7%, Neo4j 0.87%, Redis 0.68%였다.
-짧은 표본은 정기 작업 최대 부하를 대표하지 않는다.
-
-확인 명령:
+낮은 free만으로 메모리 부족을 판단하지 말고 available·swap 입출력·CPU iowait를 함께 본다.
+프로세스 PSS는 shared page를 비례 배분한 상주량이다. Docker stats는 inactive file cache를
+뺀 cgroup working set이므로 두 지표를 정밀 합산하지 않는다. 짧은 표본과 정기 작업 최대 부하도 구분한다.
 
 ```bash
 uptime
@@ -151,24 +128,4 @@ root에서 `/sys/fs/cgroup<ControlGroup>/cgroup.procs`(하위 cgroup 포함)의 
 `/proc/<pid>/smaps_rollup` PSS/Swap을 합산하면 브라우저 자식까지 포함한다.
 CPUUsageNSec 두 표본의 차이를 관찰 초와 1e9로 나누고 100을 곱하면 한 코어 기준 CPU%다.
 DB 조회는 `scripts/query-db`의 read-only guard를 사용한다.
-
-최적화: 본문 수집 Chromium은 5분 유휴 뒤 자동 해제한다(`web_research.md`).
-임베딩 8→4 CPU thread 실험은 짧은 한·영·러 검색어의 CPU 계산량을 약 45% 줄였지만,
-문서 8개(반복 한·영 문단) 묶음은 중앙값 4.99초→11.87초, CPU 시간 39.08초→39.21초였다.
-단일 모델에서 각 조건 3회 측정했으며 max vector difference는 검색어 2.61e-7,
-문서 0이었다. 문서 처리 저하 때문에 thread 설정은 변경하지 않았다.
-journal 약 3 GiB와 모델 cache 약 6.4 GiB는 디스크 여유가 충분하고 로그/재시작에 필요해
-삭제하지 않았다. Docker 로그에는 현재 rotation cap이 없지만 총 관찰 로그가 수 MiB였으므로
-DB 컨테이너를 재생성하는 변경은 수행하지 않았다.
-
-
-2026-10-03 04:56 UTC 검증·적용: 전체 unittest 1,361개(23 skip), pytest 66 pass
-(7 skip), Python name 검사 573개 파일 통과. 유휴 pool 회귀 테스트 6개와 실제 Chromium의
-본문 수집→유휴 종료→재생성 2회도 통과했다(각 종료 후 드라이버 자식 프로세스 0개,
-임시 파일에 쿠키 저장 확인). 실제 smoke는 독립 프로세스의 idle을 1초로 줄여 실행했다.
-운영 API/Telegram은 기본 300초다. DB/Redis restart guard가 진행 중 작업 없음으로 통과한 뒤
-두 서비스를 재시작했고 새 MainPID, API `/health` 정상, Telegram polling 재개를 확인했다.
-두 서비스 PSS는 API 600.9→184.7 MiB, Telegram 576.0→295.3 MiB였다.
-합계 감소 약 697 MiB에는 재시작으로 해제된 Python 캐시도 포함된다. 변경으로 회수 가능한
-기존 Chromium/드라이버 자식만의 PSS는 API 198.4 + Telegram 199.3 = 약 398 MiB였다.
-따라서 유휴 자동 종료의 지속 절감량과 재시작 직후의 전체 감소량을 구분한다.
+본문 수집 Chromium은 기본 5분 유휴 뒤 자동 해제한다([web_research.md](web_research.md#로컬-브라우저-수명)).

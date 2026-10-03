@@ -100,7 +100,7 @@ Jev의 그룹·관직·국가·출신·사망 유형·용어 분류 기준은 [J
 
 frontend의 호스트 마운트 변경은 운영 변경이다. 공통 저장 계약 변경 시 Python과 frontend의 schema를 함께 맞춘다.
 Python을 장기 import하는 서비스는 재시작이 필요하고 스케줄 프로세스는 다음 실행부터 새 코드를 읽는다.
-private RPC의 코드 반영 경계는 [파이프라인 배포](commulingo_pipeline.md#legacy-호환과-배포-경계)를 따른다.
+private RPC의 코드 반영 경계는 [파이프라인 배포](commulingo_pipeline.md#workflow-고정과-배포-경계)를 따른다.
 롤백 때도 기존 근거·보강 상태·검토·대기열 테이블은 보존한다.
 
 `tests/test_commulingo_evidence_diagnostics.py`는 DB 없이 제출 진단을 검사한다.

@@ -26,18 +26,7 @@ Private notes, character/scene/goal state, person records, `/status`, and recent
 features, including the fictional-time calculator in `roleplay/dynamics.py` and calendar interpretation in `roleplay/clock.py`
 (see `roleplay_persona_design.md`) and require a roleplay service restart when changed.
 
-The roleplay identity distinguishes historical background, a behavioral interpretation,
-and user-established canon. Its current interpretation expresses organizational judgment
-through questions and choices rather than repeated paperwork metaphors or omniscient
-self-analysis. Kovno/Kaunas is the birthplace; the Petersburg official biography and
-Marijampol interrogation account are distinct. The owner has explicitly adopted private-life
-interrogation statements, including the Goloshchyokin relationship, as roleplay canon;
-do not reintroduce uncertainty about them into in-character dialogue. Existing female
-appearance and personal preferences remain canon, without determining political character.
-The historical behavioral specification now distinguishes personnel work, policy defense,
-security investigations, loss of authority, and private relationships. Source passages,
-interpretive limits, and evaluation prompts are maintained in `roleplay_persona_design.md`;
-that evidence document is not automatically injected into the runtime prompt.
+Historical evidence, interpretation and owner-established roleplay canon are maintained in [roleplay_persona_design.md](roleplay_persona_design.md).
 
 ## Prompt Assembly
 
