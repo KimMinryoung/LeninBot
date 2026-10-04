@@ -196,6 +196,7 @@ _COMMANDS = [
     ("태스크", "commulingo_review", "인물 검토 목록·근거·승인·반려", ["/commulingo_review — 인물 검토 목록·근거·승인·반려"]),
     ("태스크", "status", "시스템 대시보드", ["/status — 시스템 대시보드"]),
     ("태스크", "report", "태스크 리포트 재전송", ["/report <id> — 태스크 리포트 재전송"]),
+    ("태스크", "cancel", "태스크 취소", ["/cancel <id> — 대기·실행 중인 태스크 취소 (실행 중이면 다음 라운드 전에 중단)"]),
     ("태스크", "llm_balance", "LLM 잔액·비용 조회", ["/llm_balance \\[1~30] — LLM 공식 잔액/비용"]),
     ("채널", "channel", "브로드캐스트 채널 설정", [
         "/channel info — 브로드캐스트 대상/권한 확인",
@@ -218,7 +219,7 @@ _COMMANDS = [
 
 # Order of the Telegram "/" autocomplete menu.
 BOT_MENU_ORDER = ("help", "task", "commulingo_review", "curate", "status", "llm_balance", "report",
-                  "config", "agents", "projects", "project", "channel", "restart", "clear")
+                  "cancel", "config", "agents", "projects", "project", "channel", "restart", "clear")
 
 
 def _build_help_text() -> str:
