@@ -4,8 +4,10 @@
 # Usage:
 #   scripts/query-db "SELECT id, title FROM ai_diary ORDER BY id DESC LIMIT 3"
 #
-# This wraps scripts/psql-main so Codex/operator sessions can inspect state
-# without exposing DB_PASSWORD and without accidentally running write queries.
+# Logs in as leninbot_ro (pg_read_all_data, read-only transactions by default;
+# scripts/setup_readonly_db_role.sh creates it and its password file). It never
+# touches DB_PASSWORD, so no sudo or credstore access. Host/port/database follow
+# DB_* in .env. Approved writes still go through scripts/psql-main.
 
 set -euo pipefail
 
@@ -38,8 +40,23 @@ case "$(printf '%s' "$SQL" | awk '{print tolower($1)}')" in
         ;;
 esac
 
-cd "$ROOT"
-exec scripts/psql-main \
+PW_FILE="${DB_RO_PASSWORD_FILE:-$HOME/.config/leninbot/db_ro_password}"
+if [ ! -r "$PW_FILE" ]; then
+    echo "query-db: $PW_FILE not readable (run as grass; create it with scripts/setup_readonly_db_role.sh)" >&2
+    exit 1
+fi
+
+# Source only connection settings, never DB_USER/DB_PASSWORD.
+set -a
+# shellcheck disable=SC1090
+source <(grep -E '^DB_(HOST|PORT|NAME|SSL)=' "$ROOT/.env" 2>/dev/null || true)
+set +a
+
+PGPASSWORD="$(<"$PW_FILE")"
+export PGPASSWORD
+
+exec psql \
+    "host=${DB_HOST:-127.0.0.1} port=${DB_PORT:-5434} dbname=${DB_NAME:-leninbot} user=${DB_RO_USER:-leninbot_ro} sslmode=${DB_SSL:-prefer} application_name=query-db" \
     -X \
     -q \
     -v ON_ERROR_STOP=1 \

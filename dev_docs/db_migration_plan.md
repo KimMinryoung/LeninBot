@@ -9,7 +9,7 @@
 - 호스트 앱은 `127.0.0.1:5434`, 복제는 tailnet `100.122.248.77:5434`를 사용한다. unit은 Tailscale 주소가 나타날 때까지 기다린다. 부팅 시 dockerd가 restart 정책으로 먼저 띄운 `leninbot-pg`가 tailnet 주소 부재로 네트워크 없이 남을 수 있어(2026-09-23 Tailscale 키 만료 때 발생), unit의 `ExecStartPost`가 두 게시 포트를 호스트에서 확인하고 죽어 있으면 `pg`를 `--force-recreate`한다.
 - 활성 DB는 `leninbot`과 `writer`, 보관 DB는 읽기 전용 `legacy_game`이다. 테스트 DB `leninbot_test`·`writer_test`는 운영 백업 범위에 포함하지 않는다.
 - 메인 풀은 `db.py`의 `DB_*` (`DB_SSL` 기본 `prefer`), writer 풀은 `WRITER_DB_*` (`WRITER_DB_SSLMODE` 기본 `disable`)로 분리된다. 시크릿 로딩은 [secret_management.md](secret_management.md)를 따른다.
-- 로컬 SQL 진입점은 `scripts/psql-main`이다. 개발 진단은 기본 MCP `inspect`, SQL이 필요하면 `operator`의 `readonly_query_db` 또는 `scripts/query-db`를 사용한다. 구 `psql-supabase` 심링크는 없다.
+- 로컬 SQL 진입점은 `scripts/psql-main`이다. 개발 진단은 기본 MCP `inspect`, SQL이 필요하면 `operator`의 `readonly_query_db` 또는 `scripts/query-db`(읽기 전용 계정 `leninbot_ro`로 접속, sudo 불필요)를 사용한다. 구 `psql-supabase` 심링크는 없다.
 - frontend는 별도 저장소 `/home/grass/frontend`와 자체 DB 설정을 사용한다. 컨테이너에서는 `leninbot-pg:5432`, DB `leninbot`, 전용 `frontend` 역할을 쓴다. DB 접속 변경 시 backend 설정만 고쳐서는 부족하다.
 
 ## 백업과 복구

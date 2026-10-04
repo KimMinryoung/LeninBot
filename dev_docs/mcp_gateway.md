@@ -135,7 +135,7 @@ Operator-only:
 - `readonly_query_db`
 - `kg_maintenance_run`
 
-`readonly_query_db` delegates to `scripts/query-db`, preserving the existing guard that allows only a single `SELECT`, `WITH`, `SHOW`, or `EXPLAIN` diagnostic and runs it in a read-only transaction through `scripts/psql-main` (DB는 2026-07-28부터 로컬 `leninbot-pg`; 구 `psql-supabase` 심링크는 제거됨).
+`readonly_query_db` delegates to `scripts/query-db`, preserving the existing guard that allows only a single `SELECT`, `WITH`, `SHOW`, or `EXPLAIN` diagnostic and runs it in a read-only transaction, logged in as the read-only role `leninbot_ro` (password file `~/.config/leninbot/db_ro_password` from `scripts/setup_readonly_db_role.sh`; no DB_PASSWORD, sudo or credstore).
 
 Every `tools/call` checks the profile allow-list and the shared security gateway authorization policy. Allowed and denied calls both emit `tool_audit_log` rows with `interface=mcp`, the local UID and profile; arguments use the common recursive redactor. The `operator` profile is downgraded to `inspect` when the MCP server process is not running as the repository owner UID. This is an account boundary for the local stdio server, not a separate operator credential.
 
