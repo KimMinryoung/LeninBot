@@ -5,6 +5,7 @@ Uses PostgreSQL (via db.py) instead of SQLite. Missions are per-user.
 
 import logging
 from db import query as _query, execute as _execute, get_conn as _get_conn
+from db import execute_returning_rowcount as _execute_rowcount
 from psycopg2.extras import RealDictCursor
 
 logger = logging.getLogger(__name__)
@@ -64,12 +65,59 @@ def get_active_mission(user_id: int) -> dict | None:
 
 
 def get_mission_events(mission_id: int, limit: int = 20) -> list[dict]:
-    """Return events for a mission in chronological order."""
+    """Return timeline events for a mission in chronological order.
+
+    Agent board messages live in the same table but are read through
+    read_agent_messages, so they do not crowd the timeline.
+    """
     return _query(
-        "SELECT * FROM telegram_mission_events WHERE mission_id = %s "
+        "SELECT * FROM telegram_mission_events WHERE mission_id = %s AND event_type <> %s "
         "ORDER BY created_at ASC LIMIT %s",
-        (mission_id, limit),
+        (mission_id, _AGENT_MESSAGE, limit),
     )
+
+
+# ── Agent board (messages between a mission's agents) ─────────────────
+
+_AGENT_MESSAGE = "agent_message"
+_AGENT_MESSAGE_MAX_CHARS = 2000
+_AGENT_BOARD_LIMIT = 50
+
+
+def post_agent_message(mission_id: int, task_id: int, agent_type: str, message: str) -> bool:
+    """Leave a message for the mission's other agents. False if the mission is closed."""
+    source = f"{agent_type or 'agent'}#{task_id}"
+    return _execute_rowcount(
+        "INSERT INTO telegram_mission_events (mission_id, source, event_type, content) "
+        "SELECT id, %s, %s, %s FROM telegram_missions WHERE id = %s AND status = 'active'",
+        (source, _AGENT_MESSAGE, message[:_AGENT_MESSAGE_MAX_CHARS], mission_id),
+    ) > 0
+
+
+def read_agent_messages(mission_id: int) -> list[dict]:
+    """The mission's latest board messages, oldest first."""
+    rows = _query(
+        "SELECT source, content, created_at FROM telegram_mission_events "
+        "WHERE mission_id = %s AND event_type = %s ORDER BY id DESC LIMIT %s",
+        (mission_id, _AGENT_MESSAGE, _AGENT_BOARD_LIMIT),
+    )
+    messages = []
+    for row in reversed(rows or []):
+        agent, _, tid = str(row["source"]).rpartition("#")
+        created = row.get("created_at")
+        messages.append({
+            "task_id": tid,
+            "agent": agent or "?",
+            "message": row["content"],
+            "ts": created.timestamp() if hasattr(created, "timestamp") else 0,
+        })
+    return messages
+
+
+def format_board_for_context(mission_id: int, *, provider: str = "claude") -> str:
+    """Board messages as an injectable context block."""
+    from llm.prompt_context import format_agent_board
+    return format_agent_board(read_agent_messages(mission_id), provider)
 
 
 def create_mission(user_id: int, title: str, task_id: int | None = None) -> dict:

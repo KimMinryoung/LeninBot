@@ -34,15 +34,6 @@ def _db_active_tasks() -> list[dict]:
         return [{"warning": f"db task check failed: {e}"}]
 
 
-def _redis_active_tasks() -> list[dict]:
-    try:
-        from memory_store.redis_state import get_all_active_tasks
-
-        return get_all_active_tasks()
-    except Exception as e:
-        return [{"warning": f"redis task check failed: {e}"}]
-
-
 def _redis_active_web_chats() -> list[dict]:
     try:
         from memory_store.redis_state import get_active_web_chats
@@ -79,10 +70,9 @@ def check_restart_allowed(service: str) -> tuple[bool, list[str]]:
     blockers: list[str] = []
     warnings: list[str] = []
     if service in {"telegram", "all"}:
-        redis_tasks = _redis_active_tasks()
         db_tasks = _db_active_tasks()
-        active_tasks = [t for t in (redis_tasks + db_tasks) if not t.get("warning")]
-        warnings.extend(_format_task(t) for t in (redis_tasks + db_tasks) if t.get("warning"))
+        active_tasks = [t for t in db_tasks if not t.get("warning")]
+        warnings.extend(_format_task(t) for t in db_tasks if t.get("warning"))
         if active_tasks:
             blockers.append("Active Telegram/background tasks:")
             blockers.extend(_format_task(t) for t in active_tasks)

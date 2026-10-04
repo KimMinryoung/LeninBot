@@ -2880,7 +2880,7 @@ def build_task_context_tools(task_id: int, user_id: int, depth: int = 0, mission
         if not mission_id:
             return "No mission linked to this task — message not posted."
         try:
-            from memory_store.redis_state import post_to_board
+            from telegram.mission import post_agent_message
             agent_type_str = ""
             try:
                 from llm.runtime_context import current_task_ctx
@@ -2888,7 +2888,8 @@ def build_task_context_tools(task_id: int, user_id: int, depth: int = 0, mission
                 agent_type_str = (ctx or {}).get("agent_type", "")
             except Exception:
                 pass
-            post_to_board(mission_id, task_id, agent_type_str, message_text)
+            if not await asyncio.to_thread(post_agent_message, mission_id, task_id, agent_type_str, message_text):
+                return ToolFailure(f"Mission #{mission_id} is closed — message not posted.")
             return f"Message posted to mission #{mission_id} board."
         except Exception as e:
             logger.error("send_message error (task %d): %s", task_id, e)
@@ -2899,9 +2900,9 @@ def build_task_context_tools(task_id: int, user_id: int, depth: int = 0, mission
         if not mission_id:
             return "No mission linked to this task."
         try:
-            from memory_store.redis_state import read_board
-            from datetime import datetime, timezone
-            messages = read_board(mission_id)
+            from telegram.mission import read_agent_messages
+            from datetime import datetime
+            messages = await asyncio.to_thread(read_agent_messages, mission_id)
             if not messages:
                 return "No messages on the mission board."
             lines = []

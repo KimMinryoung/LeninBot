@@ -211,7 +211,21 @@ class TestEmitProgress(unittest.TestCase):
 
 class TestCheckCancelled(unittest.TestCase):
     def test_none_task_id_is_noop(self):
-        check_cancelled(None)  # must not raise, must not touch Redis
+        with patch("db.query_one") as query_one:
+            check_cancelled(None)
+        query_one.assert_not_called()
+
+    def test_failed_row_cancels(self):
+        with patch("db.query_one", return_value={"status": "failed"}):
+            with self.assertRaises(tool_loop_common.TaskCancelledError):
+                check_cancelled(7)
+
+    def test_running_missing_or_db_error_continues(self):
+        for value in ({"status": "processing"}, None):
+            with patch("db.query_one", return_value=value):
+                check_cancelled(7)
+        with patch("db.query_one", side_effect=RuntimeError("db down")):
+            check_cancelled(7)
 
 
 if __name__ == "__main__":

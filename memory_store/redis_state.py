@@ -1,10 +1,14 @@
-"""redis_state.py — Redis-backed live state for orchestrator-worker coordination.
+"""redis_state.py — Redis-backed short-lived shared state.
 
-Provides incremental task progress persistence (survives process restarts),
-active task registry, and live task state monitoring.
+Holds incremental task progress (survives process restarts), in-flight web
+chat markers, the owner alert queue, task-chain summaries, and the keys other
+modules keep here (tool-gateway rate windows, Jev route exhaustion flags).
 
 All operations are fail-safe: Redis unavailability never crashes the bot.
 PostgreSQL remains the system of record; Redis is the live state layer.
+
+Leninbot uses Redis database 1. Database 0 of the same server belongs to the
+frontend (sessions), so the two never share a keyspace.
 """
 
 import json
@@ -12,50 +16,93 @@ import logging
 import os
 import time
 
-from llm.prompt_context import format_agent_board, format_task_chain
+import redis
+from redis.exceptions import ConnectionError as RedisConnectionError
+from redis.exceptions import TimeoutError as RedisTimeoutError
+
+from llm.prompt_context import format_task_chain
 
 logger = logging.getLogger(__name__)
 
-_KEY_TTL = 604800  # 7 days — all ephemeral keys (progress, state, board)
+_KEY_TTL = 604800  # 7 days — ephemeral keys (progress, web chat markers)
+_DEFAULT_URL = "redis://localhost:6379/1"
 
 # ── Connection ────────────────────────────────────────────────────────
+#
+# Callers run on the Telegram/API event loop, so a hung or absent Redis must
+# not cost seconds per call. One client is built once (no per-call PING); any
+# connection or timeout error opens a circuit, and for _DOWN_COOLDOWN seconds
+# get_redis() returns None at once instead of retrying the connection.
+
+_SOCKET_TIMEOUT = 1.0
+_DOWN_COOLDOWN = 30.0
 
 _redis_client = None
+_down_until = 0.0
+
+
+def _open_circuit(exc: Exception) -> None:
+    global _down_until
+    if time.monotonic() >= _down_until:
+        logger.warning("Redis unavailable, skipping it for %.0fs: %s", _DOWN_COOLDOWN, exc)
+    _down_until = time.monotonic() + _DOWN_COOLDOWN
+
+
+class _GuardedRedis:
+    """Delegates to a redis client; connection or timeout errors open the circuit."""
+
+    def __init__(self, client):
+        self._client = client
+
+    def __getattr__(self, name):
+        attr = getattr(self._client, name)
+        if not callable(attr):
+            return attr
+
+        def call(*args, **kwargs):
+            try:
+                return attr(*args, **kwargs)
+            except (RedisConnectionError, RedisTimeoutError) as e:
+                _open_circuit(e)
+                raise
+
+        return call
 
 
 def get_redis():
-    """Lazy singleton Redis connection."""
+    """Shared Redis client, or None while Redis is unreachable."""
     global _redis_client
+    if time.monotonic() < _down_until:
+        return None
     if _redis_client is not None:
-        try:
-            _redis_client.ping()
-            return _redis_client
-        except Exception:
-            _redis_client = None
-
+        return _redis_client
+    url = os.getenv("REDIS_URL", _DEFAULT_URL)
     try:
-        import redis
-        url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-        _redis_client = redis.Redis.from_url(
+        client = redis.Redis.from_url(
             url,
             decode_responses=True,
-            socket_connect_timeout=3,
-            socket_timeout=3,
-            retry_on_timeout=True,
+            socket_connect_timeout=_SOCKET_TIMEOUT,
+            socket_timeout=_SOCKET_TIMEOUT,
+            health_check_interval=30,
         )
-        _redis_client.ping()
-        logger.info("Redis connected: %s", url)
-        return _redis_client
+        client.ping()
     except Exception as e:
-        logger.warning("Redis unavailable: %s", e)
-        _redis_client = None
+        _open_circuit(e)
         return None
+    _redis_client = _GuardedRedis(client)
+    logger.info("Redis connected: %s", url)
+    return _redis_client
 
 
 def redis_available() -> bool:
-    """Check if Redis is reachable."""
+    """Check if Redis is reachable (one PING)."""
     r = get_redis()
-    return r is not None
+    if r is None:
+        return False
+    try:
+        return bool(r.ping())
+    except Exception:
+        return False
 
 
 # ── Owner alerts from any process ─────────────────────────────────────
@@ -152,120 +199,6 @@ def clear_task_progress(task_id: int):
         logger.debug("clear_task_progress failed (task %d): %s", task_id, e)
 
 
-_MAX_PROGRESS_ENTRIES = 30  # cap injected entries to prevent context bloat
-_MAX_PROGRESS_CHARS = 8000  # hard limit on total formatted output
-
-
-# ── Live Task State (real-time monitoring) ────────────────────────────
-
-def set_task_state(
-    task_id: int,
-    round_num: int = 0,
-    total_cost: float = 0.0,
-    status: str = "running",
-    agent_type: str = "",
-):
-    """Update live task state hash."""
-    try:
-        r = get_redis()
-        if not r:
-            return
-        key = f"task:{task_id}:state"
-        r.hset(key, mapping={
-            "round": str(round_num),
-            "cost": f"{total_cost:.4f}",
-            "status": status,
-            "agent_type": agent_type,
-            "updated_at": f"{time.time():.0f}",
-        })
-        r.expire(key, _KEY_TTL)
-    except Exception as e:
-        logger.debug("set_task_state failed (task %d): %s", task_id, e)
-
-
-def get_task_state(task_id: int) -> dict | None:
-    """Get live task state."""
-    try:
-        r = get_redis()
-        if not r:
-            return None
-        key = f"task:{task_id}:state"
-        data = r.hgetall(key)
-        return data if data else None
-    except Exception as e:
-        logger.debug("get_task_state failed (task %d): %s", task_id, e)
-        return None
-
-
-def get_all_active_tasks() -> list[dict]:
-    """Get state of all currently active tasks."""
-    try:
-        r = get_redis()
-        if not r:
-            return []
-        task_ids = r.smembers("active_tasks")
-        result = []
-        for tid_str in task_ids:
-            state = get_task_state(int(tid_str))
-            if state:
-                state["task_id"] = tid_str
-                result.append(state)
-        return result
-    except Exception as e:
-        logger.debug("get_all_active_tasks failed: %s", e)
-        return []
-
-
-def clear_task_state(task_id: int):
-    """Remove live state after task completes."""
-    try:
-        r = get_redis()
-        if r:
-            r.delete(f"task:{task_id}:state")
-    except Exception as e:
-        logger.debug("clear_task_state failed (task %d): %s", task_id, e)
-
-
-# ── Active Task Registry ─────────────────────────────────────────────
-
-def register_active_task(task_id: int, agent_type: str = "", user_id: int = 0):
-    """Register a task as actively processing."""
-    try:
-        r = get_redis()
-        if not r:
-            return
-        r.sadd("active_tasks", str(task_id))
-        set_task_state(task_id, status="starting", agent_type=agent_type)
-    except Exception as e:
-        logger.debug("register_active_task failed (task %d): %s", task_id, e)
-
-
-def unregister_active_task(task_id: int):
-    """Remove task from active registry. Progress and summary are preserved
-    until mission close — they're cheap text and useful for chain context."""
-    try:
-        r = get_redis()
-        if not r:
-            return
-        r.srem("active_tasks", str(task_id))
-        clear_task_state(task_id)
-    except Exception as e:
-        logger.debug("unregister_active_task failed (task %d): %s", task_id, e)
-
-
-def get_active_task_ids() -> set[int]:
-    """Get set of currently active task IDs."""
-    try:
-        r = get_redis()
-        if not r:
-            return set()
-        members = r.smembers("active_tasks")
-        return {int(m) for m in members}
-    except Exception as e:
-        logger.debug("get_active_task_ids failed: %s", e)
-        return set()
-
-
 # ── Active Web Chat Registry ─────────────────────────────────────────
 
 def register_active_web_chat(request_id: str, session_id: str = "", fingerprint: str = ""):
@@ -329,51 +262,6 @@ def get_active_web_chats(max_age_sec: int = 1800) -> list[dict]:
     except Exception as e:
         logger.debug("get_active_web_chats failed: %s", e)
         return []
-
-
-# ── Mission Bulletin Board (inter-agent messaging) ───────────────────
-
-def post_to_board(mission_id: int, from_task_id: int, agent_type: str, message: str):
-    """Post a message to the mission bulletin board, visible to all sibling agents."""
-    try:
-        r = get_redis()
-        if not r:
-            return
-        key = f"board:{mission_id}"
-        entry = json.dumps({
-            "task_id": from_task_id,
-            "agent": agent_type,
-            "message": message[:2000],
-            "ts": time.time(),
-        }, ensure_ascii=False)
-        r.rpush(key, entry)
-        r.expire(key, _KEY_TTL)
-    except Exception as e:
-        logger.debug("post_to_board failed (mission %d): %s", mission_id, e)
-
-
-def read_board(mission_id: int, since_ts: float = 0.0) -> list[dict]:
-    """Read messages from the mission bulletin board, optionally filtering by timestamp."""
-    try:
-        r = get_redis()
-        if not r:
-            return []
-        key = f"board:{mission_id}"
-        entries = r.lrange(key, 0, -1)
-        result = []
-        for e in entries:
-            parsed = json.loads(e)
-            if parsed.get("ts", 0) > since_ts:
-                result.append(parsed)
-        return result
-    except Exception as e:
-        logger.debug("read_board failed (mission %d): %s", mission_id, e)
-        return []
-
-
-def format_board_for_context(mission_id: int, *, provider: str = "claude") -> str:
-    """Format board messages as an injectable context block."""
-    return format_agent_board(read_board(mission_id), provider)
 
 
 # ── Task Chain Memory (parent chain context) ─────────────────────────
@@ -476,28 +364,17 @@ def format_task_chain_for_context(task_id: int, *, provider: str = "claude") -> 
 # ── Mission-scoped Cleanup ────────────────────────────────────────────
 
 def cleanup_mission(mission_id: int, task_ids: list[int] | None = None):
-    """Clean up all Redis state for a completed mission.
+    """Drop the progress logs of a closed mission's tasks.
 
-    Called when a mission is closed. Removes board messages and
-    optionally task progress/state/summaries for associated tasks.
+    task_result summaries are kept: chain history is cheap and useful later.
     """
+    if not task_ids:
+        return
     try:
         r = get_redis()
         if not r:
             return
-        # Board messages
-        r.delete(f"board:{mission_id}")
-        # Task-level keys
-        if task_ids:
-            keys_to_delete = []
-            for tid in task_ids:
-                keys_to_delete.extend([
-                    f"task:{tid}:progress",
-                    f"task:{tid}:state",
-                    # task_result kept — chain history is cheap and useful for future reference
-                ])
-            if keys_to_delete:
-                r.delete(*keys_to_delete)
-        logger.info("Cleaned up Redis state for mission #%d (%d tasks)", mission_id, len(task_ids or []))
+        r.delete(*[f"task:{tid}:progress" for tid in task_ids])
+        logger.info("Cleaned up Redis state for mission #%d (%d tasks)", mission_id, len(task_ids))
     except Exception as e:
         logger.debug("cleanup_mission failed (mission %d): %s", mission_id, e)

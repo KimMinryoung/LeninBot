@@ -20,11 +20,11 @@ class TaskContextTests(unittest.TestCase):
             "memory_store.experiential": SimpleNamespace(recall_experiences_block=self.recall),
             "kg_runtime.recall": SimpleNamespace(entity_gated_kg_block=self.kg),
             "memory_store.redis_state": SimpleNamespace(
-                format_board_for_context=lambda *a, **kw: "",
                 format_task_chain_for_context=lambda *a, **kw: "parent evidence",
             ),
             "telegram.mission": SimpleNamespace(
                 get_mission_events=lambda *a, **kw: [], add_mission_event=lambda *a: None,
+                format_board_for_context=lambda *a, **kw: "",
             ),
         }))
         self.stack.enter_context(patch("db.query", return_value=[]))

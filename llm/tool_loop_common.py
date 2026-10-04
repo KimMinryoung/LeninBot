@@ -168,48 +168,29 @@ async def emit_progress(on_progress, event: str, detail: str):
 # ── Task cancellation ─────────────────────────────────────────────────
 
 class TaskCancelledError(Exception):
-    """Raised when a task is cancelled via Redis signal."""
+    """Raised when the task row was cancelled (/cancel marks it failed)."""
     pass
 
 
 def check_cancelled(task_id: int | None):
-    """Check if a task has been cancelled. Raises TaskCancelledError if so."""
+    """Raise TaskCancelledError if the task's row is already failed.
+
+    /cancel writes status='failed' to Postgres, so the row is the signal: it
+    cannot expire before the next round boundary and needs no Redis. A DB
+    error never stops the run. Blocking; async callers use asyncio.to_thread.
+    """
     if task_id is None:
         return
     try:
-        from memory_store.redis_state import get_redis
-        r = get_redis()
-        if r.exists(f"task:{task_id}:cancel"):
-            r.delete(f"task:{task_id}:cancel")
-            raise TaskCancelledError(f"Task #{task_id} cancelled by user")
-    except TaskCancelledError:
-        raise
+        from db import query_one
+        row = query_one("SELECT status FROM telegram_tasks WHERE id = %s", (task_id,))
     except Exception:
-        pass
-
-
-def request_cancel(task_id: int):
-    """Set a cancel flag in Redis for a running task."""
-    try:
-        from memory_store.redis_state import get_redis
-        r = get_redis()
-        r.set(f"task:{task_id}:cancel", "1", ex=300)  # 5 min TTL
-    except Exception:
-        pass
-
-
-# ── Redis state ──────────────────────────────────────────────────────
-
-def update_redis_state(task_id: int | None, round_num: int, total_cost: float):
-    """Update live task state in Redis (non-fatal on failure)."""
-    if task_id is None:
         return
-    try:
-        from memory_store.redis_state import set_task_state
-        set_task_state(task_id, round_num, total_cost, status="running")
-    except Exception:
-        pass
+    if row and row.get("status") == "failed":
+        raise TaskCancelledError(f"Task #{task_id} cancelled by user")
 
+
+# ── Redis progress ───────────────────────────────────────────────────
 
 def save_redis_progress(
     task_id: int | None, round_num: int,

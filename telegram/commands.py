@@ -1217,19 +1217,23 @@ async def cmd_cancel(message: Message):
         await message.answer("사용법: `/cancel <task_id>`", parse_mode="Markdown")
         return
     task_id = int(args[1])
-    from llm.tool_loop_common import request_cancel
-    request_cancel(task_id)
-    # Also mark in DB as failed immediately
+    # The failed row is the cancel signal: the running loop checks it before
+    # each round (llm.tool_loop_common.check_cancelled).
     try:
-        _execute(
+        row = await asyncio.to_thread(
+            _query_one,
             "UPDATE telegram_tasks SET status = 'failed', "
             "result = COALESCE(result, '') || %s, completed_at = NOW() "
-            "WHERE id = %s AND status IN ('processing', 'queued')",
+            "WHERE id = %s AND status IN ('processing', 'queued', 'pending') RETURNING status",
             (f"\n[CANCELLED] Stopped by user via /cancel.", task_id),
         )
-    except Exception:
-        pass
-    await message.answer(f"✅ Task #{task_id} 취소 신호 전송. 다음 라운드에서 중단됩니다.")
+    except Exception as e:
+        await message.answer(f"❌ Task #{task_id} 취소 실패 (DB 오류): {e}")
+        return
+    if not row:
+        await message.answer(f"Task #{task_id}은(는) 대기·실행 중이 아닙니다. 취소할 것이 없습니다.")
+        return
+    await message.answer(f"✅ Task #{task_id} 취소됨. 실행 중이면 다음 라운드 시작 전에 중단합니다.")
 
 
 async def cmd_restart(message: Message):

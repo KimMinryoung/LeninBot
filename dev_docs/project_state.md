@@ -2,7 +2,7 @@
 
 2026-09-23 저장소 코드·프런트엔드 프록시 설정·설치된 Nginx 설정을 대조했다. 서비스 활성 상태는 별도 점검 대상이다.
 
-Cyber-Lenin은 하나의 런타임 정체성을 여러 인터페이스로 노출하는 시스템이다. 주요 사용자 인터페이스는 Telegram bot, public web chat API, scheduled autonomous/diary/background workers다. 장기 상태는 로컬 PostgreSQL(`leninbot-pg` Docker 컨테이너 — 활성 `leninbot`·`writer` DB와 읽기 전용 보관 `legacy_game` DB, `dev_docs/db_migration_plan.md`)과 Neo4j에 저장하고, Redis는 실행 중인 task 상태와 mission board 같은 단기 공유 상태를 맡는다.
+Cyber-Lenin은 하나의 런타임 정체성을 여러 인터페이스로 노출하는 시스템이다. 주요 사용자 인터페이스는 Telegram bot, public web chat API, scheduled autonomous/diary/background workers다. 장기 상태는 로컬 PostgreSQL(`leninbot-pg` Docker 컨테이너 — 활성 `leninbot`·`writer` DB와 읽기 전용 보관 `legacy_game` DB, `dev_docs/db_migration_plan.md`)과 Neo4j에 저장하고, Redis(DB 1, DB 0은 frontend 세션)는 task 진행 로그·웹챗 진행 표시·호출 한도 창 같은 단기 공유 상태만 맡는다.
 
 ## Runtime Map
 
@@ -54,7 +54,7 @@ telegram/bot.py orchestrator (chat loop: telegram/chat_runtime.py)
         |-- agents/* AgentSpec registry
         |
         +--> PostgreSQL task/chat/mission tables
-        +--> Redis task progress, active task state, mission board
+        +--> Redis task progress, task-chain summaries, rate windows
         +--> Neo4j KG
 
 systemd timers
@@ -141,7 +141,7 @@ Dependency direction is simple: `leninbot-llm-proxy.service` waits for network-o
 | PostgreSQL `legacy_game` DB (`leninbot-pg` 내부, 런타임 미사용·읽기 전용 보관) | 운영자 전용; `scripts/backup_main_db_to_r2.py`, `scripts/restore_db.py` | 옛 게임의 `story_scenes` 415행. main DB에서 2026-07-29 분리했으며 일일 로컬/R2 백업 및 DRI 복구 범위에 포함 |
 | pgvector | `corpus/*`, `memory_store/experiential.py` | core theory, modern analysis, self-produced analysis, experience memory vectors |
 | Neo4j | `graph_memory/*`, `kg_runtime/*`, `jobs/kg_sync*` | typed KG entities, relations, Graphiti episodes; 저장소 간 허브 — CommuLingo·리서치·사료 문서가 external_ids로 미러됨 (`dev_docs/knowledge_graph_design.md`) |
-| Redis | `memory_store/redis_state.py` | live task progress/state, active task registry, mission board, task-chain summaries |
+| Redis (DB 1) | `memory_store/redis_state.py` | incremental task progress, task-chain summaries, in-flight web chats, owner alert queue; circuit breaker on outage |
 | R2 | `shared.py`, publication/runtime tools | public uploaded files and generated media |
 
 ## Vector Corpus Maintenance Backlog

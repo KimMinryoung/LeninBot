@@ -1871,13 +1871,8 @@ async def bot_main():
         logger.info("SIGTERM received — stopping polling gracefully")
         # Schedule shutdown notification before stopping
         async def _shutdown_notify_and_checkpoint():
-            # Merge in-memory and Redis active task sets for comprehensive checkpoint
+            # The worker in this process tracks every task it is running.
             active_ids = set(_runtime_state.get("active_task_ids", set()))
-            try:
-                from memory_store.redis_state import get_active_task_ids
-                active_ids |= get_active_task_ids()
-            except Exception:
-                pass
             for task_id in active_ids:
                 try:
                     ok = await checkpoint_task_on_shutdown(int(task_id))

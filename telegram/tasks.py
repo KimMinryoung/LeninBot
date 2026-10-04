@@ -1352,7 +1352,7 @@ def _build_task_context_content(
     board_ctx = ""
     if mission_id:
         try:
-            from memory_store.redis_state import format_board_for_context
+            from telegram.mission import format_board_for_context
             board_ctx = format_board_for_context(mission_id, provider=context_provider)
         except Exception as e:
             logger.debug("Board context load failed: %s", e)
@@ -1492,13 +1492,6 @@ async def _persist_task_success(
         except Exception as e:
             logger.debug("Failed to save tool_log for task %d: %s", task_id, e)
 
-    # Clean up Redis live state (PG now has the record)
-    try:
-        from memory_store.redis_state import unregister_active_task
-        unregister_active_task(task_id)
-    except Exception:
-        pass
-
     # Save task summary to Redis for chain context (7-day TTL)
     try:
         from memory_store.redis_state import save_task_summary
@@ -1628,12 +1621,6 @@ async def _handle_task_failure(
                 await cb_result
         except Exception:
             logger.debug("on_complete callback failed for task %d", task_id)
-    # Clean up Redis live state on failure
-    try:
-        from memory_store.redis_state import unregister_active_task
-        unregister_active_task(task_id)
-    except Exception:
-        pass
     return {
         "status": "failed",
         "task_id": task_id,
@@ -2536,13 +2523,22 @@ async def task_worker(bot: Bot, *, process_task_fn, runtime_state: dict | None =
             # 'processing' while actually blocked on the semaphore — appearing
             # as zombie tasks (especially with LOCAL_SEMAPHORE=1).
             try:
-                await asyncio.to_thread(
-                    _execute,
-                    "UPDATE telegram_tasks SET status = 'processing' WHERE id = %s",
+                claimed = await asyncio.to_thread(
+                    _query_one,
+                    "UPDATE telegram_tasks SET status = 'processing' "
+                    "WHERE id = %s AND status = 'queued' RETURNING id",
                     (task_id,),
                 )
             except Exception as e:
                 logger.warning("Task #%d: failed to set processing status: %s", task_id, e)
+                claimed = True
+            if not claimed:
+                # /cancel marked it failed while it waited for the semaphore.
+                logger.info("Task #%d: no longer queued, skipping", task_id)
+                active_tasks.pop(task_id, None)
+                if runtime_state is not None:
+                    runtime_state.get("active_task_ids", set()).discard(task_id)
+                return
             try:
                 await process_task_fn(bot, task)
             except Exception as e:
@@ -2562,11 +2558,6 @@ async def task_worker(bot: Bot, *, process_task_fn, runtime_state: dict | None =
                 active_tasks.pop(task_id, None)
                 if runtime_state is not None:
                     runtime_state.get("active_task_ids", set()).discard(task_id)
-                try:
-                    from memory_store.redis_state import unregister_active_task
-                    unregister_active_task(task_id)
-                except Exception:
-                    pass
 
     while True:
         try:
@@ -2610,11 +2601,6 @@ async def task_worker(bot: Bot, *, process_task_fn, runtime_state: dict | None =
                 task_id = task["id"]
                 if runtime_state is not None:
                     runtime_state.get("active_task_ids", set()).add(task_id)
-                try:
-                    from memory_store.redis_state import register_active_task
-                    register_active_task(task_id, task.get("agent_type", ""), task.get("user_id", 0))
-                except Exception:
-                    pass
                 t = asyncio.create_task(_run_one(task), name=f"task-{task_id}")
                 active_tasks[task_id] = t
             else:

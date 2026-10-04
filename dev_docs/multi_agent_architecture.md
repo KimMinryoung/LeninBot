@@ -2,7 +2,7 @@
 
 최종 확인 기준: 2026-07-12 코드 트리.
 
-Telegram is the full multi-agent runtime. The orchestrator receives user messages, answers directly when appropriate, or creates database-backed tasks for specialist agents. PostgreSQL is the durable task record; Redis holds live progress and shared mission state.
+Telegram is the full multi-agent runtime. The orchestrator receives user messages, answers directly when appropriate, or creates database-backed tasks for specialist agents. PostgreSQL is the durable task record (including the mission agent board and the /cancel signal); Redis holds incremental tool progress and short-lived shared state.
 
 ## High-Level Flow
 
@@ -364,7 +364,7 @@ Agent tasks receive structured context rather than a passive chat dump:
 | mission context | `telegram_mission_events` |
 | agent execution history | latest completed/handed-off task by same user and agent in the same mission, only when no parent-chain context was recovered |
 | task chain | Redis `task_result:*` and DB fallback |
-| agent board | Redis `board:{mission_id}` |
+| agent board | `telegram_mission_events` rows with `event_type='agent_message'` (latest 50; kept out of the mission timeline) |
 | diary activity preflight | scheduled diary-writing prompt only: latest diary anchor plus recent Telegram context, completed tasks/reports, public or staged research documents, and autonomous project state are injected automatically so new entries can focus on the period since the last diary |
 | diary web-chat preflight | scheduled diary-writing prompt only: recent public web `chat_logs` are injected automatically so correction, omission, non-publication, and topic-priority instructions from web chat reach the next scheduled diary run |
 | task | orchestrator delegation text |
@@ -404,15 +404,29 @@ The diary prompt treats finance/securities data as background context by default
 
 ## Redis Runtime State
 
+Leninbot uses Redis database 1 (`REDIS_URL=redis://localhost:6379/1`); database 0
+of the same server holds the frontend's sessions, so the keyspaces never mix.
+
 | Key pattern | Purpose |
 |---|---|
-| `task:{id}:progress` | incremental tool-call log for restart recovery |
-| `task:{id}:state` | live round/cost/status metadata |
-| `active_tasks` | IDs currently processing |
-| `board:{mission_id}` | inter-agent mission bulletin board |
-| `task_result:{task_id}` | 7-day task-chain summaries |
+| `task:{id}:progress` | incremental tool-call log for restart recovery (7 days; dropped when the mission closes) |
+| `task_result:{task_id}` | 30-day task-chain summaries (DB fallback when missing) |
+| `web_chat:{request_id}:state`, `active_web_chats` | in-flight web chat answers for the API restart guard |
+| `owner_alerts` | alerts from processes without a Telegram token; `system_monitor` drains them |
+| `gw:rl:*`, `jev:exhausted:*` | tool-gateway rate windows; Jev route exhaustion flags |
+
+Which tasks are running comes from Postgres (`status='processing'`) and the
+worker's in-memory set, not Redis. `/cancel` marks the row `failed`, and the
+agent loop reads the row before each round (`check_cancelled`), so a cancel
+cannot expire or vanish with Redis. The worker claims a task only while it is
+still `queued`, so a cancel during the semaphore wait is not overwritten.
 
 Redis failures are intended to degrade live continuity, not crash task execution.
+`memory_store.redis_state.get_redis()` builds one client (1s timeouts, no
+per-call PING). A connection or timeout error opens a 30-second circuit in
+which `get_redis()` returns `None` immediately, so an outage cannot block the
+event loop for seconds per call. Agent-loop Redis and cancel checks run through
+`asyncio.to_thread`.
 
 `telegram_tasks.tool_log` is treated as append-only execution evidence once populated. The task success path sets it initially and appends later retry/resume logs instead of replacing it. A Telegram schema trigger blocks clearing, replacing, deleting rows with non-empty tool logs, or truncating `telegram_tasks` unless an administrator explicitly sets `SET LOCAL leninbot.task_tool_log_mutation_approved = on` in a maintenance transaction.
 

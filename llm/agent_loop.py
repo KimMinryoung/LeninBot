@@ -52,6 +52,7 @@ _OpenAIProtocolAdapter for the two implementations):
   make_result(parts, **meta)       — final text (or metadata dict)
 """
 
+import asyncio
 import json
 import logging
 
@@ -65,7 +66,6 @@ from llm.tool_loop_common import (
     check_cancelled,
     emit_progress,
     save_redis_progress,
-    update_redis_state,
     validate_budget,
 )
 
@@ -259,7 +259,7 @@ async def run_tool_loop(
     try:
         while round_num < total_round_limit:
             round_num += 1
-            check_cancelled(task_id)
+            await asyncio.to_thread(check_cancelled, task_id)
 
             response = await adapter.call_model(working_msgs, round_num)
             if response is None:
@@ -272,7 +272,6 @@ async def run_tool_loop(
                     on_progress, "budget",
                     f"[{round_num}] ${state.total_cost:.3f}/${budget_usd:.2f}",
                 )
-                update_redis_state(task_id, round_num, state.total_cost)
 
             turn = adapter.parse_turn(response, round_num)
 
@@ -377,7 +376,9 @@ async def run_tool_loop(
                     safe_result = redact_log_text(result)
                     tool_call_log.append(f"  [{round_num}/{max_rounds}] {tname}({input_summary})")
                     tool_work_details.append(f"  [{round_num}] {tname}({input_summary}) → {safe_result}")
-                    save_redis_progress(task_id, round_num, tname, input_summary, safe_result, is_error)
+                    await asyncio.to_thread(
+                        save_redis_progress, task_id, round_num, tname, input_summary, safe_result, is_error,
+                    )
                 adapter.note_exec_results(round_num, exec_results)
 
             # Safety net: every tool call must get a result (adapter appends a
@@ -488,7 +489,8 @@ async def run_tool_loop(
                         safe_result = redact_log_text(result)
                         tool_call_log.append(f"  [final] {tname}({input_summary})")
                         tool_work_details.append(f"  [final] {tname}({input_summary}) → {safe_result}")
-                        save_redis_progress(
+                        await asyncio.to_thread(
+                            save_redis_progress,
                             task_id, round_num + final_attempt, tname, input_summary, safe_result, is_error,
                         )
                 adapter.append_final_results(working_msgs, final_turn, final_exec)
