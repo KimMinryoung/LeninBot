@@ -22,9 +22,27 @@ CF_PURGE_SCRIPT = os.getenv(
 )
 
 
+# Paths the frontend serves in one language only; every other public path
+# also has an English copy under /en/ (frontend isLanguageSpecificPublicPath),
+# which Cloudflare caches separately.
+_SINGLE_LANGUAGE_PATHS = {"/sitemap.xml", "/robots.txt"}
+
+
+def with_english_paths(paths: list[str]) -> list[str]:
+    """Add the /en/ copy of each language-specific path ("/" becomes "/en/")."""
+    out: list[str] = []
+    for path in paths:
+        out.append(path)
+        if path in _SINGLE_LANGUAGE_PATHS or not path.startswith("/") or path.startswith("/en/"):
+            continue
+        out.append("/en/" if path == "/" else f"/en{path}")
+    return out
+
+
 def purge_paths(paths: list[str], label: str) -> dict[str, Any]:
-    """Purge ``paths`` (deduplicated, order kept); ``label`` names the target in logs."""
-    paths = list(dict.fromkeys(paths))
+    """Purge ``paths`` and their /en/ copies (deduplicated, order kept);
+    ``label`` names the target in logs."""
+    paths = list(dict.fromkeys(with_english_paths(paths)))
     if not paths:
         return {"ok": True, "purged": 0, "urls": []}
     if not os.path.isfile(CF_PURGE_SCRIPT):
