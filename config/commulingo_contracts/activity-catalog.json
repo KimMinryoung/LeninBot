@@ -2662,6 +2662,9 @@
         "ko": "앙골라 해방인민운동",
         "en": "Popular Movement for the Liberation of Angola (MPLA)"
       },
+      "termIds": [
+        "popular-movement-for-the-liberation-of-angola"
+      ],
       "countryCode": "angola",
       "icon": "flag",
       "parentId": null,
@@ -2689,6 +2692,9 @@
         "ko": "모잠비크 해방전선",
         "en": "Mozambique Liberation Front (FRELIMO)"
       },
+      "termIds": [
+        "mozambique-liberation-front"
+      ],
       "countryCode": "mozambique",
       "icon": "flag",
       "parentId": null,
@@ -2716,6 +2722,9 @@
         "ko": "기니·카보베르데 아프리카독립당",
         "en": "African Party for the Independence of Guinea and Cape Verde (PAIGC)"
       },
+      "termIds": [
+        "african-party-for-the-independence-of-guinea-and-cape-verde"
+      ],
       "countryCode": "guinea-bissau",
       "icon": "flag",
       "parentId": null,
@@ -2734,6 +2743,9 @@
         "ko": "남아프리카 공산당",
         "en": "South African Communist Party (SACP)"
       },
+      "termIds": [
+        "south-african-communist-party"
+      ],
       "countryCode": "south-africa",
       "icon": "flag",
       "parentId": null,
@@ -2752,6 +2764,9 @@
         "ko": "아프리카민족회의",
         "en": "African National Congress (ANC)"
       },
+      "termIds": [
+        "african-national-congress"
+      ],
       "countryCode": "south-africa",
       "icon": "flag",
       "parentId": null,
@@ -2770,6 +2785,9 @@
         "ko": "쿠바 공산당",
         "en": "Communist Party of Cuba (PCC)"
       },
+      "termIds": [
+        "communist-party-of-cuba"
+      ],
       "countryCode": "cuba",
       "icon": "flag",
       "parentId": null,
@@ -3037,6 +3055,9 @@
         "ko": "산디니스타 민족해방전선",
         "en": "Sandinista National Liberation Front (FSLN)"
       },
+      "termIds": [
+        "sandinista-national-liberation-front"
+      ],
       "countryCode": "nicaragua",
       "icon": "flag",
       "parentId": null,
@@ -3340,6 +3361,9 @@
         "ko": "브라질 공산당",
         "en": "Brazilian Communist Party (PCB)"
       },
+      "termIds": [
+        "brazilian-communist-party"
+      ],
       "countryCode": "brazil",
       "icon": "flag",
       "parentId": null,
@@ -3358,6 +3382,9 @@
         "ko": "칠레 공산당",
         "en": "Communist Party of Chile"
       },
+      "termIds": [
+        "communist-party-of-chile"
+      ],
       "countryCode": "chile",
       "icon": "flag",
       "parentId": null,
@@ -3787,6 +3814,9 @@
         "ko": "신보석운동",
         "en": "New JEWEL Movement (NJM)"
       },
+      "termIds": [
+        "new-jewel-movement"
+      ],
       "countryCode": "grenada",
       "icon": "flag",
       "parentId": null,
