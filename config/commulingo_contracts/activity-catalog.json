@@ -1299,6 +1299,10 @@
         "ko": "소련공산당·볼셰비키",
         "en": "Soviet Communist Party and Bolsheviks"
       },
+      "termIds": [
+        "communist-party-of-the-soviet-union",
+        "bolshevik"
+      ],
       "countryCode": "soviet",
       "icon": "flag",
       "parentId": null,
@@ -1326,6 +1330,9 @@
         "ko": "좌익공산주의자",
         "en": "Left Communists"
       },
+      "termIds": [
+        "left-communists"
+      ],
       "countryCode": "soviet",
       "icon": "flag",
       "parentId": "soviet-party",
@@ -1344,6 +1351,9 @@
         "ko": "민주집중파",
         "en": "Democratic Centralists (Decists)"
       },
+      "termIds": [
+        "democratic-centralists"
+      ],
       "countryCode": "soviet",
       "icon": "flag",
       "parentId": "soviet-party",
@@ -1362,6 +1372,9 @@
         "ko": "노동자 반대파",
         "en": "Workers' Opposition"
       },
+      "termIds": [
+        "workers-opposition"
+      ],
       "countryCode": "soviet",
       "icon": "flag",
       "parentId": "soviet-party",
@@ -1380,6 +1393,9 @@
         "ko": "노동자 그룹",
         "en": "Workers' Group"
       },
+      "termIds": [
+        "workers-group"
+      ],
       "countryCode": "soviet",
       "icon": "flag",
       "parentId": "soviet-party",
@@ -1398,6 +1414,9 @@
         "ko": "좌익반대파",
         "en": "Left Opposition"
       },
+      "termIds": [
+        "left-opposition"
+      ],
       "countryCode": "soviet",
       "icon": "flag",
       "parentId": "soviet-party",
@@ -1416,6 +1435,9 @@
         "ko": "마르크스-레닌주의자 동맹(류틴 그룹)",
         "en": "Union of Marxist-Leninists (Ryutin group)"
       },
+      "termIds": [
+        "ryutin-platform"
+      ],
       "countryCode": "soviet",
       "icon": "flag",
       "parentId": "soviet-party",
@@ -1470,6 +1492,9 @@
         "ko": "코민테른",
         "en": "Comintern"
       },
+      "termIds": [
+        "comintern"
+      ],
       "countryCode": null,
       "icon": "globe",
       "parentId": null,
@@ -1618,6 +1643,9 @@
         "ko": "사회혁명당",
         "en": "Socialist Revolutionary Party (PSR/SR)"
       },
+      "termIds": [
+        "socialist-revolutionary-party-srs"
+      ],
       "countryCode": "russia",
       "icon": "flag",
       "parentId": null,
@@ -1636,6 +1664,9 @@
         "ko": "좌파 사회혁명당",
         "en": "Party of Left Socialist Revolutionaries"
       },
+      "termIds": [
+        "left-socialist-revolutionaries"
+      ],
       "countryCode": "russia",
       "icon": "flag",
       "parentId": null,
@@ -1654,6 +1685,9 @@
         "ko": "멘셰비키",
         "en": "Mensheviks (RSDLP)"
       },
+      "termIds": [
+        "menshevik"
+      ],
       "countryCode": "russia",
       "icon": "flag",
       "parentId": null,
@@ -1708,6 +1742,9 @@
         "ko": "인민의 의지",
         "en": "Narodnaya Volya"
       },
+      "termIds": [
+        "narodnaya-volya"
+      ],
       "countryCode": "russia",
       "icon": "flag",
       "parentId": null,
@@ -1726,6 +1763,9 @@
         "ko": "러시아 임시정부",
         "en": "Russian Provisional Government"
       },
+      "termIds": [
+        "russian-provisional-government"
+      ],
       "countryCode": "russia",
       "icon": "swords",
       "parentId": null,
@@ -1798,6 +1838,9 @@
         "ko": "독일 사회민주당",
         "en": "Social Democratic Party of Germany (SPD)"
       },
+      "termIds": [
+        "social-democratic-party-of-germany"
+      ],
       "countryCode": "germany",
       "icon": "flag",
       "parentId": null,
@@ -1816,6 +1859,9 @@
         "ko": "독일 사회주의통일당",
         "en": "Socialist Unity Party of Germany (SED)"
       },
+      "termIds": [
+        "socialist-unity-party-of-germany"
+      ],
       "countryCode": "east-germany",
       "icon": "flag",
       "parentId": null,
@@ -1969,6 +2015,9 @@
         "ko": "헝가리 노동인민당",
         "en": "Hungarian Working People's Party (MDP)"
       },
+      "termIds": [
+        "hungarian-working-peoples-party"
+      ],
       "countryCode": "hungary",
       "icon": "flag",
       "parentId": null,
@@ -2185,6 +2234,9 @@
         "ko": "그리스 공산당",
         "en": "Communist Party of Greece (KKE)"
       },
+      "termIds": [
+        "communist-party-of-greece-kke"
+      ],
       "countryCode": "greece",
       "icon": "flag",
       "parentId": null,
@@ -2437,6 +2489,9 @@
         "ko": "아프가니스탄 인민민주당",
         "en": "People's Democratic Party of Afghanistan (PDPA)"
       },
+      "termIds": [
+        "people-s-democratic-party-of-afghanistan-pdpa"
+      ],
       "countryCode": "afghanistan",
       "icon": "flag",
       "parentId": null,
@@ -2644,6 +2699,9 @@
         "ko": "폴란드 연대노조",
         "en": "Solidarity (Solidarność)"
       },
+      "termIds": [
+        "solidarnosc"
+      ],
       "countryCode": "poland",
       "icon": "flag",
       "parentId": null,
@@ -2662,6 +2720,9 @@
         "ko": "노동자방어위원회",
         "en": "Workers' Defence Committee (KOR)"
       },
+      "termIds": [
+        "workers-defence-committee-kor"
+      ],
       "countryCode": "poland",
       "icon": "flag",
       "parentId": null,
@@ -2896,6 +2957,9 @@
         "ko": "지롱드파",
         "en": "Girondins"
       },
+      "termIds": [
+        "girondins"
+      ],
       "countryCode": "france",
       "icon": "flag",
       "parentId": null,
@@ -2914,6 +2978,9 @@
         "ko": "자코뱅 클럽",
         "en": "Jacobin Club"
       },
+      "termIds": [
+        "jacobins"
+      ],
       "countryCode": "france",
       "icon": "flag",
       "parentId": null,
@@ -2932,6 +2999,9 @@
         "ko": "산악파",
         "en": "The Mountain (Montagnards)"
       },
+      "termIds": [
+        "the-mountain"
+      ],
       "countryCode": "france",
       "icon": "flag",
       "parentId": null,
@@ -2950,6 +3020,9 @@
         "ko": "코르들리에 클럽",
         "en": "Cordeliers Club"
       },
+      "termIds": [
+        "cordeliers-club"
+      ],
       "countryCode": "france",
       "icon": "flag",
       "parentId": null,
@@ -2986,6 +3059,9 @@
         "ko": "푀양파",
         "en": "Feuillants"
       },
+      "termIds": [
+        "feuillants"
+      ],
       "countryCode": "france",
       "icon": "flag",
       "parentId": null,
@@ -3637,6 +3713,9 @@
         "ko": "유엔",
         "en": "United Nations"
       },
+      "termIds": [
+        "united-nations"
+      ],
       "countryCode": null,
       "icon": "landmark",
       "parentId": null,
@@ -3655,6 +3734,9 @@
         "ko": "국제노동자협회(제1인터내셔널)",
         "en": "International Workingmen's Association (First International)"
       },
+      "termIds": [
+        "first-international"
+      ],
       "countryCode": null,
       "icon": "landmark",
       "parentId": null,
@@ -3691,6 +3773,9 @@
         "ko": "미국구호청",
         "en": "American Relief Administration (ARA)"
       },
+      "termIds": [
+        "american-relief-administration-ara"
+      ],
       "countryCode": "usa",
       "icon": "landmark",
       "parentId": null,
@@ -3763,6 +3848,9 @@
         "ko": "앙라제",
         "en": "Enragés"
       },
+      "termIds": [
+        "enrages"
+      ],
       "countryCode": "france",
       "icon": "flag",
       "parentId": null,
@@ -3781,6 +3869,9 @@
         "ko": "평등주의자 결사",
         "en": "Conspiracy of the Equals / Société des Égaux"
       },
+      "termIds": [
+        "conspiracy-of-equals"
+      ],
       "countryCode": "france",
       "icon": "flag",
       "parentId": null,
@@ -3817,6 +3908,9 @@
         "ko": "러시아 사회민주노동당",
         "en": "Russian Social Democratic Labour Party (RSDLP)"
       },
+      "termIds": [
+        "rsdlp"
+      ],
       "countryCode": "russia",
       "icon": "flag",
       "parentId": null,
@@ -3835,6 +3929,9 @@
         "ko": "노동해방단",
         "en": "Emancipation of Labour group"
       },
+      "termIds": [
+        "emancipation-of-labour"
+      ],
       "countryCode": "russia",
       "icon": "flag",
       "parentId": null,
