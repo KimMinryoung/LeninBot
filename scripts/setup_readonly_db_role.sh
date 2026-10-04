@@ -13,6 +13,12 @@
 
 set -euo pipefail
 
+if [ "$(id -u)" -eq 0 ]; then
+    echo "Run as grass, not root: the password file must be readable by grass." >&2
+    echo "  sudo -u grass -H $0" >&2
+    exit 1
+fi
+
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PW_FILE="${DB_RO_PASSWORD_FILE:-$HOME/.config/leninbot/db_ro_password}"
 
@@ -22,6 +28,7 @@ PW="$("$ROOT/venv/bin/python" -c 'import secrets; print(secrets.token_hex(24))')
 
 # The password goes over stdin, never on a command line.
 "$ROOT/scripts/psql-main" -v ON_ERROR_STOP=1 -q <<SQL
+SET client_min_messages = warning;
 DO \$\$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'leninbot_ro') THEN
