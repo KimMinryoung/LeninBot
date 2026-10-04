@@ -57,6 +57,7 @@ TIER_A = [
     "TELEGRAM_BOT_TOKEN",
     "X_BEARER_TOKEN",
     "WRITER_DB_PASSWORD",
+    "ROLEPLAY_BOT_TOKEN",
 ]
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -74,10 +75,11 @@ _LLM_PROVIDER_KEYS = {
     "OPENROUTER_API_KEY", "TYPESAFE_API_KEY",
 }
 _SEARCH_PROVIDER_KEYS = {"TAVILY_API_KEY", "BRAVE_SEARCH_API_KEY"}
-# The writer DB login belongs to the fiction workspace alone; agent hosts read
-# writer data, if ever, through the read-only role.
-_WRITER_ONLY_KEYS = {"WRITER_DB_PASSWORD"}
-_FULL = set(TIER_A) - _LLM_PROVIDER_KEYS - _SEARCH_PROVIDER_KEYS - _WRITER_ONLY_KEYS
+# Secrets owned by exactly one service, kept off the agent hosts: the writer DB
+# login (fiction workspace; agents read writer data through the read-only
+# role) and the roleplay bot's Telegram token.
+_SINGLE_SERVICE_KEYS = {"WRITER_DB_PASSWORD", "ROLEPLAY_BOT_TOKEN"}
+_FULL = set(TIER_A) - _LLM_PROVIDER_KEYS - _SEARCH_PROVIDER_KEYS - _SINGLE_SERVICE_KEYS
 
 SERVICE_CREDS: dict[str, set[str]] = {
     "leninbot-web-gateway": _SEARCH_PROVIDER_KEYS,
@@ -164,6 +166,7 @@ SERVICE_CREDS: dict[str, set[str]] = {
     "leninbot-roleplay": {
         "DB_PASSWORD",
         "NEO4J_PASSWORD",
+        "ROLEPLAY_BOT_TOKEN",
     },
 
     # These services load DB in the static unit; paid web and model traffic
