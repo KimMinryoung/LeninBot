@@ -56,6 +56,7 @@ TIER_A = [
     "TAVILY_API_KEY",
     "TELEGRAM_BOT_TOKEN",
     "X_BEARER_TOKEN",
+    "WRITER_DB_PASSWORD",
 ]
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -73,7 +74,10 @@ _LLM_PROVIDER_KEYS = {
     "OPENROUTER_API_KEY", "TYPESAFE_API_KEY",
 }
 _SEARCH_PROVIDER_KEYS = {"TAVILY_API_KEY", "BRAVE_SEARCH_API_KEY"}
-_FULL = set(TIER_A) - _LLM_PROVIDER_KEYS - _SEARCH_PROVIDER_KEYS
+# The writer DB login belongs to the fiction workspace alone; agent hosts read
+# writer data, if ever, through the read-only role.
+_WRITER_ONLY_KEYS = {"WRITER_DB_PASSWORD"}
+_FULL = set(TIER_A) - _LLM_PROVIDER_KEYS - _SEARCH_PROVIDER_KEYS - _WRITER_ONLY_KEYS
 
 SERVICE_CREDS: dict[str, set[str]] = {
     "leninbot-web-gateway": _SEARCH_PROVIDER_KEYS,
@@ -94,6 +98,7 @@ SERVICE_CREDS: dict[str, set[str]] = {
         "ADMIN_API_KEY",
         "WRITER_ACCESS_KEY",
         "DB_PASSWORD",
+        "WRITER_DB_PASSWORD",
     },
 
     # Email API handles admin review, outbound approval, and optional resend.

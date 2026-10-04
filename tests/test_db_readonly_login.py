@@ -13,7 +13,9 @@ _ENV = {"DB_HOST": "127.0.0.1", "DB_USER": "postgres", "DB_NAME": "leninbot"}
 class ReadonlyLoginTests(unittest.TestCase):
     def setUp(self):
         self.addCleanup(setattr, db, "_pool", None)
+        self.addCleanup(setattr, db, "_writer_pool", None)
         db._pool = None
+        db._writer_pool = None
         tmp = tempfile.NamedTemporaryFile("w", delete=False)
         tmp.write("ro-secret\n")
         tmp.close()
@@ -43,6 +45,17 @@ class ReadonlyLoginTests(unittest.TestCase):
     def test_explicit_password_wins(self):
         kw = self._pool_kwargs({}, "main-secret")
         self.assertEqual((kw["user"], kw["password"]), ("postgres", "main-secret"))
+
+    def test_writer_pool_without_password_uses_readonly_role(self):
+        env = {**_ENV, "DB_RO_PASSWORD_FILE": self.pw_file, "WRITER_DB_HOST": "127.0.0.1"}
+        with patch.dict(os.environ, env), \
+                patch.object(db, "get_secret", return_value=None), \
+                patch.object(db.pool, "ThreadedConnectionPool") as tcp:
+            for key in ("INVOCATION_ID", "LENINBOT_SERVICE", "LENINBOT_ALLOW_WRITE"):
+                os.environ.pop(key, None)
+            db._get_writer_pool()
+        kw = tcp.call_args.kwargs
+        self.assertEqual((kw["user"], kw["dbname"]), ("leninbot_ro", "writer"))
 
     def test_missing_file_keeps_clear_error(self):
         os.unlink(self.pw_file)

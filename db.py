@@ -140,14 +140,18 @@ def _get_writer_pool() -> pool.ThreadedConnectionPool:
     global _writer_pool
     if _writer_pool is None:
         writer_dbname = os.getenv("WRITER_DB_NAME", "writer")
+        user = os.getenv("WRITER_DB_USER", "writer")
+        password = get_secret("WRITER_DB_PASSWORD")
+        if not password and not _writes_allowed(writer_dbname):
+            user, password = _readonly_credentials() or (user, password)
         _writer_pool = pool.ThreadedConnectionPool(
             minconn=1,
             maxconn=int(os.getenv("WRITER_DB_POOL_MAX", "5")),
             host=os.getenv("WRITER_DB_HOST"),
             port=int(os.getenv("WRITER_DB_PORT", "5432")),
             dbname=writer_dbname,
-            user=os.getenv("WRITER_DB_USER", "writer"),
-            password=get_secret("WRITER_DB_PASSWORD"),
+            user=user,
+            password=password,
             sslmode=os.getenv("WRITER_DB_SSLMODE", "disable"),
             application_name=_application_name(),
             options=None if _writes_allowed(writer_dbname) else "-c default_transaction_read_only=on",
