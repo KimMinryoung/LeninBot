@@ -51,6 +51,8 @@ writer/frontend 역할 복구에는 기존 credential 또는 암호만 담은 06
 
 `db.py`는 ad-hoc 연결을 `default_transaction_read_only=on`으로 연다. `_writes_allowed`는 `INVOCATION_ID`, `LENINBOT_SERVICE=1`, 명시적 `LENINBOT_ALLOW_WRITE=1`, 또는 DB 이름 `*_test`에서 쓰기를 허용한다. 이 플래그는 사고 방지용이며 직접 psql을 막는 보안 경계가 아니다. `.env`에 쓰기 opt-in을 상시 넣지 않는다.
 
+서비스 밖 프로세스(운영 스크립트, `restart_guard`, MCP 게이트웨이)에는 `DB_PASSWORD`가 없다. 이때 `db.py`는 읽기 전용 계정 `leninbot_ro`(`pg_read_all_data`, 기본 read-only 트랜잭션)로 로그인한다. 비밀번호는 `~/.config/leninbot/db_ro_password`(0600, `DB_RO_PASSWORD_FILE`로 변경 가능)에 있고 `scripts/setup_readonly_db_role.sh`가 만들거나 교체한다. 서비스(`INVOCATION_ID`)와 쓰기 opt-in 프로세스는 이 계정을 쓰지 않는다. 승인된 쓰기는 `scripts/psql-main`으로 한다.
+
 테스트는 `DB_NAME=leninbot_test` / `WRITER_DB_NAME=writer_test`를 사용한다. `scripts/refresh_test_db.sh`는 테스트 DB를 drop/create하고 스키마만 다시 적재한다. 서비스 startup DDL은 없으며 스키마 변경은 `scripts/schema_migrations.py`로 적용한다.
 
 ## 접속 변경 시 확인

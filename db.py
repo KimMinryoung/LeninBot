@@ -5,7 +5,9 @@ leninbot-pg Docker container (pgvector/pg17, 127.0.0.1:5434); see
 dev_docs/db_migration_plan.md.
 
 Write guard: processes outside a systemd service get read-only
-connections to production databases (see _writes_allowed).
+connections to production databases (see _writes_allowed). Without
+DB_PASSWORD they log in as the read-only role leninbot_ro instead
+(see _readonly_credentials).
 """
 
 import os
@@ -57,6 +59,28 @@ def _writes_allowed(dbname: str | None) -> bool:
     return bool(dbname) and dbname.endswith("_test")
 
 
+_READONLY_USER = "leninbot_ro"
+_READONLY_PASSWORD_FILE = "~/.config/leninbot/db_ro_password"
+
+
+def _readonly_credentials() -> tuple[str, str] | None:
+    """Login for processes outside a service that have no DB_PASSWORD.
+
+    ``leninbot_ro`` holds pg_read_all_data and defaults to read-only
+    transactions, so the database itself refuses writes. Its password lives
+    in a file only the operator account can read (scripts/setup_readonly_db_role.sh).
+    """
+    path = os.path.expanduser(os.getenv("DB_RO_PASSWORD_FILE", _READONLY_PASSWORD_FILE))
+    try:
+        with open(path, encoding="utf-8") as f:
+            password = f.read().strip()
+    except OSError:
+        return None
+    if not password:
+        return None
+    return os.getenv("DB_RO_USER", _READONLY_USER), password
+
+
 def _tag_conn(conn) -> None:
     with conn.cursor() as cur:
         cur.execute("SELECT set_config(%s, %s, false)", ("application_name", _application_name()))
@@ -70,6 +94,8 @@ def _get_pool() -> pool.ThreadedConnectionPool:
         dbname = os.getenv("DB_NAME", "postgres")
         user = os.getenv("DB_USER")
         password = get_secret("DB_PASSWORD")
+        if not password and not _writes_allowed(dbname):
+            user, password = _readonly_credentials() or (user, password)
         missing = [
             name for name, value in (
                 ("DB_HOST", host),
@@ -82,8 +108,10 @@ def _get_pool() -> pool.ThreadedConnectionPool:
             raise RuntimeError(
                 "Missing database configuration: "
                 + ", ".join(missing)
-                + ". For local psql use scripts/psql-main; production services "
-                "load DB_PASSWORD via systemd LoadCredentialEncrypted."
+                + ". Production services load DB_PASSWORD via systemd "
+                "LoadCredentialEncrypted; outside a service, reads use the "
+                "leninbot_ro login (scripts/setup_readonly_db_role.sh) and "
+                "approved writes go through scripts/psql-main."
             )
         _pool = pool.ThreadedConnectionPool(
             minconn=1,

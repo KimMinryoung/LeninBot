@@ -80,6 +80,19 @@ Use the operator profile only when the client should be allowed to run guarded r
 }
 ```
 
+Claude Code on the production server registers both profiles in local scope
+(this project on this host only, not committed to the public repo):
+
+```bash
+claude mcp add --scope local leninbot-inspect -- /home/grass/leninbot/scripts/mcp-gateway
+claude mcp add --scope local leninbot-operator -- /home/grass/leninbot/scripts/mcp-gateway --profile operator
+```
+
+Python-backed DB tools (`list_recent_tasks`, `get_task_status`, …) run outside
+a systemd service and log in through `db.py`'s read-only `leninbot_ro`
+fallback (`dev_docs/db_migration_plan.md`); without its password file they fail
+with `Missing database configuration: DB_PASSWORD`.
+
 Human quick checks:
 
 ```bash
