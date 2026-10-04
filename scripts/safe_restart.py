@@ -35,8 +35,11 @@ def main() -> int:
         print("Use --force only if losing that in-flight work is acceptable.")
         return 2
 
-    if blockers and args.force:
+    if blockers and args.force and not allowed:
         print("Restart guard overridden with --force. Blockers were:")
+        print("\n".join(blockers))
+    elif blockers:
+        print("⚠️ Restart allowed, but the guard could not check everything:")
         print("\n".join(blockers))
 
     for unit in UNITS[args.service]:

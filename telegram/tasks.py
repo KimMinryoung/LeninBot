@@ -2265,6 +2265,20 @@ async def _send_owner(bot: Bot, owner_id: int, text: str):
         logger.warning("Send to owner %d failed: %s", owner_id, e)
 
 
+
+# What a Redis outage actually breaks (dev_docs/multi_agent_architecture.md).
+_REDIS_DOWN_IMPACT = (
+    "pay/send/publish tools are denied (rate store fail-closed); restart handoff loses "
+    "tool progress; owner alert queue and Jev exhaustion flags are off; the API restart "
+    "guard cannot see in-flight web chats"
+)
+_REDIS_DOWN_IMPACT_KO = (
+    "게시·발송·결제 도구(연구 문서 게시, /curate, 채널 방송, 메일, 송금 등)가 모두 거부됨. "
+    "재시작된 태스크는 진행 기록 없이 이어지고, Jev 소진 차단·알림 대기열이 꺼지며, "
+    "API 재시작 가드는 진행 중인 웹챗을 확인하지 못함. frontend 세션도 같은 Redis라 끊김."
+)
+
+
 async def system_monitor(
     bot: Bot,
     *,
@@ -2288,7 +2302,7 @@ async def system_monitor(
     from memory_store.redis_state import redis_available
     redis_is_up = await asyncio.to_thread(redis_available)
     if not redis_is_up:
-        add_alert_fn("Redis unreachable — live task progress tracking unavailable")
+        add_alert_fn(f"Redis unreachable — {_REDIS_DOWN_IMPACT}")
     redis_was_up = redis_is_up
 
     # 3. Periodic health check (every 2 minutes)
@@ -2314,12 +2328,12 @@ async def system_monitor(
             redis_is_up = await asyncio.to_thread(redis_available)
             if redis_was_up and not redis_is_up:
                 clear_alert_fn("Redis reconnect")
-                add_alert_fn("Redis disconnected — live task progress tracking unavailable")
-                await _send_owner(bot, owner_id, "🔴 Redis 연결 끊김 — 재시작 시 태스크 진행 상태가 유실될 수 있습니다.")
+                add_alert_fn(f"Redis disconnected — {_REDIS_DOWN_IMPACT}")
+                await _send_owner(bot, owner_id, f"🔴 Redis 연결 끊김 — {_REDIS_DOWN_IMPACT_KO}")
             elif not redis_was_up and redis_is_up:
                 clear_alert_fn("Redis")
                 add_alert_fn("Redis reconnected")
-                await _send_owner(bot, owner_id, "🟢 Redis 재연결 성공 — 태스크 상태 추적 정상.")
+                await _send_owner(bot, owner_id, "🟢 Redis 재연결 성공 — 게시·발송·결제 도구와 진행 기록 정상.")
             redis_was_up = redis_is_up
 
             # Alerts queued by processes without a Telegram token (timer jobs,

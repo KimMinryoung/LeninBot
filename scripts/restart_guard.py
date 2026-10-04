@@ -36,8 +36,10 @@ def _db_active_tasks() -> list[dict]:
 
 def _redis_active_web_chats() -> list[dict]:
     try:
-        from memory_store.redis_state import get_active_web_chats
+        from memory_store.redis_state import get_active_web_chats, redis_available
 
+        if not redis_available():
+            return [{"warning": "Redis unavailable — in-flight web chat answers cannot be checked"}]
         return get_active_web_chats()
     except Exception as e:
         return [{"warning": f"redis web chat check failed: {e}"}]
@@ -102,8 +104,11 @@ def main() -> int:
 
     allowed, blockers = check_restart_allowed(args.service)
     if allowed or args.force:
-        if blockers and args.force:
+        if blockers and args.force and not allowed:
             print("Restart guard overridden with --force. Blockers were:")
+            print("\n".join(blockers))
+        elif blockers:
+            print("⚠️ Restart allowed, but the guard could not check everything:")
             print("\n".join(blockers))
         return 0
 
