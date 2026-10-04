@@ -3592,7 +3592,7 @@
       "countryCode": "north-korea",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Workers' Party of North Korea. Never infer affiliation from nationality, residence or ideology. Party activity before the DPRK was founded in 1948 remains here. In 1948–1949 party posts and party cadre work also stay here; government, armed forces and other state-institution service in that period belongs to state-north-korea, and a person who held both gets both activities. Opposition is not state service.",
+      "criteria": "Only documented service, membership or organizational activity in Workers' Party of North Korea. Never infer affiliation from nationality, residence or ideology. Party activity before the DPRK was founded in 1948 remains here. In 1948–1949 party posts and party cadre work also stay here; government, armed forces and other state-institution service in that period belongs to state-north-korea, and a person who held both gets both activities; opposition is not state service.",
       "periods": [
         [
           1946,
