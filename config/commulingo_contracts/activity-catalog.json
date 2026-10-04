@@ -1146,6 +1146,9 @@
         "ko": "중국공산당",
         "en": "Communist Party of China"
       },
+      "termIds": [
+        "communist-party-of-china"
+      ],
       "countryCode": "china",
       "icon": "hammer-sickle",
       "parentId": null,
@@ -1173,6 +1176,9 @@
         "ko": "중국국민당",
         "en": "Kuomintang"
       },
+      "termIds": [
+        "kuomintang"
+      ],
       "countryCode": "china",
       "icon": "flag",
       "parentId": null,
@@ -1478,6 +1484,9 @@
         "ko": "미국 사회주의노동자당",
         "en": "Socialist Workers Party (United States)"
       },
+      "termIds": [
+        "socialist-workers-party-united-states"
+      ],
       "countryCode": "usa",
       "icon": "flag",
       "parentId": null,
@@ -1553,6 +1562,9 @@
         "ko": "나치당·나치 정권",
         "en": "Nazi party and regime"
       },
+      "termIds": [
+        "nazi-party"
+      ],
       "countryCode": "germany",
       "icon": "landmark",
       "parentId": null,
@@ -1714,6 +1726,9 @@
         "ko": "10월당",
         "en": "Union of 17 October (Octobrists)"
       },
+      "termIds": [
+        "union-of-17-october"
+      ],
       "countryCode": "russia",
       "icon": "flag",
       "parentId": null,
@@ -1732,6 +1747,9 @@
         "ko": "입헌민주당",
         "en": "Constitutional Democratic Party (Kadets)"
       },
+      "termIds": [
+        "constitutional-democratic-party-kadets"
+      ],
       "countryCode": "russia",
       "icon": "flag",
       "parentId": null,
@@ -1792,6 +1810,9 @@
         "ko": "프랑스 공산당",
         "en": "French Communist Party (PCF)"
       },
+      "termIds": [
+        "french-communist-party"
+      ],
       "countryCode": "france",
       "icon": "flag",
       "parentId": null,
@@ -1810,6 +1831,9 @@
         "ko": "프랑스 노동자당",
         "en": "French Workers' Party (POF)"
       },
+      "termIds": [
+        "french-workers-party"
+      ],
       "countryCode": "france",
       "icon": "flag",
       "parentId": null,
@@ -1828,6 +1852,9 @@
         "ko": "독일 공산당",
         "en": "Communist Party of Germany (KPD)"
       },
+      "termIds": [
+        "communist-party-of-germany"
+      ],
       "countryCode": "germany",
       "icon": "flag",
       "parentId": null,
@@ -1897,6 +1924,9 @@
         "ko": "체코슬로바키아 공산당",
         "en": "Communist Party of Czechoslovakia (KSČ)"
       },
+      "termIds": [
+        "communist-party-of-czechoslovakia"
+      ],
       "countryCode": "czechoslovakia",
       "icon": "flag",
       "parentId": null,
@@ -1924,6 +1954,9 @@
         "ko": "폴란드 통일노동당",
         "en": "Polish United Workers' Party (PZPR)"
       },
+      "termIds": [
+        "polish-united-workers-party"
+      ],
       "countryCode": "poland",
       "icon": "flag",
       "parentId": null,
@@ -1951,6 +1984,9 @@
         "ko": "루마니아 공산당",
         "en": "Romanian Communist Party (PCR)"
       },
+      "termIds": [
+        "romanian-communist-party"
+      ],
       "countryCode": "romania",
       "icon": "flag",
       "parentId": null,
@@ -1978,6 +2014,9 @@
         "ko": "불가리아 공산당",
         "en": "Bulgarian Communist Party (BKP)"
       },
+      "termIds": [
+        "bulgarian-communist-party"
+      ],
       "countryCode": "bulgaria",
       "icon": "flag",
       "parentId": null,
@@ -2005,6 +2044,9 @@
         "ko": "헝가리 공산주의자당",
         "en": "Party of Communists in Hungary (KMP)"
       },
+      "termIds": [
+        "hungarian-communist-party"
+      ],
       "countryCode": "hungary",
       "icon": "flag",
       "parentId": null,
@@ -2053,6 +2095,9 @@
         "ko": "헝가리 사회주의노동자당",
         "en": "Hungarian Socialist Workers' Party (MSzMP)"
       },
+      "termIds": [
+        "hungarian-socialist-workers-party"
+      ],
       "countryCode": "hungary",
       "icon": "flag",
       "parentId": null,
@@ -2080,6 +2125,9 @@
         "ko": "유고슬라비아 공산주의자동맹",
         "en": "Communist Party / League of Communists of Yugoslavia (KPJ/SKJ)"
       },
+      "termIds": [
+        "league-of-communists-of-yugoslavia"
+      ],
       "countryCode": "yugoslavia",
       "icon": "flag",
       "parentId": null,
@@ -2107,6 +2155,9 @@
         "ko": "알바니아 노동당",
         "en": "Party of Labour of Albania"
       },
+      "termIds": [
+        "party-of-labour-of-albania"
+      ],
       "countryCode": "albania",
       "icon": "flag",
       "parentId": null,
@@ -2134,6 +2185,9 @@
         "ko": "이탈리아 공산당",
         "en": "Communist Party of Italy / Italian Communist Party (PCdI/PCI)"
       },
+      "termIds": [
+        "italian-communist-party"
+      ],
       "countryCode": "italy",
       "icon": "flag",
       "parentId": null,
@@ -2152,6 +2206,9 @@
         "ko": "이탈리아 사회당",
         "en": "Italian Socialist Party (PSI)"
       },
+      "termIds": [
+        "italian-socialist-party"
+      ],
       "countryCode": "italy",
       "icon": "flag",
       "parentId": null,
@@ -2170,6 +2227,9 @@
         "ko": "이탈리아 국가파시스트당",
         "en": "National Fascist Party (PNF)"
       },
+      "termIds": [
+        "national-fascist-party"
+      ],
       "countryCode": "italy",
       "icon": "flag",
       "parentId": null,
@@ -2188,6 +2248,9 @@
         "ko": "스페인 공산당",
         "en": "Communist Party of Spain (PCE)"
       },
+      "termIds": [
+        "communist-party-of-spain"
+      ],
       "countryCode": "spain",
       "icon": "flag",
       "parentId": null,
@@ -2206,6 +2269,9 @@
         "ko": "마르크스주의통일노동자당",
         "en": "Workers' Party of Marxist Unification (POUM)"
       },
+      "termIds": [
+        "workers-party-of-marxist-unification-poum"
+      ],
       "countryCode": "spain",
       "icon": "flag",
       "parentId": null,
@@ -2224,6 +2290,9 @@
         "ko": "포르투갈 공산당",
         "en": "Portuguese Communist Party (PCP)"
       },
+      "termIds": [
+        "portuguese-communist-party"
+      ],
       "countryCode": "portugal",
       "icon": "flag",
       "parentId": null,
@@ -2263,6 +2332,9 @@
         "ko": "핀란드 사회민주당",
         "en": "Social Democratic Party of Finland"
       },
+      "termIds": [
+        "social-democratic-party-of-finland"
+      ],
       "countryCode": "finland",
       "icon": "flag",
       "parentId": null,
@@ -2281,6 +2353,9 @@
         "ko": "핀란드 공산당",
         "en": "Communist Party of Finland (SKP)"
       },
+      "termIds": [
+        "communist-party-of-finland"
+      ],
       "countryCode": "finland",
       "icon": "flag",
       "parentId": null,
@@ -2299,6 +2374,9 @@
         "ko": "영국 노동당",
         "en": "Labour Party (United Kingdom)"
       },
+      "termIds": [
+        "labour-party-uk"
+      ],
       "countryCode": "uk",
       "icon": "flag",
       "parentId": null,
@@ -2317,6 +2395,9 @@
         "ko": "영국 공산당",
         "en": "Communist Party of Great Britain (CPGB)"
       },
+      "termIds": [
+        "communist-party-of-great-britain"
+      ],
       "countryCode": "uk",
       "icon": "flag",
       "parentId": null,
@@ -2335,6 +2416,9 @@
         "ko": "미국 공산당",
         "en": "Communist Party USA (CPUSA)"
       },
+      "termIds": [
+        "communist-party-usa"
+      ],
       "countryCode": "usa",
       "icon": "flag",
       "parentId": null,
@@ -2353,6 +2437,9 @@
         "ko": "베트남 공산당",
         "en": "Communist Party of Vietnam / Workers' Party of Vietnam"
       },
+      "termIds": [
+        "communist-party-of-vietnam"
+      ],
       "countryCode": "vietnam",
       "icon": "flag",
       "parentId": null,
@@ -2380,6 +2467,9 @@
         "ko": "조선로동당",
         "en": "Workers' Party of Korea (WPK)"
       },
+      "termIds": [
+        "workers-party-of-korea"
+      ],
       "countryCode": "north-korea",
       "icon": "flag",
       "parentId": null,
@@ -2407,6 +2497,9 @@
         "ko": "조선신민당",
         "en": "New People's Party of Korea"
       },
+      "termIds": [
+        "new-peoples-party-of-korea"
+      ],
       "countryCode": "north-korea",
       "icon": "flag",
       "parentId": null,
@@ -2425,6 +2518,9 @@
         "ko": "조선민주당",
         "en": "Democratic Party of Korea"
       },
+      "termIds": [
+        "korean-democratic-party-north-korea"
+      ],
       "countryCode": "north-korea",
       "icon": "flag",
       "parentId": null,
@@ -2443,6 +2539,9 @@
         "ko": "인도네시아 공산당",
         "en": "Communist Party of Indonesia (PKI)"
       },
+      "termIds": [
+        "communist-party-of-indonesia"
+      ],
       "countryCode": "indonesia",
       "icon": "flag",
       "parentId": null,
@@ -2461,6 +2560,9 @@
         "ko": "인도 공산당",
         "en": "Communist Party of India (CPI)"
       },
+      "termIds": [
+        "communist-party-of-india"
+      ],
       "countryCode": "india",
       "icon": "flag",
       "parentId": null,
@@ -2479,6 +2581,9 @@
         "ko": "인도 공산당(마르크스주의)",
         "en": "Communist Party of India (Marxist), CPI(M)"
       },
+      "termIds": [
+        "communist-party-of-india-marxist"
+      ],
       "countryCode": "india",
       "icon": "flag",
       "parentId": null,
@@ -2527,6 +2632,9 @@
         "ko": "예멘 사회당",
         "en": "Yemeni Socialist Party (YSP)"
       },
+      "termIds": [
+        "yemeni-socialist-party"
+      ],
       "countryCode": "yemen",
       "icon": "flag",
       "parentId": null,
@@ -2947,6 +3055,9 @@
         "ko": "독일 공산당 반대파",
         "en": "Communist Party of Germany Opposition (KPO)"
       },
+      "termIds": [
+        "communist-party-of-germany-opposition"
+      ],
       "countryCode": "germany",
       "icon": "flag",
       "parentId": null,
@@ -3088,6 +3199,9 @@
         "ko": "몽골인민당·인민혁명당",
         "en": "Mongolian People's Party / Mongolian People's Revolutionary Party"
       },
+      "termIds": [
+        "mongolian-peoples-party"
+      ],
       "countryCode": "mongolia",
       "icon": "flag",
       "parentId": null,
@@ -3115,6 +3229,9 @@
         "ko": "라오인민혁명당",
         "en": "Lao People's Revolutionary Party"
       },
+      "termIds": [
+        "lao-peoples-revolutionary-party"
+      ],
       "countryCode": "laos",
       "icon": "flag",
       "parentId": null,
@@ -3142,6 +3259,9 @@
         "ko": "캄푸치아 공산당",
         "en": "Communist Party of Kampuchea (CPK)"
       },
+      "termIds": [
+        "communist-party-of-kampuchea"
+      ],
       "countryCode": "cambodia",
       "icon": "flag",
       "parentId": null,
@@ -3169,6 +3289,9 @@
         "ko": "캄푸치아 인민혁명당",
         "en": "Kampuchean People's Revolutionary Party (KPRP)"
       },
+      "termIds": [
+        "kampuchean-peoples-revolutionary-party"
+      ],
       "countryCode": "cambodia",
       "icon": "flag",
       "parentId": null,
@@ -3196,6 +3319,9 @@
         "ko": "일본 공산당",
         "en": "Japanese Communist Party (JCP)"
       },
+      "termIds": [
+        "japanese-communist-party"
+      ],
       "countryCode": "japan",
       "icon": "flag",
       "parentId": null,
@@ -3250,6 +3376,9 @@
         "ko": "에티오피아 노동자당",
         "en": "Workers' Party of Ethiopia"
       },
+      "termIds": [
+        "workers-party-of-ethiopia"
+      ],
       "countryCode": "ethiopia",
       "icon": "flag",
       "parentId": null,
@@ -3277,6 +3406,9 @@
         "ko": "폴란드 공산당",
         "en": "Communist Party of Poland (KPP)"
       },
+      "termIds": [
+        "communist-party-of-poland"
+      ],
       "countryCode": "poland",
       "icon": "flag",
       "parentId": null,
@@ -3295,6 +3427,9 @@
         "ko": "폴란드 노동자당",
         "en": "Polish Workers' Party (PPR)"
       },
+      "termIds": [
+        "polish-workers-party"
+      ],
       "countryCode": "poland",
       "icon": "flag",
       "parentId": null,
@@ -3322,6 +3457,9 @@
         "ko": "폴란드 인민당",
         "en": "Polish People's Party (PSL)"
       },
+      "termIds": [
+        "polish-peoples-party"
+      ],
       "countryCode": "poland",
       "icon": "flag",
       "parentId": null,
@@ -3340,6 +3478,9 @@
         "ko": "폴란드왕국·리투아니아 사회민주당",
         "en": "Social Democracy of the Kingdom of Poland and Lithuania (SDKPiL)"
       },
+      "termIds": [
+        "social-democracy-of-the-kingdom-of-poland-and-lithuania"
+      ],
       "countryCode": "poland",
       "icon": "flag",
       "parentId": null,
@@ -3358,6 +3499,9 @@
         "ko": "조선공산당",
         "en": "Communist Party of Korea"
       },
+      "termIds": [
+        "communist-party-of-korea"
+      ],
       "countryCode": "south-korea",
       "icon": "flag",
       "parentId": null,
@@ -3394,6 +3538,9 @@
         "ko": "남조선로동당",
         "en": "Workers' Party of South Korea"
       },
+      "termIds": [
+        "workers-party-of-south-korea"
+      ],
       "countryCode": "south-korea",
       "icon": "flag",
       "parentId": null,
@@ -3412,6 +3559,9 @@
         "ko": "북조선로동당",
         "en": "Workers' Party of North Korea"
       },
+      "termIds": [
+        "workers-party-of-north-korea"
+      ],
       "countryCode": "north-korea",
       "icon": "flag",
       "parentId": null,
@@ -3439,6 +3589,9 @@
         "ko": "노동자 인터내셔널 프랑스 지부",
         "en": "French Section of the Workers' International (SFIO)"
       },
+      "termIds": [
+        "french-section-of-the-workers-international"
+      ],
       "countryCode": "france",
       "icon": "flag",
       "parentId": null,
@@ -3457,6 +3610,9 @@
         "ko": "스페인 사회노동당",
         "en": "Spanish Socialist Workers' Party (PSOE)"
       },
+      "termIds": [
+        "spanish-socialist-workers-party"
+      ],
       "countryCode": "spain",
       "icon": "flag",
       "parentId": null,
@@ -3475,6 +3631,9 @@
         "ko": "독일 기독교민주연합",
         "en": "Christian Democratic Union (CDU)"
       },
+      "termIds": [
+        "christian-democratic-union-of-germany"
+      ],
       "countryCode": "germany",
       "icon": "flag",
       "parentId": null,
@@ -3493,6 +3652,9 @@
         "ko": "영국 보수당",
         "en": "Conservative Party (United Kingdom)"
       },
+      "termIds": [
+        "conservative-party-uk"
+      ],
       "countryCode": "uk",
       "icon": "flag",
       "parentId": null,
@@ -3511,6 +3673,9 @@
         "ko": "오스트레일리아 노동당",
         "en": "Australian Labor Party (ALP)"
       },
+      "termIds": [
+        "australian-labor-party"
+      ],
       "countryCode": "australia",
       "icon": "flag",
       "parentId": null,
@@ -3529,6 +3694,9 @@
         "ko": "인도 국민회의",
         "en": "Indian National Congress"
       },
+      "termIds": [
+        "indian-national-congress"
+      ],
       "countryCode": "india",
       "icon": "flag",
       "parentId": null,
@@ -3547,6 +3715,9 @@
         "ko": "알제리 민족해방전선",
         "en": "National Liberation Front (FLN, Algeria)"
       },
+      "termIds": [
+        "national-liberation-front-algeria"
+      ],
       "countryCode": "algeria",
       "icon": "flag",
       "parentId": null,
@@ -3565,6 +3736,9 @@
         "ko": "콩고 노동당",
         "en": "Congolese Party of Labour (PCT)"
       },
+      "termIds": [
+        "congolese-party-of-labour"
+      ],
       "countryCode": "republic-of-congo",
       "icon": "flag",
       "parentId": null,
@@ -3592,6 +3766,9 @@
         "ko": "콩고민족운동",
         "en": "Congolese National Movement (MNC)"
       },
+      "termIds": [
+        "congolese-national-movement"
+      ],
       "countryCode": "congo",
       "icon": "flag",
       "parentId": null,
@@ -3898,6 +4075,9 @@
         "ko": "유대인 노동자 총동맹(분트)",
         "en": "General Jewish Labour Bund"
       },
+      "termIds": [
+        "general-jewish-labour-bund"
+      ],
       "countryCode": "russia",
       "icon": "flag",
       "parentId": null,
