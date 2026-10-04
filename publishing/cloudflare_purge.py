@@ -1,5 +1,10 @@
 """Cloudflare cache purge through the frontend's ``scripts/cloudflare-purge.js``.
 
+Off unless ``LENINBOT_CLOUDFLARE_PURGE=1``: the frontend caches public HTML at
+the edge for only 60 s, and an agent verifies a change through the origin (a
+unique ``?verify=<timestamp>`` query or ``http://127.0.0.1:3000``) instead of
+waiting for a purge. Turn it on if the edge TTL is ever made long.
+
 Failure is reported to the caller but never raises: the database update and
 Redis invalidation are the source-of-truth changes, the purge only shortens
 how long the edge serves the old page.
@@ -28,6 +33,17 @@ CF_PURGE_SCRIPT = os.getenv(
 _SINGLE_LANGUAGE_PATHS = {"/sitemap.xml", "/robots.txt"}
 
 
+def purge_enabled() -> bool:
+    return os.getenv("LENINBOT_CLOUDFLARE_PURGE", "0") == "1"
+
+
+# Shown to the agent in place of a purge count when purging is off.
+SKIPPED_NOTE = (
+    "Cloudflare purge off (edge copies refresh within 60 s; verify with "
+    "?verify=<timestamp> on the public URL)"
+)
+
+
 def with_english_paths(paths: list[str]) -> list[str]:
     """Add the /en/ copy of each language-specific path ("/" becomes "/en/")."""
     out: list[str] = []
@@ -45,6 +61,8 @@ def purge_paths(paths: list[str], label: str) -> dict[str, Any]:
     paths = list(dict.fromkeys(with_english_paths(paths)))
     if not paths:
         return {"ok": True, "purged": 0, "urls": []}
+    if not purge_enabled():
+        return {"ok": True, "purged": 0, "urls": paths, "skipped": True}
     if not os.path.isfile(CF_PURGE_SCRIPT):
         return {
             "ok": False,

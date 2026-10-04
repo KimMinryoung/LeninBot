@@ -52,7 +52,7 @@ RESEARCH_DIR = _PROJECT_ROOT / "research"
 LEGACY_RESEARCH_DIR = _PROJECT_ROOT / "output" / "research"
 PRIVATE_RESEARCH_DIR = RESEARCH_DIR / "private"
 PUBLICATION_DRAFT_DIR = _PROJECT_ROOT / "data" / "publication_drafts" / "research"
-from publishing.cloudflare_purge import FRONTEND_DIR, purge_paths
+from publishing.cloudflare_purge import FRONTEND_DIR, SKIPPED_NOTE, purge_paths
 
 from shared import KST
 
@@ -550,7 +550,9 @@ def _format_invalidation_note(
     missing_msg: str | None = None,
 ) -> str:
     cache_note = _format_cache_note(cache, filename, missing_msg=missing_msg)
-    if cloudflare["ok"]:
+    if cloudflare.get("skipped"):
+        cf_note = SKIPPED_NOTE
+    elif cloudflare["ok"]:
         cf_note = f"Cloudflare purged ({cloudflare['purged']} URL(s))"
     else:
         urls = " ".join(cloudflare.get("urls") or [])

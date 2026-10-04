@@ -29,7 +29,7 @@ from tool_gateway.results import ToolFailure
 
 logger = logging.getLogger(__name__)
 
-from publishing.cloudflare_purge import FRONTEND_DIR, purge_paths
+from publishing.cloudflare_purge import FRONTEND_DIR, SKIPPED_NOTE, purge_paths
 
 
 # Per kind: table, which fields the tool may write, which cache keys to purge.
@@ -357,7 +357,9 @@ def _format_invalidation_note(
             f"run `redis-cli DEL {manual_key}` manually"
         )
 
-    if cf["ok"]:
+    if cf.get("skipped"):
+        cf_note = SKIPPED_NOTE
+    elif cf["ok"]:
         cf_note = f"purged {cf['purged']} Cloudflare URL(s)"
     else:
         urls = " ".join(cf.get("urls") or [])
