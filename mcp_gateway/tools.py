@@ -379,7 +379,7 @@ async def list_recent_tasks(limit: int = 10, status: str = "", agent_type: str =
     where = "WHERE " + " AND ".join(clauses) if clauses else ""
     sql = f"""
         SELECT id, status, priority, agent_type, mission_id, parent_task_id,
-               created_at, updated_at, available_at,
+               created_at, completed_at, available_at,
                left(content, 300) AS content_preview,
                left(result, 300) AS result_preview
         FROM telegram_tasks
@@ -411,7 +411,7 @@ async def get_task_status(
         query,
         """
         SELECT id, user_id, status, priority, agent_type, mission_id, parent_task_id,
-               depth, plan_id, plan_role, created_at, updated_at, available_at,
+               depth, plan_id, plan_role, created_at, completed_at, available_at,
                metadata, content, result, tool_log
         FROM telegram_tasks
         WHERE id = %s
@@ -463,7 +463,7 @@ async def list_recent_task_reports(limit: int = 10, agent_type: str = "", **_: A
     rows = await asyncio.to_thread(
         query,
         f"""
-        SELECT id, agent_type, mission_id, created_at, updated_at,
+        SELECT id, agent_type, mission_id, created_at, completed_at,
                left(content, 240) AS content_preview,
                left(result, 500) AS result_preview
         FROM telegram_tasks
