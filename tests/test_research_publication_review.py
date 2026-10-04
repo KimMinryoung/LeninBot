@@ -40,7 +40,6 @@ def isolated(monkeypatch, tmp_path):
 
     monkeypatch.setattr(r.research_store, "upsert_document", write)
     monkeypatch.setattr(r.research_store, "set_status", Mock(side_effect=AssertionError("unreviewed visibility write")))
-    monkeypatch.setattr(r, "_invalidate_cache_sync", Mock(return_value={"ok": True, "deleted": 0}))
     monkeypatch.setattr(r, "_purge_cloudflare_sync", Mock(return_value={"ok": True}))
     monkeypatch.setattr(r, "_format_invalidation_note", lambda *a, **kw: "cache checked")
     monkeypatch.setattr(r, "maybe_broadcast_autonomous_publication", AsyncMock())
@@ -59,7 +58,6 @@ def test_blocked_review_precedes_all_public_side_effects(isolated, monkeypatch, 
     result = asyncio.run(r._exec_research_document(action="publish_public", slug="report", fact_check_notes=NOTES))
     assert isinstance(result, ToolFailure)
     assert not writes and current["status"] == "staged"
-    r._invalidate_cache_sync.assert_not_called()
     r._purge_cloudflare_sync.assert_not_called()
     r.maybe_broadcast_autonomous_publication.assert_not_awaited()
 

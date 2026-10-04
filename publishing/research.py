@@ -13,7 +13,7 @@ action-based interface so older tool names cannot be invoked directly.
 If a document only exists as a legacy fallback file, that file is relocated out
 of the public-listing scope.
 
-Mirrors the publishing.post_edit pattern (UPDATE + cache purge in one step) for
+Mirrors the publishing.post_edit pattern (UPDATE + Cloudflare purge in one step) for
 DB-backed public content.
 """
 
@@ -470,39 +470,6 @@ def _format_draft_revision_guidance(*, filename: str, draft_path: Path, blocker:
     return "\n".join(lines)
 
 
-def _cache_safe_key(filename: str) -> str:
-    """Mirror the frontend's safe-key transform: non-[A-Za-z0-9._-] → '_'."""
-    return re.sub(r"[^A-Za-z0-9._-]", "_", filename)
-
-
-def _invalidate_cache_sync(filename: str) -> dict[str, Any]:
-    """Drop the per-file and list caches in Redis. Returns {ok, deleted, reason?}."""
-    from memory_store.redis_state import get_redis
-
-    r = get_redis()
-    if r is None:
-        return {"ok": False, "deleted": 0, "reason": "redis_unavailable"}
-    deleted = 0
-    try:
-        safe = _cache_safe_key(filename)
-        deleted += int(r.delete(
-            f"research:{safe}",
-            f"research:{safe}:ko",
-            f"research:{safe}:en",
-            f"research:v3:{safe}:ko",
-            f"research:v3:{safe}:en",
-            "report:research_list",
-            "report:research_list:ko",
-            "report:research_list:en",
-            "report:research_list:v3:ko",
-            "report:research_list:v3:en",
-        ) or 0)
-    except Exception as e:
-        logger.warning("research cache invalidation failed for %s: %s", filename, e)
-        return {"ok": False, "deleted": deleted, "reason": f"{type(e).__name__}: {e}"}
-    return {"ok": True, "deleted": deleted}
-
-
 def _public_slug(filename: str) -> str:
     return filename[:-3] if filename.endswith(".md") else filename
 
@@ -527,40 +494,19 @@ def _purge_cloudflare_sync(filename: str) -> dict[str, Any]:
     return purge_paths(_cloudflare_purge_paths(filename), f"research {filename}")
 
 
-def _format_cache_note(cache: dict[str, Any], filename: str, *, missing_msg: str | None = None) -> str:
-    if cache["ok"]:
-        return f"cache invalidated ({cache['deleted']} key(s))"
-    base = f"CACHE INVALIDATION FAILED ({cache['reason']})"
-    safe = _cache_safe_key(filename)
-    manual = (
-        f"redis-cli DEL research:{safe} research:{safe}:ko research:{safe}:en "
-        f"research:v3:{safe}:ko research:v3:{safe}:en "
-        "report:research_list report:research_list:ko report:research_list:en "
-        "report:research_list:v3:ko report:research_list:v3:en"
-    )
-    tail = f" — {missing_msg} Manually run: {manual}" if missing_msg else f" — readers may see stale data. Manually run: {manual}"
-    return base + tail
-
-
-def _format_invalidation_note(
-    cache: dict[str, Any],
-    cloudflare: dict[str, Any],
-    filename: str,
-    *,
-    missing_msg: str | None = None,
-) -> str:
-    cache_note = _format_cache_note(cache, filename, missing_msg=missing_msg)
+def _format_invalidation_note(cloudflare: dict[str, Any]) -> str:
+    """The Cloudflare part of a publish/edit/unpublish result. The frontend
+    reads research documents from the database and refreshes its list on the
+    table's change notification, so there is no Redis copy to drop."""
     if cloudflare.get("skipped"):
-        cf_note = SKIPPED_NOTE
-    elif cloudflare["ok"]:
-        cf_note = f"Cloudflare purged ({cloudflare['purged']} URL(s))"
-    else:
-        urls = " ".join(cloudflare.get("urls") or [])
-        cf_note = (
-            f"CLOUDFLARE PURGE FAILED ({cloudflare.get('reason', 'unknown')}) — "
-            f"run `cd {FRONTEND_DIR} && node scripts/cloudflare-purge.js {urls}` manually"
-        )
-    return f"{cache_note}; {cf_note}"
+        return SKIPPED_NOTE
+    if cloudflare["ok"]:
+        return f"Cloudflare purged ({cloudflare['purged']} URL(s))"
+    urls = " ".join(cloudflare.get("urls") or [])
+    return (
+        f"CLOUDFLARE PURGE FAILED ({cloudflare.get('reason', 'unknown')}) — "
+        f"run `cd {FRONTEND_DIR} && node scripts/cloudflare-purge.js {urls}` manually"
+    )
 
 
 # ── Public research document publication ───────────────────────────────
@@ -868,7 +814,6 @@ async def _exec_research_document_publish_public(
         logger.error("research_document publish_public DB write error for %s: %s", fname, e)
         return ToolFailure(f"Error: failed to store {fname}: {type(e).__name__}: {e}")
 
-    cache = await asyncio.to_thread(_invalidate_cache_sync, fname)
     cloudflare = await asyncio.to_thread(_purge_cloudflare_sync, fname)
     status = "Updated public document" if was_already_public else "Published"
     broadcast_note = ""
@@ -917,7 +862,7 @@ async def _exec_research_document_publish_public(
         f"Storage: research_documents id={row['id']} sha256={row['content_sha256'][:12]}\n"
         f"Public URL: {public_url}\n"
         f"{review_note}\n"
-        f"Size: {len(document)} chars; {_format_invalidation_note(cache, cloudflare, fname)}"
+        f"Size: {len(document)} chars; {_format_invalidation_note(cloudflare)}"
         f"{broadcast_note}{spelling_note}"
     )
 
@@ -1138,8 +1083,7 @@ async def _exec_research_document_edit_public(
             logger.error("research_document edit_public DB write error for %s: %s", fname, e)
             return ToolFailure(f"Error: failed to rewrite {fname}: {type(e).__name__}: {e}")
 
-        cache = await asyncio.to_thread(_invalidate_cache_sync, fname)
-        cloudflare = await asyncio.to_thread(_purge_cloudflare_sync, fname)
+            cloudflare = await asyncio.to_thread(_purge_cloudflare_sync, fname)
         draft_note = f"Draft backup: {draft_path}\n" if draft_path else ""
         review_line = f"{review_note}\n" if review_note else ""
         return (
@@ -1148,7 +1092,7 @@ async def _exec_research_document_edit_public(
             f"Storage: research_documents id={row['id']} sha256={row['content_sha256'][:12]}\n"
             f"Public URL: {_public_url(fname)}\n"
             f"{review_line}"
-            f"Title: {new_title}; size: {len(document)} chars; {_format_invalidation_note(cache, cloudflare, fname)}"
+            f"Title: {new_title}; size: {len(document)} chars; {_format_invalidation_note(cloudflare)}"
             f"{spelling_note}"
         )
 
@@ -1186,14 +1130,8 @@ async def _exec_research_document_edit_public(
             logger.error("research_document unpublish_public error for %s: %s", fname, e)
             return ToolFailure(f"Error: failed to move {fname} to private/: {type(e).__name__}: {e}")
 
-    cache = await asyncio.to_thread(_invalidate_cache_sync, fname)
     cloudflare = await asyncio.to_thread(_purge_cloudflare_sync, fname)
-    cache_note = _format_invalidation_note(
-        cache,
-        cloudflare,
-        fname,
-        missing_msg="document was unpublished but the cached copy may still be served." if not cache["ok"] else None,
-    )
+    cache_note = _format_invalidation_note(cloudflare)
     delete_note = ""
     try:
         from publishing.publication_records import delete_broadcasts_for_slug

@@ -1,15 +1,14 @@
-"""publishing.post_edit — Edit public-facing posts with cache invalidation.
+"""publishing.post_edit — Edit public-facing posts.
 
-The frontend (Node.js, runs in Docker) caches each published post permanently
-in Redis under `{kind}:{id}` and serves from cache before hitting the DB. A
-direct `UPDATE` via `query_db` therefore goes *unseen* on the public site
-until the cache TTL (which, for per-entry keys, is never). Tasks 587/588 hit
-exactly this trap — DB was edited, readers kept seeing the old text.
+The frontend reads posts, diary entries, curations and static pages straight
+from the database (its memory lists are refreshed by table-change
+notifications) and fetches task reports from this backend's API on every
+view, so an UPDATE here is live at once; no Redis copy exists to clear.
 
-This tool bundles the cache-busting steps so they cannot drift:
-  1. UPDATE or remove the target row (ai_diary / telegram_tasks / posts)
-  2. DEL the per-entry cache key + the list/nav caches that embed entry content
-  3. Purge the affected public URLs from Cloudflare via the frontend script
+This tool bundles the steps so they cannot drift:
+  1. UPDATE or remove the target row (ai_diary / telegram_tasks / posts / ...)
+  2. Purge the affected public URLs from Cloudflare (off unless
+     LENINBOT_CLOUDFLARE_PURGE=1; the edge copy lives 60 s)
 
 The diary agent writes new entries via save_diary; maintenance flows use this
 tool for edits and, for diary rows only, explicit delete/unpublish actions.
@@ -32,29 +31,19 @@ logger = logging.getLogger(__name__)
 from publishing.cloudflare_purge import FRONTEND_DIR, SKIPPED_NOTE, purge_paths
 
 
-# Per kind: table, which fields the tool may write, which cache keys to purge.
-# "*" in a cache key is a SCAN pattern (report list pages and post/diary index
-# pages are cached one key per page+lang, e.g. post:index:page:2:ko).
+# Per kind: table, which fields the tool may write, how the row is addressed.
 _KIND_CONFIG: dict[str, dict[str, Any]] = {
     "diary": {
         "table": "ai_diary",
         "allowed_fields": ("title", "content"),
-        "entry_key": "diary:{id}",
-        "localized_cache": True,
-        "index_keys": ("diary:index:*", "diary:nav"),
     },
     "report": {
         "table": "telegram_tasks",
         "allowed_fields": ("content", "result"),
-        "entry_key": "report:{id}",
-        "index_keys": ("report:list:*",),
     },
     "post": {
         "table": "posts",
         "allowed_fields": ("title", "content"),
-        "entry_key": "post:{id}",
-        "localized_cache": True,
-        "index_keys": ("post:index:*", "post:nav"),
     },
     "curation": {
         "table": "hub_curations",
@@ -65,7 +54,6 @@ _KIND_CONFIG: dict[str, dict[str, Any]] = {
         ),
         "where_field": "slug",
         "touch_updated_at": True,
-        "index_keys": (),
     },
     "static_page": {
         "table": "static_pages",
@@ -75,7 +63,6 @@ _KIND_CONFIG: dict[str, dict[str, Any]] = {
         ),
         "where_field": "slug",
         "touch_updated_at": True,
-        "index_keys": ("report:pages_list:ko", "report:pages_list:en"),
     },
 }
 
@@ -85,7 +72,7 @@ EDIT_CONTENT_TOOL = {
     "description": (
         "Edit published diary, task report (completed Telegram tasks), blog post, hub "
         "curation or static page (/p/{slug}) content, or delete/unpublish a diary entry, "
-        "and invalidate Redis and Cloudflare caches. Use this, not query_db, to correct "
+        "and purge Cloudflare when enabled. Use this, not query_db, to correct "
         "published content. Not for research documents (use research_document). Give id "
         "(diary/task_report/blog_post) or slug (hub_curation/static_page) plus at least one "
         "field. For a narrow correction pass field, replace_old and replace_new: it edits "
@@ -227,42 +214,6 @@ def _format_match_snippets(text: str, spans: list[tuple[int, int]], *, context_c
     return "\n".join(lines)
 
 
-def _invalidate_cache_sync(kind: str, post_id: int) -> dict[str, Any]:
-    """Blocking cache cleanup. Returns {ok, deleted, reason?}. Redis-down is
-    soft-failure: we report it back to the agent instead of raising."""
-    from memory_store.redis_state import get_redis
-
-    cfg = _KIND_CONFIG[kind]
-    if not cfg.get("entry_key") and not cfg.get("index_keys"):
-        return {"ok": True, "deleted": 0}
-    r = get_redis()
-    if r is None:
-        return {"ok": False, "deleted": 0, "reason": "redis_unavailable"}
-
-    deleted = 0
-    try:
-        entry_key = cfg.get("entry_key")
-        if entry_key:
-            key = entry_key.format(id=post_id)
-            keys = [key]
-            if cfg.get("localized_cache"):
-                keys.extend([f"{key}:ko", f"{key}:en"])
-            deleted += int(r.delete(*keys) or 0)
-        for pattern in cfg["index_keys"]:
-            if "*" in pattern:
-                for k in r.scan_iter(match=pattern):
-                    deleted += int(r.delete(k) or 0)
-            else:
-                keys = [pattern]
-                if cfg.get("localized_cache") and pattern.endswith(":index"):
-                    keys.extend([f"{pattern}:ko", f"{pattern}:en"])
-                deleted += int(r.delete(*keys) or 0)
-    except Exception as e:
-        logger.warning("edit_public_post cache invalidation failed (%s:%s): %s", kind, post_id, e)
-        return {"ok": False, "deleted": deleted, "reason": f"{type(e).__name__}: {e}"}
-    return {"ok": True, "deleted": deleted}
-
-
 def _cloudflare_purge_paths(kind: str, target: int | str) -> list[str]:
     """Return public URLs whose Cloudflare edge cache can embed this row."""
     if kind == "diary":
@@ -341,34 +292,16 @@ def _purge_cloudflare_sync(kind: str, target: int | str) -> dict[str, Any]:
     return purge_paths(_cloudflare_purge_paths(kind, target), f"{kind}:{target}")
 
 
-def _format_invalidation_note(
-    cache: dict[str, Any],
-    cf: dict[str, Any],
-    cfg: dict[str, Any],
-    target: int | str,
-) -> str:
-    if cache["ok"]:
-        cache_note = f"invalidated {cache['deleted']} Redis key(s)"
-    else:
-        entry_key = cfg.get("entry_key")
-        manual_key = entry_key.format(id=target) if entry_key else "(no per-entry cache)"
-        cache_note = (
-            f"CACHE INVALIDATION FAILED ({cache['reason']}) — "
-            f"run `redis-cli DEL {manual_key}` manually"
-        )
-
+def _format_invalidation_note(cf: dict[str, Any]) -> str:
     if cf.get("skipped"):
-        cf_note = SKIPPED_NOTE
-    elif cf["ok"]:
-        cf_note = f"purged {cf['purged']} Cloudflare URL(s)"
-    else:
-        urls = " ".join(cf.get("urls") or [])
-        cf_note = (
-            f"CLOUDFLARE PURGE FAILED ({cf.get('reason', 'unknown')}) — "
-            f"run `cd {FRONTEND_DIR} && node scripts/cloudflare-purge.js {urls}` manually"
-        )
-    return f"{cache_note}; {cf_note}"
-
+        return SKIPPED_NOTE
+    if cf["ok"]:
+        return f"purged {cf['purged']} Cloudflare URL(s)"
+    urls = " ".join(cf.get("urls") or [])
+    return (
+        f"CLOUDFLARE PURGE FAILED ({cf.get('reason', 'unknown')}) — "
+        f"run `cd {FRONTEND_DIR} && node scripts/cloudflare-purge.js {urls}` manually"
+    )
 
 def _delete_diary_sync(target: int) -> tuple[dict[str, Any] | None, int, int]:
     """Remove a diary row after clearing publication-audit FK references."""
@@ -401,9 +334,8 @@ async def _exec_diary_remove_action(
     if not row or not deleted:
         return f"Error: no diary row found with id={target!r} — nothing removed."
 
-    cache = await asyncio.to_thread(_invalidate_cache_sync, "diary", target)
     cf = await asyncio.to_thread(_purge_cloudflare_sync, "diary", target)
-    invalidation_note = _format_invalidation_note(cache, cf, cfg, target)
+    invalidation_note = _format_invalidation_note(cf)
     verb = "Unpublished" if action == "unpublish" else "Deleted"
     title = row.get("title") or "(untitled)"
     extra = (
@@ -608,9 +540,8 @@ async def _exec_edit_public_post(
     if not affected:
         return f"Error: no {kind} row found with {where_field}={target!r} — nothing updated."
 
-    cache = await asyncio.to_thread(_invalidate_cache_sync, kind, int(target) if isinstance(target, int) else 0)
     cf = await asyncio.to_thread(_purge_cloudflare_sync, kind, target)
-    invalidation_note = _format_invalidation_note(cache, cf, cfg, target)
+    invalidation_note = _format_invalidation_note(cf)
     fields_str = ", ".join(f for f, _ in updates)
     if surgical_requested:
         return (

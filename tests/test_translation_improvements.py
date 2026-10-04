@@ -167,7 +167,7 @@ class BatchHistory(unittest.TestCase):
              patch.object(db, '_select_rows', return_value=rows), \
              patch.object(db, '_call_translator', return_value={'title_en': 'Title', 'content_en': 'Body'}) as translate, \
              patch.object(db, '_update_row'), patch.object(db, '_record_tm'):
-            changed, _, failures = db.translate_target('diary', ids=[], limit=1, force=False, dry_run=False, select_only=False)
+            changed, failures = db.translate_target('diary', ids=[], limit=1, force=False, dry_run=False, select_only=False)
         self.assertEqual(changed, 1)
         self.assertEqual(translate.call_args.args[0]['id'], 2)
         self.assertEqual(len(failures), 1)

@@ -2173,11 +2173,9 @@ async def _assert_diary_unpublish_action() -> None:
     import publishing.post_edit as post_edit
 
     original_delete = post_edit._delete_diary_sync
-    original_cache = post_edit._invalidate_cache_sync
     original_cf = post_edit._purge_cloudflare_sync
     try:
         post_edit._delete_diary_sync = lambda target: ({"id": target, "title": "비공개 대상"}, 2, 1)
-        post_edit._invalidate_cache_sync = lambda kind, target: {"ok": True, "deleted": 3}
         post_edit._purge_cloudflare_sync = lambda kind, target: {"ok": True, "purged": 7, "urls": []}
 
         missing_confirm = await post_edit._exec_edit_content(
@@ -2207,7 +2205,6 @@ async def _assert_diary_unpublish_action() -> None:
         assert "cannot be combined with edit fields" in combined
     finally:
         post_edit._delete_diary_sync = original_delete
-        post_edit._invalidate_cache_sync = original_cache
         post_edit._purge_cloudflare_sync = original_cf
 
 

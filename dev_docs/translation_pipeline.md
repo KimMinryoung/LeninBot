@@ -167,7 +167,7 @@ status: machine < published < reviewed
 
 저장은 `id + 선택 당시 markdown + status='public'` 조건의 UPDATE다. 번역 중 원문이 바뀌거나 비공개가 됐으면 저장을 거부한다. 기록하는 출처 해시는 선택 당시 행의 `content_sha256` 값이다. 직접 SQL로 원문을 고쳐 `content_sha256`이 어긋난 행에 sha256(markdown)을 다시 계산해 넣으면 선택 조건과 영원히 불일치해 매일 밤 재번역된다. title_en/summary_en은 번역 Markdown에서 추출한다. 기타 DB도 선택 당시 원문 필드 값으로 조건부 UPDATE한다. 각 원문 테이블의 `translation_source_sha256`로 원문 변경을 탐지하며, 영어본과 해시를 같은 조건부 UPDATE로 저장한다.
 
-파일 번역은 출력 옆 `.translation.json`에 sourceHash/targetHash를 기록한다. sourceHash가 같으면 수동 편집도 보존한다. 보존한 파일이 구조 검증에 실패하면 덮어쓰지 않고 오류로 보고하므로 손으로 고치거나 `--force`로 재번역한다. 원문이 달라지거나 메타데이터가 없으면 다시 처리하며, 생성 중 원문 변경을 확인하면 최종 파일 저장을 거부한다. 성공한 DB 변경 후에는 해당 frontend Redis 캐시를 비운다.
+파일 번역은 출력 옆 `.translation.json`에 sourceHash/targetHash를 기록한다. sourceHash가 같으면 수동 편집도 보존한다. 보존한 파일이 구조 검증에 실패하면 덮어쓰지 않고 오류로 보고하므로 손으로 고치거나 `--force`로 재번역한다. 원문이 달라지거나 메타데이터가 없으면 다시 처리하며, 생성 중 원문 변경을 확인하면 최종 파일 저장을 거부한다. frontend는 번역 결과를 DB에서 바로 읽으므로(Redis 캐시 없음) 따로 비울 캐시가 없다.
 
 운영 적용 상태:
 

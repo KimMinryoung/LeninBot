@@ -306,15 +306,6 @@ async def _exec_publish_private_report(
 
     row = result["research_document"]
     public_url = result["public_url"]
-    cache_note = ""
-    try:
-        from publishing.research import _invalidate_cache_sync
-
-        cache = await asyncio.to_thread(_invalidate_cache_sync, row["filename"])
-        cache_note = f"; cache invalidated ({cache.get('deleted', 0)} key(s))" if cache.get("ok") else f"; cache invalidation failed ({cache.get('reason')})"
-    except Exception as e:
-        cache_note = f"; cache invalidation failed ({e})"
-
     broadcast_note = ""
     if broadcast:
         try:
@@ -347,7 +338,7 @@ async def _exec_publish_private_report(
         f"{status}: {row['filename']}\n"
         f"Private research document slug: {slug}\n"
         f"Storage: research_documents id={row['id']} sha256={row['content_sha256'][:12]}\n"
-        f"Public URL: {public_url}{cache_note}"
+        f"Public URL: {public_url}"
         f"{broadcast_note}"
     )
 

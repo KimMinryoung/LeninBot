@@ -14,7 +14,6 @@ import sys
 from pathlib import Path
 from typing import Any
 
-import redis
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -79,20 +78,6 @@ def _update_translation(row: dict[str, Any], translated_markdown: str) -> None:
         raise RuntimeError("source changed or became private during translation; retry latest source")
 
 
-def _clear_frontend_research_cache() -> None:
-    redis_url = os.getenv("REDIS_URL") or "redis://127.0.0.1:6379"
-    try:
-        client = redis.Redis.from_url(redis_url)
-        keys: list[bytes] = []
-        for pattern in ("report:research_list:*", "research:*"):
-            keys.extend(client.scan_iter(match=pattern))
-        if keys:
-            deleted = client.delete(*keys)
-            print(f"cleared redis cache keys: {deleted}")
-    except Exception as exc:
-        print(f"warning: could not clear redis cache: {exc}", file=sys.stderr)
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description="Translate missing research_documents English columns.")
     parser.add_argument("--limit", type=int, default=2, help="Rows to translate per run. Use 0 for no limit.")
@@ -143,8 +128,6 @@ def main() -> int:
                     "authentication", "quota", "policy", "configuration"}:
                 break
 
-    if changed:
-        _clear_frontend_research_cache()
     print(f"done: updated {changed}, failures {failures}")
     return 1 if failures else 0
 

@@ -16,7 +16,6 @@ from typing import Any
 
 import psycopg2
 import psycopg2.extras
-import redis
 from dotenv import dotenv_values
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -42,17 +41,14 @@ FEATURE = "db_content_translation"
 TARGETS = {
     "posts": {
         "table": "posts",
-        "cache_pattern": "post:*",
         "label": "Bichon blog post",
     },
     "diary": {
         "table": "ai_diary",
-        "cache_pattern": "diary:*",
         "label": "Cyber-Lenin diary entry",
     },
     "curation": {
         "table": "hub_curations",
-        "cache_pattern": "hub:*",
         "label": "Cyber-Lenin curation entry",
     },
 }
@@ -323,17 +319,6 @@ def _record_tm(target_name: str, row: dict[str, Any], translated: dict[str, str]
         print(f"warning: tm record skipped for {target_name}#{row['id']}: {exc}", file=sys.stderr)
 
 
-def _clear_cache(patterns: set[str], env: dict[str, str]) -> None:
-    redis_url = env.get("REDIS_URL") or "redis://127.0.0.1:6379"
-    client = redis.Redis.from_url(redis_url)
-    deleted = 0
-    for pattern in patterns:
-        keys = list(client.scan_iter(match=pattern))
-        if keys:
-            deleted += client.delete(*keys)
-    print(f"cleared redis cache keys: {deleted}")
-
-
 def translate_target(
     target_name: str,
     *,
@@ -385,7 +370,6 @@ def translate_target(
                         "authentication", "quota", "policy", "configuration"}:
                     exc.partial_changed = changed
                     exc.partial_failures = failures[:-1]  # the last entry is this error
-                    exc.cache_pattern = target["cache_pattern"]
                     raise
                 continue
             if dry_run:
@@ -408,7 +392,7 @@ def translate_target(
             print(f"updated {target_name}#{row['id']}: {translated['title_en']}")
     finally:
         conn.close()
-    return changed, target["cache_pattern"], failures
+    return changed, failures
 
 
 def main() -> int:
@@ -428,11 +412,10 @@ def main() -> int:
 
     names = ["posts", "diary", "curation"] if args.kind == "all" else [args.kind]
     changed_total = 0
-    cache_patterns: set[str] = set()
     failures: list[str] = []
     for name in names:
         try:
-            changed, pattern, row_failures = translate_target(
+            changed, row_failures = translate_target(
                 name,
                 ids=args.ids,
                 limit=args.limit,
@@ -443,8 +426,6 @@ def main() -> int:
             )
             changed_total += changed
             failures.extend(row_failures)
-            if changed:
-                cache_patterns.add(pattern)
         except Exception as exc:
             # 여기까지 올라오는 것은 이제 그 종류 전체가 못 도는 사고다
             # (DB 연결 실패 등). 개별 줄의 실패는 translate_target 안에서
@@ -454,14 +435,9 @@ def main() -> int:
             failures.append(f"{name}: {exc}")
             if isinstance(exc, TranslationProviderError):
                 changed_total += getattr(exc, "partial_changed", 0)
-                if getattr(exc, "partial_changed", 0):
-                    cache_patterns.add(exc.cache_pattern)
                 break
 
-    # 한 줄이라도 번역됐으면 캐시를 비운다. 실패가 섞여 있어도 성공한 것은
-    # 바로 보여야 한다.
-    if cache_patterns and not args.dry_run:
-        _clear_cache(cache_patterns, _load_frontend_env())
+    # 번역 결과는 frontend가 DB에서 바로 읽으므로(Redis 캐시 없음) 비울 캐시가 없다.
     print(f"done: updated {changed_total} row(s), failures {len(failures)}")
     for detail in failures:
         print(f"  - {detail}", file=sys.stderr)
