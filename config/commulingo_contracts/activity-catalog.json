@@ -1306,6 +1306,10 @@
       "countryCode": "soviet",
       "icon": "flag",
       "parentId": null,
+      "factionOf": {
+        "id": "russian-rsdlp",
+        "until": 1912
+      },
       "criteria": "Choose only when the cited career explicitly establishes service or organizational membership in this body; not citizenship or sympathy. Use this party for documented pre-state revolutionary activity, activity outside its ruling period, or explicitly oppositional party activity. During 1917–1991, activity as part of the ruling system (including party leadership and non-member state service) belongs to state-soviet, NOT this party. Opposition, independent work and victimhood must not be attributed to that state.",
       "periods": [
         [
@@ -1691,6 +1695,10 @@
       "countryCode": "russia",
       "icon": "flag",
       "parentId": null,
+      "factionOf": {
+        "id": "russian-rsdlp",
+        "until": 1912
+      },
       "criteria": "Only documented service, membership or organizational activity in Mensheviks (RSDLP). Never infer affiliation from nationality, residence or ideology.",
       "periods": [
         [
