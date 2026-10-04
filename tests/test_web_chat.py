@@ -53,13 +53,14 @@ class HistoryTests(unittest.TestCase):
             self.assertEqual(store._load_web_history(['fp'], 'new'), [])
             query.assert_called_once()
 
-    def test_account_identity_replaces_fingerprints(self):
+    def test_account_identity_adds_its_unstamped_fingerprint_rows(self):
+        # An account owns its stamped rows plus unstamped ones under its
+        # fingerprints (chats saved while the frontend session store was down).
         with patch.object(store, 'db_query', side_effect=[[row(1), row(2)], []]) as query:
             messages = store._load_web_history(['other'], persona='yezhov', account_user_id=7)
             self.assertEqual([m['content'] for m in messages if m['role'] == 'user'], ['q1', 'q2'])
-            self.assertEqual(query.call_args.args[1], (7, 'yezhov', 20))
-            self.assertIn('WHERE user_id = %s AND persona = %s', query.call_args.args[0])
-            self.assertNotIn('fingerprint', query.call_args.args[0])
+            self.assertEqual(query.call_args.args[1], (7, ['other'], 'yezhov', 20))
+            self.assertIn('WHERE (user_id = %s OR (user_id IS NULL AND fingerprint = ANY(%s))) AND persona = %s', query.call_args.args[0])
             store._load_web_history([], 'session', account_user_id=7)
             self.assertEqual(query.call_args.args[1], ('session', 7, 'cyber-lenin', 4, 16))
 
@@ -80,8 +81,8 @@ class FeedbackTests(unittest.TestCase):
             self.assertEqual(query.call_args.args[1], [5, ['fp'], 's', 'gramsci'])
             self.assertIn('id = %s AND fingerprint = ANY(%s) AND session_id = %s AND persona = %s', query.call_args.args[0])
             store.get_web_chat_log_for_feedback(5, ['fp'], 's', 'gramsci', account_user_id=7)
-            self.assertEqual(query.call_args.args[1], [5, 7, 's', 'gramsci'])
-            self.assertIn('id = %s AND user_id = %s', query.call_args.args[0])
+            self.assertEqual(query.call_args.args[1], [5, 7, ['fp'], 's', 'gramsci'])
+            self.assertIn('id = %s AND (user_id = %s OR (user_id IS NULL AND fingerprint = ANY(%s)))', query.call_args.args[0])
 
     def test_pending_note_and_persistent_tone_sql(self):
         with patch.object(store, 'db_query', return_value=[{'tone_feedback': 'shorter', 'count': 3}, {'tone_feedback': 'invalid'}]) as query:
@@ -89,8 +90,8 @@ class FeedbackTests(unittest.TestCase):
                 with self.subTest(account=account):
                     store._load_web_feedback_rows(['fp', ''], 's', 'p', account_user_id=account)
                     sql, params = query.call_args.args
-                    self.assertEqual(params, [account or ['fp'], 'p', 's', 8])
-                    self.assertIn('l.user_id = %s' if account else 'f.fingerprint = ANY(%s)', sql)
+                    self.assertEqual(params, ([account, ['fp']] if account else [['fp']]) + ['p', 's', 8])
+                    self.assertIn('(l.user_id = %s OR (l.user_id IS NULL AND l.fingerprint = ANY(%s)))' if account else 'f.fingerprint = ANY(%s)', sql)
                     self.assertIn('f.persona = %s', sql)
                     self.assertIn('(f.session_id = %s OR f.session_id IS NULL)', sql)
                     self.assertIn('f.consumed_at IS NULL', sql)
@@ -98,7 +99,7 @@ class FeedbackTests(unittest.TestCase):
                     self.assertIn("ELSE '[지워진 턴]'", sql)
                     self.assertEqual(store._load_web_tone_policy(['fp'], 's', 'p', 200, account_user_id=account), [{'tone_feedback': 'shorter', 'count': 3}])
                     sql, params = query.call_args.args
-                    self.assertEqual(params, [account or ['fp'], 'p', 's', 100])
+                    self.assertEqual(params, ([account, ['fp']] if account else [['fp']]) + ['p', 's', 100])
                     self.assertNotIn('consumed_at', sql)
                     self.assertIn('GROUP BY tone_feedback', sql)
             store._load_web_feedback_rows(['fp'], None, 'p')

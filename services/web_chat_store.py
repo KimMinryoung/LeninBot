@@ -42,6 +42,27 @@ def ensure_web_chat_feedback_table() -> None:
     )
 
 
+def chat_identity_clause(
+    account_user_id: int | None, fingerprints: list[str], column_prefix: str = "",
+) -> tuple[str, list]:
+    """WHERE condition and values for the chat_logs rows a requester owns.
+
+    An account owns its stamped rows plus unstamped ones under the request's
+    fingerprints (those bound to it at sign-in, and the browser's own): chats
+    saved while the frontend's session store was down, or before that browser
+    signed in. The frontend's chat history (config/chat-log-store.js) uses the
+    same rule; the startup backfill in ensure_chat_logs_persona_column stamps
+    such rows for good. Anonymous requesters own their fingerprints' rows.
+    """
+    c = column_prefix
+    fps = [f for f in (fingerprints or []) if f]
+    if account_user_id:
+        if not fps:
+            return f"{c}user_id = %s", [account_user_id]
+        return f"({c}user_id = %s OR ({c}user_id IS NULL AND {c}fingerprint = ANY(%s)))", [account_user_id, fps]
+    return f"{c}fingerprint = ANY(%s)", [fps]
+
+
 def get_web_chat_log_for_feedback(
     chat_log_id: int,
     fingerprints: list[str],
@@ -52,14 +73,9 @@ def get_web_chat_log_for_feedback(
     fps = [f for f in (fingerprints or []) if f]
     if not account_user_id and not fps:
         return None
-    clauses = ["id = %s"]
-    params: list = [chat_log_id]
-    if account_user_id:
-        clauses.append("user_id = %s")
-        params.append(account_user_id)
-    else:
-        clauses.append("fingerprint = ANY(%s)")
-        params.append(fps)
+    identity, identity_params = chat_identity_clause(account_user_id, fps)
+    clauses = ["id = %s", identity]
+    params: list = [chat_log_id, *identity_params]
     if session_id:
         clauses.append("session_id = %s")
         params.append(session_id)
@@ -115,9 +131,14 @@ def _web_feedback_scope(
     fps = [f for f in (fingerprints or []) if f]
     if not account_user_id and not fps:
         return None
-    identity = "l.user_id = %s" if account_user_id else "f.fingerprint = ANY(%s)"
+    # An account's notes follow its chat rows (chat_identity_clause); a
+    # browser's follow the fingerprint the feedback was left under.
+    if account_user_id:
+        identity, identity_params = chat_identity_clause(account_user_id, fps, "l.")
+    else:
+        identity, identity_params = "f.fingerprint = ANY(%s)", [fps]
     clauses = [identity, "f.persona = %s"]
-    params: list = [account_user_id or fps, persona]
+    params: list = [*identity_params, persona]
     if session_id:
         clauses.append("(f.session_id = %s OR f.session_id IS NULL)")
         params.append(session_id)
@@ -210,8 +231,7 @@ def _load_web_history(
     if not account_user_id and not fps:
         return []
     excluded_ids = {int(x) for x in (exclude_chat_log_ids or set()) if x}
-    identity_clause = "user_id = %s" if account_user_id else "fingerprint = ANY(%s)"
-    identity_value = account_user_id or fps
+    identity_clause, identity_params = chat_identity_clause(account_user_id, fps)
 
     columns = "id, user_query, bot_answer, tool_trace, user_query_active, bot_answer_active, created_at"
     if session_id:
@@ -229,7 +249,7 @@ def _load_web_history(
                 UNION
                 (SELECT * FROM scoped ORDER BY created_at DESC, id DESC LIMIT %s)
             ) AS history ORDER BY created_at ASC, id ASC""",
-            (session_id, identity_value, persona, anchor_limit, recent_limit),
+            (session_id, *identity_params, persona, anchor_limit, recent_limit),
         )
     else:
         rows = db_query(
@@ -238,7 +258,7 @@ def _load_web_history(
                  WHERE {identity_clause} AND persona = %s
                  ORDER BY created_at DESC, id DESC LIMIT %s
             ) AS history ORDER BY created_at ASC, id ASC""",
-            (identity_value, persona, limit),
+            (*identity_params, persona, limit),
         )
     return _history_rows_to_messages(rows, excluded_ids)
 

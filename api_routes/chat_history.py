@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from services.api_security import require_admin, trusted_proxy_request
 from services.chat_history_sanitize import clean_chat_history_text
+from services.web_chat_store import chat_identity_clause
 from db import execute_returning_rowcount as db_execute_rowcount, query as db_query
 
 router = APIRouter()
@@ -122,8 +123,7 @@ async def deactivate_chat_message(
         raise HTTPException(status_code=403, detail="Chat identity required")
 
     column = "user_query_active" if payload.part == "user" else "bot_answer_active"
-    identity_clause = "user_id = %s" if account_user_id else "fingerprint = ANY(%s)"
-    identity_value = account_user_id or fingerprints
+    identity_clause, identity_params = chat_identity_clause(account_user_id, fingerprints)
     changed = db_execute_rowcount(
         f"""UPDATE chat_logs
                SET {column} = false
@@ -131,7 +131,7 @@ async def deactivate_chat_message(
                AND session_id = %s
                AND persona = %s
                AND {identity_clause}""",
-        (message_id, payload.session_id, payload.persona, identity_value),
+        (message_id, payload.session_id, payload.persona, *identity_params),
     )
     if changed < 1:
         raise HTTPException(status_code=404, detail="Chat message not found")
