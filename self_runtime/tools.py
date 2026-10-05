@@ -15,7 +15,7 @@ import logging
 import re
 from datetime import datetime, timezone, timedelta
 
-from tool_gateway.results import ToolFailure
+from tool_gateway.results import ToolFailure, ToolResult
 
 logger = logging.getLogger(__name__)
 
@@ -2045,6 +2045,12 @@ async def _exec_write_kg_structured(
         provenance_footer=provenance_footer,
     )
 
+    # Audit records partial_success as "ok"; these counts keep rejections visible.
+    write_metadata = {
+        "write_status": result.get("status"),
+        "facts_written": result.get("facts_written", 0),
+        "facts_rejected": result.get("facts_rejected", len(result.get("rejected_facts") or [])),
+    }
     if result["status"] in {"ok", "partial_success"}:
         logger.info(
             "[KG AUDIT] structured write | status=%s facts=%d rejected=%d new=%d reused=%d | "
@@ -2073,7 +2079,7 @@ async def _exec_write_kg_structured(
                 "\nPartial success details JSON:\n"
                 + json.dumps(partial_payload, ensure_ascii=False, indent=2)
             )
-        return f"Structured facts stored: {msg}"
+        return ToolResult(f"Structured facts stored: {msg}", write_metadata)
     else:
         msg = result["message"]
         if result.get("rejected_facts"):
@@ -2083,7 +2089,7 @@ async def _exec_write_kg_structured(
                 indent=2,
             )
             msg += f"\nRejected facts JSON for retry:\n{rejected_json}"
-        return ToolFailure(f"Failed to store structured facts: {msg}")
+        return ToolFailure(f"Failed to store structured facts: {msg}", write_metadata)
 
 
 def _compact_tool(tool: dict, *, include_descriptions: bool, include_schemas: bool) -> dict:

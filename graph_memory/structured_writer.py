@@ -130,10 +130,19 @@ def validate_fact(fact: dict, idx: int, *, allow_sync_predicates: bool = False) 
         if not sync_predicate_allowed(s_type, t_type, pred):
             return f"fact[{idx}] predicate '{pred}' not allowed for ({s_type} -> {t_type})"
     elif pred not in allowed_for_pair and pred not in WILDCARD_ALLOWED:
+        # Agents otherwise fall back to a wildcard (Causation) and store a
+        # wrong-meaning edge, e.g. "hack incident —Causation→ bank".
+        reverse_hint = ""
+        if pred in EDGE_TYPE_MAP.get((t_type, s_type), []):
+            reverse_hint = (
+                f" '{pred}' IS allowed for ({t_type} -> {s_type}): swap subject and object "
+                "instead of switching to a wildcard predicate."
+            )
         return (
             f"fact[{idx}] predicate '{pred}' not allowed for "
             f"({s_type} -> {t_type}). Allowed for this pair: "
-            f"{sorted(allowed_for_pair) or 'none'}; wildcard: {sorted(WILDCARD_ALLOWED)}"
+            f"{sorted(allowed_for_pair) or 'none'}; wildcard: {sorted(WILDCARD_ALLOWED)}."
+            f"{reverse_hint}"
         )
 
     from graph_memory.fact_version import canonical_date
