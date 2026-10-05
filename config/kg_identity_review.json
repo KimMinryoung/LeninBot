@@ -329,30 +329,6 @@
       ]
     },
     {
-      "uuid": "2e2827d2-a576-4d29-9450-0aa52ec05a15",
-      "target_uuid": "2e2827d2-a576-4d29-9450-0aa52ec05a15",
-      "original_name": "비소련 혁명가",
-      "name": "비소련 혁명가 (인물 분류)",
-      "types": [
-        "Concept"
-      ],
-      "target_types": [
-        "Concept"
-      ],
-      "external_ids": [
-        "commulingo:people-group:international-revolutionary"
-      ],
-      "action": "rename",
-      "reason": "people-group 원천의 편집상 인물 분류",
-      "evidence_sync_keys": [
-        "commulingo:person_group:abdul-fattah-ismail",
-        "commulingo:person_group:adam-michnik",
-        "commulingo:person_group:adrien-duport",
-        "commulingo:person_group:agostinho-neto",
-        "commulingo:person_group:aime-cesaire"
-      ]
-    },
-    {
       "uuid": "a554c6c1-32f3-447f-8102-6218bb2115f2",
       "target_uuid": "a554c6c1-32f3-447f-8102-6218bb2115f2",
       "original_name": "비소련 혁명가",
