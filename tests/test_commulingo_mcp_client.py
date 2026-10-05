@@ -37,6 +37,18 @@ class FakeMcp(BaseHTTPRequestHandler):
         pass
 
 
+def urllib_response(message):
+    import io
+
+    class Response(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+    return Response(json.dumps(message).encode())
+
+
 def error(payload):
     return {"isError": True, "structuredContent": payload}
 
@@ -104,6 +116,23 @@ class CommuLingoMcpClient(unittest.TestCase):
             spec.flush()
             with self.assertRaisesRegex(RuntimeError, "bad card"):
                 apply_person_spec(spec.name)
+
+    def test_reset_is_retried_for_reads_only(self):
+        import http.client
+        attempts = []
+
+        def flaky(request, timeout):
+            attempts.append(1)
+            if len(attempts) == 1:
+                raise http.client.RemoteDisconnected("starting")
+            return urllib_response({"jsonrpc": "2.0", "id": 1, "result": {"structuredContent": {"person": {"id": "x"}}}})
+        with patch.object(mcp_client, "REFUSED_RETRIES", (0,)), patch("urllib.request.urlopen", flaky):
+            self.assertEqual(call_person_service({"command": "read", "id": "x"}), {"id": "x"})
+        attempts.clear()
+        with patch.object(mcp_client, "REFUSED_RETRIES", (0,)), patch("urllib.request.urlopen", flaky):
+            with self.assertRaises(RuntimeError):
+                call_person_service({"command": "submit", "id": "x", "fields": {}})
+        self.assertEqual(len(attempts), 1, "a non-idempotent write is not resent")
 
     def test_unreachable_server_is_a_runtime_error(self):
         with patch.dict(os.environ, {"COMMULINGO_MCP_URL": "http://127.0.0.1:9/mcp"}), \

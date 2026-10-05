@@ -7,6 +7,7 @@ frontend container or its tables. Stateless Streamable HTTP: one JSON-RPC
 """
 from __future__ import annotations
 
+import http.client
 import itertools
 import json
 import os
@@ -23,6 +24,9 @@ TOKEN_FILE = Path.home() / ".config" / "commulingo-mcp" / "leninbot.token"
 # container; a refused connection never reached the server, so retrying is
 # safe even for writes.
 REFUSED_RETRIES = (1, 2, 4, 8)
+# A connection reset while the new container is still starting is retried too,
+# except for writes that carry no idempotency key.
+NOT_REPEATABLE = frozenset({"editorial_store", "people_upsert"})
 _ids = itertools.count(1)
 
 
@@ -56,6 +60,11 @@ def _refused(exc: urllib.error.URLError) -> bool:
     return isinstance(getattr(exc, "reason", None), ConnectionRefusedError)
 
 
+def _reset(exc: Exception) -> bool:
+    reason = getattr(exc, "reason", exc)
+    return isinstance(reason, (ConnectionResetError, http.client.RemoteDisconnected))
+
+
 def call_tool(name: str, arguments: dict | None = None, *, timeout: float = 120) -> dict:
     """Call one MCP tool and return its structured result."""
     body = json.dumps({"jsonrpc": "2.0", "id": next(_ids), "method": "tools/call",
@@ -72,11 +81,16 @@ def call_tool(name: str, arguments: dict | None = None, *, timeout: float = 120)
         except urllib.error.HTTPError as exc:
             raise CommuLingoUnavailable(f"CommuLingo MCP HTTP {exc.code}; no fallback write was attempted") from exc
         except urllib.error.URLError as exc:
-            if delay is None or not _refused(exc):
+            if delay is None or not (_refused(exc) or (_reset(exc) and name not in NOT_REPEATABLE)):
                 raise CommuLingoUnavailable(f"CommuLingo MCP unreachable ({exc.reason}); no fallback write was attempted") from exc
             time.sleep(delay)
+        except (ConnectionResetError, http.client.RemoteDisconnected) as exc:
+            if delay is None or name in NOT_REPEATABLE:
+                raise CommuLingoUnavailable(f"CommuLingo MCP connection reset ({exc}); no fallback write was attempted") from exc
+            time.sleep(delay)
         except (ValueError, OSError) as exc:
-            raise CommuLingoUnavailable("CommuLingo MCP answered outside the protocol; no fallback write was attempted") from exc
+            raise CommuLingoUnavailable(f"CommuLingo MCP answered outside the protocol ({type(exc).__name__}); "
+                                        "no fallback write was attempted") from exc
     if "error" in message:
         raise CommuLingoUnavailable(f"CommuLingo MCP {name}: {message['error'].get('message')}")
     result = message.get("result") or {}
