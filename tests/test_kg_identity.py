@@ -143,6 +143,23 @@ class WeakAliasTests(unittest.TestCase):
         hit = identity.resolve_entity_sync(session, name="블라디미르 코마로프", entity_type="Person")
         self.assertEqual(hit.uuid, "k1")
 
+    def test_source_record_adopts_agent_node_only_by_its_name(self):
+        agent_dpk = [{"uuid": "dpk", "name": "더불어민주당", "labels": ["Entity", "Organization"], "rels": 30,
+                      "same_label": True, "external_ids": []}]
+        session = FakeSyncSession({identity.CYPHER_RESOLVE_BY_KEY: agent_dpk})
+        hit = identity.resolve_entity_sync(
+            session, name="미국 민주당", entity_type="Organization",
+            external_id="commulingo:term:democratic-party-united-states",
+            aliases=["Democratic Party (United States)", "Democratic Party"],
+        )
+        self.assertFalse(hit.found)
+        agent_lenin = [{"uuid": "lenin", "name": "Vladimir Lenin", "labels": ["Entity", "Person"], "rels": 200,
+                        "same_label": True, "external_ids": []}]
+        session = FakeSyncSession({identity.CYPHER_RESOLVE_BY_KEY: agent_lenin})
+        hit = identity.resolve_entity_sync(session, name="블라디미르 레닌", entity_type="Person",
+                                           external_id="commulingo:person:lenin", aliases=["Vladimir Lenin"])
+        self.assertEqual(hit.uuid, "lenin")
+
     def test_exclude_uuid(self):
         rows = [{"uuid": "self", "name": "Stalin", "labels": ["Entity", "Person"], "rels": 100, "same_label": True, "external_ids": []},
                 {"uuid": "twin", "name": "Joseph Stalin", "labels": ["Entity", "Person"], "rels": 50, "same_label": True,

@@ -423,13 +423,21 @@ def _namespace_conflict(row: dict, external_id: str | None) -> bool:
     return any(x.startswith(ns) and x != external_id for x in (row.get("external_ids") or []))
 
 
-def _filter_rows(rows: list[dict], *, exclude_uuid: str | None, external_id: str | None, name: str) -> list[dict]:
+def _filter_rows(rows: list[dict], *, exclude_uuid: str | None, external_id: str | None, name: str,
+                 keys=()) -> list[dict]:
     out = []
     for r in rows:
         if exclude_uuid and r.get("uuid") == exclude_uuid:
             continue
         if _namespace_conflict(r, external_id):
             logger.info("[KG identity] '%s' (%s) matches '%s' which already carries another id in that namespace — not reused",
+                        name, external_id, r.get("name"))
+            continue
+        if external_id and not r.get("external_ids") and normalize_alias_key(r.get("name") or "") not in keys:
+            # A source record adopts an agent-made node only by that node's own
+            # name. Adoption through a shared alias stacked the CommuLingo
+            # "미국 민주당" identity onto the agent node "더불어민주당".
+            logger.info("[KG identity] '%s' (%s) matches agent node '%s' only by alias — not adopted",
                         name, external_id, r.get("name"))
             continue
         out.append(r)
@@ -506,12 +514,12 @@ def resolve_entity_sync(
     if not names:
         return ResolveResult(None, "none")
     rows = [dict(r) for r in session.run(CYPHER_RESOLVE_BY_KEY, names=names, keys=keys, etype=entity_type)]
-    rows = _filter_rows(rows, exclude_uuid=exclude_uuid, external_id=external_id, name=name)
+    rows = _filter_rows(rows, exclude_uuid=exclude_uuid, external_id=external_id, name=name, keys=keys)
     hit = _pick_key_hit(rows, entity_type, name)
     if hit.found or hit.method in {"label_conflict", "ambiguous"}:
         return hit
     weak_rows = [dict(r) for r in session.run(CYPHER_RESOLVE_BY_WEAK_KEY, keys=keys, etype=entity_type)]
-    weak_rows = _filter_rows(weak_rows, exclude_uuid=exclude_uuid, external_id=external_id, name=name)
+    weak_rows = _filter_rows(weak_rows, exclude_uuid=exclude_uuid, external_id=external_id, name=name, keys=keys)
     return _pick_weak_hit(weak_rows, name)
 
 
@@ -541,12 +549,12 @@ async def resolve_entity_async(
     if not names:
         return ResolveResult(None, "none")
     result = await session.run(CYPHER_RESOLVE_BY_KEY, names=names, keys=keys, etype=entity_type)
-    rows = _filter_rows([dict(r) async for r in result], exclude_uuid=None, external_id=external_id, name=name)
+    rows = _filter_rows([dict(r) async for r in result], exclude_uuid=None, external_id=external_id, name=name, keys=keys)
     hit = _pick_key_hit(rows, entity_type, name)
     if hit.found or hit.method in {"label_conflict", "ambiguous"}:
         return hit
     result = await session.run(CYPHER_RESOLVE_BY_WEAK_KEY, keys=keys, etype=entity_type)
-    weak_rows = _filter_rows([dict(r) async for r in result], exclude_uuid=None, external_id=external_id, name=name)
+    weak_rows = _filter_rows([dict(r) async for r in result], exclude_uuid=None, external_id=external_id, name=name, keys=keys)
     hit = _pick_weak_hit(weak_rows, name)
     if hit.found:
         return hit
