@@ -51,7 +51,9 @@ CommuLingo의 필요한 설명·라벨·원문 발췌 전송과 자동 실행은
 
 현재 등록·보강 경로는 `commulingo/activities.py`와 frontend의 `activity-catalog.json`을 공유한다. 국적별 role 목록 대신 기능 13개와 실제 활동 소속을 판정하고, 같은 경력을 지지하는 출처 발췌를 함께 선택한다. 발췌가 없거나 선택이 허용 목록 밖이면 초안을 보존하고 보류한다. 옛 role(사무국 계열·역할 범주) 분류와 `legacy=True` 경로는 2026-09-30 frontend의 role 테이블 폐기와 함께 제거했다. 분류 결과는 `groupId`와 대표 활동(`activities`)뿐이며 `role`을 만들지 않는다. 직접 도구의 낮은 신뢰도 활동 배정은 공통 편집 검토 대기로 보낸다.
 
-일당제 현실 사회주의 체제 내의 집권당·국가기관 활동은 국가 이름과 `kind=state`인 소속 ID로 판정하며, 국가 관계는 `service`로 저장한다. 건국 전 정당 활동과 체제 반대파는 해당 정당·세력 또는 미확정 소속으로 구분한다. 정당 카탈로그의 `governingState`와 criteria가 적용 기간을 명시하며, 국가에 `membership`을 쓰는 요청은 frontend가 거부한다. 옛 역할 매핑도 국가 ID를 사용하지만 건국 전에 사망한 인물은 `legacyBeforeState`에 따라 정당에 남긴다.
+일당제 현실 사회주의 체제의 집권기 정부·입법·국가기관·군·보안 활동은 국가 이름과 `kind=state`인 소속 ID로 판정하며, 국가 관계는 `service`로 저장한다. 집권당의 당 직책·당 간부 활동은 2026-10-04부터 그 정당으로 판정한다. 건국 전 정당 활동과 체제 반대파는 해당 정당·세력 또는 미확정 소속으로 구분한다. 정당 카탈로그의 `governingState`와 criteria가 적용 기간을 명시하며, 국가에 `membership`을 쓰는 요청은 frontend가 거부한다. 옛 역할 매핑도 국가 ID를 사용하지만 건국 전에 사망한 인물은 `legacyBeforeState`에 따라 정당에 남긴다.
+
+대표 활동 다음에 **정당 활동 단계**가 따로 돈다(`classify_party_activity`, 2026-10-05 사용자 지시). 먼저 인용 발췌 중 본인의 정당 당원 자격이나 당 직책을 말하는 발췌를 고르고(`person-party-basis`), 그 발췌의 연도에 존재한 정당과 역할(단순 당원·당 지도부·비당원 당 직책)을 고른다(`person-party-affiliation`). 일당제 국가에서 국가 직책만 맡은 단순 당원도 당원과 비당원을 구분하려고 기록한다. 단순 당원은 대표 활동과 같은 기능에 `membership`, 당 지도부는 `political-leadership`·`membership`, 비당원 당 직책(예: 푸틴의 통합 러시아 의장)은 `political-leadership`·`service`로 둔다. 동조·협력·지지·가족의 당적·청년동맹만으로는 넣지 않는다. 신뢰도가 기준 미만이거나 대표 활동과 같은 정당이면 넣지 않고, 이 단계가 실패해도 등록은 진행한다. 정당 활동이 없는 기존 인물을 보강하는 작업도 그 작업의 발췌로 같은 단계를 돌려 기존 활동 뒤에 덧붙인다(`Decisions.party_enrichment`).
 
 `list_activity_catalog`가 공통 카탈로그를 반환하고 `get_person.activities`는 원본 활동 묶음을 반환한다. 각 활동은 functionId, affiliationId/affiliationStatus, relation, 기간, primary, evidence를 가진다. 국적이나 연구 주제를 소속으로 대신하지 않는다. `scripts/audit_person_activities.py`는 공개 인물 API의 현재 대표 기능과 Jev 후보를 비교하는 읽기 전용 감사다. 기본 대상은 `government`, `--function all`이면 전체다. 공개 약력·경력과 기존 활동의 출처 발췌만 전송하고 기존 분류값은 판정 입력에서 제외한다. 기능 판정 후 발췌가 있으면 신규 등록과 같은 `activity_basis_question`으로 근거를 확인한다. 발췌가 없으면 약력 기반 후보만 기록한다(`needs_source`). 소속·시대 그룹은 재분류하지 않는다.
 

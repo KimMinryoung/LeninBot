@@ -69,10 +69,50 @@ def activity_questions(catalog, evidence, window=None):
             **{a['id']:f"{a['label']['en']} ({a['kind']}): {a['criteria']}" for a in affiliations_for(catalog, window)},
             'independent':'The chosen evidence explicitly establishes independent/unaffiliated activity.',
             'unresolved':'The evidence does not establish the organization served in the chosen activity, or it is absent from the catalogue.'},
-            'instructions':'Choose the actual state, organization or force served in the career the selected excerpt documents (selected_activity_evidence). Only affiliations that existed in that period are offered. Citizenship, ethnicity, residence and research subject are NOT affiliation. For a one-party socialist system, choose the STATE for activity as part of that system during its ruling period: ruling-party leadership, cadres, government, state institutions, armed forces and security, including non-party members. Store the country, not the ruling party. This rule does NOT apply to opposition against that regime: choose its documented opposition organization, independent or unresolved; earlier state service is a separate activity. Pre-state revolutionary activity and party activity outside the ruling period retain the party or movement. Otherwise prefer a documented specific organization over a generic state. In the French Revolution choose the named club, faction, Paris Commune or the regime of the date (Bourbon monarchy, First Republic, Consulate/Empire); the generic revolutionary camp only when none is named. For scholars and artists do not infer state service from nationality or a public university. Select unresolved when evidence is insufficient.'},
+            'instructions':'Choose the actual state, organization or force served in the career the selected excerpt documents (selected_activity_evidence). Only affiliations that existed in that period are offered. Citizenship, ethnicity, residence and research subject are NOT affiliation. For a one-party socialist system during its ruling period, choose the STATE for government, legislature, state institutions, armed forces and security, including non-party members, and the RULING PARTY for party posts and party cadre work (first/general secretary, politburo, central committee secretariat and departments, regional party committees). Plain party membership is recorded as a separate party activity, not here. This rule does NOT apply to opposition against that regime: choose its documented opposition organization, independent or unresolved; earlier state service is a separate activity. Pre-state revolutionary activity and party activity outside the ruling period retain the party or movement. Otherwise prefer a documented specific organization over a generic state. In the French Revolution choose the named club, faction, Paris Commune or the regime of the date (Bourbon monarchy, First Republic, Consulate/Empire); the generic revolutionary camp only when none is named. For scholars and artists do not infer state service from nationality or a public university. Select unresolved when evidence is insufficient.'},
         'activity_basis': {'type':'choice', 'criteria':{str(i):e['excerpt'][:2400] for i,e in enumerate(evidence)} | {'unsupported':'No excerpt documents the selected function.'},
             'instructions':'Which excerpt documents the selected function as this person\'s DEFINING activity, the career the card is about? Prefer the excerpt of that career over a later or incidental episode. Select unsupported if no excerpt documents the function.'},
     }
+
+
+PARTY_ROLES = {
+    'member': 'Documented ordinary membership of the party (joined, was a member, a candidate member, a party deputy or nominee), with no leading party post in the excerpt.',
+    'leadership': 'A leading party post: party leader, chair or general/first secretary (including of a republic or region), politburo or presidium member, central committee secretary or department head.',
+    'nonmember_office': 'An official party post (for example party chairman) held while the excerpt says the person was not a party member.',
+}
+
+
+def party_questions(catalog, evidence, window=None):
+    """Second, non-primary activity: the person's own documented party
+    membership or party office. Owner rule 2026-10-05: plain membership is
+    recorded, also in one-party socialist states (to tell members from
+    non-members); a non-member party chairman gets the office as service."""
+    parties = [a for a in affiliations_for(catalog, window) if a['kind'] == 'party']
+    return {
+        'party_basis': {'type':'choice', 'criteria':{str(i):e['excerpt'][:2400] for i,e in enumerate(evidence)} | {'none':'No excerpt states this person\'s own party membership or party post.'},
+            'instructions':'Which excerpt states THIS person\'s own membership in a political party, or an official post in a party, even as a non-member? Sympathy, cooperation, voting, advising, campaigning for, a youth league alone, a family member\'s membership, or party affiliation inferred from a state office do not count. Choose none when no excerpt says it.'},
+        'party_affiliation': {'type':'choice', 'criteria':{
+            **{a['id']:f"{a['label']['en']}: {a['criteria']}" for a in parties},
+            'unresolved':'The party in the excerpt is not offered, or the excerpt does not name which party.'},
+            'instructions':'Which party does selected_party_evidence say the person belonged to or held a post in? A generic "Communist Party" means the party of the country and period in the excerpt, never another country\'s party. Bolsheviks, RSDLP(b), RCP(b), VKP(b), CPSU and Soviet republic communist parties are the Soviet Communist Party; RSDLP before 1912 is the Russian Social Democratic Labour Party.'},
+        'party_role': {'type':'choice', 'criteria':dict(PARTY_ROLES),
+            'instructions':'What does selected_party_evidence document about the person in that party?'},
+    }
+
+
+def party_activity_from(primary, catalog, evidence, basis, affiliation, role):
+    """The party activity for the chosen excerpt, or None when it adds nothing."""
+    affiliations = {a['id']: a for a in catalog['affiliations']}
+    if role not in PARTY_ROLES or affiliations.get(affiliation, {}).get('kind') != 'party':
+        return None
+    if not isinstance(basis, str) or not basis.isdigit() or int(basis) >= len(evidence):
+        return None
+    if primary and primary.get('affiliationId') == affiliation:
+        return None
+    function = primary.get('functionId') if primary and role == 'member' else 'political-leadership'
+    return {'functionId':function,'affiliationId':affiliation,'affiliationStatus':'confirmed',
+            'relation':'service' if role == 'nonmember_office' else 'membership','primary':False,
+            'startYear':None,'endYear':None,'evidence':[evidence[int(basis)]]}
 
 
 def activity_basis_question(catalog, evidence, function, group=None):

@@ -3001,6 +3001,11 @@ def _run_edit(target_type: str, action: str, target_id: str, patch: dict,
                 if classification["low_confidence"]:
                     activity_review_required = bool(classification.get("activities"))
                     logger.info("person %s classified with low confidence: %s", target_id, classification["confidence"])
+        if target_type == "person" and fields.get("activities"):
+            # An activity list resubmitted with an appended party activity
+            # (pipeline party enrichment) keeps citing the card's earlier sources.
+            sources = list(dict.fromkeys([*sources, *(e["source"] for a in fields["activities"]
+                                                      for e in a.get("evidence") or [] if e.get("source"))]))
         evidence_errors = _person_evidence_errors(fields, sources)
         if evidence_errors:
             return "Error: evidence validation: " + "; ".join(evidence_errors)

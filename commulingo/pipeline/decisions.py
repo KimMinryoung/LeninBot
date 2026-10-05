@@ -64,7 +64,7 @@ class Decisions:
         codes = kind=='person' and any(k in fields for k in ('citizenship','nationalOrigin','fate'))
         term = kind=='term' and self.job['action']=='create'
         if not (person or codes or term):
-            return fields, {}
+            return await self.party_enrichment(fields, merged, excerpts), {}
         state = c.term_state(merged) if term else c.person_card_state(merged,excerpts)
         from commulingo.activities import load_catalog
         cache_key = canonical({'state':state,'person':person,'codes':codes,'term':term,'activity_catalog':load_catalog() if person else None})
@@ -93,4 +93,33 @@ class Decisions:
                     if key in classified and (self.job['action']=='create' or not self.current.get(key)):
                         out[key] = classified[key]
         self.cache[cache_key] = verdict
+        if not person:
+            out = await self.party_enrichment(out, merged, excerpts)
         return out, verdict
+
+    async def party_enrichment(self, fields, merged, excerpts):
+        """An update of a person whose activities name no party gets a
+        documented party membership or party office appended from the job's
+        excerpts (owner rule 2026-10-05). A classifier miss leaves the fields
+        as they are: the party activity is never required."""
+        from commulingo import classify as c
+        from commulingo.activities import activity_evidence, load_catalog
+        if self.job['kind'] != 'person' or self.job['action'] == 'create' or 'activities' in fields:
+            return fields
+        current = self.current.get('activities') or []
+        catalog = load_catalog()
+        kinds = {a['id']: a['kind'] for a in catalog['affiliations']}
+        if not current or any(kinds.get(a.get('affiliationId')) == 'party' for a in current):
+            return fields
+        basis = activity_evidence(merged, excerpts)
+        if not basis:
+            return fields
+        primary = next((a for a in current if a.get('primary')), current[0])
+        party = await asyncio.to_thread(c.classify_party_activity, merged, primary, basis,
+                                        state=c.person_card_state(merged, excerpts), catalog=catalog,
+                                        decide=self.detailed)
+        if not party:
+            return fields
+        out = deepcopy(fields)
+        out['activities'] = deepcopy(current) + [party]
+        return out

@@ -31,6 +31,24 @@ class DecisionTests(HermeticAsyncCase):
         self.assertNotIn('groupId',result); self.assertNotIn('activities',result)
         self.assertEqual(result['citizenship']['code'],'france')
 
+    async def test_update_appends_a_documented_party_activity_only_when_none_exists(self):
+        body = 'He joined the Communist Party in 1932.'
+        claims = [{'source_id':'s1','field':'career','claim':'joined the party','start':0,'end':len(body)}]
+        sources = {'s1':{'body':body,'url':'https://example.org/p'}}
+        primary = {'functionId':'military','affiliationId':'state-soviet','primary':True}
+        party = {'functionId':'military','affiliationId':'soviet-party','relation':'membership','primary':False}
+        helper = Decisions({'kind':'person','action':'update'},{'groupId':'g','activities':[primary]},None,Usage())
+        with patch('commulingo.classify.classify_party_activity',return_value=party) as stage:
+            result,_ = await helper.classify({'bio':{'en':'x'}},claims,sources)
+        stage.assert_called_once()
+        self.assertEqual(stage.call_args.args[2][0]['excerpt'], body)
+        self.assertEqual(result['activities'],[primary,party])
+        member = Decisions({'kind':'person','action':'update'},{'groupId':'g','activities':[primary,party]},None,Usage())
+        with patch('commulingo.classify.classify_party_activity') as stage:
+            result,_ = await member.classify({'bio':{'en':'x'}},claims,sources)
+        stage.assert_not_called()
+        self.assertNotIn('activities',result)
+
     def test_jev_cost_is_added_to_stage_ledger(self):
         usage = Usage(); usage.tracker['total_cost']=.01
         helper = Decisions({},None,None,usage)

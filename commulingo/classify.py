@@ -551,7 +551,56 @@ def classify_person_card(fields: dict, *, catalogs=None, claims: dict | None = N
         'activity_affiliation': affiliation_result.decision.answers['activity_affiliation'],
         'activity_basis': basis_result.decision.answers['activity_basis']}, model=decision.model)
     person = activity_person_from(decision, activity_catalog, basis, {g['id'] for g in groups}, accept)
+    if person and person.get('activities'):
+        party = classify_party_activity(fields, person['activities'][0], basis, state=state,
+                                        catalog=activity_catalog, decide=decide, accept=accept)
+        if party:
+            person['activities'] = person['activities'] + [party]
     return {"codes": verdicts, "person": person}
+
+
+def classify_party_activity(fields: dict, primary: dict | None, basis: list, *, state=None, catalog=None,
+                            decide=None, accept: float = 0.7) -> dict | None:
+    """A non-primary party activity from the cited excerpts, or None.
+
+    Owner rule 2026-10-05: documented party membership is recorded beside the
+    defining activity, also for members holding only state posts in one-party
+    socialist states; a non-member party chairman gets that office as service.
+    The excerpt is chosen first and its years decide which parties are
+    offered, as for the primary activity. Below the accept threshold the
+    activity is left out rather than sent to review."""
+    from llm.call_registry import decide_detailed
+    from commulingo.activities import party_questions, party_activity_from, excerpt_years, load_catalog
+    catalog = catalog or load_catalog()
+    if not basis:
+        return None
+    state = dict(state if state is not None else person_card_state(fields, None))
+    state['cited_activity_evidence'] = basis
+    if primary:
+        state['primary_activity'] = {k: primary.get(k) for k in ('functionId', 'affiliationId')}
+    decide = decide or decide_detailed
+    span = active_span(fields.get("years"))
+    questions = party_questions(catalog, basis, span)
+    first = decide(FEATURE, state, {'party_basis': questions['party_basis']}, label='person-party-basis')
+    if first.decision is None:
+        return None
+    choice = first.decision.choice('party_basis')
+    if not isinstance(choice, str) or not choice.isdigit() or int(choice) >= len(basis) \
+            or (first.decision.confidence('party_basis') or 0) < accept:
+        return None
+    chosen = basis[int(choice)]
+    years = excerpt_years(chosen.get('excerpt'), span)
+    window = (years[0], years[-1]) if years else span
+    state['selected_party_evidence'] = chosen
+    questions = party_questions(catalog, basis, window)
+    second = decide(FEATURE, state, {'party_affiliation': questions['party_affiliation'],
+                                     'party_role': questions['party_role']}, label='person-party-affiliation')
+    if second.decision is None:
+        return None
+    if min(second.decision.confidence(k) or 0 for k in ('party_affiliation', 'party_role')) < accept:
+        return None
+    return party_activity_from(primary, catalog, basis, choice, second.decision.choice('party_affiliation'),
+                               second.decision.choice('party_role'))
 
 
 def fill_classification(fields: dict, classification: dict | None) -> dict:

@@ -74,6 +74,45 @@ class ClassifyTests(unittest.TestCase):
         self.assertNotIn('role', filled)
         self.assertEqual(filled['activities'], out['activities'])
 
+    def test_documented_party_membership_is_added_beside_the_primary_activity(self):
+        def decide(feature, state, questions, label=None):
+            if label == 'person-party-basis':
+                self.assertIn('primary_activity', state)
+                return answers(party_basis=('0', 0.93))
+            if label == 'person-party-affiliation':
+                self.assertEqual(state['selected_party_evidence']['excerpt'], EVIDENCE[0]['excerpt'])
+                self.assertIn('party-hungarian-socialist-workers', questions['party_affiliation']['criteria'])
+                return answers(party_affiliation=('party-hungarian-socialist-workers', 0.9), party_role=('member', 0.9))
+            if label == 'person-activity-affiliation':
+                return answers(activity_affiliation=('state-hungary', 0.9))
+            return activity_decide()(feature, state, questions, label)
+        out = cc.classify_person({**FIELDS, 'evidence': EVIDENCE}, catalogs=CATALOGS, decide=decide)
+        primary, party = out['activities']
+        self.assertTrue(primary['primary'])
+        self.assertEqual((party['affiliationId'], party['relation'], party['primary'], party['functionId']),
+                         ('party-hungarian-socialist-workers', 'membership', False, primary['functionId']))
+        self.assertEqual(party['evidence'], [{k: EVIDENCE[0][k] for k in ('source', 'locator', 'claim', 'excerpt')}])
+
+    def test_party_office_without_membership_is_service_and_unsure_party_is_left_out(self):
+        from commulingo.activities import load_catalog
+        catalog = load_catalog()
+        basis = [{k: EVIDENCE[0][k] for k in ('source', 'locator', 'claim', 'excerpt')}]
+        primary = {'functionId': 'government', 'affiliationId': 'state-hungary'}
+        def decide_with(role, p=0.9, basis_choice='0'):
+            def decide(feature, state, questions, label=None):
+                if label == 'person-party-basis':
+                    return answers(party_basis=(basis_choice, 0.9))
+                return answers(party_affiliation=('party-hungarian-socialist-workers', p), party_role=(role, p))
+            return decide
+        office = cc.classify_party_activity(FIELDS, primary, basis, catalog=catalog, decide=decide_with('nonmember_office'))
+        self.assertEqual((office['relation'], office['functionId']), ('service', 'political-leadership'))
+        leader = cc.classify_party_activity(FIELDS, primary, basis, catalog=catalog, decide=decide_with('leadership'))
+        self.assertEqual((leader['relation'], leader['functionId']), ('membership', 'political-leadership'))
+        self.assertIsNone(cc.classify_party_activity(FIELDS, primary, basis, catalog=catalog, decide=decide_with('member', 0.5)))
+        self.assertIsNone(cc.classify_party_activity(FIELDS, primary, basis, catalog=catalog, decide=decide_with('member', basis_choice='none')))
+        same = {'functionId': 'political-leadership', 'affiliationId': 'party-hungarian-socialist-workers'}
+        self.assertIsNone(cc.classify_party_activity(FIELDS, same, basis, catalog=catalog, decide=decide_with('member')))
+
     def test_research_excerpts_for_bio_and_career_join_the_state(self):
         seen = {}
         claims = {'career': [{'claim': 'First Secretary 1956–1988', 'excerpt': 'x' * 2000}],
@@ -179,7 +218,7 @@ class ClassifyCardTests(unittest.TestCase):
         decide = activity_decide(seen, citizenship=('soviet', 0.98), fate=('natural', 0.9))
         out = cc.classify_person_card(card, catalogs=CATALOGS, claims={'fate': [{'claim': 'died at home', 'excerpt': 'умер'}]},
                                       decide=decide)
-        self.assertEqual(seen['labels'], ['person-card', 'person-activity-basis', 'person-activity-affiliation'])
+        self.assertEqual(seen['labels'], ['person-card', 'person-activity-basis', 'person-activity-affiliation', 'person-party-basis'])
         self.assertEqual(set(seen['questions']['person-card']), {'citizenship', 'fate', 'group', 'activity_function'})
         state = seen['states']['person-card']
         self.assertEqual(state['fate_claims'][0]['excerpt'], 'умер')

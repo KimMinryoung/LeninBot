@@ -82,6 +82,9 @@ class ActivitiesTests(unittest.TestCase):
                 self.assertIn('activity_function', questions)
                 self.assertNotIn('activity_affiliation', questions)
                 self.assertNotIn('activity_basis', questions)
+            elif label == 'person-party-basis':
+                # The optional party stage: an unavailable answer adds no activity.
+                return DecisionResult(error_kind='server', error='503')
             elif label == 'person-activity-basis':
                 self.assertEqual(state['selected_activity_function'], 'security')
                 self.assertEqual(set(questions), {'activity_basis'})
@@ -91,8 +94,8 @@ class ActivitiesTests(unittest.TestCase):
             return DecisionResult(decision=verdict())
         with patch('llm.call_registry.resolve',return_value=PROFILE):
             out=c.classify_person_card({**FIELDS,'evidence':EVIDENCE},catalogs=CATALOGS,decide=decide,codes=False)
-        self.assertEqual(stages, ['person-classification', 'person-activity-basis', 'person-activity-affiliation'])
-        person=out['person'];filled=c.fill_classification(FIELDS,person)
+        self.assertEqual(stages, ['person-classification', 'person-activity-basis', 'person-activity-affiliation', 'person-party-basis'])
+        person=out['person'];self.assertEqual(len(person['activities']),1);filled=c.fill_classification(FIELDS,person)
         self.assertEqual(filled['activities'][0]['affiliationId'],'china-ccp')
         self.assertEqual(filled['activities'][0]['evidence'][0]['source'],EVIDENCE[0]['source'])
         self.assertIsNone(filled['activities'][0]['startYear'])
