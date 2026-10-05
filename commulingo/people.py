@@ -12,17 +12,17 @@ Writes run in one of two modes, switched by
 config/commulingo_people.json → {"direct_apply": true|false} (mtime-cached,
 no restart needed):
 
-- direct_apply=true  — the edit is validated and applied to the DB
-  immediately, inside one transaction, with a revision snapshot in
-  commulingo_people_revisions (same semantics as the frontend admin store)
-  plus an auto-approved row in commulingo_agent_suggestions so provenance
-  (sources, confidence) is always on record.
-- direct_apply=false — the edit is staged as a pending row in
-  commulingo_agent_suggestions; the operator reviews and applies it with
-  scripts/commulingo_suggestions.py (which reuses apply_edit below).
+- direct_apply=true  — the edit is applied at once by the CommuLingo editorial
+  service, which records a revision snapshot and an auto-approved row in
+  commulingo_agent_suggestions so provenance (sources, confidence) is always
+  on record.
+- direct_apply=false — the edit is staged as a pending suggestion; the
+  operator reviews it with scripts/commulingo_suggestions.py.
 
-The frontend serves a periodically refreshed snapshot (default 60 seconds).
-Person writes and approvals use its shared Admin store through private local RPC.
+CommuLingo is a separate service: every write and approval goes through its
+admin MCP (commulingo/mcp_client.py, frontend dev_docs/commulingo-admin-mcp.md).
+This module only checks curator policy first and phrases the result for the
+model. The frontend serves a periodically refreshed snapshot (default 60 seconds).
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ import re
 from datetime import date, datetime
 from decimal import Decimal
 
-from psycopg2.extras import RealDictCursor, execute_values
+from psycopg2.extras import RealDictCursor
 
 from db import query as db_query, query_one as db_query_one, get_conn
 from ops.paths import COMMULINGO_DATA_DIR, commulingo_data_file
@@ -330,7 +330,7 @@ _LOCALIZED_EVENT_KEYS = ("question", "summary", "outcome")
 
 # One `## ` section of an event's long-form body. The body is a single markdown
 # column rather than a table of rows, so a section write is a splice into that
-# markdown — see _splice_event_section. Modelled on person sections for the same
+# markdown — the CommuLingo editorial service splices it. Modelled on person sections for the same
 # reason they exist: a narrative this long is written one part per run, and a
 # run that had to restate the whole body would spend most of its output
 # reproducing text it is not changing (and would regress it whenever it drifted).
@@ -1505,82 +1505,6 @@ def _existing_person_match(cur, target_id: str, patch: dict) -> dict | None:
     return None
 
 
-def _write_revision(cur, entity_type: str, entity_id: str, note: str, snapshot, changed_by: str):
-    cur.execute(
-        """INSERT INTO commulingo_people_revisions
-              (entity_type, entity_id, revision_note, snapshot, changed_by)
-           VALUES (%s, %s, %s, %s::jsonb, %s)""",
-        (entity_type, entity_id, note, json.dumps(snapshot or {}, default=_json_default, ensure_ascii=False), changed_by),
-    )
-
-
-
-
-
-
-
-
-
-
-
-
-def _apply_office_row_create(cur, office_id: str, patch: dict) -> int:
-    cur.execute(
-        "SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_sort FROM commulingo_office_rows WHERE office_id = %s",
-        (office_id,),
-    )
-    next_sort = cur.fetchone()["next_sort"]
-    sort_order = patch["sortOrder"] if isinstance(patch.get("sortOrder"), int) else next_sort
-    period = period_columns(patch.get("period"))
-    cur.execute(
-        f"""INSERT INTO commulingo_office_rows
-              (office_id, sort_order, {', '.join(PERIOD_COLUMNS)},
-               body_ko, body_en, person_id, name_ko, name_en, note_ko, note_en, updated_at)
-           VALUES (%s, %s, {', '.join(['%s'] * len(PERIOD_COLUMNS))}, %s, %s, NULLIF(%s, ''), %s, %s, %s, %s, NOW())
-           RETURNING id""",
-        (
-            office_id, sort_order, *(period[c] for c in PERIOD_COLUMNS),
-            _localized(patch.get("body"), "ko"), _localized(patch.get("body"), "en"),
-            patch.get("personId") or "",
-            _localized(patch.get("name"), "ko"), _localized(patch.get("name"), "en"),
-            _localized(patch.get("note"), "ko"), _localized(patch.get("note"), "en"),
-        ),
-    )
-    return cur.fetchone()["id"]
-
-
-def _apply_office_row_update(cur, row_id: int, patch: dict) -> None:
-    sets, values = [], []
-
-    def set_col(column, value):
-        values.append(value)
-        sets.append(f"{column} = %s")
-
-    if "sortOrder" in patch:
-        try:
-            set_col("sort_order", int(patch.get("sortOrder")))
-        except (TypeError, ValueError):
-            set_col("sort_order", 0)
-    if "period" in patch:
-        for column, value in period_columns(patch["period"]).items():
-            set_col(column, value)
-    if "body" in patch:
-        set_col("body_ko", _localized(patch.get("body"), "ko"))
-        set_col("body_en", _localized(patch.get("body"), "en"))
-    if "personId" in patch:
-        set_col("person_id", patch.get("personId") or None)
-    if "name" in patch:
-        set_col("name_ko", _localized(patch.get("name"), "ko"))
-        set_col("name_en", _localized(patch.get("name"), "en"))
-    if "note" in patch:
-        set_col("note_ko", _localized(patch.get("note"), "ko"))
-        set_col("note_en", _localized(patch.get("note"), "en"))
-    if sets:
-        sets.append("updated_at = NOW()")
-        values.append(row_id)
-        cur.execute(f"UPDATE commulingo_office_rows SET {', '.join(sets)} WHERE id = %s", values)
-
-
 def _person_create_nationality_problem(patch: dict) -> str | None:
     """Return a fail-closed error when a new card lacks either flag."""
     for key, public_key in (("citizenship", "citizenship"), ("origin", "nationalOrigin")):
@@ -2543,7 +2467,6 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
             "exactly as their own dictionary card does. Keep an original spelling "
             "only inside direct quotation marks (quoted spans are already exempt)."
         )
-    cur.execute("SELECT pg_advisory_xact_lock(hashtext('commulingo-editorial-write'))")
     allowed = _PATCH_KEYS_BY_TARGET[target_type]
     unknown = set(patch) - allowed
     if unknown:
@@ -2554,126 +2477,6 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
     # Every target type in _PATCH_KEYS_BY_TARGET has a validator; the lookup
     # above already raised KeyError for anything else.
     return _VALIDATORS_BY_TARGET[target_type](cur, action, target_id, patch)
-
-
-def _replace_term_aliases(cur, term_id: str, aliases: dict):
-    cur.execute("DELETE FROM commulingo_term_aliases WHERE term_id = %s", (term_id,))
-    # Dedupe keeping the last occurrence for the term alias conflict key.
-    rows: dict[tuple, tuple] = {}
-    for lang in ("ko", "en"):
-        for index, alias in enumerate((aliases or {}).get(lang) or []):
-            value = alias.strip() if isinstance(alias, str) else ""
-            if not value:
-                continue
-            rows[(term_id, lang, value)] = (term_id, lang, value, index)
-    if rows:
-        execute_values(
-            cur,
-            """INSERT INTO commulingo_term_aliases (term_id, lang, alias, sort_order)
-               VALUES %s
-               ON CONFLICT (term_id, lang, alias) DO UPDATE SET sort_order = EXCLUDED.sort_order""",
-            list(rows.values()),
-        )
-
-
-def _replace_term_links(cur, term_id: str, table: str, column: str, ids: list):
-    cur.execute(f"DELETE FROM {table} WHERE term_id = %s", (term_id,))
-    rows = []
-    for index, item in enumerate(ids or []):
-        value = item.strip() if isinstance(item, str) else ""
-        if not value:
-            continue
-        rows.append((term_id, value, index))
-    if rows:
-        execute_values(
-            cur,
-            f"""INSERT INTO {table} (term_id, {column}, sort_order)
-                VALUES %s ON CONFLICT DO NOTHING""",
-            rows,
-        )
-
-
-def _apply_term_create(cur, term_id: str, patch: dict) -> None:
-    cur.execute("SELECT COALESCE(MAX(sort_order), -1) + 10 AS next_sort FROM commulingo_terms")
-    next_sort = cur.fetchone()["next_sort"]
-    term = patch.get("term") or {}
-    period = patch.get("period")
-    cur.execute(
-        """INSERT INTO commulingo_terms
-              (id, sort_order, term_ko, term_en, original,
-               period_label, period_ko, period_en, start_year, end_year, category,
-               definition_ko, definition_en, body_ko, body_en, sources, parent_id, updated_at)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, NOW())""",
-        (
-            term_id,
-            patch["sortOrder"] if isinstance(patch.get("sortOrder"), int) else next_sort,
-            _localized(term, "ko"), _localized(term, "en"),
-            patch.get("original") or "",
-            # period_label is the frozen pre-071 column; the frontend store reads
-            # period_ko/en and only falls back to it, so keep it populated with
-            # the Korean label for anything that still looks at the old column.
-            _localized(period, "ko"),
-            _localized(period, "ko"), _localized(period, "en"),
-            patch.get("startYear"), patch.get("endYear"),
-            patch.get("category") or "",
-            _localized(patch.get("definition"), "ko"), _localized(patch.get("definition"), "en"),
-            _localized(patch.get("body"), "ko"), _localized(patch.get("body"), "en"),
-            json.dumps(patch.get("sources") or [], ensure_ascii=False),
-            (patch.get("parentId") or None),
-        ),
-    )
-    _replace_term_aliases(cur, term_id, patch.get("aliases") or {
-        "ko": [_localized(term, "ko")], "en": [_localized(term, "en")],
-    })
-    _replace_term_links(cur, term_id, "commulingo_term_people", "person_id", patch.get("people") or [])
-    _replace_term_links(cur, term_id, "commulingo_term_events", "event_id", patch.get("events") or [])
-
-
-def _apply_term_update(cur, term_id: str, patch: dict) -> None:
-    sets, values = [], []
-
-    def set_col(column, value):
-        values.append(value)
-        sets.append(f"{column} = %s")
-
-    if "term" in patch:
-        set_col("term_ko", _localized(patch.get("term"), "ko"))
-        set_col("term_en", _localized(patch.get("term"), "en"))
-    if "original" in patch:
-        set_col("original", patch.get("original") or "")
-    if "period" in patch:
-        period = patch.get("period")
-        set_col("period_label", _localized(period, "ko"))
-        set_col("period_ko", _localized(period, "ko"))
-        set_col("period_en", _localized(period, "en"))
-    for key, column in (("startYear", "start_year"), ("endYear", "end_year")):
-        if key in patch:
-            set_col(column, patch.get(key))
-    if "category" in patch:
-        set_col("category", patch.get("category") or "")
-    if "definition" in patch:
-        set_col("definition_ko", _localized(patch.get("definition"), "ko"))
-        set_col("definition_en", _localized(patch.get("definition"), "en"))
-    if "body" in patch:
-        set_col("body_ko", _localized(patch.get("body"), "ko"))
-        set_col("body_en", _localized(patch.get("body"), "en"))
-    if "sortOrder" in patch and isinstance(patch.get("sortOrder"), int):
-        set_col("sort_order", patch["sortOrder"])
-    if "parentId" in patch:
-        set_col("parent_id", patch.get("parentId") or None)
-    if "sources" in patch and patch.get("sources") is not None:
-        values.append(json.dumps(patch["sources"], ensure_ascii=False))
-        sets.append("sources = %s::jsonb")
-    if sets:
-        sets.append("updated_at = NOW()")
-        values.append(term_id)
-        cur.execute(f"UPDATE commulingo_terms SET {', '.join(sets)} WHERE id = %s", values)
-    if "aliases" in patch:
-        _replace_term_aliases(cur, term_id, patch.get("aliases") or {})
-    if "people" in patch:
-        _replace_term_links(cur, term_id, "commulingo_term_people", "person_id", patch.get("people") or [])
-    if "events" in patch:
-        _replace_term_links(cur, term_id, "commulingo_term_events", "event_id", patch.get("events") or [])
 
 
 _EVENT_HEADING_RE = re.compile(r"^## +(.+?)[ \t]*$", re.M)
@@ -2718,22 +2521,6 @@ def _find_event_section(parts: list[tuple[str, str]], heading: str) -> int:
     return -1
 
 
-def _splice_event_section(body: str, heading: str, section_body: str,
-                          after: str, action: str) -> str:
-    """Write one `## heading` part into an event body and return the new body."""
-    parts = _split_event_body(body)
-    heading = (heading or "").strip()
-    block = f"## {heading}\n\n{(section_body or '').strip()}"
-    at = _find_event_section(parts, heading)
-    if action == "update":
-        # _validate has already established the section exists in both languages.
-        parts[at] = (heading, block)
-    else:
-        anchor = _find_event_section(parts, after) if after else -1
-        parts.insert(anchor + 1 if anchor >= 0 else len(parts), (heading, block))
-    return "\n\n".join(block for _, block in parts if block.strip())
-
-
 def _event_snapshot(cur, event_id: str) -> dict | None:
     """Full history event via an existing cursor, for the revision log."""
     cur.execute(
@@ -2745,183 +2532,6 @@ def _event_snapshot(cur, event_id: str) -> dict | None:
     )
     row = cur.fetchone()
     return dict(row) if row else None
-
-
-def _apply_event_update(cur, event_id: str, patch: dict) -> None:
-    sets: list[str] = []
-    params: list = []
-    for key, (ko_col, en_col) in (
-        ("question", ("question_ko", "question_en")),
-        ("summary", ("summary_ko", "summary_en")),
-        ("outcome", ("outcome_ko", "outcome_en")),
-    ):
-        value = patch.get(key)
-        if isinstance(value, dict):
-            sets += [f"{ko_col} = %s", f"{en_col} = %s"]
-            params += [value.get("ko") or "", value.get("en") or ""]
-    for key in ("timeline", "sources"):
-        if patch.get(key) is not None:
-            sets.append(f"{key} = %s::jsonb")
-            params.append(json.dumps(patch[key], ensure_ascii=False))
-    if not sets:
-        return
-    sets.append("updated_at = NOW()")
-    params.append(event_id)
-    cur.execute(
-        f"UPDATE commulingo_history_events SET {', '.join(sets)} WHERE id = %s", params
-    )
-
-
-def _apply_event_section(cur, event_id: str, patch: dict, action: str) -> None:
-    cur.execute(
-        "SELECT body_ko, body_en FROM commulingo_history_events WHERE id = %s",
-        (event_id,),
-    )
-    row = cur.fetchone()
-    heading, body = patch["heading"], patch["body"]
-    after = patch.get("after") or {}
-    cur.execute(
-        """UPDATE commulingo_history_events
-              SET body_ko = %s, body_en = %s, updated_at = NOW()
-            WHERE id = %s""",
-        (
-            _splice_event_section(row["body_ko"], heading.get("ko", ""),
-                                  body.get("ko", ""), after.get("ko", ""), action),
-            _splice_event_section(row["body_en"], heading.get("en", ""),
-                                  body.get("en", ""), after.get("en", ""), action),
-            event_id,
-        ),
-    )
-
-
-def apply_edit(cur, target_type: str, action: str, target_id: str, patch: dict, changed_by: str) -> str:
-    """Apply a validated edit via an open RealDictCursor. Returns a summary.
-
-    Caller owns the transaction: everything here (including the revision
-    snapshot) commits or rolls back together.
-    """
-    if target_type in {"person", "person_section"}:
-        raise ValueError("person writes must use the shared editorial service, including approvals")
-
-    if target_type == "term":
-        if action == "create":
-            _apply_term_create(cur, target_id, patch)
-            _write_revision(cur, "term", target_id, "create term", _term_snapshot(cur, target_id), changed_by)
-            return f"created term '{target_id}'"
-        if action == "update":
-            before = _term_snapshot(cur, target_id)
-            _apply_term_update(cur, target_id, patch)
-            _write_revision(cur, "term", target_id, "update term",
-                            {"before": before, "after": _term_snapshot(cur, target_id)}, changed_by)
-            return f"updated term '{target_id}' ({', '.join(sorted(patch)) or 'no fields'})"
-        before = _term_snapshot(cur, target_id)
-        cur.execute("DELETE FROM commulingo_terms WHERE id = %s", (target_id,))
-        _write_revision(cur, "term", target_id, "delete term", before, changed_by)
-        return f"deleted term '{target_id}'"
-
-    if target_type == "history_event":
-        before = _event_snapshot(cur, target_id)
-        _apply_event_update(cur, target_id, patch)
-        _write_revision(cur, "history_event", target_id, "update event",
-                        {"before": before, "after": _event_snapshot(cur, target_id)}, changed_by)
-        return f"updated event '{target_id}' ({', '.join(sorted(patch)) or 'no fields'})"
-
-    if target_type == "history_event_section":
-        heading = (patch["heading"].get("ko") or patch["heading"].get("en") or "").strip()
-        before = _event_snapshot(cur, target_id)
-        _apply_event_section(cur, target_id, patch, action)
-        _write_revision(cur, "history_event", target_id, f"{action} body section '{heading}'",
-                        {"before": before, "after": _event_snapshot(cur, target_id)}, changed_by)
-        verb = "added" if action == "create" else "rewrote"
-        return f"{verb} body section '{heading}' of event '{target_id}'"
-
-    if target_type == "history_event_person":
-        person_id = patch["personId"]
-        entity_id = f"{target_id}/{person_id}"
-        cur.execute(
-            """SELECT event_id, person_id, sort_order, relation_kind,
-                      relation_ko, relation_en, note_ko, note_en, side
-                 FROM commulingo_history_event_people
-                WHERE event_id = %s AND person_id = %s""",
-            (target_id, person_id),
-        )
-        row = cur.fetchone()
-        before = dict(row) if row else None
-        if isinstance(patch.get("sortOrder"), int):
-            sort_order = patch["sortOrder"]
-        else:
-            cur.execute(
-                """SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_sort
-                     FROM commulingo_history_event_people WHERE event_id = %s""",
-                (target_id,),
-            )
-            sort_order = cur.fetchone()["next_sort"]
-        relation = patch["relation"]
-        note = patch["note"]
-        # A patch without "side" keeps the stored side (an update of the caption
-        # must not drop the person out of their camp); "side": null clears it.
-        cur.execute(
-            """INSERT INTO commulingo_history_event_people
-                      (event_id, person_id, sort_order, relation_kind,
-                       relation_ko, relation_en, note_ko, note_en, side)
-                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                 ON CONFLICT (event_id, person_id) DO UPDATE SET
-                     sort_order = EXCLUDED.sort_order,
-                     relation_kind = EXCLUDED.relation_kind,
-                     relation_ko = EXCLUDED.relation_ko,
-                     relation_en = EXCLUDED.relation_en,
-                     note_ko = EXCLUDED.note_ko,
-                     note_en = EXCLUDED.note_en,
-                     side = CASE WHEN %s THEN EXCLUDED.side
-                                 ELSE commulingo_history_event_people.side END""",
-            (target_id, person_id, sort_order, patch["relationKind"],
-             relation["ko"], relation["en"], note["ko"], note["en"], patch.get("side"),
-             "side" in patch),
-        )
-        after = {**patch, "eventId": target_id, "sortOrder": sort_order}
-        _write_revision(cur, "history_event_person", entity_id,
-                        "upsert history event person", {"before": before, "after": after}, changed_by)
-        return f"linked person '{person_id}' to history event '{target_id}'"
-
-    if action == "create":
-        before = _office_snapshot(cur, target_id)
-        row_id = _apply_office_row_create(cur, target_id, patch)
-        after = _office_snapshot(cur, target_id)
-        _write_revision(cur, "office", target_id, "create office row", {"before": before, "after": after}, changed_by)
-        return f"created office row #{row_id} in '{target_id}'"
-
-    row_id = int(target_id)
-    cur.execute("SELECT office_id FROM commulingo_office_rows WHERE id = %s", (row_id,))
-    office_id = cur.fetchone()["office_id"]
-    before = _office_snapshot(cur, office_id)
-    if action == "update":
-        _apply_office_row_update(cur, row_id, patch)
-        after = _office_snapshot(cur, office_id)
-        _write_revision(cur, "office", office_id, "update office row", {"before": before, "after": after}, changed_by)
-        return f"updated office row #{row_id} in '{office_id}'"
-    cur.execute("DELETE FROM commulingo_office_rows WHERE id = %s", (row_id,))
-    after = _office_snapshot(cur, office_id)
-    _write_revision(cur, "office", office_id, "delete office row", {"before": before, "after": after}, changed_by)
-    return f"deleted office row #{row_id} from '{office_id}'"
-
-
-def _record_suggestion(cur, target_type, action, target_id, patch, sources, confidence,
-                       status: str, reviewer: str = "", review_note: str = "") -> int:
-    cur.execute(
-        """INSERT INTO commulingo_agent_suggestions
-              (target_type, target_id, action, patch_json, source_refs, confidence,
-               suggested_by, status, reviewer, review_note, reviewed_at)
-           VALUES (%s, %s, %s, %s::jsonb, %s::jsonb, %s, %s, %s, %s, %s,
-                   CASE WHEN %s = 'pending' THEN NULL ELSE NOW() END)
-           RETURNING id""",
-        (
-            target_type, target_id, action,
-            json.dumps(patch, ensure_ascii=False),
-            json.dumps(sources, ensure_ascii=False),
-            confidence, _SUGGESTED_BY, status, reviewer, review_note, status,
-        ),
-    )
-    return cur.fetchone()["id"]
 
 
 def _public_page(target_type: str, target_id: str) -> str:
@@ -3021,28 +2631,16 @@ def _run_edit(target_type: str, action: str, target_id: str, patch: dict,
                 f"Logged as edit #{result['suggestionId']}. "
                 + ("Pending review; no content changed." if result["status"] == "pending"
                    else "Applied through the shared Admin store."))
-    if target_type == "person_section" and not patch.get("sources"):
-        # Section rows carry their own sources column; reuse the tool-level
-        # citations so they survive into the rendered detail page data.
-        patch = {**patch, "sources": sources}
-    direct = direct_apply_enabled()
+    if target_type == "term":
+        return "Error: term writes go through the term editorial service; it is disabled in config/commulingo_pipeline.json."
+    # History events, their sections and people, office rows. The curator
+    # checks below give the model specific guidance; the CommuLingo editorial
+    # service re-checks integrity and owns the write.
     with get_conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             error = _validate(cur, target_type, action, target_id, patch)
             if error:
                 return error
-            if direct:
-                summary = apply_edit(cur, target_type, action, target_id, patch, _SUGGESTED_BY)
-                sid = _record_suggestion(
-                    cur, target_type, action, target_id, patch, sources, confidence,
-                    status="approved", reviewer="auto:direct_apply",
-                    review_note="applied directly (direct_apply mode)",
-                )
-                return (
-                    f"OK — applied: {summary}. Logged as edit #{sid}. The change is live "
-                    f"on {_public_page(target_type, target_id)} within ~1 minute "
-                    "(server cache TTL)."
-                )
             cur.execute(
                 """SELECT id FROM commulingo_agent_suggestions
                    WHERE target_type = %s AND target_id = %s AND action = %s AND status = 'pending'
@@ -3050,20 +2648,30 @@ def _run_edit(target_type: str, action: str, target_id: str, patch: dict,
                 (target_type, target_id, action),
             )
             pending = cur.fetchone()
-            sid = _record_suggestion(
-                cur, target_type, action, target_id, patch, sources, confidence, status="pending"
-            )
-            msg = (
-                f"OK — staged as suggestion #{sid} ({action} {target_type} '{target_id}'). "
-                "Staging mode is on: the operator reviews it with "
-                "scripts/commulingo_suggestions.py before it goes live."
-            )
-            if pending:
-                msg += (
-                    f" Note: suggestion #{pending['id']} for the same target/action is "
-                    "still pending — mention to the operator if this one supersedes it."
-                )
-            return msg
+    try:
+        result = call_person_service({"command": "submit", "target": target_type, "action": action,
+            "id": target_id, "fields": patch, "sources": sources, "confidence": confidence,
+            "changedBy": _SUGGESTED_BY, "directApply": direct_apply_enabled()})
+    except ValueError as exc:
+        return f"Error: {exc}"
+    sid = result["suggestionId"]
+    if result["status"] == "approved":
+        return (
+            f"OK — applied: {result.get('summary')}. Logged as edit #{sid}. The change is live "
+            f"on {_public_page(target_type, target_id)} within ~1 minute "
+            "(server cache TTL)."
+        )
+    msg = (
+        f"OK — staged as suggestion #{sid} ({action} {target_type} '{target_id}'). "
+        "Staging mode is on: the operator reviews it with "
+        "scripts/commulingo_suggestions.py before it goes live."
+    )
+    if pending:
+        msg += (
+            f" Note: suggestion #{pending['id']} for the same target/action is "
+            "still pending — mention to the operator if this one supersedes it."
+        )
+    return msg
 
 
 _BILINGUAL_TEXT_SCHEMA = {

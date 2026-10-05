@@ -47,7 +47,20 @@ os.environ.setdefault("COMMULINGO_SUGGESTED_BY", "commulingo-em-dash-sweep")
 from bot_config import _deepseek_anthropic_client, _resolve_deepseek_model  # noqa: E402
 from db import query as db_query, get_conn  # noqa: E402
 from psycopg2.extras import RealDictCursor  # noqa: E402
-from commulingo.people import QUOTED_SPAN_RE, _write_revision  # noqa: E402
+from commulingo.people import QUOTED_SPAN_RE, _json_default  # noqa: E402
+
+
+def _write_revision(cur, entity_type: str, entity_id: str, note: str, snapshot, changed_by: str):
+    # Direct SQL into the frontend's tables: this operator bulk fix still
+    # bypasses the CommuLingo admin MCP and must move to a frontend content
+    # job before leninbot's write grants are revoked
+    # (frontend dev_docs/commulingo-admin-mcp.md, stage 5).
+    cur.execute(
+        """INSERT INTO commulingo_people_revisions
+              (entity_type, entity_id, revision_note, snapshot, changed_by)
+           VALUES (%s, %s, %s, %s::jsonb, %s)""",
+        (entity_type, entity_id, note, json.dumps(snapshot or {}, default=_json_default, ensure_ascii=False), changed_by),
+    )
 
 logger = logging.getLogger("commulingo_strip_em_dashes")
 LOCK_PATH = Path("/tmp/leninbot-commulingo-em-dash-sweep.lock")

@@ -99,8 +99,8 @@ tick에 붙였다. `tick`은 과제 선정 뒤 연결이 하나도 없는 인물
   - 작성기(`commulingo/people.py` `history_event_person`): `side`를 받아 사건 진영과 대조하고, 진영 있는 사건의 opponent와
     진영 없는 사건의 side를 거부한다. side가 빠진 수정 요청은 저장된 진영을 유지하고, `side: null`만 지운다.
     `commulingo_event_link` 도구와 사건 읽기(`get_event`)도 side·sides를 다룬다.
-  - SQL로 직접 넣는 운영자 일괄 스크립트(`commulingo_backfill_event_links.py`, `commulingo_event_evidence_links.py`)는
-    진영을 고를 수 없으므로 진영 있는 사건의 opponent를 거부한다. 재분류 스크립트 지시문도 진영이 있으면 opponent를 빼게 했다.
+  - 운영자 일괄 스크립트(`commulingo_backfill_event_links.py`, `commulingo_event_evidence_links.py`)는 CommuLingo
+    관리자 MCP(`history_event_person` 생성, 기존 연결은 건너뜀)로 넣는다. 진영을 고를 수 없으므로 진영 있는 사건의 opponent를 거부한다. 재분류 스크립트 지시문도 진영이 있으면 opponent를 빼게 했다.
   - 테스트: `tests/test_commulingo_event_links.py`(진영 선별·검증 교정), `tests/test_commulingo_event_sides.py`(작성기 검증).
 - 링크가 이미 있는 인물도 `events` 판정 기록이 없으면 보강 검사를 받는다(2026-09-29). 연결 단계가 링크 0명만 보던
   탓에, 콘텐츠·옛 배치로 링크 하나를 얻은 2,012명이 다른 사건을 검사받지 못했다(페펠랴예프의 1938년 총살과 대숙청 등).

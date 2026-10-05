@@ -1,3 +1,11 @@
+-- leninbot's CommuLingo work state. Two more tables belong here although the
+-- frontend's migrations created them before the service split (2026-10-05,
+-- frontend dev_docs/commulingo-admin-mcp.md): commulingo_curation_gaps
+-- (frontend migration 125: what the curators still have to register) and
+-- commulingo_person_review_jobs (migration 177: review leases). Only leninbot
+-- reads or writes them; the frontend no longer touches either, and leninbot
+-- follows CommuLingo id renames into them itself (commulingo/id_sync.py).
+
 CREATE TABLE IF NOT EXISTS commulingo_pipeline_jobs (
     id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     kind text NOT NULL CHECK (kind IN ('person','term')),

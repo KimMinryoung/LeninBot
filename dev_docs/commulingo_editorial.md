@@ -10,6 +10,15 @@ Python `commulingo/people.py`와 제안 승인 스크립트는
 `commulingo/person_service.py`를 통해 같은 JS Admin 저장소를 호출한다.
 직접 SQL fallback은 없다. 파이프라인의 용어·원자적 공개는 frontend
 `editorial-pipeline-service.js`가 담당한다. 편집 쓰기는 공통 advisory lock으로 직렬화한다.
+사건 카드·본문 절·사건 인물·직책 행 쓰기도 2026-10-05부터 frontend
+`content-editorial-service.js`(MCP `editorial_store`의 history_event·history_event_section·
+history_event_person·office_row 대상)가 검증·반영·제안 기록·리비전을 맡는다. `_run_edit`는
+작성자 정책 검사(`_validate`, 모델용 안내)만 먼저 하고, 승인은 `scripts/commulingo_suggestions.py`가
+같은 MCP로 한다. 운영자 일괄 정리 `commulingo_strip_em_dashes.py`·`commulingo_normalize_names.py`만
+아직 직접 SQL이며 DB 권한 회수 전에 frontend 콘텐츠 작업으로 옮긴다.
+`commulingo_curation_gaps`·`commulingo_person_review_jobs`는 leninbot 작업 상태다. frontend가
+더 건드리지 않으므로 인물·용어 id 변경은 `commulingo/id_sync.py`가 MCP `id_redirects_list`로
+따라간다(파이프라인 tick·gap worker 시작 시).
 
 CommuLingo는 별개 서비스다. 저장소 호출은 frontend가 소유한 관리자 MCP
 (`http://127.0.0.1:3100/mcp`, frontend `dev_docs/commulingo-admin-mcp.md`)를

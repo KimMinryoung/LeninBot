@@ -34,7 +34,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from db import query as db_query, execute as db_execute
+from db import query as db_query
+from commulingo.person_service import call_person_service
 from runtime_tools.wiki import _exec_wiki_get
 from scripts.commulingo_backfill_event_links import (
     refuse_opponent_on_sided_event,
@@ -206,29 +207,17 @@ def label_batch(cfg: dict, people: list[dict]) -> list[dict]:
 
 def apply_link(event_id: str, person_id: str, relation_ko: str, relation_en: str,
                kind: str, evidence: list[str]) -> None:
+    """Add one evidence-backed event link through the CommuLingo editorial
+    service (admin MCP); an existing link is left as it is."""
     kind = kind if kind in VALID_KINDS else FALLBACK_KIND
     refuse_opponent_on_sided_event(event_id, kind)
-    nxt = db_query(
-        "SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM commulingo_history_event_people WHERE event_id = %s",
-        (event_id,),
-    )[0]["next"]
-    db_execute(
-        """INSERT INTO commulingo_history_event_people
-             (event_id, person_id, sort_order, relation_ko, relation_en, relation_kind)
-           VALUES (%s, %s, %s, %s, %s, %s)
-           ON CONFLICT (event_id, person_id) DO NOTHING""",
-        (event_id, person_id, nxt, relation_ko, relation_en, kind),
-    )
-    db_execute(
-        """INSERT INTO commulingo_people_revisions (entity_type, entity_id, revision_note, snapshot, changed_by)
-           VALUES ('history_event_person', %s, 'event link from Wikipedia evidence', %s::jsonb, %s)""",
-        (f"{event_id}/{person_id}",
-         json.dumps({"after": {"event_id": event_id, "person_id": person_id,
-                               "relation_ko": relation_ko, "relation_en": relation_en,
-                               "relation_kind": kind},
-                     "evidence": evidence}, ensure_ascii=False),
-         CHANGED_BY),
-    )
+    if db_query("SELECT 1 FROM commulingo_history_event_people WHERE event_id = %s AND person_id = %s",
+                (event_id, person_id)):
+        return
+    call_person_service({"command": "submit", "target": "history_event_person", "action": "create", "id": event_id,
+                         "fields": {"personId": person_id, "relationKind": kind,
+                                    "relation": {"ko": relation_ko, "en": relation_en}},
+                         "sources": [str(item) for item in evidence], "changedBy": CHANGED_BY, "directApply": True})
 
 
 def main() -> int:

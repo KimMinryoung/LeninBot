@@ -546,6 +546,8 @@ def main() -> int:
         logger.info("another gap worker is active; exiting")
         return 0
     events = [e.strip() for e in args.events.split(",") if e.strip()] or None
+    from commulingo.id_sync import follow_renames_best_effort
+    follow_renames_best_effort()
     result = asyncio.run(run_once(args.kind, events))
     print(json.dumps(result, ensure_ascii=False, default=str, indent=2))
     return 0

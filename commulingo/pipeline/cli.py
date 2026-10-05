@@ -130,6 +130,8 @@ def main():
         async def run_batch():
             if args.command=='tick':
                 from .planner import Planner
+                from commulingo.id_sync import follow_renames_best_effort
+                await asyncio.to_thread(follow_renames_best_effort)
                 await asyncio.to_thread(store.reconcile_costs, apply=True)
                 if config['phase']=='live':
                     await asyncio.to_thread(store.release_publication_waits)

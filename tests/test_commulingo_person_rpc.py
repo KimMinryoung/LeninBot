@@ -71,7 +71,5 @@ class SharedPersonRPC(unittest.TestCase):
             with self.assertRaises(RuntimeError): apply_person_spec(spec.name)
         self.assertEqual(people._get_person(person_id)['epithet']['ko'], '공통 CLI 수정', 'batch failure rolls back prior writes')
 
-        with self.assertRaisesRegex(ValueError, 'shared editorial'):
-            people.apply_edit(None, 'person', 'update', person_id, {}, 'forbidden-legacy')
 
 if __name__ == '__main__': unittest.main()
