@@ -264,7 +264,6 @@ class Discover:
     async def __call__(self, job, artifacts, usage, budget):
         from .prompts import spec as stage_spec
         spec = stage_spec('discover')
-        from db import query_one
         schema = {'type':'object','additionalProperties':False,'properties':{'candidates':{
             'type':'array','maxItems':4,'items':{'type':'object','additionalProperties':False,
                 'properties':{'kind':{'type':'string','enum':['person','term']},
@@ -303,17 +302,14 @@ class Discover:
                                  'label':job['payload']['label'], 'mention':job['payload']['label']}
                 if candidate['mention'] not in job['payload']['body']:
                     raise ValueError('candidate mention must occur exactly in this material')
-                table,aliases,foreign,label = ('commulingo_people','commulingo_person_aliases','person_id','name') if candidate['kind']=='person' else ('commulingo_terms','commulingo_term_aliases','term_id','term')
-                existing = await asyncio.to_thread(query_one,f'''SELECT id FROM {table}
-                    WHERE id=%(id)s OR lower({label}_ko)=lower(%(label)s) OR lower({label}_en)=lower(%(label)s)
-                    UNION SELECT {foreign} FROM {aliases} WHERE lower(alias)=lower(%(label)s) LIMIT 1''',
-                    {'id':candidate['target'],'label':candidate['label']})
-                if candidate['kind']=='term' and candidate['target'] not in overlap_allow:
-                    from .store import EVENT_TITLE_MATCH_SQL
-                    event = await asyncio.to_thread(query_one, 'SELECT 1 AS hit WHERE ' + EVENT_TITLE_MATCH_SQL.format(
-                        label_ko='%(label)s', label_en='%(label)s'), {'label':candidate['label']})
-                    if event:
-                        continue  # the events lane owns this name; not a glossary entry
+                # CommuLingo answers whether the entry exists and whether the
+                # label names a history event (admin MCP entry_lookup).
+                from commulingo.mcp_client import call_tool
+                lookup = await asyncio.to_thread(call_tool, 'entry_lookup',
+                    {'kind':candidate['kind'],'id':candidate['target'],'label':candidate['label']})
+                existing = lookup['existingId']
+                if candidate['kind']=='term' and candidate['target'] not in overlap_allow and lookup['eventTitleMatch']:
+                    continue  # the events lane owns this name; not a glossary entry
                 if not existing:
                     accepted.append(candidate)
             box['candidates'] = accepted

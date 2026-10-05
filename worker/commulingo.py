@@ -3,7 +3,8 @@ dev_docs/commulingo-agent-pipeline.md, decision 2026-10-05 option 1).
 
 The frontend owns the enrichment queue, planning, validation and publication.
 It hands one stage of one job to the worker: `commulingo_editor` (research and
-draft, one author session) or `commulingo_review` (independent review). The
+draft, one author session), `commulingo_review` (independent review) or
+`commulingo_discover` (which requested entries are missing). The
 session code is the pipeline's Editor/Review, unchanged; this module only
 replaces the queue store they used with the task's own input and output:
 
@@ -22,7 +23,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-KINDS = {"commulingo_editor": ("research", "draft"), "commulingo_review": ("review",)}
+KINDS = {"commulingo_editor": ("research", "draft"), "commulingo_review": ("review",), "commulingo_discover": ("discover",)}
 JOB_KEYS = ("id", "kind", "action", "target", "topic", "stage", "payload", "attempts", "baseline", "reason", "priority")
 
 
@@ -92,6 +93,9 @@ async def run(task_id: int, request: dict) -> dict:
     notes: list[dict] = []
     if request["kind"] == "commulingo_editor":
         stage = Editor(store)
+    elif request["kind"] == "commulingo_discover":
+        from commulingo.pipeline.stages import Discover
+        stage = Discover()
     else:
         class WorkerReview(Review):
             async def leave_note(self, job, artifacts, decision, reason):
