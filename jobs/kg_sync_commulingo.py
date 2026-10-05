@@ -5,13 +5,12 @@ so re-runs are idempotent and full passes can expire vanished rows):
 
   commulingo:person:<id>         Person     name=name_ko, aliases=name_en/cyrillic/person_aliases
   commulingo:office:<id>         Role       title_ko (office lineage, e.g. 국가보안 기관)
-  commulingo:collection:people   Concept    CommuLingo 인물사전 (every person)
   commulingo:event:<id>          Incident   title_ko, summary_ko, period_label
   commulingo:location:<slug>     Location   event map pins (label.ko / label.en)
   commulingo:term:<id>           Concept    term_ko, aliases term_en/original/term_aliases
 
   Person→Role       Affiliation   primary activity officeId, office_rows (valid_at/invalid_at)
-  Person→Concept    Reference     collection (인물사전), person_term
+  Person→Concept    Reference     person_term
   Person→Incident   Involvement   history_event_people (role_in_incident = relation_kind)
   Incident→Location Presence      history_events.locations
   Concept→Concept   Reference     term_relations (related_term), parent_id (parent_term)
@@ -22,7 +21,9 @@ office lineage now comes from the primary activity's officeId, and the old
 person_role edges expire on the next full pass. Term categories were dropped
 on 2026-10-05: a category is a CommuLingo display grouping, not knowledge, and
 its generic labels (경제) fail validate_fact. Era groups (스탈린 시대의 사람들 …)
-went the same way; every person now references the 인물사전 collection instead.
+went the same way, and so did the per-person 인물사전 collection edge: thousands
+of identical edges carry no knowledge. A person with no office, event or term
+link therefore gets no node.
 
 Career entries (17k free-text rows) are folded into the Person summary, not
 materialized as edges. ``commulingo_id_redirects`` are honoured: a node still
@@ -269,7 +270,7 @@ def build_facts(src: Source, *, changed: dict[str, set[str]] | None = None) -> l
 
     facts: list[dict] = []
 
-    # people → office lineage (primary activity) / 인물사전 collection
+    # people → office lineage (primary activity)
     for pid, p in src.people.items():
         if not touched("person", pid):
             continue
@@ -282,16 +283,6 @@ def build_facts(src: Source, *, changed: dict[str, set[str]] | None = None) -> l
                 sync_key=sync_key("person_office", pid, office['id']),
                 attributes={"affiliation_type": "office_lineage"},
             ))
-        facts.append(make_fact(
-            ps, "Reference",
-            {"name": "CommuLingo 인물사전", "type": "Concept",
-             "external_id": ext_id("collection", "people"), "aliases": ["CommuLingo people"],
-             "summary": "cyber-lenin.com CommuLingo 인물사전 수록 인물", "name_ko": "CommuLingo 인물사전",
-             "name_en": "CommuLingo people"},
-            f"{ps['name']}{josa(ps['name'], '은/는')} CommuLingo 인물사전에 수록되어 있다",
-            sync_key=sync_key("person_collection", pid),
-            attributes={"reference_type": "collection"},
-        ))
 
     # office rows → dated Person→Role affiliations
     for row in src.office_rows:

@@ -114,7 +114,7 @@ graphiti 기본 속성(`uuid`, `name`, `summary`, `group_id`, `created_at`, `nam
 
 | 원본 | 노드 | 엣지 |
 |------|------|------|
-| commulingo_people | Person (name=name_ko, aliases=name_en·cyrillic·person_aliases, summary=별칭·생몰·bio·주요 경력 6줄) | Person→Role(기관 계보, 대표 활동의 officeId) Affiliation, Person→Concept(CommuLingo 인물사전) Reference(collection) (시대 그룹은 2026-10-05부터 미러링 안 함) |
+| commulingo_people | Person (name=name_ko, aliases=name_en·cyrillic·person_aliases, summary=별칭·생몰·bio·주요 경력 6줄) | Person→Role(기관 계보, 대표 활동의 officeId) Affiliation, (시대 그룹·인물사전 컬렉션 연결은 2026-10-05부터 미러링 안 함 — 기관·사건·용어 연결이 없는 인물은 노드가 생기지 않는다) |
 | commulingo_offices / office_rows | Role | Person→Role Affiliation (`valid_at`/`invalid_at` = 재임 연도, attributes.position) |
 | commulingo_history_events / event_people / locations | Incident, Location | Person→Incident Involvement (role_in_incident=relation_kind), Incident→Location Presence |
 | commulingo_terms / term_* | Concept | Concept→Concept Reference(parent_term·related_term) (용어 범주는 2026-10-05부터 미러링 안 함), Person→Concept Reference(person_term), Concept→Incident Reference(event_term) |

@@ -107,14 +107,6 @@ class BuildFactsTests(unittest.TestCase):
         keys = [f["attributes"]["sync_key"] for f in self.facts]
         self.assertEqual(len(keys), len(set(keys)))
 
-    def test_every_person_has_at_least_one_edge(self):
-        for pid in self.src.people:
-            ext = f"commulingo:person:{pid}"
-            self.assertTrue(any(
-                f.get("subject_external_id") == ext or f.get("object_external_id") == ext for f in self.facts
-            ), pid)
-        self.assertIn("commulingo:person_collection:lonely", self.by_key)
-
     def test_office_row_dated_affiliation(self):
         f = self.by_key["commulingo:office_row:2"]
         self.assertEqual((f["subject_type"], f["predicate"], f["object_type"]), ("Person", "Affiliation", "Role"))
@@ -146,12 +138,9 @@ class BuildFactsTests(unittest.TestCase):
         self.assertEqual((te["subject_type"], te["object_type"]), ("Concept", "Incident"))
         self.assertIs(te["attributes"]["same_subject"], False)
 
-    def test_people_collection_reference(self):
-        self.assertFalse([k for k in self.by_key if k.startswith("commulingo:person_group:")])
-        f = self.by_key["commulingo:person_collection:khrushchev"]
-        self.assertEqual(f["object_external_id"], "commulingo:collection:people")
-        self.assertEqual(f["fact"], "니키타 흐루쇼프는 CommuLingo 인물사전에 수록되어 있다")
-        self.assertEqual(f["attributes"]["reference_type"], "collection")
+    def test_no_people_grouping_edges(self):
+        prefixes = ("commulingo:person_group:", "commulingo:person_collection:")
+        self.assertFalse([k for k in self.by_key if k.startswith(prefixes)])
 
     def test_incremental_filter(self):
         facts = sync.build_facts(self.src, changed={"person": {"yezhov"}, "event": set(), "term": set(), "office": set()})
