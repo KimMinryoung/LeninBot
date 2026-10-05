@@ -669,9 +669,18 @@ SELF_TOOLS = [
         "name": "write_kg_structured",
         "description": (
             "Canonical KG fact writer: typed triples, no LLM extraction. Entities match "
-            "by exact name; unknown names become new nodes of the declared type. `fact` "
+            "by exact name or stored alias; unknown names become new nodes of the declared type. `fact` "
             "must be self-contained (e.g. 'Anthropic announced Claude Opus 4.6 on "
             "2026-04-11'); it is the embedded search text.\n\n"
+            "ENTITY NAMES: reuse the name the KG already stores (knowledge_graph_search shows it). "
+            "A new entity gets its standard Korean name in Hangul, no translation or second name "
+            "in parentheses: Korean/Chinese/Vietnamese people family name first without a space "
+            "(김여정, 시진핑, 호찌민); Japanese family first with a space (다카이치 사나에); others "
+            "per 외래어 표기법 (에마뉘엘 마크롱); organizations by their common Korean name (민주노총, "
+            "SK하이닉스). Keep Latin only when Korean press writes it so (OpenAI). A new "
+            "Person/Organization/Location whose name closely matches an existing node in the other "
+            "script is rejected with that node's name; reuse it, or set confirm_new_entities only "
+            "after checking that they differ.\n\n"
             "PREDICATE RULES by (subject_type → object_type); other pairs are rejected:\n"
             "  • Affiliation: Person→Org, Person→Role, Role→Org, Org→Industry\n"
             "  • PersonalRelation: Person→Person\n"
@@ -698,7 +707,7 @@ SELF_TOOLS = [
                     "items": {
                         "type": "object",
                         "properties": {
-                            "subject_name": {"type": "string", "description": "Canonical English name of the subject entity."},
+                            "subject_name": {"type": "string", "description": "Name as stored in the KG; a new entity uses its standard Korean name (see ENTITY NAMES)."},
                             "subject_type": {
                                 "type": "string",
                                 "enum": ["Person", "Organization", "Location", "Asset",
@@ -714,7 +723,7 @@ SELF_TOOLS = [
                                          "Statement", "Causation"],
                                 "description": "Must match the (subject_type → object_type) pair per PREDICATE RULES.",
                             },
-                            "object_name": {"type": "string", "description": "Canonical English name of the object entity."},
+                            "object_name": {"type": "string", "description": "Name as stored in the KG; a new entity uses its standard Korean name (see ENTITY NAMES)."},
                             "object_type": {
                                 "type": "string",
                                 "enum": ["Person", "Organization", "Location", "Asset",
@@ -729,6 +738,10 @@ SELF_TOOLS = [
                             "valid_at": {
                                 "type": "string",
                                 "description": "Optional ISO date (YYYY-MM-DD) for when the fact became true.",
+                            },
+                            "confirm_new_entities": {
+                                "type": "boolean",
+                                "description": "Only after a possible-duplicate rejection, when you checked the names are different entities.",
                             },
                         },
                         "required": ["subject_name", "subject_type", "predicate",
@@ -2043,6 +2056,7 @@ async def _exec_write_kg_structured(
         mission_id=mission_id,
         trust_tier=trust_tier,
         provenance_footer=provenance_footer,
+        cross_script_guard=True,
     )
 
     # Audit records partial_success as "ok"; these counts keep rejections visible.

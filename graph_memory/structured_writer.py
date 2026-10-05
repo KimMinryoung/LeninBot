@@ -205,6 +205,41 @@ async def _untrusted_aliases(driver_client, database: str, name: str, aliases) -
     return filter_untrusted_aliases(name, candidates, owned)
 
 
+# ── Cross-script twin guard (agent writes) ────────────────────────────────────
+#
+# Untrusted sides resolve by exact name/alias only, so "Kim Yo Jong" never met
+# "김여정" and 2026-10 audit found ~300 Korean/English twin nodes. Before an
+# agent write creates a Person/Organization/Location, the new name is compared
+# with same-label nodes written in the other script (name embeddings); a close
+# match rejects the fact with the existing name so the agent can reuse it.
+
+TWIN_GUARD_TYPES = frozenset({"Person", "Organization", "Location"})
+TWIN_GUARD_THRESHOLD = float(os.getenv("KG_CROSS_SCRIPT_TWIN_THRESHOLD", "0.80"))
+
+CYPHER_TWIN_CANDIDATES = """
+CALL db.index.vector.queryNodes('entity_name_embedding', 50, $vec)
+YIELD node, score
+WHERE $etype IN labels(node) AND score >= $threshold
+RETURN node.uuid AS uuid, node.name AS name, score
+ORDER BY score DESC
+LIMIT 20
+"""
+
+
+def _has_hangul(text: str) -> bool:
+    return any("\uac00" <= ch <= "\ud7a3" for ch in text or "")
+
+
+async def _cross_script_twin(session, name: str, etype: str, vec) -> dict | None:
+    """Closest same-label node whose name is in the other script, if any."""
+    result = await session.run(CYPHER_TWIN_CANDIDATES, vec=vec, etype=etype, threshold=TWIN_GUARD_THRESHOLD)
+    hangul = _has_hangul(name)
+    async for row in result:
+        if _has_hangul(row["name"]) != hangul:
+            return {"uuid": row["uuid"], "name": row["name"], "score": row["score"]}
+    return None
+
+
 # ── Build phase ───────────────────────────────────────────────────────────────
 
 def _make_synthetic_episode(group_id: str, agent: str, mission_id: int | None,
@@ -353,6 +388,7 @@ async def write_structured_facts(
     trust_tier: str = "unverified",
     provenance_footer: str = "",
     allow_sync_predicates: bool = False,
+    cross_script_guard: bool = False,
 ) -> dict:
     """Write a batch of structured facts to the KG.
 
@@ -370,6 +406,9 @@ async def write_structured_facts(
         provenance_footer: Pre-built provenance text (sources etc.) — written
             into the synthetic episode body verbatim.
         allow_sync_predicates: unlock Document / Reference for mirror jobs.
+        cross_script_guard: reject facts whose new Person/Organization/Location
+            name closely matches an existing node written in the other script
+            (agent writes; a fact may opt out with confirm_new_entities: true).
 
     Returns:
         {
@@ -483,6 +522,65 @@ async def write_structured_facts(
         t_uuid, t_new = await get_or_assign(_side(f, "object"))
         resolved.append((f, s_uuid, s_new, t_uuid, t_new))
 
+    # ── 2b. Cross-script twin guard ──────────────────────────────────────
+    guard_embeddings: dict[str, list[float]] = {}
+    if cross_script_guard and embedder is not None:
+        probes: dict[str, EntityNode] = {}
+        for f, s_uuid, s_new, t_uuid, t_new in resolved:
+            if f.get("confirm_new_entities") is True:
+                continue
+            for role, uuid, is_new in (("subject", s_uuid, s_new), ("object", t_uuid, t_new)):
+                if is_new and f[f"{role}_type"] in TWIN_GUARD_TYPES and uuid not in probes:
+                    probes[uuid] = EntityNode(uuid=uuid, name=f[f"{role}_name"], group_id=group_id)
+        twins: dict[str, dict] = {}
+        if probes:
+            try:
+                await _embed_in_batches(embedder, list(probes.values()), [])
+                async with driver_client.session(database=database) as session:
+                    for f, s_uuid, _sn, t_uuid, _tn in resolved:
+                        for role, uuid in (("subject", s_uuid), ("object", t_uuid)):
+                            node = probes.get(uuid)
+                            if node is None or uuid in twins or not node.name_embedding:
+                                continue
+                            guard_embeddings[uuid] = node.name_embedding
+                            twin = await _cross_script_twin(session, node.name, f[f"{role}_type"], node.name_embedding)
+                            if twin:
+                                twins[uuid] = twin
+            except Exception as exc:  # the guard must not block writes when embeddings fail
+                logger.warning("[KG STRUCTURED] cross-script twin guard skipped: %s", exc)
+                twins = {}
+        if twins:
+            kept, kept_indices = [], []
+            for item, index in zip(resolved, written_fact_indices):
+                f, s_uuid, _sn, t_uuid, _tn = item
+                hits = [(role, f[f"{role}_name"], twins[u]) for role, u in (("subject", s_uuid), ("object", t_uuid))
+                        if u in twins]
+                if not hits:
+                    kept.append(item)
+                    kept_indices.append(index)
+                    continue
+                detail = "; ".join(
+                    f"{role}_name '{name}' is new, but the KG already has '{twin['name']}' "
+                    f"[{f[f'{role}_type']}] (name similarity {twin['score']:.2f}, other script)"
+                    for role, name, twin in hits
+                )
+                rejected_facts.append(_reject_fact(index, facts[index], (
+                    f"fact[{index}] possible duplicate entity: {detail}. If it is the same entity, resend "
+                    "with the existing name exactly. If it is a different entity, resend the fact with "
+                    "confirm_new_entities: true."
+                )))
+            resolved, written_fact_indices = kept, kept_indices
+            if not resolved:
+                return {
+                    "status": "error",
+                    "message": (f"no facts written: {len(rejected_facts)} rejected. "
+                                "Retry only the rejected_facts entries after fixing them."),
+                    "facts_written": 0,
+                    "facts_rejected": len(rejected_facts),
+                    "written_fact_indices": [],
+                    "rejected_facts": rejected_facts,
+                }
+
     # ── 3. Build synthetic episode + entity/edge/mentions objects ────────
     episode = _make_synthetic_episode(
         group_id=group_id, agent=agent, mission_id=mission_id,
@@ -506,8 +604,11 @@ async def write_structured_facts(
             name_ko=hints.get("name_ko"),
             name_en=hints.get("name_en"),
         )
-        return _make_entity_node(name, etype, group_id, uuid,
+        node = _make_entity_node(name, etype, group_id, uuid,
                                  identity=identity, summary=hints.get("summary", ""))
+        if uuid in guard_embeddings and node.name_embedding is None:
+            node.name_embedding = guard_embeddings[uuid]
+        return node
 
     for f, s_uuid, s_new, t_uuid, t_new in resolved:
         if s_new and s_uuid not in seen_new_uuids:

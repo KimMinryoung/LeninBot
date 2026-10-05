@@ -293,6 +293,7 @@ class UpsertAndMergeTests(unittest.TestCase):
             identity.CYPHER_MERGE_OUT: [{"cnt": 2}],
             identity.CYPHER_MERGE_IN: [{"cnt": 1}],
             identity.CYPHER_MERGE_MENTIONS: [{"cnt": 3}],
+            identity.CYPHER_MERGE_DUP_NAME: [{"name": "Lee Jae-myung"}],
             identity.CYPHER_MERGE_IDENTITY: [{"uuid": "canon"}],
             identity.CYPHER_MERGE_DELETE: [{"cnt": 1}],
         })
@@ -303,8 +304,10 @@ class UpsertAndMergeTests(unittest.TestCase):
         order = [c for c, _ in session.calls]
         self.assertEqual(order, [
             identity.CYPHER_MERGE_OUT, identity.CYPHER_MERGE_IN, identity.CYPHER_MERGE_MENTIONS,
-            identity.CYPHER_MERGE_IDENTITY, identity.CYPHER_MERGE_DELETE,
+            identity.CYPHER_MERGE_DUP_NAME, identity.CYPHER_MERGE_IDENTITY, identity.CYPHER_MERGE_DELETE,
         ])
+        identity_params = session.calls[4][1]
+        self.assertEqual(sorted(identity_params["dup_keys"]), ["lee jae myung", "lee jae-myung"])
         self.assertEqual(session.calls[-1][1], {"canon_uuid": "canon", "dup_uuid": "dup1"})
 
     def test_post_episode_merge_folds_cross_group_duplicate(self):

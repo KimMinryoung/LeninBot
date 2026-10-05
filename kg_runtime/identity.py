@@ -330,12 +330,16 @@ DELETE r
 RETURN count(r2) AS cnt
 """
 
+# The resolver looks names up by ``normalize_alias_key``; toLower alone left
+# "lee jae-myung" in alias_keys where lookups use "lee jae myung".
+CYPHER_MERGE_DUP_NAME = "MATCH (dup:Entity {uuid: $dup_uuid}) RETURN dup.name AS name"
+
 CYPHER_MERGE_IDENTITY = """
 MATCH (canon:Entity {uuid: $canon_uuid}), (dup:Entity {uuid: $dup_uuid})
 WITH canon, dup,
      coalesce(canon.external_ids, []) + coalesce(dup.external_ids, []) AS ids_raw,
      coalesce(canon.aliases, []) + [dup.name] + coalesce(dup.aliases, []) AS aliases_raw,
-     coalesce(canon.alias_keys, []) + [toLower(dup.name)] + coalesce(dup.alias_keys, []) AS keys_raw,
+     coalesce(canon.alias_keys, []) + $dup_keys + coalesce(dup.alias_keys, []) AS keys_raw,
      coalesce(canon.weak_keys, []) + coalesce(dup.weak_keys, []) AS weak_raw
 WITH canon, dup, weak_raw,
      reduce(acc = [], x IN ids_raw | CASE WHEN x IS NULL OR x = '' OR x IN acc THEN acc ELSE acc + x END) AS ids,
@@ -676,6 +680,11 @@ def _merge_stats(canonical_uuid: str) -> dict:
     return {"canonical_uuid": canonical_uuid, "merged": [], "edges_moved": 0, "mentions_moved": 0}
 
 
+def _dup_name_keys(record) -> list[str]:
+    name = record["name"] if record else None
+    return [k for k in {(name or "").lower(), normalize_alias_key(name or "")} if k]
+
+
 def merge_entity_nodes_sync(session, canonical_uuid: str, dup_uuids) -> dict:
     """Fold ``dup_uuids`` into ``canonical_uuid`` (sync session). Returns stats.
 
@@ -692,7 +701,8 @@ def merge_entity_nodes_sync(session, canonical_uuid: str, dup_uuids) -> dict:
         stats["edges_moved"] += session.run(CYPHER_MERGE_OUT, **params).single()["cnt"]
         stats["edges_moved"] += session.run(CYPHER_MERGE_IN, **params).single()["cnt"]
         stats["mentions_moved"] += session.run(CYPHER_MERGE_MENTIONS, **params).single()["cnt"]
-        session.run(CYPHER_MERGE_IDENTITY, **params).consume()
+        dup = session.run(CYPHER_MERGE_DUP_NAME, **params).single()
+        session.run(CYPHER_MERGE_IDENTITY, **params, dup_keys=_dup_name_keys(dup)).consume()
         session.run(CYPHER_MERGE_DELETE, **params).consume()
         stats["merged"].append(dup_uuid)
     return stats
@@ -709,9 +719,12 @@ async def merge_entity_nodes_async(session, canonical_uuid: str, dup_uuids) -> d
             result = await session.run(cypher, **params)
             rec = await result.single()
             stats[key] += rec["cnt"] if rec else 0
-        for cypher in (CYPHER_MERGE_IDENTITY, CYPHER_MERGE_DELETE):
-            result = await session.run(cypher, **params)
-            await result.consume()
+        result = await session.run(CYPHER_MERGE_DUP_NAME, **params)
+        dup = await result.single()
+        result = await session.run(CYPHER_MERGE_IDENTITY, **params, dup_keys=_dup_name_keys(dup))
+        await result.consume()
+        result = await session.run(CYPHER_MERGE_DELETE, **params)
+        await result.consume()
         stats["merged"].append(dup_uuid)
     return stats
 

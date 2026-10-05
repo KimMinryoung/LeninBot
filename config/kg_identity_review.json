@@ -707,6 +707,5286 @@
         "commulingo:event_person:kronstadt-1921:israel-getzler",
         "commulingo:event_person:kronstadt-1921:kalinin"
       ]
+    },
+    {
+      "uuid": "c7cad7fc-6eeb-4cfc-bfef-0c53a145c322",
+      "target_uuid": "19507615-1db2-418c-9272-e133293f5981",
+      "original_name": "Kim Yo Jong",
+      "name": "Kim Yo Jong",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Kim Yo Jong' = '김여정' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "9a673c52-39f2-44fb-b3be-17da70ef0b64",
+      "target_uuid": "daa94ac0-52d7-4e25-ab22-8440397a9811",
+      "original_name": "Lee Jae-myung",
+      "name": "Lee Jae-myung",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Lee Jae-myung' = '이재명' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "f98f3971-fe99-4466-b6ee-22868fd73449",
+      "target_uuid": "577ff0f5-d283-4d16-8e40-142ab8bd620b",
+      "original_name": "Hong Myeong-gyo (홍명교)",
+      "name": "Hong Myeong-gyo (홍명교)",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Hong Myeong-gyo (홍명교)' = '홍명교' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "c93692c5-bfe9-419d-bda2-72ca1ad86eaa",
+      "target_uuid": "577ff0f5-d283-4d16-8e40-142ab8bd620b",
+      "original_name": "Hong Myeong-gyo",
+      "name": "Hong Myeong-gyo",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Hong Myeong-gyo' = '홍명교' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "f6c54245-ecef-4366-a0c6-7035620cd036",
+      "target_uuid": "af6a97cf-c424-49ff-a49c-55bcd7f58e80",
+      "original_name": "Bae Se-jin",
+      "name": "Bae Se-jin",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Bae Se-jin' = 'Bae Se-jin (배세진)' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "b6c638ab-376b-469b-af6e-7dd4259c999a",
+      "target_uuid": "af6a97cf-c424-49ff-a49c-55bcd7f58e80",
+      "original_name": "Se-jin Bae",
+      "name": "Se-jin Bae",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Se-jin Bae' = 'Bae Se-jin (배세진)' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "3901b4fb-d07a-47a8-9f2d-98c48465265f",
+      "target_uuid": "8cc3d12a-232f-4618-b552-f7bcbbe3e6bf",
+      "original_name": "Seo Gwang-seok (서광석)",
+      "name": "Seo Gwang-seok (서광석)",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Seo Gwang-seok (서광석)' = '서광석' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "04e480b7-642e-4964-811e-44093b890e85",
+      "target_uuid": "8cc3d12a-232f-4618-b552-f7bcbbe3e6bf",
+      "original_name": "Seo Gwang-seok",
+      "name": "Seo Gwang-seok",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Seo Gwang-seok' = '서광석' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "3d36aa80-dd32-4538-b42b-6b22b676956d",
+      "target_uuid": "8cc3d12a-232f-4618-b552-f7bcbbe3e6bf",
+      "original_name": "Seo Kwang-seok",
+      "name": "Seo Kwang-seok",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Seo Kwang-seok' = '서광석' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "a9a73deb-01e2-4d89-93e7-3c2724890d04",
+      "target_uuid": "8cc3d12a-232f-4618-b552-f7bcbbe3e6bf",
+      "original_name": "Gwangseok Seo",
+      "name": "Gwangseok Seo",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Gwangseok Seo' = '서광석' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "4fcefc34-94d4-460c-9afb-8f8861c58837",
+      "target_uuid": "6beb39a9-4a33-402d-9b59-ad89e20abd4c",
+      "original_name": "Park Hyun-chae (박현채)",
+      "name": "Park Hyun-chae (박현채)",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Park Hyun-chae (박현채)' = '박현채' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "2d526c13-ff1a-42d5-9173-5de99a65f946",
+      "target_uuid": "6beb39a9-4a33-402d-9b59-ad89e20abd4c",
+      "original_name": "Pak Hyun-chae (박현채)",
+      "name": "Pak Hyun-chae (박현채)",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Pak Hyun-chae (박현채)' = '박현채' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "a1f4d71b-7e99-4503-8bb1-821a2cb47733",
+      "target_uuid": "6beb39a9-4a33-402d-9b59-ad89e20abd4c",
+      "original_name": "Park Hyun-chae",
+      "name": "Park Hyun-chae",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Park Hyun-chae' = '박현채' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "fb222fdd-d9a6-482b-a9e5-189143588769",
+      "target_uuid": "6beb39a9-4a33-402d-9b59-ad89e20abd4c",
+      "original_name": "Pak Hyun-chae",
+      "name": "Pak Hyun-chae",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Pak Hyun-chae' = '박현채' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "fed374a6-101c-4876-91db-32ee7fd1f7ec",
+      "target_uuid": "60ca2907-f5d3-4322-95e7-bcdfc8b1208c",
+      "original_name": "Seo Yeong-pyo",
+      "name": "Seo Yeong-pyo",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Seo Yeong-pyo' = 'Seo Yeong-pyo (서영표)' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "b3a47376-0dfe-483e-9764-d7856b6d0aa7",
+      "target_uuid": "80c00ebc-6886-4b2d-9e21-5339ddc03f05",
+      "original_name": "김용범 (Kim Yong-beom)",
+      "name": "김용범 (Kim Yong-beom)",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: '김용범 (Kim Yong-beom)' = '김용범' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "8c99d219-48b2-40b9-93f7-e5260408a613",
+      "target_uuid": "80c00ebc-6886-4b2d-9e21-5339ddc03f05",
+      "original_name": "Kim Yong-beom",
+      "name": "Kim Yong-beom",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Kim Yong-beom' = '김용범' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "35c6ec57-abf9-4b84-ac0c-f16da7db06c4",
+      "target_uuid": "f6644a6c-29fa-402e-b87a-c270165bacb0",
+      "original_name": "Kwon Young-guk (권영국)",
+      "name": "Kwon Young-guk (권영국)",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Kwon Young-guk (권영국)' = '권영국' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "cc8fa762-a405-474c-ad2d-65231383a65e",
+      "target_uuid": "f6644a6c-29fa-402e-b87a-c270165bacb0",
+      "original_name": "Kwon Young-guk",
+      "name": "Kwon Young-guk",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Kwon Young-guk' = '권영국' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "18f253fa-9c42-49d8-9c7e-b5a38e28f036",
+      "target_uuid": "08609874-6d78-4f8c-af73-6a2c94c21193",
+      "original_name": "Shin Hyun-song",
+      "name": "Shin Hyun-song",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Shin Hyun-song' = 'Shin Hyun-song (신현송)' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "04aec3ad-9f37-49e3-9dd8-9d5a5f7f57e5",
+      "target_uuid": "08609874-6d78-4f8c-af73-6a2c94c21193",
+      "original_name": "Shin Hyun-Song",
+      "name": "Shin Hyun-Song",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Shin Hyun-Song' = 'Shin Hyun-song (신현송)' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "c5ed5eb2-a290-4459-89f2-b11b74646cf3",
+      "target_uuid": "27c5725e-a775-43ae-9280-c793098a2308",
+      "original_name": "Chae Man-su",
+      "name": "Chae Man-su",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Chae Man-su' = 'Chae Man-su (채만수)' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "b8eba766-39fd-4428-b4b8-281b8404eb8b",
+      "target_uuid": "27c5725e-a775-43ae-9280-c793098a2308",
+      "original_name": "Chae Man-soo",
+      "name": "Chae Man-soo",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Chae Man-soo' = 'Chae Man-su (채만수)' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "4b40c80d-fce9-49ce-a639-8c63d006f53e",
+      "target_uuid": "99b98438-0672-44c5-87ef-2cf58ce4d1b9",
+      "original_name": "Baek Seung-wook (백승욱)",
+      "name": "Baek Seung-wook (백승욱)",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Baek Seung-wook (백승욱)' = '백승욱' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "5c6f98ff-35f2-4012-b5c6-8909a478e1cb",
+      "target_uuid": "99b98438-0672-44c5-87ef-2cf58ce4d1b9",
+      "original_name": "Baek Seung-wook",
+      "name": "Baek Seung-wook",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Baek Seung-wook' = '백승욱' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "1e6d1ee3-5d58-47ba-8d0f-7143f12b8dd9",
+      "target_uuid": "218416c0-8868-494e-81ca-bec8c4266539",
+      "original_name": "Yoon So-young (윤소영)",
+      "name": "Yoon So-young (윤소영)",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Yoon So-young (윤소영)' = '윤소영' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "1dc5a0e8-929f-4199-9669-e258cfaf73db",
+      "target_uuid": "218416c0-8868-494e-81ca-bec8c4266539",
+      "original_name": "Yoon So-young",
+      "name": "Yoon So-young",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Yoon So-young' = '윤소영' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "8fe680d0-6d2c-412e-bd73-5462674b09a8",
+      "target_uuid": "218416c0-8868-494e-81ca-bec8c4266539",
+      "original_name": "Yun So-young",
+      "name": "Yun So-young",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Yun So-young' = '윤소영' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "2d4c1c03-f990-4485-8dbf-d4feaa609b67",
+      "target_uuid": "218416c0-8868-494e-81ca-bec8c4266539",
+      "original_name": "So-Young Yoon",
+      "name": "So-Young Yoon",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'So-Young Yoon' = '윤소영' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "380c80dd-fc64-4c60-9581-62706deab6b7",
+      "target_uuid": "91782bfa-597b-4057-9c13-79c1bad0b818",
+      "original_name": "구윤철 (Gu Yun-cheol)",
+      "name": "구윤철 (Gu Yun-cheol)",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: '구윤철 (Gu Yun-cheol)' = '구윤철' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "e2570799-f169-4820-ad71-4aeb606724a6",
+      "target_uuid": "91782bfa-597b-4057-9c13-79c1bad0b818",
+      "original_name": "Gu Yun-cheol",
+      "name": "Gu Yun-cheol",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Gu Yun-cheol' = '구윤철' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "2477defa-107f-466f-ba9e-f60a3ecdae9e",
+      "target_uuid": "91782bfa-597b-4057-9c13-79c1bad0b818",
+      "original_name": "Koo Yun-cheol",
+      "name": "Koo Yun-cheol",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Koo Yun-cheol' = '구윤철' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "568cef26-d885-45ac-b5d8-3d216705b8f2",
+      "target_uuid": "defd7b5c-2a8d-49ed-9d53-fcbdcc710040",
+      "original_name": "김민석 (Kim Min-seok)",
+      "name": "김민석 (Kim Min-seok)",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: '김민석 (Kim Min-seok)' = '김민석' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "e9eb1116-7492-46ba-abc5-e004c62111c6",
+      "target_uuid": "defd7b5c-2a8d-49ed-9d53-fcbdcc710040",
+      "original_name": "Kim Min-seok",
+      "name": "Kim Min-seok",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Kim Min-seok' = '김민석' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "e22b118d-159d-45b9-a290-f0a459323ec4",
+      "target_uuid": "80cf2cee-1b7a-4ec2-b896-3ba99f6e2f9b",
+      "original_name": "최승호 (Choi Seung-ho)",
+      "name": "최승호 (Choi Seung-ho)",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: '최승호 (Choi Seung-ho)' = '최승호' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "d3021b20-5fa7-4a81-8803-0ffb419fc404",
+      "target_uuid": "80cf2cee-1b7a-4ec2-b896-3ba99f6e2f9b",
+      "original_name": "Choi Seung-ho",
+      "name": "Choi Seung-ho",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Choi Seung-ho' = '최승호' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "dd125dde-f30a-4183-9c12-85c61d27269b",
+      "target_uuid": "3ce57b24-0af7-46f9-aa94-47d65a737c09",
+      "original_name": "Koo Gyo-hyeon (구교현)",
+      "name": "Koo Gyo-hyeon (구교현)",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Koo Gyo-hyeon (구교현)' = '구교현' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "a68ed9e0-3d08-43ad-84d1-9006a3d92bec",
+      "target_uuid": "45e19aef-2b3d-461e-9a83-752361308f48",
+      "original_name": "김태식 (Kim Tae-sik)",
+      "name": "김태식 (Kim Tae-sik)",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: '김태식 (Kim Tae-sik)' = '김태식' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "871ff66c-6914-4951-8926-8f2f02564f2b",
+      "target_uuid": "343e842e-cb86-49f4-9b99-e2f7a3f8ac88",
+      "original_name": "김혜경 (Kim Hye-kyung)",
+      "name": "김혜경 (Kim Hye-kyung)",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: '김혜경 (Kim Hye-kyung)' = '김혜경' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "a495601e-5e1a-488e-b4dd-4cad3586eaae",
+      "target_uuid": "dc26d688-f2e9-4cf5-93ff-989e00166d0c",
+      "original_name": "Na Gyeong-chae (나경채)",
+      "name": "Na Gyeong-chae (나경채)",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Na Gyeong-chae (나경채)' = '나경채' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "80cd3df1-0062-45bb-b850-8ae96c80f8b5",
+      "target_uuid": "038e75d9-54ae-41cb-a893-2522ee674dfb",
+      "original_name": "이덕우 (Lee Deok-woo)",
+      "name": "이덕우 (Lee Deok-woo)",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: '이덕우 (Lee Deok-woo)' = '이덕우' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "9d48d54d-0d89-40d0-8588-437875d74e44",
+      "target_uuid": "7182a652-ac39-4906-9667-521dbe01ecd5",
+      "original_name": "Matsuoka Yosuke",
+      "name": "Matsuoka Yosuke",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Matsuoka Yosuke' = '마쓰오카 요스케' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "189d9895-1c2f-4415-a6ce-0479d660e68b",
+      "target_uuid": "6191a9c1-18f4-45ac-aadb-a0a4048d1c2d",
+      "original_name": "Lee Jae-yong",
+      "name": "Lee Jae-yong",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Lee Jae-yong' = '이재용' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "dc35454e-621c-448f-9592-93add48223a0",
+      "target_uuid": "e0854b90-4a05-4eae-80aa-717303cdad63",
+      "original_name": "Nikolai Petrov",
+      "name": "Nikolai Petrov",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Nikolai Petrov' = '니콜라이 페트로프' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "349cf70b-2ed2-48c9-8f00-8211789c5285",
+      "target_uuid": "57ac5b8a-cbdb-49d7-b487-c4e84281f909",
+      "original_name": "Nicolas Maduro",
+      "name": "Nicolas Maduro",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Nicolas Maduro' = '니콜라스 마두로' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "f097ea1f-effe-4b44-b3bf-102b66e39957",
+      "target_uuid": "fcc8b9f9-3f73-457c-911e-afcf76ac3e6a",
+      "original_name": "Jeon Tae-il",
+      "name": "Jeon Tae-il",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Jeon Tae-il' = '전태일' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "255e9bf2-02eb-4f47-87f5-b5f5099634c2",
+      "target_uuid": "a1e010d4-b720-43eb-a4a0-624c85af458e",
+      "original_name": "Han Dong-hoon",
+      "name": "Han Dong-hoon",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Han Dong-hoon' = '한동훈' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "97797177-366f-40c9-b136-79458e3e534a",
+      "target_uuid": "76f0e12f-3c22-4e49-b1d7-1fda4b718f06",
+      "original_name": "Pavel Axelrod",
+      "name": "Pavel Axelrod",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Pavel Axelrod' = '파벨 악셀로트' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "ee7ff341-afe0-4609-baaf-57e413691ee4",
+      "target_uuid": "c4529f99-9897-4427-84a4-51adba7752ad",
+      "original_name": "Sanae Takaichi",
+      "name": "Sanae Takaichi",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Sanae Takaichi' = '다카이치 사나에' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "a1447a86-1eec-42aa-84e2-7b85308c1e71",
+      "target_uuid": "2bce7175-30d5-4588-9597-548f1e3b0b27",
+      "original_name": "Ali Abdollahi",
+      "name": "Ali Abdollahi",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Ali Abdollahi' = '알리 압돌라히' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "a9d94c35-ee96-42f9-8ce2-6440428a854f",
+      "target_uuid": "9fa6fa31-c056-4f68-9655-9bfde70090e4",
+      "original_name": "Choi Su-bin",
+      "name": "Choi Su-bin",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Choi Su-bin' = '최수빈' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "a8bb5e8b-9621-4bad-aa87-bc57c5bfa4db",
+      "target_uuid": "db0b610f-291e-4a91-9a36-0bf2460fae2c",
+      "original_name": "Park Jae-sung",
+      "name": "Park Jae-sung",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Park Jae-sung' = '박재성' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "eb9a2a94-ec6c-4189-b5f5-c82e5ab07d6b",
+      "target_uuid": "29b178f5-f794-4ecd-afe5-51b590c9e49b",
+      "original_name": "Shinichi Uchida",
+      "name": "Shinichi Uchida",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Shinichi Uchida' = '우치다 신이치' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "8d36a691-afba-4595-abd9-3615c7d30ae9",
+      "target_uuid": "b917e7e3-e437-4ded-b000-0d3480889bbc",
+      "original_name": "Brad Cooper",
+      "name": "Brad Cooper",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Brad Cooper' = '브래드 쿠퍼' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "fe5585d4-f3d9-4c40-b9a1-70898fb340eb",
+      "target_uuid": "fc2b880a-21e7-4e4c-999f-820385a188cd",
+      "original_name": "Leopold Aschenbrenner",
+      "name": "Leopold Aschenbrenner",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Leopold Aschenbrenner' = '레오폴트 아셴브레너' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "cf527e2b-5a8a-43b5-bf91-e9e1a541f3ad",
+      "target_uuid": "56f2ff60-731d-4150-a6be-d6c60294022b",
+      "original_name": "Go Yu-mi",
+      "name": "Go Yu-mi",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Go Yu-mi' = '고유미' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "a434818b-723d-44d0-a4b2-328e2c77129f",
+      "target_uuid": "7f4f6f0e-437f-483d-8017-5570d44aae03",
+      "original_name": "Sanjay Mehrotra",
+      "name": "Sanjay Mehrotra",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Sanjay Mehrotra' = '산제이 메흐로트라' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "1d8c7f09-cad4-4518-8c58-f3019811de34",
+      "target_uuid": "9f0160d3-f9f2-42d5-9405-acf69455f5b4",
+      "original_name": "Oh Se-hoon",
+      "name": "Oh Se-hoon",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Oh Se-hoon' = '오세훈' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "27e2ecc2-d29d-4df5-b8a7-e5158875716f",
+      "target_uuid": "9f0a719d-7cf4-4a62-a125-1cd5e8d211b3",
+      "original_name": "Yoon Suk Yeol",
+      "name": "Yoon Suk Yeol",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Yoon Suk Yeol' = '윤석열' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "cef70d8b-e1a9-4557-a19c-946ec40aaf78",
+      "target_uuid": "9f0a719d-7cf4-4a62-a125-1cd5e8d211b3",
+      "original_name": "Yoon Suk-yeol",
+      "name": "Yoon Suk-yeol",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Yoon Suk-yeol' = '윤석열' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "75737eaf-14ba-4b7b-9974-3072a8c9806b",
+      "target_uuid": "9841515e-c720-4670-b0ad-00aa6805e147",
+      "original_name": "Emmanuel Macron",
+      "name": "Emmanuel Macron",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Emmanuel Macron' = '에마뉘엘 마크롱' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "6035b7c6-d5e7-44a8-99d6-72f7b6548bac",
+      "target_uuid": "a8ff6712-0d83-4827-bc1b-5287cda48fda",
+      "original_name": "Park Jae-hyun",
+      "name": "Park Jae-hyun",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Park Jae-hyun' = '박재현' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "edf683e2-9797-42ae-8e2d-86b85bf1b56e",
+      "target_uuid": "8cc390d4-65c5-4e75-a972-72f138160724",
+      "original_name": "Kim Se-yeon",
+      "name": "Kim Se-yeon",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Kim Se-yeon' = '김세연' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "ac855a44-1694-4183-b233-6c6ffba3e71f",
+      "target_uuid": "a086e98e-0640-4be7-b274-c496c62b9b34",
+      "original_name": "Harlan Ullman",
+      "name": "Harlan Ullman",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Harlan Ullman' = '할란 울만' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "693eaf3b-e96b-4968-b60e-b4a9fff1c9dc",
+      "target_uuid": "80e86264-62b2-421c-a78d-3f760163cf6f",
+      "original_name": "Yong Hye-in",
+      "name": "Yong Hye-in",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Yong Hye-in' = '용혜인' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "5e88203d-615a-4ce8-8865-0a135ba7fe8e",
+      "target_uuid": "5c958524-4760-452f-bd89-8e1e0599abbc",
+      "original_name": "Mohammad Bagher Ghalibaf",
+      "name": "Mohammad Bagher Ghalibaf",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Mohammad Bagher Ghalibaf' = '무함마드 바케르 갈리바프' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "ba550484-ef78-45d1-b659-8989b195cfe2",
+      "target_uuid": "5c958524-4760-452f-bd89-8e1e0599abbc",
+      "original_name": "Mohammad Bagher Qalibaf",
+      "name": "Mohammad Bagher Qalibaf",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Mohammad Bagher Qalibaf' = '무함마드 바케르 갈리바프' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "429b5583-7105-4037-823e-351f52b0c4a9",
+      "target_uuid": "37ec8049-d12a-4e7f-aa23-38503063341a",
+      "original_name": "Bernie Sanders",
+      "name": "Bernie Sanders",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Bernie Sanders' = '버니 샌더스' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "280285b7-ae5f-4684-8e75-85a8a8a78315",
+      "target_uuid": "501d25ac-b7e4-45a0-b38a-a3dba5562602",
+      "original_name": "Jang Dong-hyuk",
+      "name": "Jang Dong-hyuk",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Jang Dong-hyuk' = '장동혁' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "3d4a2182-cfb9-45f0-abe2-f5572108ea9d",
+      "target_uuid": "501d25ac-b7e4-45a0-b38a-a3dba5562602",
+      "original_name": "Chang Dong-hyeok",
+      "name": "Chang Dong-hyeok",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Chang Dong-hyeok' = '장동혁' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "a2df1a08-4c40-4c7d-a35b-73df2e8a682d",
+      "target_uuid": "e713afcc-fb91-4908-9b07-ef66df5eac02",
+      "original_name": "Hong Kwang-heum",
+      "name": "Hong Kwang-heum",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Hong Kwang-heum' = '홍광흠' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "9b09b981-6810-4fad-a0e2-70f16d2fba61",
+      "target_uuid": "4dd944ef-33b0-47e6-ab70-17d6ae135d7c",
+      "original_name": "칼 마르크스",
+      "name": "칼 마르크스",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: '칼 마르크스' = 'Karl Marx' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "c4d9d656-d6e7-462d-9754-76c812a714e7",
+      "target_uuid": "a850195d-a8f0-4c33-95ec-5d18c1f3f449",
+      "original_name": "Kim Jae-yeon",
+      "name": "Kim Jae-yeon",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Kim Jae-yeon' = '김재연' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "fc8d9a17-c4f1-4148-a48a-1ea5a257fd79",
+      "target_uuid": "ce6d0c02-9b42-4ade-8cdb-fe02b7857782",
+      "original_name": "Yang Kyung-soo",
+      "name": "Yang Kyung-soo",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Yang Kyung-soo' = '양경수' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "e763c75b-48e8-48c8-b0a9-2eaf9bc6db99",
+      "target_uuid": "ce6d0c02-9b42-4ade-8cdb-fe02b7857782",
+      "original_name": "Gyeongsu Yang",
+      "name": "Gyeongsu Yang",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Gyeongsu Yang' = '양경수' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "4d7a0b25-df21-4cfb-b83b-27b03d3aff0c",
+      "target_uuid": "504d5d4c-4616-4559-aee2-345812bd41ce",
+      "original_name": "Son Min-seok",
+      "name": "Son Min-seok",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Son Min-seok' = '손민석' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "10f5403c-7d09-4cf4-9217-eb95bd50016f",
+      "target_uuid": "999b7308-2b5f-4690-a8f5-e8862dd6e658",
+      "original_name": "John Lim",
+      "name": "John Lim",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'John Lim' = '존 림' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "919dc462-50b5-49ec-9587-bffac7612c9e",
+      "target_uuid": "999b7308-2b5f-4690-a8f5-e8862dd6e658",
+      "original_name": "John Rim",
+      "name": "John Rim",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'John Rim' = '존 림' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "0123a974-4c9f-43e0-b56b-a36b99435810",
+      "target_uuid": "4ba2eae1-35e8-41f1-ad9e-0c2c78e2d419",
+      "original_name": "Shin Je-yoon",
+      "name": "Shin Je-yoon",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Shin Je-yoon' = '신제윤' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "be583789-7fed-4cab-b105-9e60186da292",
+      "target_uuid": "60ba9923-7478-4954-bd90-8aeb28e3afbb",
+      "original_name": "Seong Du-hyeon",
+      "name": "Seong Du-hyeon",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Seong Du-hyeon' = '성두현' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "c4fca3d5-6a47-4467-9fa3-1c1f50b5066f",
+      "target_uuid": "fa41b59f-1cbd-4a9b-bc4e-575163091fc9",
+      "original_name": "Aleksandr Bogdanov",
+      "name": "Aleksandr Bogdanov",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Aleksandr Bogdanov' = '알렉산드르 보그다노프' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "c2feda1a-15c2-48d2-914b-eff18cfb7490",
+      "target_uuid": "a97803cf-2a32-43ed-a931-879106f44c12",
+      "original_name": "Nikolay Yezhov",
+      "name": "Nikolay Yezhov",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Nikolay Yezhov' = '니콜라이 예조프' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "1025be8c-8d8c-43f2-96e9-b0d0e6227399",
+      "target_uuid": "14b9a457-63de-4026-bad1-a4f374f9e06c",
+      "original_name": "Chey Tae-won",
+      "name": "Chey Tae-won",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Chey Tae-won' = '최태원' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "65617228-100c-43ba-a470-c066e0e03a99",
+      "target_uuid": "9417e34e-9d65-4529-b6a0-1f2760471d31",
+      "original_name": "Son Woo-mok",
+      "name": "Son Woo-mok",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Son Woo-mok' = '손우목' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "1baf927b-a271-447f-8846-6941f84c2039",
+      "target_uuid": "9417e34e-9d65-4529-b6a0-1f2760471d31",
+      "original_name": "Sohn Woo-mok",
+      "name": "Sohn Woo-mok",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Sohn Woo-mok' = '손우목' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "21954850-620f-4f8c-b2aa-83bd6c2ffa8d",
+      "target_uuid": "5aa640e4-fa19-4a62-982e-8846c3d0d3e9",
+      "original_name": "Lee Chan-jin",
+      "name": "Lee Chan-jin",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Lee Chan-jin' = '이찬진' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "760811cd-94fb-4185-adb2-fd4d17c41706",
+      "target_uuid": "d40c1914-5de9-4db8-b350-19710487adf8",
+      "original_name": "Kim Jeong-gwan",
+      "name": "Kim Jeong-gwan",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Kim Jeong-gwan' = '김정관' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "88d10167-768b-473a-b992-f606c97ff21e",
+      "target_uuid": "2a487cd5-66d7-4881-b5e6-4bd2b46f0c3b",
+      "original_name": "Lee Baek-yoon",
+      "name": "Lee Baek-yoon",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Lee Baek-yoon' = '이백윤' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "9f73d4ea-0980-449b-b637-b635b49650e2",
+      "target_uuid": "82393ae7-b38d-425d-a9b0-93aa25c7d2bd",
+      "original_name": "Abd al-Rahman al-Jabarti",
+      "name": "Abd al-Rahman al-Jabarti",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Abd al-Rahman al-Jabarti' = '압드 알라흐만 알자바르티' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "c0ea8aa2-4a8d-4b74-b894-2b6b3926e73f",
+      "target_uuid": "12d30296-f4dc-472d-a08a-bb9f2498325f",
+      "original_name": "Asada Toichiro",
+      "name": "Asada Toichiro",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Asada Toichiro' = '아사다 도이치로' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "3dacf7ee-7d16-4e66-9a03-8d017d1ecd5b",
+      "target_uuid": "0b05958e-f46a-43e6-806d-163e37cd40bf",
+      "original_name": "Choe Ch'ang-ik",
+      "name": "Choe Ch'ang-ik",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Choe Ch'ang-ik' = '최창익' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "2d0dfeeb-5226-4868-9779-e0eb5fca6471",
+      "target_uuid": "9a863c05-db03-4dc6-96ce-98bd6f29f874",
+      "original_name": "Han Dong-baek",
+      "name": "Han Dong-baek",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Han Dong-baek' = '한동백' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "4bd0b637-115b-4292-baea-cfe4ff90b6a2",
+      "target_uuid": "59acce47-e167-494d-8314-d166b91f1115",
+      "original_name": "트로츠키",
+      "name": "트로츠키",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: '트로츠키' = 'Leon Trotsky' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "e7ede6e9-ffe3-4bcd-90b3-72525d57d538",
+      "target_uuid": "59acce47-e167-494d-8314-d166b91f1115",
+      "original_name": "Lev Trotsky",
+      "name": "Lev Trotsky",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Lev Trotsky' = 'Leon Trotsky' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "a08b4eef-c53d-4a29-87a2-d89c14a0d63a",
+      "target_uuid": "12a1d501-d046-453f-b6dc-2ad0e1f3dc6a",
+      "original_name": "요제프 스탈린",
+      "name": "요제프 스탈린",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: '요제프 스탈린' = 'Joseph Stalin' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "ec945e08-525d-4b0e-a3a6-065537622641",
+      "target_uuid": "12a1d501-d046-453f-b6dc-2ad0e1f3dc6a",
+      "original_name": "Iosif Stalin",
+      "name": "Iosif Stalin",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Iosif Stalin' = 'Joseph Stalin' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "53e67dc8-5a53-4aa5-8923-600525f28c0c",
+      "target_uuid": "12a1d501-d046-453f-b6dc-2ad0e1f3dc6a",
+      "original_name": "이오시프 V. 스탈린",
+      "name": "이오시프 V. 스탈린",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: '이오시프 V. 스탈린' = 'Joseph Stalin' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "c65463d7-3bbe-41ef-be5d-ca58b60dcd6a",
+      "target_uuid": "1644c156-b605-4447-a69e-f1e137cb5591",
+      "original_name": "Moon Jae-in",
+      "name": "Moon Jae-in",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Moon Jae-in' = '문재인' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "0c38deba-0a0c-4180-bcf8-aae07fd22519",
+      "target_uuid": "8e8faa54-d10b-41d8-9e60-f1ab28643d10",
+      "original_name": "Woo Ha-kyung",
+      "name": "Woo Ha-kyung",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Woo Ha-kyung' = '우하경' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "8e28fb74-51bd-4dbd-8b3b-6935548c68ef",
+      "target_uuid": "aa19001b-0fac-4d99-9c56-b6584457b5f2",
+      "original_name": "Xi Jinping",
+      "name": "Xi Jinping",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Xi Jinping' = '시진핑' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "1a7513cc-9ce8-413c-abfc-42780647d407",
+      "target_uuid": "3e100a41-137e-40be-a02c-dabbe3a806f6",
+      "original_name": "Lee Jinyoung",
+      "name": "Lee Jinyoung",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Lee Jinyoung' = '이진영' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "7a21194e-3987-4a25-b963-ad9e47be01af",
+      "target_uuid": "49c1ac59-fad8-4329-bf22-455edd09d4a7",
+      "original_name": "Yoon Jong-oh",
+      "name": "Yoon Jong-oh",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Yoon Jong-oh' = '윤종오' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "cb7c24cd-e3e9-4c87-9ffc-c92084a863f3",
+      "target_uuid": "14f2b474-2166-461b-a6ee-4ee352b68f14",
+      "original_name": "Choi Sang-mok",
+      "name": "Choi Sang-mok",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Choi Sang-mok' = '최상목' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "03d83a3b-b2e1-482b-8afa-d8e6ef537bb5",
+      "target_uuid": "f3dbe2ac-6b59-4396-8afe-361548ba5ed5",
+      "original_name": "Ahn Jae-kyun",
+      "name": "Ahn Jae-kyun",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Ahn Jae-kyun' = '안재균' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "7c6ee63e-4e84-4554-b3bd-dd98b8b70213",
+      "target_uuid": "5634063c-b3cb-4ae5-8aff-ea5727f59338",
+      "original_name": "Han Sang-gyun",
+      "name": "Han Sang-gyun",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Han Sang-gyun' = '한상균' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "4de2fa35-b028-4680-8c38-c4cd48a2cf75",
+      "target_uuid": "7228b5f4-168f-4e75-8279-21c33e8a546e",
+      "original_name": "Abbas Araghchi",
+      "name": "Abbas Araghchi",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Abbas Araghchi' = '아바스 아라그치' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "1ed07226-3a15-46c9-abc9-f3a42ddd55ff",
+      "target_uuid": "11b687e2-eb9c-44ff-98e5-ccced812aca8",
+      "original_name": "Chu Kyung-ho",
+      "name": "Chu Kyung-ho",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Chu Kyung-ho' = '추경호' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "2b0fc1e0-34a5-4b2e-92c4-f12f6a97e7ea",
+      "target_uuid": "445d447b-cf09-483a-84a3-43898b940ee9",
+      "original_name": "Shoshana Zuboff",
+      "name": "Shoshana Zuboff",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Shoshana Zuboff' = '쇼샤나 주보프' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "9d513588-9194-4747-ad01-0332ab331491",
+      "target_uuid": "c5d037da-9a70-4a12-b75f-447f958d6938",
+      "original_name": "Woo Won-shik",
+      "name": "Woo Won-shik",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Woo Won-shik' = '우원식' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "5b0ed3ab-09fa-427f-8bfd-8ec4096de3c8",
+      "target_uuid": "977812da-2bf7-478c-b964-dede54768af5",
+      "original_name": "Jeon Jae-soo",
+      "name": "Jeon Jae-soo",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Jeon Jae-soo' = '전재수' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "b91a1b6d-664c-46c1-915c-58cdb983450a",
+      "target_uuid": "69ad0240-3bab-4eb1-bce6-cb917dc8267d",
+      "original_name": "Kim Hyunjin",
+      "name": "Kim Hyunjin",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Kim Hyunjin' = '김현진' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "7be2f588-94df-46c4-a7c9-ce9b2508525e",
+      "target_uuid": "d9dd012b-a06a-4166-bb62-ed6d5d030d09",
+      "original_name": "Kim Jong Un",
+      "name": "Kim Jong Un",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Kim Jong Un' = '김정은' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "1e0740d3-19b6-4a09-bfe7-f363d21f1d97",
+      "target_uuid": "3897359e-0694-4b00-8eed-d00d43c1d78f",
+      "original_name": "Aleksandr Kerensky",
+      "name": "Aleksandr Kerensky",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Aleksandr Kerensky' = '알렉산드르 케렌스키' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "add9318b-0390-4c23-8dbc-4a0c006cd720",
+      "target_uuid": "00f813da-beea-49d3-8e80-683bca66eb48",
+      "original_name": "Oh Dal-su",
+      "name": "Oh Dal-su",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Oh Dal-su' = '오달수' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "eedcd4b8-5068-46a2-9ab9-380ab8d84c3f",
+      "target_uuid": "00889dcb-cf39-49ca-a474-ca3fcdabc7d9",
+      "original_name": "Samsung SDI",
+      "name": "Samsung SDI",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Samsung SDI' = '삼성SDI' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "896da3ad-b013-4e3c-bf9d-5edc95feb832",
+      "target_uuid": "ec17f80c-9c28-48e1-8d41-38e240c5ce89",
+      "original_name": "Korean Confederation of Trade Unions (민주노총)",
+      "name": "Korean Confederation of Trade Unions (민주노총)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Korean Confederation of Trade Unions (민주노총)' = '민주노총' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "de1fd117-e249-4346-afbc-78eabd0944b4",
+      "target_uuid": "ec17f80c-9c28-48e1-8d41-38e240c5ce89",
+      "original_name": "민주노총 (Korean Confederation of Trade Unions)",
+      "name": "민주노총 (Korean Confederation of Trade Unions)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: '민주노총 (Korean Confederation of Trade Unions)' = '민주노총' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "144eafef-b6ce-4549-ad8f-e55fc82262b9",
+      "target_uuid": "ec17f80c-9c28-48e1-8d41-38e240c5ce89",
+      "original_name": "Korean Confederation of Trade Unions (KCTU, 민주노총)",
+      "name": "Korean Confederation of Trade Unions (KCTU, 민주노총)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Korean Confederation of Trade Unions (KCTU, 민주노총)' = '민주노총' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "a7555d4c-d09e-49f8-bd12-295fbf5f0963",
+      "target_uuid": "ec17f80c-9c28-48e1-8d41-38e240c5ce89",
+      "original_name": "Korean Confederation of Trade Unions (KCTU)",
+      "name": "Korean Confederation of Trade Unions (KCTU)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Korean Confederation of Trade Unions (KCTU)' = '민주노총' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "5de043e5-6124-4163-8d7e-d846a841ba9b",
+      "target_uuid": "ec17f80c-9c28-48e1-8d41-38e240c5ce89",
+      "original_name": "Korean Confederation of Trade Unions",
+      "name": "Korean Confederation of Trade Unions",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Korean Confederation of Trade Unions' = '민주노총' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "80842413-b8ff-45f7-8c6d-cfe32d4c9f29",
+      "target_uuid": "1cb78fd2-36c1-4e3a-a7fd-c57c61551639",
+      "original_name": "Korean Association for Contemporary Chinese Studies",
+      "name": "Korean Association for Contemporary Chinese Studies",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Korean Association for Contemporary Chinese Studies' = 'Korean Association of Contemporary Chinese Studies (현대중국학회)' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "a6522afd-8d2c-4272-ac67-f4303094d318",
+      "target_uuid": "8968a1b8-fb3b-4575-9985-f1aae4c40033",
+      "original_name": "Minjung Party (민중당)",
+      "name": "Minjung Party (민중당)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Minjung Party (민중당)' = '민중당' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "07354dac-9d09-4504-a9ed-a31997d65c1f",
+      "target_uuid": "8968a1b8-fb3b-4575-9985-f1aae4c40033",
+      "original_name": "Minjung Party",
+      "name": "Minjung Party",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Minjung Party' = '민중당' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "d4740ef5-9bb5-4ff2-b1b5-1d30c95e5a5e",
+      "target_uuid": "eea517ff-099f-434a-97ab-331bb2de6f86",
+      "original_name": "SK Innovation E&S",
+      "name": "SK Innovation E&S",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'SK Innovation E&S' = 'SK이노베이션 E&S' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "38f90ee6-4537-41f5-82e7-1f029b1e7713",
+      "target_uuid": "8bf070e5-49dd-4f12-addb-f18ca4e4283c",
+      "original_name": "SK Telecom",
+      "name": "SK Telecom",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'SK Telecom' = 'SK텔레콤' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "4decbd59-e4a0-46b3-9d14-e50c45eb394d",
+      "target_uuid": "ebbd0893-c1a3-426d-b507-4a7375f91928",
+      "original_name": "Kakao",
+      "name": "Kakao",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Kakao' = '카카오' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "2a6ebd4e-37d2-41f3-859a-4f73d85d0b74",
+      "target_uuid": "ebbd0893-c1a3-426d-b507-4a7375f91928",
+      "original_name": "Kakao Corporation",
+      "name": "Kakao Corporation",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Kakao Corporation' = '카카오' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "192d28f4-c9ba-47ec-92f3-fec1a27276d6",
+      "target_uuid": "2e229eda-e674-4a5f-8bdc-2ca0b7553222",
+      "original_name": "진보당 (Progressive Party)",
+      "name": "진보당 (Progressive Party)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: '진보당 (Progressive Party)' = '진보당' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "2410f3ff-40ad-4357-9f0b-34af2c5545c7",
+      "target_uuid": "2e229eda-e674-4a5f-8bdc-2ca0b7553222",
+      "original_name": "Jinbo Party (진보당)",
+      "name": "Jinbo Party (진보당)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Jinbo Party (진보당)' = '진보당' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "f30dd312-6df5-4ec1-a433-0a5f344f6c92",
+      "target_uuid": "2e229eda-e674-4a5f-8bdc-2ca0b7553222",
+      "original_name": "Jinbo Party (Korea)",
+      "name": "Jinbo Party (Korea)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Jinbo Party (Korea)' = '진보당' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "acf65d02-7a53-4700-b84a-cb29e6375c02",
+      "target_uuid": "2e229eda-e674-4a5f-8bdc-2ca0b7553222",
+      "original_name": "Jinbo Party",
+      "name": "Jinbo Party",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Jinbo Party' = '진보당' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "efc6dbf9-12d9-43f2-bce2-4ef7a05c3c2b",
+      "target_uuid": "2e229eda-e674-4a5f-8bdc-2ca0b7553222",
+      "original_name": "Jinbo Party (2020)",
+      "name": "Jinbo Party (2020)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Jinbo Party (2020)' = '진보당' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "a789d89d-0c6f-4a70-b18b-595e4b591ccc",
+      "target_uuid": "473d619f-8d36-4dde-8e57-2e2624665648",
+      "original_name": "녹색당 (Green Party Korea)",
+      "name": "녹색당 (Green Party Korea)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: '녹색당 (Green Party Korea)' = '녹색당' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "997b74ba-6ad4-4091-bf86-d697ef506f79",
+      "target_uuid": "473d619f-8d36-4dde-8e57-2e2624665648",
+      "original_name": "Green Party (녹색당)",
+      "name": "Green Party (녹색당)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Green Party (녹색당)' = '녹색당' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "5d67515e-c2b1-4138-b881-d65a110bc220",
+      "target_uuid": "473d619f-8d36-4dde-8e57-2e2624665648",
+      "original_name": "Green Party Korea",
+      "name": "Green Party Korea",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Green Party Korea' = '녹색당' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "5099cf8e-efc9-4cb6-b574-4f95fe498b95",
+      "target_uuid": "473d619f-8d36-4dde-8e57-2e2624665648",
+      "original_name": "Green Party (South Korea)",
+      "name": "Green Party (South Korea)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Green Party (South Korea)' = '녹색당' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "b85c8aec-d9c4-4e07-9dbb-ea5b786c0aee",
+      "target_uuid": "f0d692b2-4084-49ef-aee8-e782cdd638f6",
+      "original_name": "Jeju National University",
+      "name": "Jeju National University",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Jeju National University' = 'Jeju National University (제주대학교)' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "efbe9421-ea62-4102-94a6-136de24da606",
+      "target_uuid": "5e479a5f-e97c-4561-8a02-156a75c71363",
+      "original_name": "볼셰비키그룹 (Bolky Group)",
+      "name": "볼셰비키그룹 (Bolky Group)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: '볼셰비키그룹 (Bolky Group)' = '볼셰비키그룹' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "a638e4ed-e8b6-4246-8e8f-f8058e52f790",
+      "target_uuid": "5e479a5f-e97c-4561-8a02-156a75c71363",
+      "original_name": "볼셰비키그룹 (Bolshevik Group)",
+      "name": "볼셰비키그룹 (Bolshevik Group)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: '볼셰비키그룹 (Bolshevik Group)' = '볼셰비키그룹' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "48f473e9-3ad6-4ef1-b665-aa1396f46af3",
+      "target_uuid": "5e479a5f-e97c-4561-8a02-156a75c71363",
+      "original_name": "Bolky Group (볼셰비키그룹)",
+      "name": "Bolky Group (볼셰비키그룹)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Bolky Group (볼셰비키그룹)' = '볼셰비키그룹' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "d0c81543-d816-4008-85e2-56d60ae7f90c",
+      "target_uuid": "5e479a5f-e97c-4561-8a02-156a75c71363",
+      "original_name": "Bolshevik Group (Bolky Group)",
+      "name": "Bolshevik Group (Bolky Group)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Bolshevik Group (Bolky Group)' = '볼셰비키그룹' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "906fab00-838f-4049-a7ab-f6187bc65122",
+      "target_uuid": "5e479a5f-e97c-4561-8a02-156a75c71363",
+      "original_name": "Bolky Group",
+      "name": "Bolky Group",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Bolky Group' = '볼셰비키그룹' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "757caf01-4536-4ca7-8faf-fef91dd8543d",
+      "target_uuid": "5e479a5f-e97c-4561-8a02-156a75c71363",
+      "original_name": "Bolshevik Group (Korea)",
+      "name": "Bolshevik Group (Korea)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Bolshevik Group (Korea)' = '볼셰비키그룹' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "805f04a1-7f6b-4c65-9a14-81b6b13b4757",
+      "target_uuid": "ea7e6ab0-5b4e-4790-8733-08cf47499346",
+      "original_name": "SK 하이닉스",
+      "name": "SK 하이닉스",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'SK 하이닉스' = 'SK하이닉스' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "4ff2619e-f303-42c9-8309-b82cc3cdb37b",
+      "target_uuid": "ea7e6ab0-5b4e-4790-8733-08cf47499346",
+      "original_name": "SK Hynix",
+      "name": "SK Hynix",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'SK Hynix' = 'SK하이닉스' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "76bac4ca-9de4-4c04-b04b-2769740d7c86",
+      "target_uuid": "0abb1e9d-331e-4283-882d-f6421756024b",
+      "original_name": "Hanwha Aerospace",
+      "name": "Hanwha Aerospace",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Hanwha Aerospace' = '한화에어로스페이스' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "ca593b3a-3e2a-448e-835f-58f551a5d1ed",
+      "target_uuid": "3a29a5b6-8ee0-49dd-b7f3-6564ba05b1a0",
+      "original_name": "Asiana Airlines",
+      "name": "Asiana Airlines",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Asiana Airlines' = '아시아나항공' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "4d6ca2a2-4516-44f5-868b-7bbe71a20c31",
+      "target_uuid": "b5a2d7f8-0405-4d6f-9ace-0b5596423d49",
+      "original_name": "System Change Movement Organizing Committee (체제전환운동 조직위원회)",
+      "name": "System Change Movement Organizing Committee (체제전환운동 조직위원회)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'System Change Movement Organizing Committee (체제전환운동 조직위원회)' = '체제전환운동 조직위원회' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "b597c0e8-1f17-42bc-b188-a58c10608ce7",
+      "target_uuid": "b5a2d7f8-0405-4d6f-9ace-0b5596423d49",
+      "original_name": "System Change Movement Organizing Committee",
+      "name": "System Change Movement Organizing Committee",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'System Change Movement Organizing Committee' = '체제전환운동 조직위원회' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "97d16d1d-82fe-4d09-86de-efde74721fa6",
+      "target_uuid": "c8dd12fb-d89f-4cff-a755-798fbf5b229c",
+      "original_name": "Fightback Study Group",
+      "name": "Fightback Study Group",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Fightback Study Group' = 'Fightback Study Group (반격)' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "35f36dd0-5942-49da-89f9-671399dd164c",
+      "target_uuid": "c8dd12fb-d89f-4cff-a755-798fbf5b229c",
+      "original_name": "Anti-Imperialist Study Group Fightback",
+      "name": "Anti-Imperialist Study Group Fightback",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Anti-Imperialist Study Group Fightback' = 'Fightback Study Group (반격)' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "cd4538ff-6456-4a03-8af0-a519be8dd21e",
+      "target_uuid": "244a0d2f-213d-4bc0-a0f6-3fe90cc5c219",
+      "original_name": "Samsung Biologics",
+      "name": "Samsung Biologics",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Samsung Biologics' = '삼성바이오로직스' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "956b90da-0ca0-4825-afb8-5386a2b3e1e6",
+      "target_uuid": "34d64464-c776-450a-9646-4a752bbffd36",
+      "original_name": "Samsung Biologics Labor Union",
+      "name": "Samsung Biologics Labor Union",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Samsung Biologics Labor Union' = '삼성바이오로직스 노동조합' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "d3211e25-c619-4d67-96d9-b06ec8a87602",
+      "target_uuid": "8a4742e2-813b-44ef-b89e-dd6abd93e832",
+      "original_name": "SK Hyper",
+      "name": "SK Hyper",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'SK Hyper' = 'SK하이퍼 (SK Hyper)' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "60e16f7a-1630-49a5-879e-cedefc55148d",
+      "target_uuid": "752e22b8-1ea5-4b4e-957a-888ec0a1f6e6",
+      "original_name": "Hanwha Ocean",
+      "name": "Hanwha Ocean",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Hanwha Ocean' = '한화오션' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "1fe3268a-7d72-4994-a0fe-950d66c72ea1",
+      "target_uuid": "7da8859c-05e6-4a5c-b2cf-ddfe4f932e5a",
+      "original_name": "Ohmynews",
+      "name": "Ohmynews",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Ohmynews' = '오마이뉴스' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "9c9e1baa-c088-4e67-88cd-78ad6cd2ff13",
+      "target_uuid": "32a35243-2750-407c-9bc0-06dbd5a91e44",
+      "original_name": "BGF Logistics",
+      "name": "BGF Logistics",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'BGF Logistics' = 'BGF로지스' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "a7894e62-de44-42b4-8dc2-20e041e32448",
+      "target_uuid": "631132e7-6fb1-4a01-8b85-48cc5f26a64f",
+      "original_name": "마르크스21 (Marx 21)",
+      "name": "마르크스21 (Marx 21)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: '마르크스21 (Marx 21)' = '마르크스21' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "8813039d-a186-4b3b-8f86-f7cab11919fb",
+      "target_uuid": "631132e7-6fb1-4a01-8b85-48cc5f26a64f",
+      "original_name": "Marxism21 (마르크스21)",
+      "name": "Marxism21 (마르크스21)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Marxism21 (마르크스21)' = '마르크스21' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "c67bfb86-7c35-438d-a21a-406fb7593324",
+      "target_uuid": "631132e7-6fb1-4a01-8b85-48cc5f26a64f",
+      "original_name": "Marxism 21 (마르크스21)",
+      "name": "Marxism 21 (마르크스21)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Marxism 21 (마르크스21)' = '마르크스21' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "8d3a9cdd-e4da-4b8f-9387-2ad3c8308a66",
+      "target_uuid": "631132e7-6fb1-4a01-8b85-48cc5f26a64f",
+      "original_name": "Marx21",
+      "name": "Marx21",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Marx21' = '마르크스21' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "355da4b1-cd53-4184-b941-c125dd17be93",
+      "target_uuid": "33b13b7c-3cab-4f48-8039-8ae1e9d40138",
+      "original_name": "플랫폼씨 (Platform C)",
+      "name": "플랫폼씨 (Platform C)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: '플랫폼씨 (Platform C)' = '플랫폼씨' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "1ed223e8-eca3-4bcf-84a5-cec971bbdd06",
+      "target_uuid": "33b13b7c-3cab-4f48-8039-8ae1e9d40138",
+      "original_name": "Platform C (플랫폼C)",
+      "name": "Platform C (플랫폼C)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Platform C (플랫폼C)' = '플랫폼씨' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "74ab3c14-11de-424c-b090-66549e4f5487",
+      "target_uuid": "33b13b7c-3cab-4f48-8039-8ae1e9d40138",
+      "original_name": "플랫폼 C",
+      "name": "플랫폼 C",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: '플랫폼 C' = '플랫폼씨' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "bbd3f3a0-3acf-4063-92de-d61f70f26106",
+      "target_uuid": "33b13b7c-3cab-4f48-8039-8ae1e9d40138",
+      "original_name": "Platform C",
+      "name": "Platform C",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Platform C' = '플랫폼씨' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "16b53061-908f-43dc-9d3e-6393c7d5ea77",
+      "target_uuid": "21cc20a3-e837-4de4-a803-43efd396c065",
+      "original_name": "Naver",
+      "name": "Naver",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Naver' = '네이버' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "f78f37c6-9fc3-49da-aff1-0b2eaa2e1a73",
+      "target_uuid": "3f54ec8b-6e6f-4cc4-9d0c-bb77b428d8ef",
+      "original_name": "Hangzhou Intermediate People's Court",
+      "name": "Hangzhou Intermediate People's Court",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Hangzhou Intermediate People's Court' = '항저우 중급인민법원' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "6a5fb67c-de6d-445f-88d2-88dab20474ef",
+      "target_uuid": "dac022b1-1633-4390-abd7-861223194eb1",
+      "original_name": "Korea Housing Finance Corporation",
+      "name": "Korea Housing Finance Corporation",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Korea Housing Finance Corporation' = '한국주택금융공사' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "8297b29b-dce8-4eff-88ee-45f7d851baa9",
+      "target_uuid": "efc134b6-24c4-493e-aacb-50ab36afd1a8",
+      "original_name": "Iranian Ministry of Foreign Affairs",
+      "name": "Iranian Ministry of Foreign Affairs",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Iranian Ministry of Foreign Affairs' = '이란 외무부' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "0268eb92-758a-4b1b-b189-9630dd4688ff",
+      "target_uuid": "26303256-04e1-4f73-afae-2b4251a151d2",
+      "original_name": "정의당 (Justice Party)",
+      "name": "정의당 (Justice Party)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: '정의당 (Justice Party)' = '정의당' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "522fe5f5-217b-4928-88d0-659e3d27a8a2",
+      "target_uuid": "26303256-04e1-4f73-afae-2b4251a151d2",
+      "original_name": "Justice Party (Korea)",
+      "name": "Justice Party (Korea)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Justice Party (Korea)' = '정의당' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "60e0727a-7099-42f3-bbc3-b51423dd5ceb",
+      "target_uuid": "26303256-04e1-4f73-afae-2b4251a151d2",
+      "original_name": "Justice Party of Korea",
+      "name": "Justice Party of Korea",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Justice Party of Korea' = '정의당' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "51a17a11-ed3b-4fbb-b07e-5a4b6684fdb8",
+      "target_uuid": "26303256-04e1-4f73-afae-2b4251a151d2",
+      "original_name": "Justice Party (South Korea)",
+      "name": "Justice Party (South Korea)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Justice Party (South Korea)' = '정의당' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "41bc7d81-c6e8-4998-800f-1fb3dc8aee0c",
+      "target_uuid": "26303256-04e1-4f73-afae-2b4251a151d2",
+      "original_name": "Justice Party",
+      "name": "Justice Party",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Justice Party' = '정의당' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "54e8ac52-a903-4593-8062-2192f79f2725",
+      "target_uuid": "7d98a5da-3c68-4553-baba-29c038871651",
+      "original_name": "Korea Labor Institute",
+      "name": "Korea Labor Institute",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Korea Labor Institute' = '한국노동연구원' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "a93fdbb2-92dd-44d7-8128-dd1456709a84",
+      "target_uuid": "c32b7abb-ea59-482c-bc8b-221a5779d8c9",
+      "original_name": "HD Korea Shipbuilding & Offshore Engineering",
+      "name": "HD Korea Shipbuilding & Offshore Engineering",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'HD Korea Shipbuilding & Offshore Engineering' = 'HD한국조선해양' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "af71a92b-67a1-4399-b47e-e7fa3ddbc9fd",
+      "target_uuid": "e8a64885-3435-4457-991d-c9ac6d4cc31e",
+      "original_name": "DBpia",
+      "name": "DBpia",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'DBpia' = 'DBpia (누리미디어)' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "07ec3ea7-3b8f-49f6-9500-382142795c0d",
+      "target_uuid": "fe8fdcdb-23d2-40c7-947a-c4cf401a18f4",
+      "original_name": "노동당 (Labor Party)",
+      "name": "노동당 (Labor Party)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: '노동당 (Labor Party)' = '노동당' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "99b0dfae-28e0-4d00-95c5-79216bff736e",
+      "target_uuid": "fe8fdcdb-23d2-40c7-947a-c4cf401a18f4",
+      "original_name": "Labor Party (노동당)",
+      "name": "Labor Party (노동당)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Labor Party (노동당)' = '노동당' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "6783de36-5462-4431-9d3a-f451b6851127",
+      "target_uuid": "fe8fdcdb-23d2-40c7-947a-c4cf401a18f4",
+      "original_name": "Labor Party (South Korea)",
+      "name": "Labor Party (South Korea)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Labor Party (South Korea)' = '노동당' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "037cf7d7-622c-4201-a828-b2be28fce985",
+      "target_uuid": "fe8fdcdb-23d2-40c7-947a-c4cf401a18f4",
+      "original_name": "Labor Party (Korea)",
+      "name": "Labor Party (Korea)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Labor Party (Korea)' = '노동당' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "be6feb39-ef1d-446e-8cdd-bc035b896f7f",
+      "target_uuid": "062e2f5b-53e0-40fb-b462-986a571a52d2",
+      "original_name": "Bulgaria",
+      "name": "Bulgaria",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Bulgaria' = '불가리아' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "768fd2fb-2644-4237-bd7a-3f96569b9c52",
+      "target_uuid": "e4422784-0ba8-489a-b47f-fd51d58a29e5",
+      "original_name": "Kazakhstan",
+      "name": "Kazakhstan",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Kazakhstan' = '카자흐스탄' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "ae52fa4d-97b3-49c1-bf77-27b9f89dbec1",
+      "target_uuid": "70155956-a67c-4ffe-acb2-bebc4cd68a5f",
+      "original_name": "Sweden",
+      "name": "Sweden",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Sweden' = '스웨덴' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "279c8087-2f37-4a80-ab9d-cf9245adb3f0",
+      "target_uuid": "9e9c845c-c8cf-49de-b8a9-532c2a91f07d",
+      "original_name": "Belgium",
+      "name": "Belgium",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Belgium' = '벨기에' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "ec37e5ab-e2a0-48c5-ab97-8e3b61161854",
+      "target_uuid": "e37c2b1e-87ca-4c36-a5fe-4d30fa9c80a3",
+      "original_name": "Switzerland",
+      "name": "Switzerland",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Switzerland' = '스위스' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "bef23a86-5322-4493-accf-76770c3d901c",
+      "target_uuid": "0ad1d911-b065-4f01-94c4-237c6202b1db",
+      "original_name": "Naver Cafe Capybara Library",
+      "name": "Naver Cafe Capybara Library",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Naver Cafe Capybara Library' = '카피바라 도서관' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "6586220b-b5d5-4025-93fe-2e3b2adf86f7",
+      "target_uuid": "9c069daf-a8ef-4eba-9467-e55ccca28ed3",
+      "original_name": "Hyundai Rotem",
+      "name": "Hyundai Rotem",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Hyundai Rotem' = '현대로템' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "29873449-f6f5-4ea4-a4b9-aecb16778af6",
+      "target_uuid": "a301b97c-64ed-4f62-b9b7-15d6e73d7720",
+      "original_name": "United States Department of Commerce Bureau of Industry and Security",
+      "name": "United States Department of Commerce Bureau of Industry and Security",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'United States Department of Commerce Bureau of Industry and Security' = '미국 상무부 BIS' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "ce564ff2-b5b6-4eba-8987-76859090bcc3",
+      "target_uuid": "a301b97c-64ed-4f62-b9b7-15d6e73d7720",
+      "original_name": "Bureau of Industry and Security",
+      "name": "Bureau of Industry and Security",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Bureau of Industry and Security' = '미국 상무부 BIS' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "3ce78626-8671-46d5-b993-8c55ec8c8bee",
+      "target_uuid": "afe88384-4a02-4bad-ad3e-37901d63cfa2",
+      "original_name": "Ansan Citizens Solar Cooperative",
+      "name": "Ansan Citizens Solar Cooperative",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Ansan Citizens Solar Cooperative' = '안산시민햇빛발전협동조합' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "98b301d9-8d3e-4bed-81c0-bf213dd3f69e",
+      "target_uuid": "bc75ee7d-950c-417d-aa81-4223ae661746",
+      "original_name": "Incheon Citizens Solar Cooperative",
+      "name": "Incheon Citizens Solar Cooperative",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Incheon Citizens Solar Cooperative' = '인천햇빛발전협동조합' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "6dac60b3-6bd2-4da2-9e8d-1f39c52f26f6",
+      "target_uuid": "1da758db-8cbb-4e88-9630-b6a7d9da1bff",
+      "original_name": "Sejong Institute",
+      "name": "Sejong Institute",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Sejong Institute' = '세종연구소' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "b91e98be-3d7d-45b9-b0f1-bdfb63681767",
+      "target_uuid": "86d85c9b-1bb3-4619-a920-c6636f8e41cf",
+      "original_name": "Chinese Communist Party",
+      "name": "Chinese Communist Party",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Chinese Communist Party' = '중국공산당' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "8ff97c3f-7cd1-4f3a-bba2-35d9b9938036",
+      "target_uuid": "5df001f6-ac88-4d71-8021-1d11de722db4",
+      "original_name": "노동사회과학연구소 (Workers Institute of Social Science)",
+      "name": "노동사회과학연구소 (Workers Institute of Social Science)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: '노동사회과학연구소 (Workers Institute of Social Science)' = '노동사회과학연구소' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "4e135d60-65dd-4dcc-b7ab-a43057270082",
+      "target_uuid": "5df001f6-ac88-4d71-8021-1d11de722db4",
+      "original_name": "Labor Social Science Institute (노사과연)",
+      "name": "Labor Social Science Institute (노사과연)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Labor Social Science Institute (노사과연)' = '노동사회과학연구소' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "7ef903fd-2d34-4e91-a00b-21de357ebcdc",
+      "target_uuid": "5df001f6-ac88-4d71-8021-1d11de722db4",
+      "original_name": "Labor Social Science Research Institute",
+      "name": "Labor Social Science Research Institute",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Labor Social Science Research Institute' = '노동사회과학연구소' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "5ae4a8ac-271a-4e6e-a9e3-3e83b5616fce",
+      "target_uuid": "541b054f-017d-4eed-acd3-442c429d9b91",
+      "original_name": "National Samsung Electronics Union (Jeon-sam-no / NSEU)",
+      "name": "National Samsung Electronics Union (Jeon-sam-no / NSEU)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'National Samsung Electronics Union (Jeon-sam-no / NSEU)' = '전국삼성전자노동조합' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "174c1ebc-58a8-4009-b6ad-9ab0129e9d2a",
+      "target_uuid": "cda45622-ef4f-4e80-be6f-5b86229167e8",
+      "original_name": "Samsung Group Cho-gieop Labor Union",
+      "name": "Samsung Group Cho-gieop Labor Union",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Samsung Group Cho-gieop Labor Union' = '삼성그룹 초기업 노동조합' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "2340ab11-bf32-4f86-aa2e-e6e6d9be08eb",
+      "target_uuid": "a862153a-ac78-4ada-8664-f045c6cc2d87",
+      "original_name": "World Economic Forum",
+      "name": "World Economic Forum",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'World Economic Forum' = '세계경제포럼' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "43e2ef7d-85f7-49da-a4b3-baa427dfae34",
+      "target_uuid": "62fe4506-002d-4948-af3c-d4235472ba2d",
+      "original_name": "Bank of America",
+      "name": "Bank of America",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Bank of America' = '뱅크오브아메리카' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "6bd33624-3e54-4971-8f55-871ba12b75f9",
+      "target_uuid": "7eebed9e-2585-4c47-a0dc-90084b02c284",
+      "original_name": "Amazon Web Services",
+      "name": "Amazon Web Services",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Amazon Web Services' = '아마존 웹서비스' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "41b32972-2c63-4626-af59-710c60349387",
+      "target_uuid": "915e5517-15e9-4866-97a8-1c0bf5176ab7",
+      "original_name": "Korea Aerospace Industries",
+      "name": "Korea Aerospace Industries",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Korea Aerospace Industries' = '한국항공우주산업' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "90c72116-74df-4bc1-b045-e97660b16340",
+      "target_uuid": "be604072-f350-4d65-bc5a-d8c76c2d2c90",
+      "original_name": "Korea Institute of Economic and Industrial Research",
+      "name": "Korea Institute of Economic and Industrial Research",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Korea Institute of Economic and Industrial Research' = '한국산업연구원' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "0f683bc8-5d75-4611-8db3-bfc9a9f16b26",
+      "target_uuid": "10591ebb-d068-400d-b77f-991037cfc738",
+      "original_name": "Samsung Heavy Industries",
+      "name": "Samsung Heavy Industries",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Samsung Heavy Industries' = '삼성중공업' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "4d413646-26ad-4187-b584-9e57f0ac889c",
+      "target_uuid": "0a7953fe-ed19-4db7-939c-93589731d13c",
+      "original_name": "International Energy Agency",
+      "name": "International Energy Agency",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'International Energy Agency' = '국제에너지기구' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "50d39b35-bde0-428b-97e5-386fdf77699a",
+      "target_uuid": "752e0a3d-8655-4c8d-83f5-146301b089bb",
+      "original_name": "노동자연대 (Workers' Solidarity)",
+      "name": "노동자연대 (Workers' Solidarity)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: '노동자연대 (Workers' Solidarity)' = '노동자연대' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "3237ab08-24dd-41b5-87ef-fd8f68cbd5d3",
+      "target_uuid": "752e0a3d-8655-4c8d-83f5-146301b089bb",
+      "original_name": "Workers' Solidarity (노동자연대)",
+      "name": "Workers' Solidarity (노동자연대)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Workers' Solidarity (노동자연대)' = '노동자연대' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "099e93f1-29cd-434c-9f6a-78eccd8bba15",
+      "target_uuid": "752e0a3d-8655-4c8d-83f5-146301b089bb",
+      "original_name": "Workers' Solidarity",
+      "name": "Workers' Solidarity",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Workers' Solidarity' = '노동자연대' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "0ff75c15-52d8-48b1-91d8-a297158ed796",
+      "target_uuid": "1833dfbc-0a8e-4faf-8f08-acc0aa65f582",
+      "original_name": "United Kingdom Government",
+      "name": "United Kingdom Government",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'United Kingdom Government' = '영국 정부' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "65647f24-51ba-4ade-a9c1-03e877fd49d1",
+      "target_uuid": "1833dfbc-0a8e-4faf-8f08-acc0aa65f582",
+      "original_name": "UK government",
+      "name": "UK government",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'UK government' = '영국 정부' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "383b59bc-8d73-4259-a457-618771753125",
+      "target_uuid": "96caeec7-0114-4c85-b95a-880e3df1cdc4",
+      "original_name": "Cargo Truckers Solidarity (화물연대)",
+      "name": "Cargo Truckers Solidarity (화물연대)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Cargo Truckers Solidarity (화물연대)' = '화물연대' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "1101bd73-00cb-49c3-8a45-9d6dc87d1bc0",
+      "target_uuid": "96caeec7-0114-4c85-b95a-880e3df1cdc4",
+      "original_name": "Cargo Truckers Solidarity Division",
+      "name": "Cargo Truckers Solidarity Division",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Cargo Truckers Solidarity Division' = '화물연대' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "7b46c69e-3a8a-436b-9aa3-739bfd85ed2a",
+      "target_uuid": "8026adf0-3b4b-48b6-bf4c-efad24f05c79",
+      "original_name": "Sarangbang (인권운동사랑방)",
+      "name": "Sarangbang (인권운동사랑방)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Sarangbang (인권운동사랑방)' = '인권운동사랑방' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "77561e1f-1e8a-4a28-b586-01ccf4f44bd6",
+      "target_uuid": "8026adf0-3b4b-48b6-bf4c-efad24f05c79",
+      "original_name": "Sarangbang",
+      "name": "Sarangbang",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Sarangbang' = '인권운동사랑방' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "feab42fe-db33-4c05-acdf-03ea1b242513",
+      "target_uuid": "044a6bfa-eeab-4896-a76e-1c5236e62b19",
+      "original_name": "Green Justice Party",
+      "name": "Green Justice Party",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Green Justice Party' = '녹색정의당 (Green Justice Party)' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "42c4fe49-7888-4f6d-b2e3-7a18e44f7583",
+      "target_uuid": "ee1c922f-b69a-4bfa-9dad-09065682421f",
+      "original_name": "Communist Party of Peru (Shining Path)",
+      "name": "Communist Party of Peru (Shining Path)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Communist Party of Peru (Shining Path)' = '페루 공산당 (Communist Party of Peru)' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "ed5ab74b-3755-4f4a-bb4f-41c2188f9675",
+      "target_uuid": "6647fa7a-9a57-4e76-a9d9-0a20c7b37769",
+      "original_name": "Basic Income Party (Korea)",
+      "name": "Basic Income Party (Korea)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Basic Income Party (Korea)' = '기본소득당' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "4fede692-5deb-40e4-a4bf-36d3a8c7d628",
+      "target_uuid": "750b4e5d-1383-403a-b059-7499d84b00da",
+      "original_name": "United States Department of Commerce",
+      "name": "United States Department of Commerce",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'United States Department of Commerce' = '미국 상무부' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "12ce1d29-2205-43e6-a5f6-ef26af6481da",
+      "target_uuid": "93eb8833-9295-4f4f-9179-154c5306b63d",
+      "original_name": "BGF Retail",
+      "name": "BGF Retail",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'BGF Retail' = 'BGF리테일' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "47d302cb-1021-4653-a5ff-e4275a862ead",
+      "target_uuid": "65f5f12c-6631-43b8-ab97-5eb5ac28ec0b",
+      "original_name": "Ministry of Employment and Labor of Korea",
+      "name": "Ministry of Employment and Labor of Korea",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Ministry of Employment and Labor of Korea' = '고용노동부' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "ecde0db6-cf4d-4f27-b022-d999479fa6ce",
+      "target_uuid": "b39e73cd-5f62-47b0-8ea9-7628dd4acc14",
+      "original_name": "Communist Party of Yugoslavia",
+      "name": "Communist Party of Yugoslavia",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Communist Party of Yugoslavia' = '유고슬라비아공산당' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "654e7e4b-bdd6-4bf5-a687-a53effa0021f",
+      "target_uuid": "6a669d49-0c08-474a-a8e1-0c3942ab6ad9",
+      "original_name": "Korea Investment & Securities",
+      "name": "Korea Investment & Securities",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Korea Investment & Securities' = '한국투자증권' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "0df9528e-77c8-4d7b-92b1-7a0e23a003a8",
+      "target_uuid": "aee39fe1-f607-4e4e-be6b-d732b19cf332",
+      "original_name": "United States Department of Defense",
+      "name": "United States Department of Defense",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'United States Department of Defense' = '미국 국방부' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "dc1e9f40-3c4b-493b-9de3-b6f5c9deafcd",
+      "target_uuid": "aee39fe1-f607-4e4e-be6b-d732b19cf332",
+      "original_name": "US Department of Defense",
+      "name": "US Department of Defense",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'US Department of Defense' = '미국 국방부' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "b7e8612e-7ade-4ca8-82ee-e87e69594ba4",
+      "target_uuid": "3501eb4d-2054-41f7-a0e7-c6ce152f973f",
+      "original_name": "Kia Motors",
+      "name": "Kia Motors",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Kia Motors' = '기아' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "982f4fae-f53c-4e3b-825b-7a64b02470ad",
+      "target_uuid": "969b1f3a-dc7f-428c-9edf-cdb66776783d",
+      "original_name": "National Pension Service (NPS) Korea",
+      "name": "National Pension Service (NPS) Korea",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'National Pension Service (NPS) Korea' = '국민연금' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "a0dbb3ff-aef0-4c41-9cc4-e5f3e24535f8",
+      "target_uuid": "e90a7bc3-acc7-4160-a961-533abb2c9033",
+      "original_name": "People's Bank of China",
+      "name": "People's Bank of China",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'People's Bank of China' = '중국인민은행' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "fe404809-d6d1-45b8-9814-30c3df0cb4de",
+      "target_uuid": "b8249c2b-07f0-45ff-a5ba-990fb8f78690",
+      "original_name": "Constitutional Court of Korea",
+      "name": "Constitutional Court of Korea",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Constitutional Court of Korea' = '대한민국 헌법재판소' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "e6e46290-bd64-4640-b0ac-8d3ddfbb34fa",
+      "target_uuid": "e149cdf9-3988-48a1-9ff4-4f2b168c1733",
+      "original_name": "Korea Institute for Defense Analyses",
+      "name": "Korea Institute for Defense Analyses",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Korea Institute for Defense Analyses' = '한국국방연구원' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "e9a224d4-717b-4cd9-a0ec-d59ca130c31b",
+      "target_uuid": "cb5444cf-89d4-43f6-a9d0-f6c98672379d",
+      "original_name": "People's Commissariat for Internal Affairs",
+      "name": "People's Commissariat for Internal Affairs",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'People's Commissariat for Internal Affairs' = '소련 내무인민위원부' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "afd394fa-552d-45be-b067-4800a22b573b",
+      "target_uuid": "7391e37c-0242-4e1f-b57f-783465a3ddf7",
+      "original_name": "People Power Party (국민의힘)",
+      "name": "People Power Party (국민의힘)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'People Power Party (국민의힘)' = '국민의힘' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "bf987cc8-40fa-4a07-80f6-32cfb5947f3f",
+      "target_uuid": "d97df9c0-ffe3-4a21-8cf6-8e64c4ae42b1",
+      "original_name": "기후정의동맹 (Climate Justice Alliance)",
+      "name": "기후정의동맹 (Climate Justice Alliance)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: '기후정의동맹 (Climate Justice Alliance)' = '기후정의동맹' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "6d3fc9f5-72f0-4bd4-b59c-112eb5125aa4",
+      "target_uuid": "d409ab17-f1fc-4c6f-8dd4-a85eb716f890",
+      "original_name": "노동전선 (현장실천 사회변혁 노동자전선)",
+      "name": "노동전선 (현장실천 사회변혁 노동자전선)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: '노동전선 (현장실천 사회변혁 노동자전선)' = '노동전선' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "5e3663d1-d9a6-4e25-ae60-6898208b9781",
+      "target_uuid": "011c8b3a-9247-47e4-b225-99cb8f417a3d",
+      "original_name": "다함께 (민중연대 구성단위)",
+      "name": "다함께 (민중연대 구성단위)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: '다함께 (민중연대 구성단위)' = '다함께' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "7374ef24-5034-48d2-a6f5-ad436853ce5e",
+      "target_uuid": "011c8b3a-9247-47e4-b225-99cb8f417a3d",
+      "original_name": "다함께 (All Together)",
+      "name": "다함께 (All Together)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: '다함께 (All Together)' = '다함께' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "e0a5b11f-6657-4cd7-8557-fc142c223a43",
+      "target_uuid": "86ec009b-b9de-4c3e-bda1-f46b90f0441e",
+      "original_name": "더불어민주연합 (비례위성정당)",
+      "name": "더불어민주연합 (비례위성정당)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: '더불어민주연합 (비례위성정당)' = '더불어민주연합 (Democratic United Alliance)' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "78945013-9bde-4dfb-8950-b665691fafc8",
+      "target_uuid": "d2cc58b7-b142-4260-81f6-666c0181d472",
+      "original_name": "디아마트",
+      "name": "디아마트",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: '디아마트' = '디아마트 (DiaMat)' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "a03ce751-978a-40d9-b0d9-d12ab246d67a",
+      "target_uuid": "ad82f89b-7f20-4069-b9ee-dd238c8f0dd4",
+      "original_name": "Rider Union (라이더유니온)",
+      "name": "Rider Union (라이더유니온)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Rider Union (라이더유니온)' = '라이더유니온' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "e313caa5-3cc0-45f9-8024-3765273e9c66",
+      "target_uuid": "87e5411c-7c8a-42e3-abb6-cf7aa791fe8b",
+      "original_name": "레디앙 (Redian)",
+      "name": "레디앙 (Redian)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: '레디앙 (Redian)' = '레디앙' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "087f3047-8eea-43a8-a19c-26c5aeb9665f",
+      "target_uuid": "7f34d026-679f-4b78-8f53-921298bc4339",
+      "original_name": "민들레 (시민언론)",
+      "name": "민들레 (시민언론)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: '민들레 (시민언론)' = '민들레' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "663f59f2-dbcc-4549-a46f-13ac565d2c64",
+      "target_uuid": "b7f66a74-e654-43ae-8917-1614984edd95",
+      "original_name": "Baedal Minjok (배달의민족)",
+      "name": "Baedal Minjok (배달의민족)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Baedal Minjok (배달의민족)' = '배달의민족' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "ab651b7f-c11f-44be-ad7c-6d5b36bbed0c",
+      "target_uuid": "084c0450-9854-470a-ae9d-24a8540f1b9f",
+      "original_name": "Delivery Platform Labor Union (배달플랫폼노동조합)",
+      "name": "Delivery Platform Labor Union (배달플랫폼노동조합)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Delivery Platform Labor Union (배달플랫폼노동조합)' = '배달플랫폼노동조합' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "4c15dbba-3543-4679-9fc9-807ef31c76ff",
+      "target_uuid": "728a743e-0007-41a9-ad04-bae6f44efce4",
+      "original_name": "사회주의를 향한 전진",
+      "name": "사회주의를 향한 전진",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: '사회주의를 향한 전진' = '사회주의를향한전진' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "630cc506-ae54-4eae-b209-729c53f7e29f",
+      "target_uuid": "728a743e-0007-41a9-ad04-bae6f44efce4",
+      "original_name": "사회주의를향한전진 (March to Socialism)",
+      "name": "사회주의를향한전진 (March to Socialism)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: '사회주의를향한전진 (March to Socialism)' = '사회주의를향한전진' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "fe41c091-14e0-412a-8c2c-c4cc1a2e4c14",
+      "target_uuid": "c6aea2ee-b8d8-478c-b29a-c95de4983f99",
+      "original_name": "Socialistja (사회주의자)",
+      "name": "Socialistja (사회주의자)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Socialistja (사회주의자)' = '사회주의자' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "aa4d9883-5a34-4099-ac5a-71ef502f969e",
+      "target_uuid": "c6aea2ee-b8d8-478c-b29a-c95de4983f99",
+      "original_name": "Socialist (사회주의자)",
+      "name": "Socialist (사회주의자)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Socialist (사회주의자)' = '사회주의자' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "00b9de7a-9cdf-4248-be6e-daf8375440a3",
+      "target_uuid": "c6aea2ee-b8d8-478c-b29a-c95de4983f99",
+      "original_name": "The Socialist (사회주의자)",
+      "name": "The Socialist (사회주의자)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'The Socialist (사회주의자)' = '사회주의자' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "c7c894e4-2e79-46f5-867c-c234bdfeb721",
+      "target_uuid": "6a906211-796a-4386-bbb4-1c73df9d8892",
+      "original_name": "Society for Social Progress (사회진보연대)",
+      "name": "Society for Social Progress (사회진보연대)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Society for Social Progress (사회진보연대)' = '사회진보연대' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "01f98ec5-97d2-4994-b6ba-3108cba016a7",
+      "target_uuid": "6a906211-796a-4386-bbb4-1c73df9d8892",
+      "original_name": "Social Progressive Alliance (사회진보연대)",
+      "name": "Social Progressive Alliance (사회진보연대)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Social Progressive Alliance (사회진보연대)' = '사회진보연대' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "1c6620c7-9b33-4981-bc0d-a1b84d5c44c2",
+      "target_uuid": "948bb114-0321-4991-b03b-b409ebe53b08",
+      "original_name": "세계반제플랫폼 (World Anti-Imperialist Platform)",
+      "name": "세계반제플랫폼 (World Anti-Imperialist Platform)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: '세계반제플랫폼 (World Anti-Imperialist Platform)' = '세계반제플랫폼' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "8f35305a-eade-4944-a04d-af88139fbca3",
+      "target_uuid": "f9adabcf-d1e1-4a1a-baf6-cdcee0e37cd0",
+      "original_name": "Citizen Power Cooperative Federation (시민발전이종협동조합연합회)",
+      "name": "Citizen Power Cooperative Federation (시민발전이종협동조합연합회)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Citizen Power Cooperative Federation (시민발전이종협동조합연합회)' = '시민발전이종협동조합연합회' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "bc3539e2-3777-4f53-bff9-81857ecc9cc7",
+      "target_uuid": "d6660c84-a7b1-4885-abae-2e0d64a30056",
+      "original_name": "신호등연대 (2026 지방선거)",
+      "name": "신호등연대 (2026 지방선거)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: '신호등연대 (2026 지방선거)' = '신호등연대 (Traffic Light Alliance)' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "dfeb68d3-9e28-4107-8cf8-601e1d10498d",
+      "target_uuid": "29b1b3cc-e939-4dcd-9518-6d24ef9200e7",
+      "original_name": "Woowa Youth (우아한청년들)",
+      "name": "Woowa Youth (우아한청년들)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Woowa Youth (우아한청년들)' = '우아한청년들' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "331e3b2c-8eb1-4052-bd87-74234024b47b",
+      "target_uuid": "e8d4d403-4340-48b7-89c2-7340ff67bafb",
+      "original_name": "전국결집 (노동해방을 위한 좌파활동가 전국결집)",
+      "name": "전국결집 (노동해방을 위한 좌파활동가 전국결집)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: '전국결집 (노동해방을 위한 좌파활동가 전국결집)' = '전국결집' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "9fb6a809-99f5-4cc0-b7b6-7024c405a48e",
+      "target_uuid": "a164f7c6-03c3-4dbf-9f1e-a45ebe362389",
+      "original_name": "National Student March (전국학생행진)",
+      "name": "National Student March (전국학생행진)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'National Student March (전국학생행진)' = '전국학생행진' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "619f2024-83ca-4ec7-a780-95311a6e530c",
+      "target_uuid": "52be22c2-d2eb-41a2-8350-374186034c8b",
+      "original_name": "전연방 공산당",
+      "name": "전연방 공산당",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: '전연방 공산당' = '전연방공산당' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "0fb77153-db99-4d91-812d-f7ee728a3c12",
+      "target_uuid": "0fc3bcc4-e6b2-471c-8bbe-d1d9c5b7e47b",
+      "original_name": "Rebuilding Korea Party (조국혁신당)",
+      "name": "Rebuilding Korea Party (조국혁신당)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Rebuilding Korea Party (조국혁신당)' = '조국혁신당' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "b63eade0-1b42-4b21-bb14-82e6e4a6f8f6",
+      "target_uuid": "7d643813-ffe5-4a52-9dab-358c87b8dd3e",
+      "original_name": "Coupang Eats (쿠팡이츠)",
+      "name": "Coupang Eats (쿠팡이츠)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Coupang Eats (쿠팡이츠)' = '쿠팡이츠' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "61119247-15eb-4827-a045-4dc2c9a17509",
+      "target_uuid": "dbfcd713-a622-4166-a83a-1f534da5027d",
+      "original_name": "Washington D.C.",
+      "name": "Washington D.C.",
+      "types": [
+        "Location"
+      ],
+      "target_types": [
+        "Location"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Washington D.C.' = '워싱턴 D.C.' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "4b159097-42d2-42e2-9d3e-1a6507767f7e",
+      "target_uuid": "1e910ec1-33c5-41cb-91a2-8381fb99730d",
+      "original_name": "Seongbuk District",
+      "name": "Seongbuk District",
+      "types": [
+        "Location"
+      ],
+      "target_types": [
+        "Location"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Seongbuk District' = '성북구' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "7a863b84-135b-4b5f-a1b6-dce737ee2cbe",
+      "target_uuid": "50359fae-a23b-4d40-9da5-d676bc6308df",
+      "original_name": "Krakow",
+      "name": "Krakow",
+      "types": [
+        "Location"
+      ],
+      "target_types": [
+        "Location"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Krakow' = '크라쿠프' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "b5c549ac-2e86-4b90-9227-099a7b20477f",
+      "target_uuid": "ea4e6567-df73-4875-8ab8-f888c8facf16",
+      "original_name": "신호등 연대",
+      "name": "신호등 연대",
+      "types": [
+        "Campaign"
+      ],
+      "target_types": [
+        "Campaign"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: '신호등 연대' = 'Traffic Light Alliance (신호등연대)' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "0096fb2e-b2a6-4e21-9e48-6c916a7c1582",
+      "target_uuid": "ea4e6567-df73-4875-8ab8-f888c8facf16",
+      "original_name": "2026 Signal Light Coalition (신호등연대)",
+      "name": "2026 Signal Light Coalition (신호등연대)",
+      "types": [
+        "Campaign"
+      ],
+      "target_types": [
+        "Campaign"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: '2026 Signal Light Coalition (신호등연대)' = 'Traffic Light Alliance (신호등연대)' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "f6d220f4-7d88-40fa-bffd-99f7a88141f5",
+      "target_uuid": "ea4e6567-df73-4875-8ab8-f888c8facf16",
+      "original_name": "2026 Local Election Signal Light Alliance (신호등연대)",
+      "name": "2026 Local Election Signal Light Alliance (신호등연대)",
+      "types": [
+        "Campaign"
+      ],
+      "target_types": [
+        "Campaign"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: '2026 Local Election Signal Light Alliance (신호등연대)' = 'Traffic Light Alliance (신호등연대)' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "5161c8d8-0e54-4a15-9636-94384cf7b328",
+      "target_uuid": "ea4e6567-df73-4875-8ab8-f888c8facf16",
+      "original_name": "Signal Light Alliance",
+      "name": "Signal Light Alliance",
+      "types": [
+        "Campaign"
+      ],
+      "target_types": [
+        "Campaign"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Signal Light Alliance' = 'Traffic Light Alliance (신호등연대)' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "6ac243ab-6bbc-47cd-9fd8-4f541de7d71f",
+      "target_uuid": "647e45c7-d447-4de3-88b9-067001a9f299",
+      "original_name": "Democratic Alliance of Korea (더불어민주연합)",
+      "name": "Democratic Alliance of Korea (더불어민주연합)",
+      "types": [
+        "Campaign"
+      ],
+      "target_types": [
+        "Campaign"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Democratic Alliance of Korea (더불어민주연합)' = '더불어민주연합' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "e193c4de-3db6-4045-a4ca-4f80a47a76c1",
+      "target_uuid": "598dd012-5cdc-4924-bd57-84c07a9cf58d",
+      "original_name": "Bureaucratic Capitalism (관료자본주의)",
+      "name": "Bureaucratic Capitalism (관료자본주의)",
+      "types": [
+        "Concept"
+      ],
+      "target_types": [
+        "Concept"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Bureaucratic Capitalism (관료자본주의)' = '관료자본주의 (Bureaucratic Capitalism)' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "a741d0a8-6ae3-4982-9b19-ad4508a3f234",
+      "target_uuid": "598dd012-5cdc-4924-bd57-84c07a9cf58d",
+      "original_name": "Bureaucratic Capitalism",
+      "name": "Bureaucratic Capitalism",
+      "types": [
+        "Concept"
+      ],
+      "target_types": [
+        "Concept"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Bureaucratic Capitalism' = '관료자본주의 (Bureaucratic Capitalism)' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "84524080-1727-47a0-a68e-4f08b6e11d97",
+      "target_uuid": "b5c39fb9-d262-4cc7-9f67-13e1dbfc3d65",
+      "original_name": "국민배당금 (Citizen Dividend)",
+      "name": "국민배당금 (Citizen Dividend)",
+      "types": [
+        "Concept"
+      ],
+      "target_types": [
+        "Concept"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: '국민배당금 (Citizen Dividend)' = '국민배당금' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "bbb168bf-becc-4f57-8e6f-f87bc6058342",
+      "target_uuid": "96a8aa50-7574-4a41-9b28-bb82d5f7b42b",
+      "original_name": "National Democratic Revolution Concept (민족민주혁명)",
+      "name": "National Democratic Revolution Concept (민족민주혁명)",
+      "types": [
+        "Concept"
+      ],
+      "target_types": [
+        "Concept"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'National Democratic Revolution Concept (민족민주혁명)' = '민족민주혁명 (NDR)' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "3eaa0526-cc29-4731-886f-9757a8f90f52",
+      "target_uuid": "80c10ad2-d520-4d48-b067-ea11a9afcee8",
+      "original_name": "신민주주의 혁명 (New Democratic Revolution)",
+      "name": "신민주주의 혁명 (New Democratic Revolution)",
+      "types": [
+        "Concept"
+      ],
+      "target_types": [
+        "Concept"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: '신민주주의 혁명 (New Democratic Revolution)' = 'New Democratic Revolution' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "ef033fd8-d425-4241-b446-bc975904c6d7",
+      "target_uuid": "80c10ad2-d520-4d48-b067-ea11a9afcee8",
+      "original_name": "New Democratic Revolution (신민주주의 혁명)",
+      "name": "New Democratic Revolution (신민주주의 혁명)",
+      "types": [
+        "Concept"
+      ],
+      "target_types": [
+        "Concept"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'New Democratic Revolution (신민주주의 혁명)' = 'New Democratic Revolution' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "f8dfa8f0-8275-4848-b0ff-0dce6e579fb1",
+      "target_uuid": "0f55768c-deb9-4d5d-be73-d99880ab57ad",
+      "original_name": "신식민지 국가독점자본주의론",
+      "name": "신식민지 국가독점자본주의론",
+      "types": [
+        "Concept"
+      ],
+      "target_types": [
+        "Concept"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: '신식민지 국가독점자본주의론' = 'NCSMC Theory (신식민지 국가독점자본주의론)' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "065ee9d0-4c25-4abf-a9c4-a7f06a35bd56",
+      "target_uuid": "92a8ab66-f64f-4e2d-83f4-26f5f0d4ecea",
+      "original_name": "Yalta System (얄타체제)",
+      "name": "Yalta System (얄타체제)",
+      "types": [
+        "Concept"
+      ],
+      "target_types": [
+        "Concept"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Yalta System (얄타체제)' = '얄타 체제' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "8cc2b55a-b3e1-4d84-9ee1-4fb55586b196",
+      "target_uuid": "488cde42-f92a-4092-a39d-384deb57dcaa",
+      "original_name": "Preview Practice Theory (예행연습론)",
+      "name": "Preview Practice Theory (예행연습론)",
+      "types": [
+        "Concept"
+      ],
+      "target_types": [
+        "Concept"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Preview Practice Theory (예행연습론)' = 'Rehearsal Theory (예행연습론)' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "84fef7a3-4cf5-471b-8b5e-d5ede16d5975",
+      "target_uuid": "488cde42-f92a-4092-a39d-384deb57dcaa",
+      "original_name": "Rehearsal Theory Concept (예행연습론)",
+      "name": "Rehearsal Theory Concept (예행연습론)",
+      "types": [
+        "Concept"
+      ],
+      "target_types": [
+        "Concept"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Rehearsal Theory Concept (예행연습론)' = 'Rehearsal Theory (예행연습론)' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "95ede160-fecb-4848-bcc4-450678dd7837",
+      "target_uuid": "270e80db-5d55-4e90-bc56-7c986dfcc765",
+      "original_name": "Liberal Democracy (자유민주주의)",
+      "name": "Liberal Democracy (자유민주주의)",
+      "types": [
+        "Concept"
+      ],
+      "target_types": [
+        "Concept"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Liberal Democracy (자유민주주의)' = '자유민주주의' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "7f80125d-51a3-46b6-82ff-aa70b012f822",
+      "target_uuid": "88232a31-03bc-4c81-9a85-51f1941818bf",
+      "original_name": "Juche Idea (주체사상)",
+      "name": "Juche Idea (주체사상)",
+      "types": [
+        "Concept"
+      ],
+      "target_types": [
+        "Concept"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Juche Idea (주체사상)' = '주체사상' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "3000e93f-e942-415f-b2ea-fa235ece6889",
+      "target_uuid": "7a3d36f5-346e-45e5-8a52-e9512207c0f4",
+      "original_name": "Endogenous Circulation National Economy Concept",
+      "name": "Endogenous Circulation National Economy Concept",
+      "types": [
+        "Concept"
+      ],
+      "target_types": [
+        "Concept"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Endogenous Circulation National Economy Concept' = 'Endogenous Circulation National Economy Concept (내생적 순환형 민족경제)' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "668331f7-ca08-4813-a1f8-628ac30ae6b9",
+      "target_uuid": "281ffc36-e52e-4edc-8eb6-4c6d10c38e8e",
+      "original_name": "Gonzalo Thought",
+      "name": "Gonzalo Thought",
+      "types": [
+        "Concept"
+      ],
+      "target_types": [
+        "Concept"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Gonzalo Thought' = 'Gonzalo Thought (곤잘로 사상)' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "5805ee3f-7e3a-40ce-96b0-864b78951323",
+      "target_uuid": "d7c3fb8e-b618-408a-ac94-f60a5bd6e490",
+      "original_name": "colonial semi-feudal society concept",
+      "name": "colonial semi-feudal society concept",
+      "types": [
+        "Concept"
+      ],
+      "target_types": [
+        "Concept"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'colonial semi-feudal society concept' = 'Colonial Semi-Feudal Society (식민지반봉건사회)' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "140af421-7891-47a3-a503-8e0c5acb7720",
+      "target_uuid": "5e6578a8-bfca-42c9-8680-cb9afc07102b",
+      "original_name": "민족부르주아지 (National Bourgeoisie)",
+      "name": "민족부르주아지 (National Bourgeoisie)",
+      "types": [
+        "Concept"
+      ],
+      "target_types": [
+        "Concept"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: '민족부르주아지 (National Bourgeoisie)' = 'National Bourgeoisie' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "3c5e99b8-5511-4cc8-aca1-919d4a1d39f0",
+      "target_uuid": "98cd1ca9-32bc-4d55-bc1a-14cfc3167743",
+      "original_name": "Trotskyism",
+      "name": "Trotskyism",
+      "types": [
+        "Concept"
+      ],
+      "target_types": [
+        "Concept"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Trotskyism' = '트로츠키주의' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "7b5603ce-663d-4bde-9736-c71ee71f3fbd",
+      "target_uuid": "a97cf032-c8cf-4499-b1a6-71af308df194",
+      "original_name": "Consumer Price Index",
+      "name": "Consumer Price Index",
+      "types": [
+        "Concept"
+      ],
+      "target_types": [
+        "Concept"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Consumer Price Index' = '소비자물가지수' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "9baf1b00-2339-4d00-8174-662557bdc4df",
+      "target_uuid": "eb4a18ec-c08f-4509-91bf-1827979b2195",
+      "original_name": "Semiconductor Special Act (반도체특별법)",
+      "name": "Semiconductor Special Act (반도체특별법)",
+      "types": [
+        "Policy"
+      ],
+      "target_types": [
+        "Policy"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Semiconductor Special Act (반도체특별법)' = '반도체특별법' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "c26e2a5e-8ec6-49ae-975a-b8cc77734baf",
+      "target_uuid": "eb4a18ec-c08f-4509-91bf-1827979b2195",
+      "original_name": "Semiconductor Special Act",
+      "name": "Semiconductor Special Act",
+      "types": [
+        "Policy"
+      ],
+      "target_types": [
+        "Policy"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Semiconductor Special Act' = '반도체특별법' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "c611e302-dcf8-4fa3-8f58-0818b63ccb61",
+      "target_uuid": "eb4a18ec-c08f-4509-91bf-1827979b2195",
+      "original_name": "South Korea Semiconductor Special Act",
+      "name": "South Korea Semiconductor Special Act",
+      "types": [
+        "Policy"
+      ],
+      "target_types": [
+        "Policy"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'South Korea Semiconductor Special Act' = '반도체특별법' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "e397a1f0-e7cd-4b49-b920-5bca5473e388",
+      "target_uuid": "33fd49d4-20f7-4827-831b-48730f4822b7",
+      "original_name": "AIDC 특별법 (AI 데이터센터 특별법)",
+      "name": "AIDC 특별법 (AI 데이터센터 특별법)",
+      "types": [
+        "Policy"
+      ],
+      "target_types": [
+        "Policy"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'AIDC 특별법 (AI 데이터센터 특별법)' = 'AIDC 특별법' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "8c463044-ac46-469d-984a-1bb365212c55",
+      "target_uuid": "33fd49d4-20f7-4827-831b-48730f4822b7",
+      "original_name": "AIDC Special Act 2026",
+      "name": "AIDC Special Act 2026",
+      "types": [
+        "Policy"
+      ],
+      "target_types": [
+        "Policy"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'AIDC Special Act 2026' = 'AIDC 특별법' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "6caf9cf9-0542-4c35-9c57-775638d47bff",
+      "target_uuid": "285c955a-c557-4ca2-9673-c6bb1136321f",
+      "original_name": "Energy Highway (에너지 고속도로)",
+      "name": "Energy Highway (에너지 고속도로)",
+      "types": [
+        "Policy"
+      ],
+      "target_types": [
+        "Policy"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Energy Highway (에너지 고속도로)' = '에너지 고속도로' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "ab3056a4-783a-49e8-a7bd-81914d5a5333",
+      "target_uuid": "5d676234-a44d-4b3f-8060-74c8e6e4d965",
+      "original_name": "특권 폐지에 관한 8월 법령",
+      "name": "특권 폐지에 관한 8월 법령",
+      "types": [
+        "Policy"
+      ],
+      "target_types": [
+        "Policy"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: '특권 폐지에 관한 8월 법령' = '특권 폐지에 관한 8월 법령 (1789)' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "a4c686e1-9569-437e-a919-bffadbfeefe7",
+      "target_uuid": "3e266c7d-2193-46b1-89c1-46bbfdf68510",
+      "original_name": "15th Five-Year Plan",
+      "name": "15th Five-Year Plan",
+      "types": [
+        "Policy"
+      ],
+      "target_types": [
+        "Policy"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: '15th Five-Year Plan' = '15차 5개년 계획' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "dfc5f6f8-a9d8-412a-8b85-2a7944a6b218",
+      "target_uuid": "af4d02d3-716d-4f75-b10a-97dedbc77c2a",
+      "original_name": "AI Basic Act",
+      "name": "AI Basic Act",
+      "types": [
+        "Policy"
+      ],
+      "target_types": [
+        "Policy"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'AI Basic Act' = 'AI 기본법' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "201f3efb-e4cd-4a45-947b-e88c624893f4",
+      "target_uuid": "18f18c8a-9f37-41ee-82ce-44c111c7f945",
+      "original_name": "V.O.S. Selections Inc. v. Trump",
+      "name": "V.O.S. Selections Inc. v. Trump",
+      "types": [
+        "Incident"
+      ],
+      "target_types": [
+        "Incident"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'V.O.S. Selections Inc. v. Trump' = 'V.O.S. Selections, Inc. 대 트럼프' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "66dbeab0-06c0-4b55-be3c-0fa2269d0f84",
+      "target_uuid": "6cbac57b-3093-4ec8-aec6-09ea1d28b125",
+      "original_name": "YH Trade Incident",
+      "name": "YH Trade Incident",
+      "types": [
+        "Incident"
+      ],
+      "target_types": [
+        "Incident"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'YH Trade Incident' = 'YH무역 사건' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "ca801150-50b4-4793-9e43-63564d22feca",
+      "target_uuid": "6587b305-de45-48f3-b271-32e8c29a54de",
+      "original_name": "2025 South Korean Presidential Election",
+      "name": "2025 South Korean Presidential Election",
+      "types": [
+        "Incident"
+      ],
+      "target_types": [
+        "Incident"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: '2025 South Korean Presidential Election' = '2025년 대한민국 대통령 선거' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "38fb861b-1bc7-4f3d-8001-9a40c52adc8e",
+      "target_uuid": "6587b305-de45-48f3-b271-32e8c29a54de",
+      "original_name": "21st Presidential Election (South Korea, 2025)",
+      "name": "21st Presidential Election (South Korea, 2025)",
+      "types": [
+        "Incident"
+      ],
+      "target_types": [
+        "Incident"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: '21st Presidential Election (South Korea, 2025)' = '2025년 대한민국 대통령 선거' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "e502417d-cd3f-4e03-9589-46d180450af3",
+      "target_uuid": "001c6a79-8d2b-4fdd-ab05-ed0d4a8d0aec",
+      "original_name": "Strait of Hormuz crisis",
+      "name": "Strait of Hormuz crisis",
+      "types": [
+        "Incident"
+      ],
+      "target_types": [
+        "Incident"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Strait of Hormuz crisis' = '호르무즈 해협 위기' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "3294775b-2a43-479b-8345-8ae28db74819",
+      "target_uuid": "136e4124-55af-4489-b129-81c51330078f",
+      "original_name": "US-Iran Hormuz Negotiations",
+      "name": "US-Iran Hormuz Negotiations",
+      "types": [
+        "Incident"
+      ],
+      "target_types": [
+        "Incident"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'US-Iran Hormuz Negotiations' = '미국-이란 호르무즈 재개방 협상' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "98abf11d-725e-48bc-b29c-97d62ca355c7",
+      "target_uuid": "1266962c-7d7c-40a1-a1fd-87900f657305",
+      "original_name": "KOSPI -9.99% Crash June 23 2026",
+      "name": "KOSPI -9.99% Crash June 23 2026",
+      "types": [
+        "Incident"
+      ],
+      "target_types": [
+        "Incident"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'KOSPI -9.99% Crash June 23 2026' = 'KOSPI 6월 폭락' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "6af0f12f-c192-4b6b-81d1-320803cc00b8",
+      "target_uuid": "1266962c-7d7c-40a1-a1fd-87900f657305",
+      "original_name": "KOSPI -9.99% Crash (June 23 2026)",
+      "name": "KOSPI -9.99% Crash (June 23 2026)",
+      "types": [
+        "Incident"
+      ],
+      "target_types": [
+        "Incident"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'KOSPI -9.99% Crash (June 23 2026)' = 'KOSPI 6월 폭락' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "ff9b7be7-5467-46fa-8407-db2652f6403c",
+      "target_uuid": "1266962c-7d7c-40a1-a1fd-87900f657305",
+      "original_name": "KOSPI -9.99% Crash (2026-06-23)",
+      "name": "KOSPI -9.99% Crash (2026-06-23)",
+      "types": [
+        "Incident"
+      ],
+      "target_types": [
+        "Incident"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'KOSPI -9.99% Crash (2026-06-23)' = 'KOSPI 6월 폭락' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "77423102-4fa8-4c92-878d-007b08131b57",
+      "target_uuid": "1266962c-7d7c-40a1-a1fd-87900f657305",
+      "original_name": "KOSPI Crash June 2026",
+      "name": "KOSPI Crash June 2026",
+      "types": [
+        "Incident"
+      ],
+      "target_types": [
+        "Incident"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'KOSPI Crash June 2026' = 'KOSPI 6월 폭락' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "5b282bab-5691-4628-ae19-5a6139faeb21",
+      "target_uuid": "bff625d0-5826-4c70-8f55-8375537f4743",
+      "original_name": "Samsung Biologics Labor Union 2026 Strike",
+      "name": "Samsung Biologics Labor Union 2026 Strike",
+      "types": [
+        "Incident"
+      ],
+      "target_types": [
+        "Incident"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Samsung Biologics Labor Union 2026 Strike' = '삼성바이오로직스 2026년 파업' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "8c8918ef-9dc4-473d-9ad3-44419e948f15",
+      "target_uuid": "a28fb592-0d50-462f-8507-1673605da69e",
+      "original_name": "Yongin Semiconductor Cluster",
+      "name": "Yongin Semiconductor Cluster",
+      "types": [
+        "Asset"
+      ],
+      "target_types": [
+        "Asset"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Yongin Semiconductor Cluster' = '용인 반도체 클러스터' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "648c9e51-750a-4d04-9823-cdda8bfec7b9",
+      "target_uuid": "f2031260-9fc4-4eac-afd6-8a592d1e1b11",
+      "original_name": "Alaska LNG development project",
+      "name": "Alaska LNG development project",
+      "types": [
+        "Asset"
+      ],
+      "target_types": [
+        "Asset"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Alaska LNG development project' = '알래스카 LNG 프로젝트' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "1c810d17-7bb1-4469-8629-814a2ce61715",
+      "target_uuid": "95546db2-bfbe-41ed-8f23-d20d5fd72309",
+      "original_name": "Helium",
+      "name": "Helium",
+      "types": [
+        "Asset"
+      ],
+      "target_types": [
+        "Asset"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Helium' = '헬륨' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "5a229eeb-4ec5-44c4-bd61-54f6ca2c8390",
+      "target_uuid": "67718fdf-66af-4c86-adb4-bcd684acbcd8",
+      "original_name": "Won-Dollar Exchange Rate",
+      "name": "Won-Dollar Exchange Rate",
+      "types": [
+        "Asset"
+      ],
+      "target_types": [
+        "Asset"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Won-Dollar Exchange Rate' = '원/달러 환율' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "84b82ed8-5586-4ed2-942d-69dd0700bd4f",
+      "target_uuid": "67718fdf-66af-4c86-adb4-bcd684acbcd8",
+      "original_name": "Korea Won/USD Exchange Rate",
+      "name": "Korea Won/USD Exchange Rate",
+      "types": [
+        "Asset"
+      ],
+      "target_types": [
+        "Asset"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'Korea Won/USD Exchange Rate' = '원/달러 환율' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "d893c8ff-47ea-46c9-86b8-ea029c9888c5",
+      "target_uuid": "67718fdf-66af-4c86-adb4-bcd684acbcd8",
+      "original_name": "KRW/USD",
+      "name": "KRW/USD",
+      "types": [
+        "Asset"
+      ],
+      "target_types": [
+        "Asset"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "한영 표기 중복: 'KRW/USD' = '원/달러 환율' (이름 임베딩 후보, 사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "af6a97cf-c424-49ff-a49c-55bcd7f58e80",
+      "target_uuid": "af6a97cf-c424-49ff-a49c-55bcd7f58e80",
+      "original_name": "Bae Se-jin (배세진)",
+      "name": "배세진",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "rename",
+      "reason": "KG 이름 표기 표준: 한글 표준명, 괄호 병기 제거 (2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "60ca2907-f5d3-4322-95e7-bcdfc8b1208c",
+      "target_uuid": "60ca2907-f5d3-4322-95e7-bcdfc8b1208c",
+      "original_name": "Seo Yeong-pyo (서영표)",
+      "name": "서영표",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "rename",
+      "reason": "KG 이름 표기 표준: 한글 표준명, 괄호 병기 제거 (2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "08609874-6d78-4f8c-af73-6a2c94c21193",
+      "target_uuid": "08609874-6d78-4f8c-af73-6a2c94c21193",
+      "original_name": "Shin Hyun-song (신현송)",
+      "name": "신현송",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "rename",
+      "reason": "KG 이름 표기 표준: 한글 표준명, 괄호 병기 제거 (2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "27c5725e-a775-43ae-9280-c793098a2308",
+      "target_uuid": "27c5725e-a775-43ae-9280-c793098a2308",
+      "original_name": "Chae Man-su (채만수)",
+      "name": "채만수",
+      "types": [
+        "Person"
+      ],
+      "target_types": [
+        "Person"
+      ],
+      "external_ids": [],
+      "action": "rename",
+      "reason": "KG 이름 표기 표준: 한글 표준명, 괄호 병기 제거 (2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "1cb78fd2-36c1-4e3a-a7fd-c57c61551639",
+      "target_uuid": "1cb78fd2-36c1-4e3a-a7fd-c57c61551639",
+      "original_name": "Korean Association of Contemporary Chinese Studies (현대중국학회)",
+      "name": "현대중국학회",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "rename",
+      "reason": "KG 이름 표기 표준: 한글 표준명, 괄호 병기 제거 (2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "f0d692b2-4084-49ef-aee8-e782cdd638f6",
+      "target_uuid": "f0d692b2-4084-49ef-aee8-e782cdd638f6",
+      "original_name": "Jeju National University (제주대학교)",
+      "name": "제주대학교",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "rename",
+      "reason": "KG 이름 표기 표준: 한글 표준명, 괄호 병기 제거 (2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "8a4742e2-813b-44ef-b89e-dd6abd93e832",
+      "target_uuid": "8a4742e2-813b-44ef-b89e-dd6abd93e832",
+      "original_name": "SK하이퍼 (SK Hyper)",
+      "name": "SK하이퍼",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "rename",
+      "reason": "KG 이름 표기 표준: 한글 표준명, 괄호 병기 제거 (2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "044a6bfa-eeab-4896-a76e-1c5236e62b19",
+      "target_uuid": "044a6bfa-eeab-4896-a76e-1c5236e62b19",
+      "original_name": "녹색정의당 (Green Justice Party)",
+      "name": "녹색정의당",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "rename",
+      "reason": "KG 이름 표기 표준: 한글 표준명, 괄호 병기 제거 (2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "ee1c922f-b69a-4bfa-9dad-09065682421f",
+      "target_uuid": "ee1c922f-b69a-4bfa-9dad-09065682421f",
+      "original_name": "페루 공산당 (Communist Party of Peru)",
+      "name": "페루 공산당",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "rename",
+      "reason": "KG 이름 표기 표준: 한글 표준명, 괄호 병기 제거 (2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "d6660c84-a7b1-4885-abae-2e0d64a30056",
+      "target_uuid": "d6660c84-a7b1-4885-abae-2e0d64a30056",
+      "original_name": "신호등연대 (Traffic Light Alliance)",
+      "name": "신호등연대",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "rename",
+      "reason": "KG 이름 표기 표준: 한글 표준명, 괄호 병기 제거 (2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "86ec009b-b9de-4c3e-bda1-f46b90f0441e",
+      "target_uuid": "86ec009b-b9de-4c3e-bda1-f46b90f0441e",
+      "original_name": "더불어민주연합 (Democratic United Alliance)",
+      "name": "더불어민주연합",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "rename",
+      "reason": "KG 이름 표기 표준: 한글 표준명, 괄호 병기 제거 (2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "ea4e6567-df73-4875-8ab8-f888c8facf16",
+      "target_uuid": "ea4e6567-df73-4875-8ab8-f888c8facf16",
+      "original_name": "Traffic Light Alliance (신호등연대)",
+      "name": "신호등연대",
+      "types": [
+        "Campaign"
+      ],
+      "target_types": [
+        "Campaign"
+      ],
+      "external_ids": [],
+      "action": "rename",
+      "reason": "KG 이름 표기 표준: 한글 표준명, 괄호 병기 제거 (2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "598dd012-5cdc-4924-bd57-84c07a9cf58d",
+      "target_uuid": "598dd012-5cdc-4924-bd57-84c07a9cf58d",
+      "original_name": "관료자본주의 (Bureaucratic Capitalism)",
+      "name": "관료자본주의",
+      "types": [
+        "Concept"
+      ],
+      "target_types": [
+        "Concept"
+      ],
+      "external_ids": [],
+      "action": "rename",
+      "reason": "KG 이름 표기 표준: 한글 표준명, 괄호 병기 제거 (2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "96a8aa50-7574-4a41-9b28-bb82d5f7b42b",
+      "target_uuid": "96a8aa50-7574-4a41-9b28-bb82d5f7b42b",
+      "original_name": "민족민주혁명 (NDR)",
+      "name": "민족민주혁명",
+      "types": [
+        "Concept"
+      ],
+      "target_types": [
+        "Concept"
+      ],
+      "external_ids": [],
+      "action": "rename",
+      "reason": "KG 이름 표기 표준: 한글 표준명, 괄호 병기 제거 (2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "0f55768c-deb9-4d5d-be73-d99880ab57ad",
+      "target_uuid": "0f55768c-deb9-4d5d-be73-d99880ab57ad",
+      "original_name": "NCSMC Theory (신식민지 국가독점자본주의론)",
+      "name": "신식민지 국가독점자본주의론",
+      "types": [
+        "Concept"
+      ],
+      "target_types": [
+        "Concept"
+      ],
+      "external_ids": [],
+      "action": "rename",
+      "reason": "KG 이름 표기 표준: 한글 표준명, 괄호 병기 제거 (2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "488cde42-f92a-4092-a39d-384deb57dcaa",
+      "target_uuid": "488cde42-f92a-4092-a39d-384deb57dcaa",
+      "original_name": "Rehearsal Theory (예행연습론)",
+      "name": "예행연습론",
+      "types": [
+        "Concept"
+      ],
+      "target_types": [
+        "Concept"
+      ],
+      "external_ids": [],
+      "action": "rename",
+      "reason": "KG 이름 표기 표준: 한글 표준명, 괄호 병기 제거 (2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "7a3d36f5-346e-45e5-8a52-e9512207c0f4",
+      "target_uuid": "7a3d36f5-346e-45e5-8a52-e9512207c0f4",
+      "original_name": "Endogenous Circulation National Economy Concept (내생적 순환형 민족경제)",
+      "name": "내생적 순환형 민족경제",
+      "types": [
+        "Concept"
+      ],
+      "target_types": [
+        "Concept"
+      ],
+      "external_ids": [],
+      "action": "rename",
+      "reason": "KG 이름 표기 표준: 한글 표준명, 괄호 병기 제거 (2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "281ffc36-e52e-4edc-8eb6-4c6d10c38e8e",
+      "target_uuid": "281ffc36-e52e-4edc-8eb6-4c6d10c38e8e",
+      "original_name": "Gonzalo Thought (곤잘로 사상)",
+      "name": "곤잘로 사상",
+      "types": [
+        "Concept"
+      ],
+      "target_types": [
+        "Concept"
+      ],
+      "external_ids": [],
+      "action": "rename",
+      "reason": "KG 이름 표기 표준: 한글 표준명, 괄호 병기 제거 (2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "d7c3fb8e-b618-408a-ac94-f60a5bd6e490",
+      "target_uuid": "d7c3fb8e-b618-408a-ac94-f60a5bd6e490",
+      "original_name": "Colonial Semi-Feudal Society (식민지반봉건사회)",
+      "name": "식민지반봉건사회",
+      "types": [
+        "Concept"
+      ],
+      "target_types": [
+        "Concept"
+      ],
+      "external_ids": [],
+      "action": "rename",
+      "reason": "KG 이름 표기 표준: 한글 표준명, 괄호 병기 제거 (2026-10-06)",
+      "evidence_sync_keys": []
     }
   ]
 }
