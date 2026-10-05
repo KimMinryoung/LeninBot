@@ -5963,6 +5963,38 @@
       "action": "rename",
       "reason": "KG 이름 표기 표준: 한글 표준명, 괄호 병기 제거 (2026-10-06)",
       "evidence_sync_keys": []
+    },
+    {
+      "uuid": "f6a8eeb3-ddc9-46a8-b92a-0d25f1eb3d14",
+      "target_uuid": "0c3dee27-a459-4caf-9569-8299e711c09d",
+      "original_name": "DMZ 지뢰 폭발 사고 (2026년 9월)",
+      "name": "DMZ 지뢰 폭발 사고 (2026년 9월)",
+      "types": [
+        "Incident"
+      ],
+      "target_types": [
+        "Incident"
+      ],
+      "external_ids": [],
+      "action": "merge",
+      "reason": "같은 2026년 9월 서부전선 DMZ 지뢰 폭발 사건 (사실 대조 검토 2026-10-06)",
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "8a550bf2-830d-425d-8be6-4ee25350aa05",
+      "target_uuid": "8a550bf2-830d-425d-8be6-4ee25350aa05",
+      "original_name": "Korean People's Army",
+      "name": "조선인민군",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "action": "rename",
+      "reason": "KG 이름 표기 표준: 한글 표준명 (2026-10-06)",
+      "evidence_sync_keys": []
     }
   ]
 }

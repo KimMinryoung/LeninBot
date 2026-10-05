@@ -33,13 +33,13 @@ def prune_r2_prefix(
     dry_run: bool = False,
     min_keep: int = 2,
 ) -> list[str]:
-    """Delete every `<key_prefix>-YYYY-MM-DD<suffix>` object dated before cutoff.
+    """Delete every `<key_prefix>-YYYY-MM-DD[_HHMMSS]<suffix>` object dated before cutoff.
 
     Returns the keys deleted (or, when dry_run, the keys that would be).
     Never raises on a listing problem — the caller's backup has already
     succeeded by this point and a failed sweep must not fail the unit.
     """
-    dated = re.compile(rf"^{re.escape(key_prefix)}-(\d{{4}}-\d{{2}}-\d{{2}}){re.escape(suffix)}$")
+    dated = re.compile(rf"^{re.escape(key_prefix)}-(\d{{4}}-\d{{2}}-\d{{2}})(?:_\d{{6}})?{re.escape(suffix)}$")
 
     try:
         keys = r2_list_keys(bucket, key_prefix)

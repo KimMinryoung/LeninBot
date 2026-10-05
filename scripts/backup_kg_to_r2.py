@@ -55,6 +55,11 @@ def main() -> int:
     today = datetime.now(KST)
     archive_key = f"kg-backup-{today.strftime('%Y-%m-%d')}.tar.gz"
     local_archive = backup_dir / archive_key
+    if local_archive.exists():
+        # A manual run before maintenance must not replace today's earlier
+        # snapshot (2026-10-06: three runs left only the post-merge archive).
+        archive_key = f"kg-backup-{today.strftime('%Y-%m-%d_%H%M%S')}.tar.gz"
+        local_archive = backup_dir / archive_key
 
     tmp_path = tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False).name
     try:

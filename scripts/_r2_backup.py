@@ -92,9 +92,9 @@ def r2_delete(bucket: str, key: str) -> None:
 
 
 def prune_local_backups(backup_dir: Path, key_prefix: str, suffix: str, cutoff) -> None:
-    """Delete local {key_prefix}-YYYY-MM-DD{suffix} files dated before cutoff."""
+    """Delete local {key_prefix}-YYYY-MM-DD[_HHMMSS]{suffix} files dated before cutoff."""
     import re
-    key_re = re.compile(rf"^{re.escape(key_prefix)}-(\d{{4}}-\d{{2}}-\d{{2}}){re.escape(suffix)}$")
+    key_re = re.compile(rf"^{re.escape(key_prefix)}-(\d{{4}}-\d{{2}}-\d{{2}})(?:_\d{{6}})?{re.escape(suffix)}$")
     for p in backup_dir.glob(f"{key_prefix}-*{suffix}"):
         m = key_re.match(p.name)
         if not m:
