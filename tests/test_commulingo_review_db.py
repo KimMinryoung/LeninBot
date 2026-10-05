@@ -1,4 +1,4 @@
-"""Opt-in: real queue leases + worker decisions through the isolated JS service."""
+"""Opt-in: real queue leases + worker decisions through an isolated CommuLingo admin MCP."""
 import asyncio
 from contextlib import contextmanager
 from concurrent.futures import ThreadPoolExecutor
@@ -10,7 +10,7 @@ import unittest
 from unittest.mock import patch,AsyncMock
 import uuid
 
-if os.getenv('COMMULINGO_FRONTEND_CONTAINER')!='commulingo-python-rpc' or os.getenv('COMMULINGO_REVIEW_TEST_PORT')!='55439':
+if os.getenv('COMMULINGO_MCP_URL','http://127.0.0.1:3100/mcp').rstrip('/')=='http://127.0.0.1:3100/mcp' or os.getenv('COMMULINGO_REVIEW_TEST_PORT')!='55439':
     raise unittest.SkipTest('isolated review DB/RPC required')
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 ROOT=Path(os.environ.get('COMMULINGO_REVIEW_SOURCE',Path(__file__).resolve().parents[1]))

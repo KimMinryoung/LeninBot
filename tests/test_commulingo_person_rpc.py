@@ -1,4 +1,4 @@
-"""Opt-in cross-runtime test; points only at the isolated RPC container."""
+"""Opt-in cross-runtime test; points only at an isolated CommuLingo admin MCP (never production)."""
 import asyncio
 import os
 import sys
@@ -6,8 +6,8 @@ import unittest
 from pathlib import Path
 import uuid
 from unittest.mock import patch
-if os.environ.get('COMMULINGO_FRONTEND_CONTAINER') != 'commulingo-python-rpc':
-    raise unittest.SkipTest('opt-in isolated RPC container required')
+if os.environ.get('COMMULINGO_MCP_URL', 'http://127.0.0.1:3100/mcp').rstrip('/') == 'http://127.0.0.1:3100/mcp':
+    raise unittest.SkipTest('opt-in: COMMULINGO_MCP_URL must point at an isolated frontend MCP')
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 source_root = Path(os.environ.get('COMMULINGO_TEST_SOURCE', Path(__file__).resolve().parents[1]))
 import db

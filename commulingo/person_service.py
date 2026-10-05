@@ -1,36 +1,38 @@
-"""Private RPC to the single frontend person store; never falls back to Python SQL."""
+"""CommuLingo editorial store calls, through the frontend's admin MCP; never falls back to Python SQL."""
 import json
-import os
-import subprocess
+from pathlib import Path
+
+from commulingo.mcp_client import CommuLingoToolError, call_tool, read_entry
 
 
 def call_person_service(request: dict):
-    container = os.environ.get("COMMULINGO_FRONTEND_CONTAINER", "leninbot-frontend")
-    script = 'commulingo-term-service.js' if request.get('target')=='term' else 'commulingo-person-service.js'
-    completed = subprocess.run(
-        ["docker", "exec", "-i", container, "node", f"/app/scripts/{script}"],
-        input=json.dumps(request, ensure_ascii=False), text=True,
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=45, check=False,
-    )
-    try:
-        response = json.loads(completed.stdout)
-    except (ValueError, TypeError) as exc:
-        raise RuntimeError("CommuLingo shared store unavailable; no fallback write was attempted") from exc
-    if not response.get("ok"):
-        raise ValueError(f"{response.get('code') or response.get('status')}: {response.get('error')}")
-    return response["result"]
+    """Person/term editorial store: read, submit, review, enrichment, note."""
+    request = dict(request)
+    command = request.pop("command", None)
+    target = request.pop("target", None) or "person"
+    if command == "read":
+        return read_entry(target, request.get("id"))
+    changed_by = request.pop("changedBy", None)
+    arguments = {"command": command, "target": target, "request": request}
+    if changed_by:
+        arguments["changedBy"] = changed_by
+    return call_tool("editorial_store", arguments)
 
 
 def apply_person_spec(path):
-    """Apply an explicit sourced/versioned spec via the atomic Admin upsert CLI."""
-    from pathlib import Path
+    """Apply an explicit sourced/versioned spec via the atomic Admin upsert (MCP people_upsert)."""
     spec = json.loads(Path(path).read_text())
-    container = os.environ.get("COMMULINGO_FRONTEND_CONTAINER", "leninbot-frontend")
-    completed = subprocess.run(
-        ["docker", "exec", "-i", container, "node", "/app/scripts/commulingo-people-upsert.js", "-"],
-        input=json.dumps(spec, ensure_ascii=False), text=True,
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120, check=False,
-    )
-    if completed.returncode:
-        raise RuntimeError(completed.stderr.strip() or "CommuLingo Admin upsert failed")
-    return completed.stdout.strip()
+    people = spec if isinstance(spec, list) else spec.get("people")
+    arguments = {"people": people, "dryRun": False}
+    if isinstance(spec, dict) and spec.get("changedBy"):
+        arguments["changedBy"] = spec["changedBy"]
+    try:
+        result = call_tool("people_upsert", arguments)
+    except CommuLingoToolError as exc:
+        raise RuntimeError(f"rejected: {exc.payload.get('error')}") from exc
+    lines = []
+    for row in result["results"]:
+        lines.append(f"{row['status']} {row['id']} (edit {row['suggestionId']})")
+        lines += [f"  {section['status']} section {section['slug']}" for section in row["sections"]]
+    lines.append(f"committed {len(result['results'])} person(s)")
+    return "\n".join(lines)

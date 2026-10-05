@@ -11,11 +11,15 @@ Python `commulingo/people.py`와 제안 승인 스크립트는
 직접 SQL fallback은 없다. 파이프라인의 용어·원자적 공개는 frontend
 `editorial-pipeline-service.js`가 담당한다. 편집 쓰기는 공통 advisory lock으로 직렬화한다.
 
-인물 RPC는 고정 argv `docker exec -i leninbot-frontend node /app/scripts/commulingo-person-service.js`와
-JSON stdin/stdout을 사용한다. 요청 본문·DB 비밀번호는 명령행에 넣지 않는다.
-frontend 컨테이너 DB 설정을 사용하며 공개 쓰기 endpoint를 추가하지 않는다.
-서비스 계정에 Docker 접근 권한이 필요하고 RPC 장애 시 쓰기는 실패한다.
-`COMMULINGO_FRONTEND_CONTAINER`는 격리 테스트용 컨테이너를 선택한다.
+CommuLingo는 별개 서비스다. 저장소 호출은 frontend가 소유한 관리자 MCP
+(`http://127.0.0.1:3100/mcp`, frontend `dev_docs/commulingo-admin-mcp.md`)를
+`commulingo/mcp_client.py`로 호출한다(2026-10-05, `docker exec` RPC 대체).
+`person_service.call_person_service`는 `person_get`/`term_get`과 `editorial_store`,
+`pipeline/service.call`은 `editorial_pipeline`, `apply_person_spec`은 `people_upsert`를 쓴다.
+토큰은 `COMMULINGO_MCP_TOKEN`(credstore 또는 env), 없으면 `~/.config/commulingo-mcp/leninbot.token`.
+MCP 장애 시 쓰기는 실패하고(`RuntimeError`), 도구 거부는 기존과 같은
+`<code|status>: <message>` 형식의 `ValueError`다. 배포 중 연결 거부는 짧게 재시도한다.
+opt-in 통합 테스트는 `COMMULINGO_MCP_URL`로 격리된 frontend MCP를 가리킨다.
 
 ## Revision·필드·근거
 
