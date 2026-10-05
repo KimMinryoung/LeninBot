@@ -1,51 +1,7 @@
--- leninbot's CommuLingo work state. Two more tables belong here although the
--- frontend's migrations created them before the service split (2026-10-05,
--- frontend dev_docs/commulingo-admin-mcp.md): commulingo_curation_gaps
--- (frontend migration 125: what the curators still have to register) and
--- commulingo_person_review_jobs (migration 177: review leases). Only leninbot
--- reads or writes them; the frontend no longer touches either, and leninbot
--- follows CommuLingo id renames into them itself (commulingo/id_sync.py).
-
-CREATE TABLE IF NOT EXISTS commulingo_pipeline_jobs (
-    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    kind text NOT NULL CHECK (kind IN ('person','term')),
-    action text NOT NULL CHECK (action IN ('create','update')),
-    target text NOT NULL,
-    topic text NOT NULL,
-    baseline text NOT NULL DEFAULT '',
-    reason text NOT NULL,
-    priority integer NOT NULL DEFAULT 50,
-    stage text NOT NULL DEFAULT 'research' CHECK (stage IN
-        ('discover','research','judge','draft','validate','review','submit','complete')),
-    status text NOT NULL DEFAULT 'ready' CHECK (status IN
-        ('ready','running','deferred','complete','escalated','cancelled')),
-    payload jsonb NOT NULL DEFAULT '{}',
-    lease_token uuid,
-    lease_until timestamptz,
-    available_at timestamptz NOT NULL DEFAULT now(),
-    attempts integer NOT NULL DEFAULT 0,
-    last_error text NOT NULL DEFAULT '',
-    created_at timestamptz NOT NULL DEFAULT now(),
-    updated_at timestamptz NOT NULL DEFAULT now()
-);
-CREATE UNIQUE INDEX IF NOT EXISTS commulingo_pipeline_active_target
-ON commulingo_pipeline_jobs(kind,target,topic)
-WHERE status IN ('ready','running','deferred','escalated');
-ALTER TABLE commulingo_pipeline_jobs DROP CONSTRAINT IF EXISTS commulingo_pipeline_jobs_stage_check;
-ALTER TABLE commulingo_pipeline_jobs ADD CONSTRAINT commulingo_pipeline_jobs_stage_check
-CHECK (stage IN ('discover','research','judge','draft','validate','review','submit','complete'));
-CREATE INDEX IF NOT EXISTS commulingo_pipeline_ready
-ON commulingo_pipeline_jobs(priority,available_at,id)
-WHERE status IN ('ready','running','deferred');
-CREATE TABLE IF NOT EXISTS commulingo_pipeline_artifacts (
-    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    job_id bigint NOT NULL REFERENCES commulingo_pipeline_jobs(id),
-    stage text NOT NULL,
-    value jsonb NOT NULL,
-    metrics jsonb NOT NULL DEFAULT '{}',
-    created_at timestamptz NOT NULL DEFAULT now()
-);
-ALTER TABLE commulingo_pipeline_artifacts ADD COLUMN IF NOT EXISTS metrics jsonb NOT NULL DEFAULT '{}';
+-- leninbot's research source cache for the CommuLingo agent sessions
+-- (commulingo/pipeline/store.py). The enrichment queue tables
+-- (commulingo_pipeline_jobs, artifacts, …) belong to the frontend since
+-- 2026-10-05 (its migration 288); job_sources rows point at its jobs.
 CREATE TABLE IF NOT EXISTS commulingo_pipeline_sources (
     id text PRIMARY KEY,
     url text NOT NULL,
@@ -55,63 +11,13 @@ CREATE TABLE IF NOT EXISTS commulingo_pipeline_sources (
     body text,
     UNIQUE(url,content_hash)
 );
-CREATE TABLE IF NOT EXISTS commulingo_pipeline_materials (
-    material_id text PRIMARY KEY,
-    content_hash text NOT NULL,
-    processed_at timestamptz NOT NULL DEFAULT now()
-);
-CREATE TABLE IF NOT EXISTS commulingo_pipeline_mentions (
-    kind text NOT NULL, target text NOT NULL, material_id text NOT NULL,
-    mention text NOT NULL, PRIMARY KEY(kind,target,material_id)
+CREATE TABLE IF NOT EXISTS commulingo_pipeline_fetch_cache (
+    tool text NOT NULL, args_hash text NOT NULL,
+    source_id text NOT NULL REFERENCES commulingo_pipeline_sources(id),
+    PRIMARY KEY(tool,args_hash)
 );
 CREATE TABLE IF NOT EXISTS commulingo_pipeline_job_sources (
     job_id bigint NOT NULL REFERENCES commulingo_pipeline_jobs(id),
     source_id text NOT NULL REFERENCES commulingo_pipeline_sources(id),
     PRIMARY KEY(job_id,source_id)
 );
-CREATE TABLE IF NOT EXISTS commulingo_pipeline_fetch_cache (
-    tool text NOT NULL, args_hash text NOT NULL,
-    source_id text NOT NULL REFERENCES commulingo_pipeline_sources(id),
-    PRIMARY KEY(tool,args_hash)
-);
-CREATE TABLE IF NOT EXISTS commulingo_pipeline_budget (
-    id uuid PRIMARY KEY,
-    day date NOT NULL DEFAULT ((now() AT TIME ZONE 'Asia/Seoul') - interval '2 hours')::date,
-    lane text NOT NULL,
-    job_id bigint REFERENCES commulingo_pipeline_jobs(id),
-    reserved numeric(12,6) NOT NULL CHECK (reserved >= 0),
-    actual numeric(12,6) CHECK (actual >= 0),
-    created_at timestamptz NOT NULL DEFAULT now(),
-    settled_at timestamptz
-);
-CREATE INDEX IF NOT EXISTS commulingo_pipeline_budget_day ON commulingo_pipeline_budget(day);
--- Budget day starts at 02:00 KST; store.BUDGET_DAY_SQL writes the same value explicitly.
-ALTER TABLE commulingo_pipeline_budget ALTER COLUMN day
-    SET DEFAULT ((now() AT TIME ZONE 'Asia/Seoul') - interval '2 hours')::date;
-CREATE TABLE IF NOT EXISTS commulingo_pipeline_scheduler (
-    id integer PRIMARY KEY CHECK (id=1), cursor integer NOT NULL DEFAULT 0
-);
-INSERT INTO commulingo_pipeline_scheduler(id) VALUES (1) ON CONFLICT DO NOTHING;
-CREATE TABLE IF NOT EXISTS commulingo_pipeline_publications (
-    job_id bigint PRIMARY KEY REFERENCES commulingo_pipeline_jobs(id),
-    day date NOT NULL DEFAULT ((now() AT TIME ZONE 'Asia/Seoul') - interval '2 hours')::date,
-    kind text NOT NULL, action text NOT NULL
-);
-ALTER TABLE commulingo_pipeline_publications ALTER COLUMN day
-    SET DEFAULT ((now() AT TIME ZONE 'Asia/Seoul') - interval '2 hours')::date;
-
-CREATE TABLE IF NOT EXISTS commulingo_pipeline_attempts (
-    id uuid PRIMARY KEY,
-    job_id bigint NOT NULL REFERENCES commulingo_pipeline_jobs(id),
-    stage text NOT NULL,
-    started_at timestamptz NOT NULL DEFAULT now(),
-    finished_at timestamptz,
-    duration_seconds double precision,
-    outcome text NOT NULL DEFAULT 'running',
-    next_stage text,
-    error text NOT NULL DEFAULT '',
-    budget_id uuid REFERENCES commulingo_pipeline_budget(id),
-    metrics jsonb NOT NULL DEFAULT '{}'
-);
-CREATE INDEX IF NOT EXISTS commulingo_pipeline_attempts_started
-ON commulingo_pipeline_attempts(started_at,job_id);

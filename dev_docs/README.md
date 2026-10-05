@@ -38,6 +38,7 @@
 | `jev_system_one_adoption.md` | Jev 분류·인용 판정, 장애 정책, 라우팅·KG 적용 범위와 평가 한계 |
 | `mcp_gateway.md` | Codex/Claude Code 같은 개발용 MCP client에 노출하는 읽기 중심 gateway |
 | `agent_worker.md` | 다른 서비스(frontend CommuLingo 파이프라인)가 조사·작성·검토를 맡기는 일꾼 MCP와 실행기 |
+| `db_app_role.md` | DB 로그인을 postgres에서 `leninbot_app`으로 바꾸는 설계·순서·되돌리기(CommuLingo 테이블 권한 없음) |
 | `hot_reload_prompts.md` | 런타임 prompt overlay와 재시작 필요 경계 |
 | `roleplay_game_balance.md` | 역할극 회복 이벤트·활동 비용·반복 보상 제한·극단값 완화·질병 상태 |
 | `roleplay_jev.md` | 예조프 JEV 자동 분류·LLM 시간 추정·코드 수치 계산 |

@@ -38,7 +38,8 @@ else
 fi
 echo "[2/4] .env AUDIT_DB_USER=$ROLE"
 
-# 3. role + grants (DB_USER=postgres from .env creates the role)
+# 3. role + grants. Needs a superuser login: since dev_docs/db_app_role.md the
+#    service db_password is leninbot_app, so run this step with postgres credentials.
 DB_PASSWORD="$(cat /run/credentials/leninbot-telegram.service/db_password)" \
 AUDIT_DB_USER="$ROLE" AUDIT_DB_PASSWORD="$AUDIT_DB_PASSWORD" \
 LENINBOT_ALLOW_WRITE=1 PYTHONDONTWRITEBYTECODE=1 \

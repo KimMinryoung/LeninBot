@@ -77,6 +77,8 @@ Relevant implementation files:
 
 ## Operational Notes
 
+- `db_password` is the password of `DB_USER` in `.env`. After [the app-role switch](db_app_role.md) that is `leninbot_app`, not the postgres superuser; superuser work goes through `docker exec leninbot-pg psql -U postgres`.
+
 - Move an existing `.env` secret into the credstore with `scripts/move_env_secret_to_credstore.sh NAME SERVICE` (root). First list NAME in `TIER_A` and the service's `SERVICE_CREDS`, and make `scripts/dropins/<service>.conf` mount it. The script encrypts the current value through `manage_secrets.py add`, installs that drop-in, deletes the `.env` line and restarts the service. It does not change the value.
 - Plaintext left in `.env` on purpose (2026-10-04): `MERSOOM_PASSWORD` (low-value site login) and `WEBCHAT_PROXY_SECRET`. The latter lets the API trust the frontend proxy's identity headers (`X-Authenticated-User-Id`, fingerprints); the API listens only on the Docker bridge (`172.17.0.1:8000`), and the frontend container keeps its copy in its own `.env`, so moving only the leninbot copy would not remove the plaintext.
 

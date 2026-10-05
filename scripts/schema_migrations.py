@@ -140,7 +140,7 @@ def _audit_sink_role() -> None:
     print(ensure_audit_role())
 
 
-def _commulingo_pipeline() -> None:
+def _commulingo_sources() -> None:
     from db import get_conn
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute("SET LOCAL lock_timeout = '5s'")
@@ -161,10 +161,12 @@ def _mail_briefing() -> None:
         cur.execute((ROOT / 'mail_runtime/schema.sql').read_text())
 
 
+ADMIN_ONLY = frozenset({"audit-sink-role"})
+
 MIGRATIONS: list[tuple[str, Callable[[], None]]] = [
     ("agent-worker", _agent_worker),
     ("mail-briefing", _mail_briefing),
-    ("commulingo-pipeline", _commulingo_pipeline),
+    ("commulingo-sources", _commulingo_sources),
     ("telegram-core", _telegram_core),
     ("telegram-summaries", _telegram_summaries),
     ("roleplay-tables", _roleplay_tables),
@@ -202,7 +204,9 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    selected = args.only or [name for name, _ in MIGRATIONS]
+    # Blocks that need a superuser (CREATE ROLE) run only when named: leninbot
+    # logs in as leninbot_app, so run them as postgres (dev_docs/db_app_role.md).
+    selected = args.only or [name for name, _ in MIGRATIONS if name not in ADMIN_ONLY]
     if args.list:
         for name, _ in MIGRATIONS:
             marker = "*" if name in selected else "-"
