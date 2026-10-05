@@ -48,6 +48,10 @@ def validate_request(request: dict) -> dict:
         if not condition:
             raise ValueError(message)
     need(isinstance(request, dict), "request must be an object")
+    from worker import commulingo
+    if request.get("kind") in commulingo.KINDS:
+        return commulingo.validate_request(request)
+    need(request.get("kind", "generic") == "generic", f"kind must be generic or one of {sorted(commulingo.KINDS)}")
     instructions = request.get("instructions")
     need(isinstance(instructions, str) and 0 < len(instructions) <= 30_000, "instructions: 1-30000 characters")
     tools = request.get("tools") or []

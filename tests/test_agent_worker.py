@@ -170,3 +170,56 @@ class RunLoop(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CommuLingoKinds(unittest.TestCase):
+    def job(self, stage="research"):
+        return {"id": 9, "kind": "person", "action": "update", "target": "lenin", "topic": "basics", "stage": stage,
+                "payload": {}, "attempts": 1, "extra": "dropped"}
+
+    def test_request_shape(self):
+        normalized = runner.validate_request({"kind": "commulingo_editor", "budgetUsd": 0.2,
+                                              "input": {"job": self.job(), "artifacts": [{"stage": "research", "value": {}, "metrics": {}}]}})
+        self.assertNotIn("extra", normalized["input"]["job"])
+        self.assertEqual(normalized["input"]["artifacts"], [{"stage": "research", "value": {}}])
+        for request, message in [
+            ({"kind": "commulingo_editor", "input": {"job": self.job("review"), "artifacts": []}}, "handles stages"),
+            ({"kind": "commulingo_review", "input": {"job": self.job("review")}}, "input must be"),
+            ({"kind": "commulingo_review", "budgetUsd": 3, "input": {"job": self.job("review"), "artifacts": []}}, "budgetUsd"),
+            ({"kind": "other"}, "kind must be"),
+        ]:
+            with self.assertRaisesRegex(ValueError, message):
+                runner.validate_request(request)
+
+    def test_editor_result_checkpoint_and_failure(self):
+        from commulingo.pipeline.engine import Result
+        from worker import commulingo
+
+        class FakeEditor:
+            def __init__(self, store):
+                self.store = store
+
+            async def __call__(self, job, artifacts, usage, budget):
+                self.store.save_editor_checkpoint(job, {"draft": 1})
+                self.store.save_editor_checkpoint(job, {"draft": 2})
+                usage.tracker["total_cost"] = 0.05
+                usage.started = usage.complete = True
+                if job["target"] == "fail":
+                    raise RuntimeError("stage ended without validated result")
+                return Result({"draft": {"fields": {}}}, "review")
+
+        request = runner.validate_request({"kind": "commulingo_editor", "input": {"job": self.job(), "artifacts": []}})
+        store = commulingo.TaskStore.__new__(commulingo.TaskStore)
+        store.captured = {}
+        with patch("commulingo.pipeline.editor.Editor", FakeEditor), patch.object(commulingo, "TaskStore", lambda: store):
+            output = asyncio.run(commulingo.run(1, request))
+        self.assertEqual(output["stage"], {"value": {"draft": {"fields": {}}}, "nextStage": "review", "status": "ready", "delaySeconds": 0})
+        self.assertEqual(output["artifacts"], [{"stage": "editor_checkpoint", "value": {"draft": 2}}])
+        self.assertEqual(output["usage"]["costUsd"], 0.05)
+        self.assertTrue(output["costComplete"])
+        request["input"]["job"]["target"] = "fail"
+        store.captured = {}
+        with patch("commulingo.pipeline.editor.Editor", FakeEditor), patch.object(commulingo, "TaskStore", lambda: store):
+            failed = asyncio.run(commulingo.run(2, request))
+        self.assertIn("without validated result", failed["error"])
+        self.assertEqual(failed["artifacts"], [{"stage": "editor_checkpoint", "value": {"draft": 2}}])

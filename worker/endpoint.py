@@ -55,8 +55,9 @@ def _object(properties: dict, required: list[str]) -> dict:
 
 TOOLS = [
     {"name": "agent_task_submit",
-     "description": "Queue one agent task. request: {instructions, input?, tools[], resultSchema, validator?, sources?, "
-                    "tier: author|review, budgetUsd, maxRounds?}. The same idempotencyKey returns the same task.",
+     "description": "Queue one agent task. Generic request: {instructions, input?, tools[], resultSchema, validator?, sources?, "
+                    "tier: author|review, budgetUsd, maxRounds?}. CommuLingo session: {kind: commulingo_editor|commulingo_review, "
+                    "input: {job, artifacts}, budgetUsd}. The same idempotencyKey returns the same task.",
      "inputSchema": _object({"idempotencyKey": {"type": "string", "maxLength": 180},
                              "request": {"type": "object"}}, ["idempotencyKey", "request"])},
     {"name": "agent_task_get",

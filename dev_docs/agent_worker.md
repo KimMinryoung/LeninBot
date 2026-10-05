@@ -37,6 +37,21 @@ the existing task, a different request under the same key is refused (409).
 - `tier`: `author` (GPT-6 Luna, the curator's settings, budget cap $0.60) or `review`
   (DeepSeek Flash, the reviewer's settings, cap $0.40). `budgetUsd`, `maxRounds`.
 
+## CommuLingo session kinds
+
+`kind: commulingo_editor` (research and draft, one author session) and
+`kind: commulingo_review` (independent review) run the CommuLingo pipeline's own
+`Editor`/`Review` (`worker/commulingo.py`) for a queue the frontend owns. The request
+is `{kind, input: {job, artifacts}, budgetUsd ≤ 0.6}`: the job row and its artifacts as
+the frontend stored them. The session reads the entry and validates drafts through the
+CommuLingo admin MCP as before, keeps fetched pages in leninbot's source cache
+(`commulingo_pipeline_sources`, `fetch_cache`, `job_sources`; bodies expire hourly in
+`leninbot-worker`), and never writes CommuLingo. `result` is
+`{stage: {value, nextStage, status, delaySeconds}, artifacts: [editor_checkpoint,
+fetch_failures], notes: [{decision, reason}], usage, metrics, costComplete}`; a failed
+session returns the same without `stage`, so its checkpoint and cost still reach the
+frontend, which stores the artifacts, writes review notes and decides the next stage.
+
 ## Result
 
 `agent_task_get {taskId}` → `status` (`queued|running|done|failed|cancelled`), `result`
