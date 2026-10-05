@@ -17,6 +17,7 @@
 | CommuLingo 편집·자동 파이프라인 | [편집 저장 계약](commulingo_editorial.md) → [파이프라인](commulingo_pipeline.md) |
 | 역할극 | [인물 모델](roleplay_persona_design.md) → [장면 정산](roleplay_postdraft.md) → [게임 규칙](roleplay_game_balance.md) |
 | 개발용 MCP 조회 | [MCP 게이트웨이](mcp_gateway.md) |
+| 다른 서비스가 맡기는 에이전트 작업(일꾼) | [Agent worker](agent_worker.md) |
 
 그 밖의 작업은 아래 전체 목록에서 찾는다. 코드 변경 뒤에는 해당 문서의 소유권·설정·운영 경계를 갱신하고, 문서 링크와 관련 검증 명령을 확인한다.
 
@@ -36,6 +37,7 @@
 | `llm_call_registry.md` | 원샷 호출 등록과 실행 정책·핫리로드 |
 | `jev_system_one_adoption.md` | Jev 분류·인용 판정, 장애 정책, 라우팅·KG 적용 범위와 평가 한계 |
 | `mcp_gateway.md` | Codex/Claude Code 같은 개발용 MCP client에 노출하는 읽기 중심 gateway |
+| `agent_worker.md` | 다른 서비스(frontend CommuLingo 파이프라인)가 조사·작성·검토를 맡기는 일꾼 MCP와 실행기 |
 | `hot_reload_prompts.md` | 런타임 prompt overlay와 재시작 필요 경계 |
 | `roleplay_game_balance.md` | 역할극 회복 이벤트·활동 비용·반복 보상 제한·극단값 완화·질병 상태 |
 | `roleplay_jev.md` | 예조프 JEV 자동 분류·LLM 시간 추정·코드 수치 계산 |

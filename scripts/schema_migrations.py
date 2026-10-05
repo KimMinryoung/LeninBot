@@ -147,6 +147,13 @@ def _commulingo_pipeline() -> None:
         cur.execute((ROOT / 'commulingo/pipeline/schema.sql').read_text())
 
 
+def _agent_worker() -> None:
+    from db import get_conn
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("SET LOCAL lock_timeout = '5s'")
+        cur.execute((ROOT / 'worker/schema.sql').read_text())
+
+
 def _mail_briefing() -> None:
     from db import get_conn
     with get_conn() as conn, conn.cursor() as cur:
@@ -155,6 +162,7 @@ def _mail_briefing() -> None:
 
 
 MIGRATIONS: list[tuple[str, Callable[[], None]]] = [
+    ("agent-worker", _agent_worker),
     ("mail-briefing", _mail_briefing),
     ("commulingo-pipeline", _commulingo_pipeline),
     ("telegram-core", _telegram_core),

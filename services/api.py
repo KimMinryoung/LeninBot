@@ -76,6 +76,10 @@ app.include_router(private_reports_router)
 app.include_router(task_reports_router)
 app.include_router(x402_demo_router)
 
+# Agent worker MCP (dev_docs/agent_worker.md): queue/poll only; leninbot-worker executes.
+from worker.endpoint import worker_router  # noqa: E402
+app.include_router(worker_router())
+
 
 # Per-session locks to prevent concurrent requests from corrupting checkpointed state.
 # Uses LRU-style eviction to prevent unbounded memory growth.

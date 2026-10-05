@@ -1,0 +1,27 @@
+[Unit]
+Description=LeninBot agent worker executor (tasks queued over the worker MCP)
+# dev_docs/agent_worker.md. Wants, not Requires: the DB stack and gateways
+# recover on their own; a task that needs them fails and can be resubmitted.
+Wants=network-online.target leninbot-llm-proxy.service leninbot-web-gateway.service leninbot-neo4j.service
+After=network-online.target leninbot-llm-proxy.service leninbot-web-gateway.service leninbot-neo4j.service
+
+[Service]
+User=grass
+WorkingDirectory=/home/grass/leninbot
+EnvironmentFile=/home/grass/leninbot/.env
+Environment=PYTHONUNBUFFERED=1
+LoadCredentialEncrypted=neo4j_password:/etc/credstore.encrypted/neo4j_password.cred
+LoadCredentialEncrypted=db_password:/etc/credstore.encrypted/db_password.cred
+# Executes tasks only; the MCP endpoint that queues them is /worker/mcp on
+# leninbot-api (worker/endpoint.py), the port the frontend container reaches.
+ExecStart=/home/grass/leninbot/venv/bin/python -m worker.service
+Restart=always
+RestartSec=5
+# Same ceiling as the CommuLingo pipeline batch it serves (source snapshots).
+MemoryHigh=2G
+MemoryMax=3G
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
