@@ -1,5 +1,5 @@
 {
-  "version": 19,
+  "version": 21,
   "functions": [
     {
       "id": "political-leadership",
@@ -4480,6 +4480,195 @@
         [
           1789,
           1794
+        ]
+      ]
+    },
+    {
+      "id": "party-united-russia",
+      "kind": "party",
+      "label": {
+        "ko": "통합 러시아",
+        "en": "United Russia"
+      },
+      "termIds": [
+        "united-russia"
+      ],
+      "countryCode": "russia",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in United Russia. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          2001,
+          null
+        ]
+      ]
+    },
+    {
+      "id": "party-our-home-russia",
+      "kind": "party",
+      "label": {
+        "ko": "우리 집 러시아",
+        "en": "Our Home – Russia"
+      },
+      "termIds": [
+        "our-home-russia"
+      ],
+      "countryCode": "russia",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Our Home – Russia. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1995,
+          2006
+        ]
+      ]
+    },
+    {
+      "id": "party-hungarian-unity",
+      "kind": "party",
+      "label": {
+        "ko": "헝가리 통일당",
+        "en": "Unity Party (Hungary)"
+      },
+      "termIds": [
+        "unity-party-hungary"
+      ],
+      "countryCode": "hungary",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Unity Party (Hungary). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1922,
+          1932
+        ]
+      ]
+    },
+    {
+      "id": "party-hungarian-life",
+      "kind": "party",
+      "label": {
+        "ko": "헝가리 생활당",
+        "en": "Party of National Unity / Party of Hungarian Life (NEP/MÉP)"
+      },
+      "termIds": [
+        "party-of-hungarian-life"
+      ],
+      "countryCode": "hungary",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Party of National Unity / Party of Hungarian Life (NEP/MÉP). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1932,
+          1945
+        ]
+      ]
+    },
+    {
+      "id": "party-hungarian-smallholders",
+      "kind": "party",
+      "label": {
+        "ko": "독립소농당",
+        "en": "Independent Smallholders' Party (FKGP)"
+      },
+      "termIds": [
+        "independent-smallholders-party"
+      ],
+      "countryCode": "hungary",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Independent Smallholders' Party (FKGP). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1930,
+          null
+        ]
+      ]
+    },
+    {
+      "id": "party-polish-democratic-union",
+      "kind": "party",
+      "label": {
+        "ko": "폴란드 민주연합",
+        "en": "Democratic Union (Poland)"
+      },
+      "termIds": [
+        "democratic-union-poland"
+      ],
+      "countryCode": "poland",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Democratic Union (Poland). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1991,
+          1994
+        ]
+      ]
+    },
+    {
+      "id": "party-czechoslovak-social-democratic",
+      "kind": "party",
+      "label": {
+        "ko": "체코슬로바키아 사회민주노동자당",
+        "en": "Czechoslovak Social Democratic Workers' Party"
+      },
+      "termIds": [
+        "czechoslovak-social-democratic-workers-party"
+      ],
+      "countryCode": "czechoslovakia",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Czechoslovak Social Democratic Workers' Party. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1878,
+          1948
+        ]
+      ]
+    },
+    {
+      "id": "party-finnish-national-progressive",
+      "kind": "party",
+      "label": {
+        "ko": "핀란드 국민진보당",
+        "en": "National Progressive Party (Finland)"
+      },
+      "termIds": [
+        "national-progressive-party-finland"
+      ],
+      "countryCode": "finland",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in National Progressive Party (Finland). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1918,
+          1951
+        ]
+      ]
+    },
+    {
+      "id": "party-belarusian-hramada",
+      "kind": "party",
+      "label": {
+        "ko": "벨라루스 사회주의 흐라마다",
+        "en": "Belarusian Socialist Hramada"
+      },
+      "termIds": [
+        "belarusian-socialist-hramada"
+      ],
+      "countryCode": "belarus",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Belarusian Socialist Hramada. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1902,
+          1924
         ]
       ]
     }
