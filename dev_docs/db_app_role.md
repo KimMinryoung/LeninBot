@@ -88,13 +88,14 @@ shred -u /home/grass/.config/leninbot/app_db_password
 - 상시 서비스 9개가 모두 active다.
 - 새 계정으로 일꾼 작업을 등록·실행·완료했고, LLM 감사 로그가 기록됐다.
 - 전환 이후 인증·권한 오류는 0건이다.
-- 비밀번호 파일은 삭제했다. credstore에는 이전 `postgres` 비밀번호 백업 두 개(`db_password.cred.pre-app-role`, `db_password.cred.bak`)가 남아 있다. 되돌릴 일이 없다고 판단되면 root로 지운다.
+- 비밀번호 파일은 삭제했다.
+- 전환 전 `db_password.cred`의 내용은 postgres 슈퍼유저 비밀번호였다. 소유자가 그 값을 따로 보관하고 있음을 확인한 뒤, 백업 두 개(`.pre-app-role`, `.bak`)를 지웠다. 되돌리려면 그 비밀번호로 `manage_secrets.py rotate DB_PASSWORD`를 다시 실행하고 `.env`를 `postgres`로 바꾼다.
 
 ### 되돌리기 (root)
 
 ```bash
 sed -i 's/^DB_USER=leninbot_app$/DB_USER=postgres/' /home/grass/leninbot/.env
-sudo cp -p /etc/credstore.encrypted/db_password.cred.pre-app-role /etc/credstore.encrypted/db_password.cred
+sudo venv/bin/python scripts/manage_secrets.py rotate DB_PASSWORD   # postgres 비밀번호 입력(백업은 삭제됨)
 sudo systemctl restart leninbot-api leninbot-telegram leninbot-worker leninbot-a2a-api leninbot-roleplay \
   leninbot-browser leninbot-email-api leninbot-llm-proxy novel-writer-api
 ```
