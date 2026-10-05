@@ -1,5 +1,5 @@
 {
-  "version": 18,
+  "version": 19,
   "functions": [
     {
       "id": "political-leadership",
@@ -4293,6 +4293,195 @@
       ],
       "socialistSystem": true,
       "criteria": "Documented activity for this state, its institutions or armed forces. During its one-party socialist period this covers government, legislature, armed forces, security and other state-institution service, including by non-members; documented party membership (including ordinary members holding only state posts), party posts and party cadre work (party first/general secretary, politburo, central committee secretariat and departments, regional party committees) belong to the ruling party, and a person who held both gets both activities. Do NOT infer affiliation from citizenship, residence, research subject, persecution or opposition. Regime opponents retain their documented opposition organization, independent or unresolved affiliation; their earlier state service is a separate activity."
+    },
+    {
+      "id": "party-us-democratic",
+      "kind": "party",
+      "label": {
+        "ko": "미국 민주당",
+        "en": "Democratic Party (United States)"
+      },
+      "termIds": [
+        "democratic-party-united-states"
+      ],
+      "countryCode": "usa",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Democratic Party (United States). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1828,
+          null
+        ]
+      ]
+    },
+    {
+      "id": "party-us-republican",
+      "kind": "party",
+      "label": {
+        "ko": "미국 공화당",
+        "en": "Republican Party (United States)"
+      },
+      "termIds": [
+        "republican-party-united-states"
+      ],
+      "countryCode": "usa",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Republican Party (United States). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1854,
+          null
+        ]
+      ]
+    },
+    {
+      "id": "party-us-socialist",
+      "kind": "party",
+      "label": {
+        "ko": "미국 사회당",
+        "en": "Socialist Party of America"
+      },
+      "termIds": [
+        "socialist-party-of-america"
+      ],
+      "countryCode": "usa",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Socialist Party of America. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1901,
+          1972
+        ]
+      ]
+    },
+    {
+      "id": "party-german-uspd",
+      "kind": "party",
+      "label": {
+        "ko": "독일 독립사회민주당",
+        "en": "Independent Social Democratic Party of Germany (USPD)"
+      },
+      "termIds": [
+        "independent-social-democratic-party-of-germany"
+      ],
+      "countryCode": "germany",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Independent Social Democratic Party of Germany (USPD). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1917,
+          1931
+        ]
+      ]
+    },
+    {
+      "id": "party-russian-cprf",
+      "kind": "party",
+      "label": {
+        "ko": "러시아 연방 공산당",
+        "en": "Communist Party of the Russian Federation (CPRF)"
+      },
+      "termIds": [
+        "communist-party-of-the-russian-federation"
+      ],
+      "countryCode": "russia",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Communist Party of the Russian Federation (CPRF). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1993,
+          null
+        ]
+      ]
+    },
+    {
+      "id": "party-hungarian-social-democratic",
+      "kind": "party",
+      "label": {
+        "ko": "헝가리 사회민주당",
+        "en": "Hungarian Social Democratic Party (MSZDP)"
+      },
+      "termIds": [
+        "social-democratic-party-of-hungary"
+      ],
+      "countryCode": "hungary",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Hungarian Social Democratic Party (MSZDP). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1890,
+          1948
+        ]
+      ]
+    },
+    {
+      "id": "party-polish-socialist",
+      "kind": "party",
+      "label": {
+        "ko": "폴란드 사회당",
+        "en": "Polish Socialist Party (PPS)"
+      },
+      "termIds": [
+        "polish-socialist-party"
+      ],
+      "countryCode": "poland",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Polish Socialist Party (PPS). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1892,
+          1948
+        ]
+      ]
+    },
+    {
+      "id": "party-polish-freedom-union",
+      "kind": "party",
+      "label": {
+        "ko": "폴란드 자유연합",
+        "en": "Freedom Union (Poland)"
+      },
+      "termIds": [
+        "freedom-union-poland"
+      ],
+      "countryCode": "poland",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Freedom Union (Poland). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1994,
+          2005
+        ]
+      ]
+    },
+    {
+      "id": "jacobin-club",
+      "kind": "party",
+      "label": {
+        "ko": "자코뱅파",
+        "en": "Jacobin Club"
+      },
+      "termIds": [
+        "jacobins"
+      ],
+      "countryCode": "france",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Jacobin Club. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1789,
+          1794
+        ]
+      ]
     }
   ],
   "legacy": {
