@@ -78,5 +78,31 @@ class RejectionHintTests(unittest.TestCase):
         self.assertIn("IS allowed for (Organization -> Incident)", reason)
 
 
+
+class AuditMetadataTests(unittest.IsolatedAsyncioTestCase):
+    """Tool result_metadata must pass the audit sink's field allowlist, or the
+    row is rejected (HTTP 400) and blocks the spool batch behind it (2026-10-06)."""
+
+    async def test_write_and_retract_metadata_pass_the_sink(self):
+        from ops import audit_sink
+        from self_runtime import tools
+
+        results = [
+            {"status": "partial_success", "message": "m", "facts_written": 2, "facts_rejected": 1,
+             "rejected_facts": [{"index": 1, "reason": "r", "fact": {}}]},
+            {"status": "error", "message": "m", "facts_written": 0, "facts_rejected": 1, "rejected_facts": []},
+        ]
+        for result in results:
+            with patch("kg_runtime.writes.add_kg_structured_async", new=AsyncMock(return_value=result)):
+                out = await tools._exec_write_kg_structured([_fact("강신철")], group_id="korea_domestic")
+            audit_sink.normalize_row("tool", {"tool_name": "write_kg_structured", "decision": "allow",
+                                              "result_metadata": out.result_metadata})
+        for status in ("retracted", "ambiguous", "refused", "not_found", "error"):
+            with patch("kg_runtime.writes.retract_kg_fact", return_value={"status": status, "message": "m"}):
+                out = await tools._exec_retract_kg_fact("a", "Statement", "b", "reason long enough here")
+            audit_sink.normalize_row("tool", {"tool_name": "retract_kg_fact", "decision": "allow",
+                                              "result_metadata": out.result_metadata})
+
+
 if __name__ == "__main__":
     unittest.main()

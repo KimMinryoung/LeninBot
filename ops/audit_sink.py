@@ -118,7 +118,9 @@ def normalize_row(kind: str, row: dict) -> dict:
             value = json.loads(val) if isinstance(val, str) else val
             if not isinstance(value, dict):
                 raise ValueError(f"{col} must be an object")
-            allowed = {"path", "node_count", "edge_count", "result_count", "empty", "fallback", "execution_kind", "extracted_chars", "returned_chars", "cache_hit", "failure_type", "source_identified", "source_measured", "degraded", "failed", "injected"}
+            allowed = {"path", "node_count", "edge_count", "result_count", "empty", "fallback", "execution_kind", "extracted_chars", "returned_chars", "cache_hit", "failure_type", "source_identified", "source_measured", "degraded", "failed", "injected",
+                       # KG write/retract outcomes (write_kg_structured, retract_kg_fact)
+                       "write_status", "facts_written", "facts_rejected", "retract_status"}
             if set(value) - allowed:
                 raise ValueError(f"unsupported {col} fields")
             for key, item in value.items():
@@ -128,7 +130,7 @@ def normalize_row(kind: str, row: dict) -> dict:
                     valid = type(item) is bool
                 elif key == "execution_kind":
                     valid = item in {"runtime", "test", "unknown"} if isinstance(item, str) else False
-                elif key in {"path", "failure_type"}:
+                elif key in {"path", "failure_type", "write_status", "retract_status"}:
                     import re
                     valid = isinstance(item, str) and re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", item) is not None
                 else:
