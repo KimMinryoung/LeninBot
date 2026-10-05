@@ -1,5 +1,5 @@
 {
-  "version": 21,
+  "version": 22,
   "functions": [
     {
       "id": "political-leadership",
@@ -171,8 +171,8 @@
       "id": "state-afghanistan",
       "kind": "state",
       "label": {
-        "ko": "아프가니스탄",
-        "en": "Afghanistan"
+        "ko": "아프가니스탄 국가기관",
+        "en": "Afghanistan state institutions"
       },
       "countryCode": "afghanistan",
       "icon": "landmark",
@@ -183,8 +183,8 @@
       "id": "state-albania",
       "kind": "state",
       "label": {
-        "ko": "알바니아",
-        "en": "Albania"
+        "ko": "알바니아 국가기관",
+        "en": "Albania state institutions"
       },
       "countryCode": "albania",
       "icon": "landmark",
@@ -195,8 +195,8 @@
       "id": "state-angola",
       "kind": "state",
       "label": {
-        "ko": "앙골라",
-        "en": "Angola"
+        "ko": "앙골라 국가기관",
+        "en": "Angola state institutions"
       },
       "countryCode": "angola",
       "icon": "landmark",
@@ -282,8 +282,8 @@
       "id": "state-benin",
       "kind": "state",
       "label": {
-        "ko": "베냉",
-        "en": "Benin"
+        "ko": "베냉 국가기관",
+        "en": "Benin state institutions"
       },
       "countryCode": "benin",
       "icon": "landmark",
@@ -305,8 +305,8 @@
       "id": "state-bulgaria",
       "kind": "state",
       "label": {
-        "ko": "불가리아",
-        "en": "Bulgaria"
+        "ko": "불가리아 국가기관",
+        "en": "Bulgaria state institutions"
       },
       "countryCode": "bulgaria",
       "icon": "landmark",
@@ -361,8 +361,8 @@
       "id": "state-cuba",
       "kind": "state",
       "label": {
-        "ko": "쿠바",
-        "en": "Cuba"
+        "ko": "쿠바 국가기관",
+        "en": "Cuba state institutions"
       },
       "countryCode": "cuba",
       "icon": "landmark",
@@ -390,8 +390,8 @@
       "id": "state-czechoslovakia",
       "kind": "state",
       "label": {
-        "ko": "체코슬로바키아",
-        "en": "Czechoslovakia"
+        "ko": "체코슬로바키아 국가기관",
+        "en": "Czechoslovakia state institutions"
       },
       "countryCode": "czechoslovakia",
       "icon": "landmark",
@@ -440,8 +440,8 @@
       "id": "state-ethiopia",
       "kind": "state",
       "label": {
-        "ko": "에티오피아",
-        "en": "Ethiopia"
+        "ko": "에티오피아 국가기관",
+        "en": "Ethiopia state institutions"
       },
       "countryCode": "ethiopia",
       "icon": "landmark",
@@ -534,8 +534,8 @@
       "id": "state-grenada",
       "kind": "state",
       "label": {
-        "ko": "그레나다",
-        "en": "Grenada"
+        "ko": "그레나다 국가기관",
+        "en": "Grenada state institutions"
       },
       "countryCode": "grenada",
       "icon": "landmark",
@@ -557,8 +557,8 @@
       "id": "state-hungary",
       "kind": "state",
       "label": {
-        "ko": "헝가리",
-        "en": "Hungary"
+        "ko": "헝가리 국가기관",
+        "en": "Hungary state institutions"
       },
       "countryCode": "hungary",
       "icon": "landmark",
@@ -692,8 +692,8 @@
       "id": "state-laos",
       "kind": "state",
       "label": {
-        "ko": "라오스",
-        "en": "Laos"
+        "ko": "라오스 국가기관",
+        "en": "Laos state institutions"
       },
       "countryCode": "laos",
       "icon": "landmark",
@@ -746,8 +746,8 @@
       "id": "state-madagascar",
       "kind": "state",
       "label": {
-        "ko": "마다가스카르",
-        "en": "Madagascar"
+        "ko": "마다가스카르 국가기관",
+        "en": "Madagascar state institutions"
       },
       "countryCode": "madagascar",
       "icon": "landmark",
@@ -775,8 +775,8 @@
       "id": "state-mongolia",
       "kind": "state",
       "label": {
-        "ko": "몽골",
-        "en": "Mongolia"
+        "ko": "몽골 국가기관",
+        "en": "Mongolia state institutions"
       },
       "countryCode": "mongolia",
       "icon": "landmark",
@@ -787,8 +787,8 @@
       "id": "state-mozambique",
       "kind": "state",
       "label": {
-        "ko": "모잠비크",
-        "en": "Mozambique"
+        "ko": "모잠비크 국가기관",
+        "en": "Mozambique state institutions"
       },
       "countryCode": "mozambique",
       "icon": "landmark",
@@ -832,8 +832,8 @@
       "id": "state-poland",
       "kind": "state",
       "label": {
-        "ko": "폴란드",
-        "en": "Poland"
+        "ko": "폴란드 국가기관",
+        "en": "Poland state institutions"
       },
       "countryCode": "poland",
       "icon": "landmark",
@@ -855,8 +855,8 @@
       "id": "state-republic-of-congo",
       "kind": "state",
       "label": {
-        "ko": "콩고공화국",
-        "en": "Republic of the Congo"
+        "ko": "콩고공화국 국가기관",
+        "en": "Republic of the Congo state institutions"
       },
       "countryCode": "republic-of-congo",
       "icon": "landmark",
@@ -867,8 +867,8 @@
       "id": "state-romania",
       "kind": "state",
       "label": {
-        "ko": "루마니아",
-        "en": "Romania"
+        "ko": "루마니아 국가기관",
+        "en": "Romania state institutions"
       },
       "countryCode": "romania",
       "icon": "landmark",
@@ -879,8 +879,8 @@
       "id": "state-somalia",
       "kind": "state",
       "label": {
-        "ko": "소말리아",
-        "en": "Somalia"
+        "ko": "소말리아 국가기관",
+        "en": "Somalia state institutions"
       },
       "countryCode": "somalia",
       "icon": "landmark",
@@ -1019,8 +1019,8 @@
       "id": "ukraine-peoples-republic",
       "kind": "state",
       "label": {
-        "ko": "우크라이나 인민공화국",
-        "en": "Ukrainian People's Republic"
+        "ko": "우크라이나 인민공화국 국가기관",
+        "en": "Ukrainian People's Republic state institutions"
       },
       "countryCode": "ukraine",
       "icon": "landmark",
@@ -1037,8 +1037,8 @@
       "id": "ukraine-hetmanate",
       "kind": "state",
       "label": {
-        "ko": "우크라이나국 (헤트만국)",
-        "en": "Ukrainian State (Hetmanate)"
+        "ko": "우크라이나국 (헤트만국) 국가기관",
+        "en": "Ukrainian State (Hetmanate) state institutions"
       },
       "countryCode": "ukraine",
       "icon": "crown",
@@ -1055,8 +1055,8 @@
       "id": "soviet-ukraine",
       "kind": "state",
       "label": {
-        "ko": "소비에트 우크라이나",
-        "en": "Soviet Ukraine"
+        "ko": "소비에트 우크라이나 국가기관",
+        "en": "Soviet Ukraine state institutions"
       },
       "countryCode": "ukraine",
       "icon": "landmark",
@@ -1102,8 +1102,8 @@
       "id": "state-vietnam",
       "kind": "state",
       "label": {
-        "ko": "베트남",
-        "en": "Vietnam"
+        "ko": "베트남 국가기관",
+        "en": "Vietnam state institutions"
       },
       "countryCode": "vietnam",
       "icon": "landmark",
@@ -1125,8 +1125,8 @@
       "id": "state-yugoslavia",
       "kind": "state",
       "label": {
-        "ko": "유고슬라비아",
-        "en": "Yugoslavia"
+        "ko": "유고슬라비아 국가기관",
+        "en": "Yugoslavia state institutions"
       },
       "countryCode": "yugoslavia",
       "icon": "landmark",
@@ -1194,8 +1194,8 @@
       "id": "china-qing",
       "kind": "state",
       "label": {
-        "ko": "청 왕조",
-        "en": "Qing dynasty"
+        "ko": "청 왕조 국가기관",
+        "en": "Qing dynasty state institutions"
       },
       "countryCode": "china",
       "icon": "crown",
@@ -1248,8 +1248,8 @@
       "id": "russian-empire",
       "kind": "state",
       "label": {
-        "ko": "러시아 제국",
-        "en": "Russian Empire"
+        "ko": "러시아 제국 국가기관",
+        "en": "Russian Empire state institutions"
       },
       "countryCode": "russia",
       "icon": "crown",
@@ -1523,8 +1523,8 @@
       "id": "spanish-republic",
       "kind": "state",
       "label": {
-        "ko": "스페인 공화파",
-        "en": "Spanish Republic"
+        "ko": "스페인 공화파 국가기관",
+        "en": "Spanish Republic state institutions"
       },
       "countryCode": "spain",
       "icon": "landmark",
@@ -1634,8 +1634,8 @@
       "id": "french-monarchy",
       "kind": "state",
       "label": {
-        "ko": "프랑스 왕정",
-        "en": "French monarchy"
+        "ko": "프랑스 왕정 국가기관",
+        "en": "French monarchy state institutions"
       },
       "countryCode": "france",
       "icon": "crown",
@@ -1786,8 +1786,8 @@
       "id": "russian-provisional-government",
       "kind": "state",
       "label": {
-        "ko": "러시아 임시정부",
-        "en": "Russian Provisional Government"
+        "ko": "러시아 임시정부 국가기관",
+        "en": "Russian Provisional Government state institutions"
       },
       "termIds": [
         "russian-provisional-government"
@@ -4165,8 +4165,8 @@
       "id": "china-prc",
       "kind": "state",
       "label": {
-        "ko": "중화인민공화국",
-        "en": "People’s Republic of China"
+        "ko": "중화인민공화국 국가기관",
+        "en": "People’s Republic of China state institutions"
       },
       "countryCode": "china",
       "icon": "landmark",
@@ -4184,8 +4184,8 @@
       "id": "state-soviet",
       "kind": "state",
       "label": {
-        "ko": "소련",
-        "en": "Soviet Union"
+        "ko": "소련 국가기관",
+        "en": "Soviet Union state institutions"
       },
       "countryCode": "soviet",
       "icon": "landmark",
@@ -4203,8 +4203,8 @@
       "id": "state-east-germany",
       "kind": "state",
       "label": {
-        "ko": "동독",
-        "en": "East Germany"
+        "ko": "동독 국가기관",
+        "en": "East Germany state institutions"
       },
       "countryCode": "east-germany",
       "icon": "landmark",
@@ -4222,8 +4222,8 @@
       "id": "state-north-korea",
       "kind": "state",
       "label": {
-        "ko": "조선민주주의인민공화국",
-        "en": "Democratic People’s Republic of Korea"
+        "ko": "조선민주주의인민공화국 국가기관",
+        "en": "Democratic People’s Republic of Korea state institutions"
       },
       "countryCode": "north-korea",
       "icon": "landmark",
@@ -4241,8 +4241,8 @@
       "id": "state-south-yemen",
       "kind": "state",
       "label": {
-        "ko": "남예멘",
-        "en": "South Yemen"
+        "ko": "남예멘 국가기관",
+        "en": "South Yemen state institutions"
       },
       "countryCode": "yemen",
       "icon": "landmark",
@@ -4260,8 +4260,8 @@
       "id": "state-democratic-kampuchea",
       "kind": "state",
       "label": {
-        "ko": "민주 캄푸치아",
-        "en": "Democratic Kampuchea"
+        "ko": "민주 캄푸치아 국가기관",
+        "en": "Democratic Kampuchea state institutions"
       },
       "countryCode": "cambodia",
       "icon": "landmark",
@@ -4279,8 +4279,8 @@
       "id": "state-peoples-kampuchea",
       "kind": "state",
       "label": {
-        "ko": "캄푸치아 인민공화국",
-        "en": "People’s Republic of Kampuchea"
+        "ko": "캄푸치아 인민공화국 국가기관",
+        "en": "People’s Republic of Kampuchea state institutions"
       },
       "countryCode": "cambodia",
       "icon": "landmark",
