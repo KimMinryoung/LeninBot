@@ -172,11 +172,7 @@ Workflow:
      places itself in the chronological view. A decade label takes the decade start
      (1980년대 -> 1980), a century label the century start (19세기 -> 1800). endYear is
      null for anything still current.
-   - category, one of: theory, economy, party-state, factions, repression,
-     nationalities, culture, international, korea, contemporary. Pick by what the term
-     primarily is, not by where it was used: a persecution campaign is repression even
-     when its subject is the arts, a Soviet reform-economics debate is economy.
-     An entry left without one shows on the glossary as 'Uncategorized'.
+   category and region are assigned by the runner's classifier; do not choose them.
    Optional, and only when it is plainly true: parentId, the id of the registered entry
    this term is a PART of, which nests it under that entry (예조프시나 -> great-purge).
    Use it for a component, phase, organ or instrument of a larger campaign already in the

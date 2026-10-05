@@ -83,27 +83,56 @@ GROUP_RULES = {
 
 
 TERM_FEATURE = "commulingo_term_classification"
-# Topic-first: a French Revolution faction is "factions", a foreign camp is
-# "repression"; "international" is relations between states and the world
-# movement; "contemporary" is present-day capitalism. Against the 1,086 stored
-# terms (themselves writer-chosen) this agreed 813/1,086, 628/714 at conf ≥0.85.
+# Kind-first since frontend migration 286: the category says what the term
+# names, and the separate region says where its main arena is. The old ten
+# mixed both axes (korea, contemporary, international), and the catch-alls
+# grew without a rule for which axis wins. Against all 1,310 stored terms
+# these rules left 445 under 0.8 on either axis; a reading of those changed
+# 130, so the accepted ≥0.8 answers stand as written.
 TERM_RULES = {
-    "theory": "Ideologies, doctrines, -isms, concepts, theoretical and historiographical terms of Marxism, socialism and "
-              "their critics.",
-    "economy": "Economic policies, institutions, campaigns and economic concepts — Soviet planning as well as monetary and "
-               "industrial policy anywhere and in any era.",
-    "party-state": "Party and state organs, offices, congresses, constitutions, military commands and political events of a "
-                   "state or party (Soviet, Russian, or a revolutionary state abroad such as revolutionary France).",
-    "factions": "Intra-party factions, oppositions, platforms and line struggles, in any party.",
-    "repression": "Terror, security organs, camps, trials, repressive laws, censorship and rehabilitation, in any state.",
-    "nationalities": "Nationalities policy, ethnic questions, deportations, republic and minority statuses.",
-    "culture": "Culture, education, science and technology, arts, media and everyday life.",
-    "international": "Relations BETWEEN states and the world movement: diplomacy, treaties, wars and campaigns between "
-                     "states, international organizations and payment systems, foreign communist parties, liberation "
-                     "fronts and the Cold War order.",
-    "korea": "Korean politics, economy and society, any era.",
-    "contemporary": "Present-day capitalism since the 1990s: today's labour, finance, technology, AI, platforms, climate "
-                    "and policy debates.",
+    "theory": "Ideologies, doctrines, -isms, concepts, slogans and strategic or tactical doctrines; theoretical, "
+              "historiographical and methodological terms (including estimates and debates among historians); "
+              "programmatic texts and works (Critique of the Gotha Programme, April Theses); official doctrines and "
+              "ideological formulas of a state or party.",
+    "parties": "Political parties of any country and era with their own organs, congresses, conferences and programmes "
+               "(Politburo, a party congress); internationals (Comintern, Profintern); trade unions, youth, women's, "
+               "mass and armed political organizations such as Red Guards or militias of a party.",
+    "state": "States, regimes and republics as polities; constitutions; governments, ministries, commissariats, "
+             "councils, legislatures, soviets and their congresses; offices and titles; elections, administrative "
+             "divisions, the nomenklatura and other institutions of state power.",
+    "factions": "Intra-party factions, oppositions, platforms, tendencies and line struggles inside a party or movement, "
+                "in any country.",
+    "events": "Revolutions, uprisings, rebellions, coups, mutinies, strikes, protests, political crises and mass "
+              "political movements or campaigns as events — unless the event is a war or battle (military), a purge "
+              "or terror (repression), or an economic campaign (economy).",
+    "military": "Wars, battles, sieges, military operations and campaigns, armies, units and commands, defence lines, "
+                "weapons and military technology, military doctrine, occupation and partisan warfare.",
+    "diplomacy": "Relations between states: treaties, pacts, agreements, summits, alliances and blocs, interstate "
+                 "organizations (Warsaw Pact, OEEC), borders settled between states, foreign-policy doctrines, the "
+                 "Cold War order and international payment systems.",
+    "repression": "Terror, purges, security and police organs, camps, prisons, trials, criminal law and repressive "
+                  "decrees, deportations of social groups, censorship, persecution, pogroms and genocide, rehabilitation.",
+    "economy": "Economic policies, plans, reforms, institutions, campaigns and concepts in any era — Soviet planning, "
+               "collectivization, NEP, money and finance, industry, trade, and present-day capitalism's markets, "
+               "finance, platforms and firms.",
+    "nationalities": "Nationalities policy, ethnic and national questions, autonomies, minority statuses, deportations "
+                     "of peoples, national identity; religion, churches, cults and anti-religious campaigns.",
+    "culture": "Literature, arts, education, science and technology, space flight, newspapers, news agencies, radio, "
+               "propaganda and official narratives, intellectual life.",
+    "society": "Social classes and groups, everyday life, labour conditions, family, women and gender, health, housing, "
+               "demography, migration, sport, and present-day social debates (climate, work, inequality).",
+}
+TERM_REGION_RULES = {
+    "russia-ussr": "The Russian Empire, Soviet Russia, the USSR and its republics, and present-day Russia.",
+    "europe": "European countries other than Russia and the USSR, including the people's democracies and post-Soviet "
+              "states west of Russia.",
+    "korea": "Korea in any era: Joseon, colonial Korea, North and South Korea, Koreans abroad.",
+    "china": "China, including Taiwan, Hong Kong, Manchuria and the Chinese revolution.",
+    "asia": "Japan, Mongolia, Vietnam, Southeast Asia, South Asia, Central Asian states after 1991, Oceania.",
+    "americas": "North, Central and South America and the Caribbean.",
+    "middle-east-africa": "West Asia, Iran, Turkey, North Africa and sub-Saharan Africa.",
+    "world": "A concept, theory, organization or order not tied to one region, or an international term spanning "
+             "several regions roughly equally (world wars as a whole, the Comintern, Marxist concepts, global capitalism).",
 }
 
 
@@ -128,10 +157,31 @@ def load_term_categories() -> list[dict]:
     return rows
 
 
-def term_questions(categories: list[dict]) -> dict:
-    return {"category": {"type": "choice", "instructions": "Which glossary category does this term belong to?",
-                         "criteria": {c["id"]: f"{c['label_en']} / {c['label_ko']}. {TERM_RULES.get(c['id'], '')}"
-                                      for c in categories}}}
+def load_term_regions() -> list[dict]:
+    """Rows of commulingo_term_regions; empty (no region question) when unreachable."""
+    try:
+        from db import query
+        return query("SELECT id, label_ko, label_en FROM commulingo_term_regions ORDER BY sort_order, id") or []
+    except Exception as exc:
+        logger.warning("term regions unavailable for classification (%s); classifying the kind only", exc)
+        return []
+
+
+def term_questions(categories: list[dict], regions: list[dict] | None = None) -> dict:
+    questions = {"category": {
+        "type": "choice",
+        "instructions": "What kind of thing is this glossary term? Classify by what the term names, not by where or "
+                        "when it happened.",
+        "criteria": {c["id"]: f"{c['label_en']} / {c['label_ko']}. {TERM_RULES.get(c['id'], '')}" for c in categories}}}
+    if regions:
+        questions["region"] = {
+            "type": "choice",
+            "instructions": "Which region is the main arena of this term? Pick the country where it happened or "
+                            "applied; a treaty or war between countries goes to the region where it was mainly fought "
+                            "or mattered most.",
+            "criteria": {r["id"]: f"{r['label_en']} / {r['label_ko']}. {TERM_REGION_RULES.get(r['id'], '')}"
+                         for r in regions}}
+    return questions
 
 
 def term_state(fields: dict) -> dict:
@@ -148,15 +198,17 @@ def term_state(fields: dict) -> dict:
             "body_ko": joined(fields.get("body"), "ko")[:1500], "body_en": joined(fields.get("body"), "en")[:800]}
 
 
-def classify_term(fields: dict, *, categories=None, decide=None) -> dict | None:
-    """{"category", "confidence", "low_confidence", "model"} for a drafted term, or None when unavailable."""
+def classify_term(fields: dict, *, categories=None, regions=None, decide=None) -> dict | None:
+    """{"category", "confidence", "region", "region_confidence", "low_confidence", "model"} for a drafted
+    term, or None when unavailable. region is None when the registry or the answer is missing."""
     from llm.call_registry import decide_detailed
 
     enabled, accept = _profile(TERM_FEATURE)
     if not enabled:
         return None
     categories = categories or load_term_categories()
-    result = (decide or decide_detailed)(TERM_FEATURE, term_state(fields), term_questions(categories),
+    regions = load_term_regions() if regions is None else regions
+    result = (decide or decide_detailed)(TERM_FEATURE, term_state(fields), term_questions(categories, regions),
                                          label="term-classification")
     decision = result.decision
     if decision is None:
@@ -166,15 +218,23 @@ def classify_term(fields: dict, *, categories=None, decide=None) -> dict | None:
     if category not in {c["id"] for c in categories}:
         return None
     conf = round(decision.confidence("category") or 0.0, 3)
-    return {"category": category, "confidence": conf, "low_confidence": conf < accept, "model": decision.model}
+    region = decision.choice("region") if regions else None
+    if region not in {r["id"] for r in regions}:
+        region = None
+    region_conf = round(decision.confidence("region") or 0.0, 3) if region else None
+    low = conf < accept or (region_conf is not None and region_conf < accept)
+    return {"category": category, "confidence": conf, "region": region, "region_confidence": region_conf,
+            "low_confidence": low, "model": decision.model}
 
 
 def fill_term_category(fields: dict, classification: dict | None) -> dict:
-    """The classifier's category; nothing to fall back on when it is unavailable."""
+    """The classifier's category and region; nothing to fall back on when it is unavailable."""
     out = dict(fields)
     if classification is None:
         return out
     out["category"] = classification["category"]
+    if classification.get("region"):
+        out["region"] = classification["region"]
     return out
 
 

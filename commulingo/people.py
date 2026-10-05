@@ -347,7 +347,7 @@ _HISTORY_EVENT_SECTION_PATCH_KEYS = frozenset({"heading", "body", "after"})
 # both are required on create rather than backfilled later by hand.
 _TERM_PATCH_KEYS = frozenset({
     "id", "sortOrder", "term", "original", "period", "startYear", "endYear",
-    "category", "definition", "body", "aliases", "people", "events", "sources",
+    "category", "region", "definition", "body", "aliases", "people", "events", "sources",
     "parentId", "expectedRevision", "evidence",
 })
 _LOCALIZED_TERM_KEYS = ("term", "definition", "body", "period")
@@ -381,11 +381,12 @@ _PATCH_KEYS_BY_TARGET = {
 # is reachable, and the loader logs a warning on every fall back so a stale copy
 # announces itself.
 _TERM_CATEGORY_FALLBACK = (
-    ("theory", "Ideology and theory"), ("economy", "Economy and planning"),
-    ("party-state", "Party and state"), ("factions", "Factions and line struggles"),
-    ("repression", "Repression and law"), ("nationalities", "Nationalities"),
-    ("culture", "Culture and education"), ("international", "International movement"),
-    ("korea", "Korean political economy"), ("contemporary", "Contemporary capitalism"),
+    ("theory", "Ideology and theory"), ("parties", "Parties and organizations"),
+    ("state", "State and government"), ("factions", "Factions and line struggles"),
+    ("events", "Revolutions and movements"), ("military", "War and the military"),
+    ("diplomacy", "Diplomacy and world order"), ("repression", "Repression and law"),
+    ("economy", "Economy"), ("nationalities", "Nations and religion"),
+    ("culture", "Culture, science and media"), ("society", "Society and everyday life"),
 )
 
 

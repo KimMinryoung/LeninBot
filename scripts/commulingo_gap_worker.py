@@ -344,9 +344,8 @@ Otherwise research it (Wikipedia first, Russian article for Soviet-era vocabular
 least one source outside Wikipedia) and make exactly one commulingo_term_create call with
 term {{ko,en}}, original (native-script form), definition {{ko,en}} (2-3 sentences; depth
 goes in body), aliases {{ko,en}} including the exact spelling the event text uses, period
-{{ko,en}}, startYear/endYear when the label names a year, and category, one of: theory,
-economy, party-state, factions, repression, nationalities, culture, international, korea,
-contemporary. Keep citations top-level.
+{{ko,en}}, and startYear/endYear when the label names a year. The runner assigns category
+and region. Keep citations top-level.
 """
 
 

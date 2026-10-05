@@ -152,15 +152,19 @@ if __name__ == '__main__':
 
 TERM_CATS = [{'id': 'theory', 'label_ko': '이념·이론', 'label_en': 'Ideology and theory'},
              {'id': 'economy', 'label_ko': '경제·계획', 'label_en': 'Economy and planning'}]
+TERM_REGIONS = [{'id': 'russia-ussr', 'label_ko': '러시아·소련', 'label_en': 'Russia and the USSR'},
+                {'id': 'world', 'label_ko': '세계', 'label_en': 'World'}]
 TERM_PROFILE = CallSiteProfile(feature=cc.TERM_FEATURE, provider='openrouter', model='typesafe/jev-1.13',
                                extra={'thresholds': {'accept': 0.7}})
 TERM = {'term': {'ko': '전시 공산주의', 'en': 'War communism'}, 'period': {'ko': '1918–1921', 'en': '1918–1921'},
         'definition': {'ko': ['내전기 경제 체제.'], 'en': ['Civil-war economic system.']}, 'body': {'ko': '본문', 'en': 'Body'}}
 
 
-def term_result(category, conf):
+def term_result(category, conf, region='russia-ussr', region_conf=0.9):
     return DecisionResult(decision=Decision(answers={
-        'category': {'choice': category, 'confidence': conf, 'probabilities': {category: conf}}}, model='typesafe/jev-test'))
+        'category': {'choice': category, 'confidence': conf, 'probabilities': {category: conf}},
+        'region': {'choice': region, 'confidence': region_conf, 'probabilities': {region: region_conf}}},
+        model='typesafe/jev-test'))
 
 
 class ClassifyTermTests(unittest.TestCase):
@@ -173,24 +177,34 @@ class ClassifyTermTests(unittest.TestCase):
         self.assertEqual(state['aliases'], ['군사공산주의', 'military communism'])
         self.assertEqual(state['parent_term'], 'nep')
         self.assertEqual(state['period'], '1918–1921')
-        criteria = cc.term_questions(TERM_CATS)['category']['criteria']
-        self.assertIn('Soviet planning', criteria['economy'])
+        questions = cc.term_questions(TERM_CATS, TERM_REGIONS)
+        self.assertIn('Soviet planning', questions['category']['criteria']['economy'])
+        self.assertIn('USSR', questions['region']['criteria']['russia-ussr'])
+        self.assertNotIn('region', cc.term_questions(TERM_CATS, []))
 
     def test_category_always_comes_from_the_classifier(self):
         def decide(feature, state, questions, label=None):
             self.assertEqual(feature, cc.TERM_FEATURE)
             return term_result('economy', 0.93)
-        out = cc.classify_term(TERM, categories=TERM_CATS, decide=decide)
-        self.assertEqual((out['category'], out['low_confidence']), ('economy', False))
-        self.assertEqual(cc.fill_term_category({**TERM, 'category': 'theory'}, out)['category'], 'economy')
-        unsure = cc.classify_term(TERM, categories=TERM_CATS, decide=lambda *a, **k: term_result('economy', 0.4))
+        out = cc.classify_term(TERM, categories=TERM_CATS, regions=TERM_REGIONS, decide=decide)
+        self.assertEqual((out['category'], out['region'], out['low_confidence']), ('economy', 'russia-ussr', False))
+        filled = cc.fill_term_category({**TERM, 'category': 'theory'}, out)
+        self.assertEqual((filled['category'], filled['region']), ('economy', 'russia-ussr'))
+        vague = cc.classify_term(TERM, categories=TERM_CATS, regions=TERM_REGIONS,
+                                 decide=lambda *a, **k: term_result('economy', 0.93, 'world', 0.5))
+        self.assertTrue(vague['low_confidence'])
+        unknown = cc.classify_term(TERM, categories=TERM_CATS, regions=TERM_REGIONS,
+                                   decide=lambda *a, **k: term_result('economy', 0.93, 'atlantis'))
+        self.assertIsNone(unknown['region'])
+        self.assertNotIn('region', cc.fill_term_category(TERM, unknown))
+        unsure = cc.classify_term(TERM, categories=TERM_CATS, regions=TERM_REGIONS, decide=lambda *a, **k: term_result('economy', 0.4))
         self.assertTrue(unsure['low_confidence'])
         self.assertEqual(cc.fill_term_category(TERM, unsure)['category'], 'economy')
 
     def test_unavailable_or_unknown_category_is_none(self):
-        self.assertIsNone(cc.classify_term(TERM, categories=TERM_CATS,
+        self.assertIsNone(cc.classify_term(TERM, categories=TERM_CATS, regions=TERM_REGIONS,
                                            decide=lambda *a, **k: DecisionResult(error_kind='server', error='503')))
-        self.assertIsNone(cc.classify_term(TERM, categories=TERM_CATS, decide=lambda *a, **k: term_result('nope', 0.9)))
+        self.assertIsNone(cc.classify_term(TERM, categories=TERM_CATS, regions=TERM_REGIONS, decide=lambda *a, **k: term_result('nope', 0.9)))
         self.assertEqual(cc.fill_term_category({**TERM, 'category': 'theory'}, None)['category'], 'theory')
 
 
