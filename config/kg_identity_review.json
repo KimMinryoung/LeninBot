@@ -5995,6 +5995,38 @@
       "action": "rename",
       "reason": "KG 이름 표기 표준: 한글 표준명 (2026-10-06)",
       "evidence_sync_keys": []
+    },
+    {
+      "uuid": "91f47709-e3e4-4ba7-9722-a6f7fc2ed262",
+      "target_uuid": "05490004-61cd-4786-92bb-badd75290943",
+      "original_name": "국가과학수사연구원",
+      "name": "국가과학수사연구원",
+      "action": "merge",
+      "reason": "국과수 공식 명칭은 국립과학수사연구원; 국가과학수사연구원은 오기 (2026-10-06)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "05490004-61cd-4786-92bb-badd75290943",
+      "target_uuid": "05490004-61cd-4786-92bb-badd75290943",
+      "original_name": "국과수",
+      "name": "국립과학수사연구원",
+      "action": "keep",
+      "reason": "통용 약칭 국과수를 공식 명칭 노드로 해석 (2026-10-06)",
+      "types": [
+        "Organization"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "evidence_sync_keys": []
     }
   ]
 }
