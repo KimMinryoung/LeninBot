@@ -65,6 +65,7 @@ Requirements:
 - Keep the writer's tone: casual blog posts may stay casual, Cyber-Lenin diary entries may stay analytical and political.
 - For curation entries, preserve the distinction between source title, selection rationale, and context.
 - Use South Korea/Korean for 한국 when that is the meaning.
+- Fixed names: translate 공산링고 (the site's learning service) as exactly "CommuLingo", never "Communist Ringo" or a romanization.
 - Return strict JSON only, with exactly these keys: "title_en", "content_en".
 """
 

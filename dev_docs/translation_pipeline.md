@@ -21,6 +21,7 @@
 - `translation_runtime/storage.py`: 원문 해시와 원자적 파일 교체. 기존 파일 권한을 유지하며 새 파일은 0644로 만든다.
 - `translation_runtime/batch_state.py`: 반복 검증 실패의 48시간 보류 기록. 최신성 판단은 DB가 맡고, 이 로컬 파일은 삭제되어도 번역 데이터에 영향이 없다.
 - `scripts/_translation_common.py`: 사이트 필드 검증·JSON 파싱과 기존 호출부용 호환 import. 별도 번역 실행 루프를 소유하지 않는다.
+- 고정 이름(`translation_runtime/structure.py`의 `FIXED_NAMES`, 현재 공산링고 → CommuLingo): 사이트 LLM 프롬프트(DB 콘텐츠·연구 Markdown·정적 페이지)에 명시하고, `fixed_name_problems`가 DB 필드·Markdown·정적 페이지 검증에서 영어형 누락이나 직역·음역(Communist Ringo, Gongsan Ringo)을 실패로 돌려 재번역시킨다. 지시를 받지 않는 DeepL에는 `apply_fixed_names`로 영어형을 미리 넣어 보낸다. 이름을 추가하면 프롬프트 세 곳도 같이 고친다.
 - `llm/call_registry.py`: provider 설정 해석, 상세 생성 결과, 정책·사용량 감사. 표준 번역 호출은 registry → LLM gateway → 키 주입 프록시를 지난다.
 - 정적 페이지 DeepL 경로는 별도 HTTP 어댑터다. HTML 검증은 공유하지만 LLM registry와 공통 생성 재시도 루프를 사용하지 않는다. 사료 용어 추출·감사도 `terms.py`의 별도 보고 작업이다.
 

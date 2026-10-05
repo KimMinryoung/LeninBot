@@ -53,6 +53,7 @@ Requirements:
   - 종속 = dependency or subordination, depending on context.
   - 한반도 = Korean Peninsula.
   - 한국 = South Korea or Korean, depending on context.
+  - 공산링고 = CommuLingo (the site's learning service), exactly; never "Communist Ringo" or a romanization.
 - Keep proper names and organization names sensible. Do not invent Western politician names.
 
 Return only the translated markdown. No code fence around the whole document.

@@ -36,6 +36,8 @@ PROMPT = """You are a meticulous Korean-to-English translation editor.
 Translate this Cyber-Lenin research page into polished, publication-quality
 English. Preserve the author's analytical stance and terminology. Do not
 summarize, omit, soften, expand, or fact-check the argument.
+Translate 공산링고 (the site's learning service) as exactly "CommuLingo", never
+"Communist Ringo" or a romanization.
 
 Critical HTML rules:
 - Return the same inner HTML structure as the source html_body.
@@ -95,6 +97,9 @@ def _deepl_translate_texts(
 
     if not texts:
         return []
+    from translation_runtime.structure import apply_fixed_names
+    texts = [apply_fixed_names(text) for text in texts]
+    context = apply_fixed_names(context)
     payload: dict[str, Any] = {
         "text": texts,
         "source_lang": source_lang,
@@ -213,8 +218,10 @@ def _validate_translation(source: dict[str, Any], translated: dict[str, Any], *,
     validation_error = _validate_inner_html(cleaned["html_body_en"], "html_body_en")
     if validation_error:
         raise ValueError(validation_error)
-    from translation_runtime.structure import html_problems
+    from translation_runtime.structure import fixed_name_problems, html_problems
     problems = html_problems(str(source.get("html_body") or ""), cleaned["html_body_en"])
+    for key in ("title", "summary", "html_body"):
+        problems.extend(f"{key}_en: {p}" for p in fixed_name_problems(str(source.get(key) or ""), cleaned[f"{key}_en"]))
     if problems:
         raise ValueError("; ".join(problems))
 

@@ -176,8 +176,9 @@ def field_translation_problems(
             problems.append(f"{label}: the source text was returned untranslated")
     if tag_sequence(source) != tag_sequence(target):
         problems.append(f"{label}: HTML tag sequence differs from the source")
-    from translation_runtime.structure import html_problems
+    from translation_runtime.structure import fixed_name_problems, html_problems
     problems.extend(f"{label}: {p}" for p in html_problems(source, target))
+    problems.extend(f"{label}: {p}" for p in fixed_name_problems(source, target))
     if url_multiset(source) != url_multiset(target):
         problems.append(f"{label}: URLs differ from the source; copy link destinations verbatim")
     return problems

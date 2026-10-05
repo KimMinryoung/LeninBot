@@ -50,6 +50,29 @@ class HTMLSignature(HTMLParser):
             self.visible.append(data)
 
 
+# Site names with one fixed English form. Left alone, the model calques
+# 공산링고 as "Communist Ringo" or romanizes it as "Gongsan Ringo" (posts 38–39,
+# diaries 298/372/408 until 2026-10-05).
+FIXED_NAMES = (
+    ("공산링고", "CommuLingo", re.compile(r"\bRingo\b|Gongsan[ -]?[LR]ingo", re.IGNORECASE)),
+)
+
+
+def apply_fixed_names(text: str) -> str:
+    """Put the English form in before a translator that takes no instructions (DeepL)."""
+    for korean, english, _ in FIXED_NAMES:
+        text = text.replace(korean, english)
+    return text
+
+
+def fixed_name_problems(source: str, target: str) -> list[str]:
+    problems = []
+    for korean, english, wrong in FIXED_NAMES:
+        if korean in (source or "") and (english not in (target or "") or wrong.search(target or "")):
+            problems.append(f'Translate {korean} as exactly "{english}" every time, never a calque or romanization')
+    return problems
+
+
 def html_problems(source: str, target: str) -> list[str]:
     a, b = HTMLSignature(source), HTMLSignature(target)
     problems = []
@@ -137,6 +160,7 @@ def markdown_problems(source: str, target: str) -> list[str]:
                         )
                     break  # One concrete correction per attempt keeps prompts bounded.
     problems.extend(html_problems(a[3], b[3]))
+    problems.extend(fixed_name_problems(source, target))
     return problems
 
 

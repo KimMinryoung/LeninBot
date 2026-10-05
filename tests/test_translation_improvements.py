@@ -8,7 +8,7 @@ from unittest.mock import Mock, patch
 from translation_runtime.archival import core
 from translation_runtime import TranslationCallError
 from translation_runtime.batch_state import BatchState
-from translation_runtime.structure import markdown_problems, translate_oversized_markdown
+from translation_runtime.structure import fixed_name_problems, markdown_problems, translate_oversized_markdown
 
 
 class AssemblyProvenance(unittest.TestCase):
@@ -331,6 +331,22 @@ class EvaluationAdapters(unittest.TestCase):
         self.assertIn('한글코드', generate.call_args.args[1])
         self.assertEqual(result['text'], 'bad output')
         self.assertEqual(generate.call_count, 1)
+
+
+class FixedNames(unittest.TestCase):
+    def test_commulingo_is_never_calqued_or_romanized(self):
+        from scripts._translation_common import field_translation_problems
+        self.assertEqual(fixed_name_problems("공산링고 페이지", "CommuLingo page"), [])
+        self.assertTrue(fixed_name_problems("공산링고 페이지", "Communist Ringo page"))
+        self.assertTrue(fixed_name_problems("공산링고 페이지", "Gongsan Ringo page"))
+        self.assertTrue(fixed_name_problems("공산링고와 공산링고", "CommuLingo and Communist Ringo"))
+        self.assertEqual(fixed_name_problems("공산성", "Gongsanseong"), [])
+        self.assertTrue(markdown_problems("# 공산링고", "# Communist Ringo"))
+        self.assertTrue(field_translation_problems("공산링고 학습", "Communist Ringo learning", label="title_en"))
+
+    def test_deepl_input_carries_the_english_name(self):
+        from translation_runtime.structure import apply_fixed_names
+        self.assertEqual(apply_fixed_names("공산링고에서 배우기"), "CommuLingo에서 배우기")
 
 
 if __name__ == '__main__':
