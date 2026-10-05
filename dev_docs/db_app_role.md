@@ -1,6 +1,6 @@
 # leninbot DB 계정 전환: postgres → leninbot_app
 
-2026-10-05 준비(frontend `dev_docs/commulingo-admin-mcp.md` 5단계, `commulingo-agent-pipeline.md` W6). leninbot 서비스는 지금 `postgres` 슈퍼유저로 접속한다. 이 상태에서는 테이블 권한이 아무 의미가 없으므로, leninbot 전용 로그인 `leninbot_app`으로 바꾸고 CommuLingo(frontend 소유) 테이블에는 권한을 주지 않는다.
+2026-10-05 준비·전환 완료(08:01 UTC, frontend `dev_docs/commulingo-admin-mcp.md` 5단계, `commulingo-agent-pipeline.md` W6). leninbot 서비스는 지금 `postgres` 슈퍼유저로 접속한다. 이 상태에서는 테이블 권한이 아무 의미가 없으므로, leninbot 전용 로그인 `leninbot_app`으로 바꾸고 CommuLingo(frontend 소유) 테이블에는 권한을 주지 않는다.
 
 ## 설계
 
@@ -24,7 +24,7 @@
 
 ## 순서
 
-`(root)` 표시가 있는 단계만 root 비밀번호가 필요하다. 나머지는 grass로 실행한다.
+**모든 명령은 grass 사용자 셸에서 실행한다**(root 셸이나 `sudo -i` 안에서 실행하면 `~`가 `/root`를 가리켜 비밀번호 파일이 다른 곳에 생긴다; 2026-10-05 전환 때 실제로 그렇게 되어 3단계가 파일을 못 찾았다). 경로는 절대 경로로 쓴다. `(root)` 단계는 그 셸에서 `sudo`로 실행한다.
 
 ### 1. 비밀번호와 role (서비스 영향 없음)
 
@@ -32,8 +32,8 @@
 
 ```bash
 cd /home/grass/leninbot
-umask 077; openssl rand -hex 24 > ~/.config/leninbot/app_db_password
-{ printf "\\set app_password '%s'\n" "$(cat ~/.config/leninbot/app_db_password)"; cat scripts/db/leninbot_app_role.sql; } \
+umask 077; openssl rand -hex 24 > /home/grass/.config/leninbot/app_db_password
+{ printf "\\set app_password '%s'\n" "$(cat /home/grass/.config/leninbot/app_db_password)"; cat scripts/db/leninbot_app_role.sql; } \
   | docker exec -i leninbot-pg psql -U postgres -d leninbot -v ON_ERROR_STOP=1
 ```
 
@@ -42,18 +42,20 @@ umask 077; openssl rand -hex 24 > ~/.config/leninbot/app_db_password
 ### 2. 새 계정으로 사전 확인 (쓰기 없음)
 
 ```bash
-APP_DB_PASSWORD="$(cat ~/.config/leninbot/app_db_password)" venv/bin/python scripts/check_app_role.py
+APP_DB_PASSWORD="$(cat /home/grass/.config/leninbot/app_db_password)" venv/bin/python scripts/check_app_role.py
 ```
 
 `FAIL` 줄이 없어야 한다.
 
 ### 3. 전환 (root)
 
+비밀번호를 먼저 교체하고, 성공했을 때만 `.env`를 바꾼다(`&&`). 순서가 반대이거나 끊겨 있으면, 교체가 실패해도 서비스가 없는 비밀번호로 재시작해 DB 인증에 실패한다(2026-10-05 첫 시도에서 약 1분간 발생).
+
 ```bash
-cd /home/grass/leninbot
-sudo cp -p /etc/credstore.encrypted/db_password.cred /etc/credstore.encrypted/db_password.cred.pre-app-role
-sed -i 's/^DB_USER=postgres$/DB_USER=leninbot_app/' .env && grep '^DB_USER=' .env
-sudo venv/bin/python scripts/manage_secrets.py rotate DB_PASSWORD < ~/.config/leninbot/app_db_password
+cd /home/grass/leninbot && \
+sudo cp -p /etc/credstore.encrypted/db_password.cred /etc/credstore.encrypted/db_password.cred.pre-app-role && \
+sudo venv/bin/python scripts/manage_secrets.py rotate DB_PASSWORD < /home/grass/.config/leninbot/app_db_password && \
+sed -i 's/^DB_USER=postgres$/DB_USER=leninbot_app/' .env && grep '^DB_USER=' .env && \
 sudo systemctl restart leninbot-api leninbot-telegram leninbot-worker leninbot-a2a-api leninbot-roleplay \
   leninbot-browser leninbot-email-api leninbot-llm-proxy novel-writer-api
 ```
@@ -79,8 +81,14 @@ docker logs leninbot-pg --since 15m 2>&1 | grep -iE "permission denied|authentic
 문제가 없으면 비밀번호 파일을 지운다:
 
 ```bash
-shred -u ~/.config/leninbot/app_db_password
+shred -u /home/grass/.config/leninbot/app_db_password
 ```
+
+2026-10-05 전환 확인 결과:
+- 상시 서비스 9개가 모두 active다.
+- 새 계정으로 일꾼 작업을 등록·실행·완료했고, LLM 감사 로그가 기록됐다.
+- 전환 이후 인증·권한 오류는 0건이다.
+- 비밀번호 파일은 삭제했다. credstore에는 이전 `postgres` 비밀번호 백업 두 개(`db_password.cred.pre-app-role`, `db_password.cred.bak`)가 남아 있다. 되돌릴 일이 없다고 판단되면 root로 지운다.
 
 ### 되돌리기 (root)
 
