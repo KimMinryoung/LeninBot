@@ -3,6 +3,10 @@
 
 from __future__ import annotations
 
+import os
+os.environ["LENINBOT_EXECUTION_KIND"] = "test"
+os.environ["LENINBOT_TOOL_AUDIT_DB"] = "0"
+
 import asyncio
 import json
 import os
@@ -39,6 +43,10 @@ def _assert_policy() -> None:
     assert "readonly_query_db" in operator
     assert "bounded_query_db" not in operator
     assert "kg_maintenance_run" in operator
+    diagnostics = {"service_health_snapshot", "get_service_logs", "get_effective_runtime_config",
+                   "pipeline_status", "usage_and_budget_report"}
+    assert diagnostics <= operator
+    assert not diagnostics & inspect
     assert inspect == readonly_alias
     assert inspect < operator
 

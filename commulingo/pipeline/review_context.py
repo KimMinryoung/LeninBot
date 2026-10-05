@@ -1,5 +1,6 @@
 """Lossless patch input with old values once and on-demand unchanged context."""
 from copy import deepcopy
+from tool_gateway.results import ToolRejection
 from tool_gateway.validation import register_argument_shape_repair
 from .patches import changes
 
@@ -43,17 +44,17 @@ def context(proposal, current, previous_patch=None):
     return result
 
 
-def context_tool(current):
+def context_tool(current, target_type="entry"):
     current = current or {}
     available = sorted(current)
     async def read(fields):
         if not 1 <= len(fields) <= len(available) or len(set(fields)) != len(fields) or any(f not in current for f in fields):
-            raise ValueError('Request distinct fields from available_current_fields: '
+            raise ToolRejection('Request distinct fields from available_current_fields: '
                              + ', '.join(available))
         from .stages import stage_evidence
         return stage_evidence({f:deepcopy(current[f]) for f in fields})
     return ({'name':'commulingo_pipeline_review_context',
-             'description':'Read unchanged current entry fields, including notes/sections, when needed to check contradictions or duplicate sections. This is current entry data, not independent source evidence.',
+             'description':'Read unchanged current entry fields, including notes/sections, when needed to check contradictions or duplicate sections. This is current entry data, not independent source evidence. Target: ' + target_type + '; available fields: ' + ', '.join(available),
              'input_schema':{'type':'object','additionalProperties':False,
                  'properties':{'fields':{'type':'array','minItems':1,'maxItems':len(available),
                      'uniqueItems':True,'items':{'type':'string','enum':available}}},

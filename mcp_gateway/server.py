@@ -99,14 +99,15 @@ def _resolve_profile(args: argparse.Namespace) -> str:
 async def _call_tool(name: str, arguments: dict[str, Any], profile: str) -> dict[str, Any]:
     import time
     from security_gateway.audit import audit as audit_tool
-    from security_gateway.context import CallerContext
+    from security_gateway.context import CallerContext, caller_scope, new_request_id
+    from tool_gateway.results import ToolRejection, is_failure, is_continuation
     from security_gateway.gateway import Decision, authorize
     from security_gateway.policy import risk_class
-    from security_gateway.redaction import redact_log_text
+    from ops.diagnostics import safe_text as redact_log_text
 
     profile = normalize_profile(profile)
     ctx = CallerContext(interface="mcp", agent_name=profile, user_id=str(os.geteuid()),
-                        is_owner=profile == OPERATOR_PROFILE)
+                        is_owner=profile == OPERATOR_PROFILE, request_id=new_request_id())
     started = time.monotonic()
     handlers = build_handlers(profile)
     handler = handlers.get(name)
@@ -128,33 +129,40 @@ async def _call_tool(name: str, arguments: dict[str, Any], profile: str) -> dict
         }
     status = "ok"
     error_excerpt = None
+    text = None
     try:
-        call_args = dict(arguments or {})
+        from tool_gateway.validation import validate_tool_arguments, ToolArgumentValidationError
+        schema = next(t["inputSchema"] for t in build_tool_catalog(profile) if t["name"] == name)
+        try:
+            call_args = validate_tool_arguments(name, arguments, schema=schema, risk_class=risk_class(name))
+        except ToolArgumentValidationError as exc:
+            raise ToolRejection(str(exc)) from exc
         signature = inspect.signature(handler)
         if "profile" in signature.parameters or any(
             param.kind == inspect.Parameter.VAR_KEYWORD
             for param in signature.parameters.values()
         ):
-            call_args.setdefault("profile", profile)
-        result = handler(**call_args)
-        if inspect.isawaitable(result):
-            text = await result
-        else:
-            text = result
-        return {"content": [{"type": "text", "text": str(text)}], "isError": False}
-    except TypeError as exc:
-        status = "invalid_args"
-        error_excerpt = str(exc)
-        return {"content": [{"type": "text", "text": f"Invalid arguments for {name}: {exc}"}], "isError": True}
+            call_args["profile"] = profile
+        with caller_scope(ctx):
+            result = handler(**call_args)
+            text = await result if inspect.isawaitable(result) else result
+        status = "error" if is_failure(text) else "continued" if is_continuation(text) else "ok"
+        if status != "ok":
+            error_excerpt = str(text)
+        return {"content": [{"type": "text", "text": str(text)}], "isError": status != "ok"}
+    except ToolRejection as exc:
+        status = "rejected"
+        error_excerpt = redact_log_text(str(exc))
+        return {"content": [{"type": "text", "text": redact_log_text(str(exc))}], "isError": True}
     except Exception as exc:
         status = "error"
-        error_excerpt = str(exc)
+        error_excerpt = redact_log_text(str(exc))
         logger.error("MCP tool call failed: %s: %s", name, redact_log_text(str(exc)))
-        return {"content": [{"type": "text", "text": f"{type(exc).__name__}: {exc}"}], "isError": True}
+        return {"content": [{"type": "text", "text": f"{type(exc).__name__}: {redact_log_text(str(exc))}"}], "isError": True}
     finally:
         audit_tool(ctx, name, arguments, decision, result_status=status,
                    latency_ms=int((time.monotonic() - started) * 1000),
-                   error_excerpt=error_excerpt)
+                   error_excerpt=error_excerpt, result_metadata=getattr(text, "result_metadata", None))
 
 
 async def handle(request: dict[str, Any], profile: str) -> dict[str, Any] | None:
@@ -175,9 +183,7 @@ async def handle(request: dict[str, Any], profile: str) -> dict[str, Any] | None
         return _result(request_id, {"tools": build_tool_catalog(profile)})
     if method == "tools/call":
         name = str(params.get("name") or "")
-        arguments = params.get("arguments") or {}
-        if not isinstance(arguments, dict):
-            return _error(request_id, -32602, "tools/call arguments must be an object")
+        arguments = params.get("arguments", {})
         return _result(request_id, await _call_tool(name, arguments, profile))
     if method == "ping":
         return _result(request_id, {})
@@ -190,6 +196,9 @@ async def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     logging.basicConfig(level=os.getenv("MCP_GATEWAY_LOG_LEVEL", "WARNING"))
     profile = _resolve_profile(args)
+    from mcp_gateway.credentials import bootstrap_kg_credentials
+    bootstrap_kg_credentials()
+    os.environ.setdefault("PGCONNECT_TIMEOUT", "5")
     if args.list_tools:
         for tool in build_tool_catalog(profile):
             print(tool["name"])

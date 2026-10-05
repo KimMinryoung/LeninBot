@@ -74,7 +74,7 @@ Publishing channels (use when the analysis warrants public output):
         ],
     ),
     tools=[
-        "knowledge_graph_search", "vector_search",
+        "knowledge_graph_search", "vector_search", "read_corpus_passage",
         "web_search", "fetch_url", "fetch_x_post", "download_file", "convert_document",
         "read_file", "search_files", "list_directory",
         "read_self", "write_kg_structured",

@@ -42,6 +42,7 @@ the pre-publication flow. Failed edit batches apply no partial changes.
 | Module | Role |
 |---|---|
 | `tool_gateway.profiles` | Named source-of-truth tool profiles for orchestrator, web persona, A2A, roleplay, and MCP surfaces |
+| `tool_gateway.visibility` | Static registration, profile exposure, runtime injection and retirement inventory; never claims current session availability |
 | `tool_gateway.selection` | Common allow-list filtering helpers for tool schemas and handlers |
 | `tool_gateway.dispatcher` | Runtime dispatch, schema enforcement, local/durable dedupe orchestration, and batching. 도구 정의는 설명을 자르지 않고 그대로 제공자에 보낸다 |
 | `tool_gateway.validation` | Provider-format schema extraction, top-level closed JSON Schema validation, defaults, and URL/path/payment/recipient/nonce policies |
@@ -159,3 +160,10 @@ failed edit or a refusal; scoped durable receipts remain conservative if one is 
 When their `MEMORY_OVERRIDE` is active, their disposable SQLite writes also bypass loop/durable receipts; a discarded draft must not suppress
 the next draft's writes. Argument validation, authorization and audit still run. Final publication is protected by roleplay's SQLite revision
 check and `automatic_turns`, while writes outside a draft retain ordinary gateway idempotency.
+
+
+검색·추출의 진단 메타데이터와 `ToolFailure`/`ToolRejection`/`ToolContinue` 상태는
+[security_gateway.md](security_gateway.md)를 따른다. `query_db`를 포함한 퇴역 도구는 전역
+schema/handler에서 제거하며 내부 구현은 보존한다. 현재 목록과 작업별 일기 필터는
+[tool_allowlist_current_state.md](tool_allowlist_current_state.md), 새 운영 감사 도구는
+[mcp_gateway.md](mcp_gateway.md)를 따른다.

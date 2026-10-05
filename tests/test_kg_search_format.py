@@ -104,7 +104,7 @@ class EntityModeDispatchTests(unittest.TestCase):
         with mock.patch.object(kgs, "_alias_hits", side_effect=AssertionError("must not be called")), \
              mock.patch.object(kgs, "get_kg_service", return_value=fake_svc), \
              mock.patch.object(kgs, "run_kg_task", return_value={"nodes": [{"uuid": "n1", "name": "N", "labels": ["Entity", "Concept"], "summary": ""}], "edges": [{"uuid": "e9", "fact": "f"}]}), \
-             mock.patch.object(kgs, "_hydrate_nodes", return_value={}), \
+             mock.patch.object(kgs, "_hydrate_nodes", return_value={"n1": {"uuid": "n1", "name": "N", "labels": ["Concept"]}}), \
              mock.patch.object(kgs, "_hydrate_edges", return_value={"e9": {"uuid": "e9", "tier": "single", "expired_at": None, "subject": "N", "predicate": "Statement", "object": "M", "fact": "f", "source": "analyst"}}):
             out = kgs.search_knowledge_graph("anything", mode="semantic")
         self.assertIn("- N [Concept]", out)
@@ -120,13 +120,17 @@ class EntityModeDispatchTests(unittest.TestCase):
         with mock.patch.object(kgs, "_alias_hits", return_value=hits), \
              mock.patch.object(kgs, "get_kg_service", return_value=mock.Mock()), \
              mock.patch.object(kgs, "run_kg_task", return_value={"nodes": [], "edges": []}), \
-             mock.patch.object(kgs, "_entity_neighborhood", side_effect=lambda uuid, cap: (dict(node_a, uuid=uuid, name=uuid.upper()), [])):
+             mock.patch.object(kgs, "_hydrate_nodes", return_value={"u1": node_a, "u2": dict(node_a, uuid="u2", name="B")}):
             out = kgs.search_knowledge_graph("A and B")
         self.assertIn("- A [Person]", out)
         self.assertIn("- B [Person]", out)
 
 
 class RecallTests(unittest.TestCase):
+    def setUp(self):
+        self.audit = mock.patch.object(recall, '_audit_recall').start()
+        self.addCleanup(mock.patch.stopall)
+
     def test_disabled_by_default(self):
         with mock.patch.dict(os.environ, {"KG_ENTITY_GATED_RECALL": "0"}):
             self.assertEqual(recall.entity_gated_kg_block("흐루쇼프", "claude"), "")

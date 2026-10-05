@@ -20,9 +20,9 @@ Two layers per document:
    Reference), each carrying ``attributes.doc_ref`` for provenance; every
    entity so asserted also gets a Document→Entity ``Reference(mentions)``.
 
-Idempotency: the Document node stores ``content_sha256``; an unchanged hash
-is skipped, a changed one expires the document's previous edges (matched by
-``sync_key`` prefix ``doc:<ref>:``) before re-extraction.
+Idempotency: content_sha256 gates LLM extraction; metadata_sha256 tracks
+source profiles. Deterministic links are reconciled daily. Old assertion
+versions expire only after all replacements are saved successfully.
 """
 
 from __future__ import annotations
@@ -32,6 +32,7 @@ import json
 import logging
 import os
 import re
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -72,7 +73,7 @@ COLLECTION = {
                  "aliases": ["autonomous project synthesis notes"], "summary": "자율 프로젝트 루프가 남긴 종합(synthesis) 노트"},
 }
 
-TRUST_TIER = {"research": "corroborated", "archival": "corroborated", "autonote": "single"}
+TRUST_TIER = {kind: "single" for kind in COLLECTION}
 
 
 def llm_enabled() -> bool:
@@ -113,6 +114,12 @@ class DocRecord(dict):
     sha, aliases (list), links ({"person": [...], "term": [...], "event": [...]})."""
 
     @property
+    def metadata_sha(self) -> str:
+        return sha256(json.dumps({k: v for k, v in self.items() if k not in
+                                 {"sha", "text", "source_updated_at"}},
+                                sort_keys=True, ensure_ascii=False, default=str))
+
+    @property
     def ref(self) -> str:
         return self["ref"]
 
@@ -138,6 +145,7 @@ def research_record(row: dict) -> DocRecord:
         aliases=[_clean(row.get("title_en"))] if row.get("title_en") else [],
         links={"person": [], "term": [], "event": []},
         tags=[str(t) for t in tags if t],
+        source_updated_at=str(row.get("updated_at") or row.get("published_at") or ""),
     )
 
 
@@ -178,7 +186,7 @@ def autonote_record(row: dict) -> DocRecord:
         title=title, description=text[:300], text=text, url=None, lang="ko",
         published_at=str(row.get("created_at") or "")[:10] or None,
         sha=sha256(text_md), aliases=[], links={"person": [], "term": [], "event": []},
-        project_id=row.get("project_id"),
+        project_id=row.get("project_id"), source_updated_at=str(row.get("created_at") or ""),
     )
 
 
@@ -198,7 +206,9 @@ def document_side(rec: DocRecord) -> dict:
 
 
 def _doc_attrs(rec: DocRecord, key: str, **extra) -> dict:
-    attrs = {"sync_key": f"doc:{rec.ref}:{key}", "doc_ref": rec.ref}
+    attrs = {"sync_key": f"doc:{rec.ref}:{key}", "doc_ref": rec.ref,
+             "source_url": rec.get("url"), "doc_kind": rec["kind"],
+             "verification_status": "unverified", "extraction": "deterministic"}
     attrs.update({k: v for k, v in extra.items() if v not in (None, "")})
     return attrs
 
@@ -209,7 +219,7 @@ def _fact(subject: dict, predicate: str, obj: dict, text: str, attrs: dict, **mo
         "object_name": obj["name"], "object_type": obj["type"], "fact": text[:600], "attributes": attrs,
     }
     for side, hints in (("subject", subject), ("object", obj)):
-        for k in ("external_id", "aliases", "summary", "name_ko", "name_en"):
+        for k in ("uuid", "external_id", "aliases", "summary", "name_ko", "name_en"):
             if hints.get(k):
                 f[f"{side}_{k}"] = hints[k]
     f.update({k: v for k, v in more.items() if v})
@@ -270,7 +280,7 @@ def mention_facts(rec: DocRecord, alias_index) -> list[dict]:
         seen_names.add(h.name)
         if len(facts) >= MAX_MENTIONS:
             break
-        obj = {"name": h.name, "type": label}
+        obj = {"name": h.name, "type": label, "uuid": h.uuid}
         facts.append(_fact(
             doc, "Reference", obj, f"문서 '{rec['title']}'에 {h.name}{josa(h.name, '이/가')} 언급된다",
             _doc_attrs(rec, f"mention:{h.uuid[:8]}", reference_type="mentions"),
@@ -288,7 +298,7 @@ _PREDICATES = ("Affiliation, PersonalRelation, OrgRelation, Funding, AssetTransf
 EXTRACTION_SYSTEM = """You extract knowledge-graph facts from a document for a Korean-language political-economy knowledge base.
 Return ONLY a JSON object: {"facts": [ ... ]}. Each fact:
 {"subject_name": str, "subject_type": T, "predicate": P, "object_name": str, "object_type": T,
- "fact": str, "valid_at": "YYYY-MM-DD" | null, "subject_aliases": [str], "object_aliases": [str]}
+ "fact": str, "valid_at": "YYYY-MM-DD" | null, "invalid_at": "YYYY-MM-DD" | null, "subject_aliases": [str], "object_aliases": [str]}
 
 T ∈ {%s}
 P ∈ {%s}
@@ -307,7 +317,7 @@ Guidelines:
 - Entities must be specific named things (proper nouns: a person, a named organization, a place, a
   named policy/event/work). NEVER use a generic common noun as an entity — not 국가, 정부, 개인, 경찰,
   청년, 주주, 기관, 외국인, "the state", "individuals", "workers" — and never a type label as a name.
-  Attach such claims to the concrete actor the document names (e.g. 마르크스 —Statement→ 『국가와 혁명』),
+  Attach such claims to the concrete actor the document names (e.g. 레닌 —Statement→ 『국가와 혁명』),
   or drop the fact. Facts using generic entities are discarded.
 - "fact" must be a self-contained sentence in the document's language, with dates/numbers when present.
 - Never extract the document itself, its author's persona, internal task ids, file names or code.
@@ -364,7 +374,7 @@ def llm_facts(rec: DocRecord, raw_facts: list[dict]) -> list[dict]:
     out, seen_entities = [], set()
     for i, f in enumerate(raw_facts[:MAX_LLM_FACTS]):
         fact = {k: f.get(k) for k in ("subject_name", "subject_type", "predicate", "object_name",
-                                      "object_type", "fact", "valid_at")}
+                                      "object_type", "fact", "valid_at", "invalid_at")}
         for side in ("subject", "object"):
             al = f.get(f"{side}_aliases")
             if isinstance(al, list):
@@ -478,20 +488,30 @@ def filter_resolved_self_loops(facts: list[dict]) -> tuple[list[dict], list[dict
     return kept, skipped
 
 
-def stamp_document_node(rec: DocRecord) -> None:
+def stamp_document_node(rec: DocRecord, *, clear_withdrawn: bool = False) -> None:
     """Store hash/url/kind on the Document node (queried for idempotency)."""
     from kg_runtime.search import _get_neo4j_sync_driver
     with _get_neo4j_sync_driver() as (drv, db):
         with drv.session(database=db) as s:
-            result = s.run(
-                "MATCH (n:Entity:Document) WHERE $ref IN coalesce(n.external_ids, []) "
-                "SET n.content_sha256 = $sha, n.doc_kind = $kind, n.slug = $ident, n.url = $url, "
-                "    n.lang = $lang, n.published_at = $pub, n.extracted_at = datetime() RETURN count(n) AS c",
-                ref=rec.ref, sha=rec["sha"], kind=rec["kind"], ident=rec["ident"], url=rec.get("url"),
-                lang=rec.get("lang"), pub=rec.get("published_at"),
-            ).single()
-            if not result or result["c"] != 1:
-                raise RuntimeError(f"Expected one Document node for {rec.ref}")
+            def stamp(tx):
+                result = tx.run(
+                    "MATCH (n:Entity:Document) WHERE $ref IN coalesce(n.external_ids, []) "
+                    "SET n.content_sha256 = $sha, n.doc_kind = $kind, n.slug = $ident, n.url = $url, "
+                    "    n.lang = $lang, n.published_at = $pub, n.extracted_at = datetime(), "
+                    "    n.metadata_sha256 = $metadata, n.source_active = true, n.curated_name = $title, "
+                    "    n.curated_summary = $summary, n.curated_source = $ref RETURN count(n) AS c",
+                    ref=rec.ref, sha=rec["sha"], kind=rec["kind"], ident=rec["ident"], url=rec.get("url"),
+                    lang=rec.get("lang"), pub=rec.get("published_at"), metadata=rec.metadata_sha,
+                    title=rec["title"], summary=document_side(rec)["summary"],
+                ).single()
+                if not result or result["c"] != 1:
+                    raise RuntimeError(f"Expected one Document node for {rec.ref}")
+                from kg_runtime.identity import upsert_identity_sync
+                row = tx.run("MATCH (n:Entity:Document) WHERE $ref IN coalesce(n.external_ids, []) RETURN n.uuid AS uuid", ref=rec.ref).single()
+                upsert_identity_sync(tx, row['uuid'], external_ids=[rec.ref], aliases=rec.get('aliases') or [], name=rec['title'])
+                if clear_withdrawn:
+                    tx.run("MATCH ()-[r:RELATES_TO]->() WHERE r.doc_ref = $ref REMOVE r.withdrawn", ref=rec.ref).consume()
+            s.execute_write(stamp)
 
 
 def expire_document_edges(ref: str, *, keep_uuids: list[str] | None = None) -> int:
@@ -506,15 +526,71 @@ def expire_document_edges(ref: str, *, keep_uuids: list[str] | None = None) -> i
             return rec["cnt"] if rec else 0
 
 
-def existing_document_hashes(prefix: str) -> dict[str, str]:
+def existing_document_states(prefix: str = "") -> dict[str, dict]:
     from kg_runtime.search import _get_neo4j_sync_driver
     with _get_neo4j_sync_driver() as (drv, db):
-        with drv.session(database=db) as s:
-            rows = s.run(
+        with drv.session(database=db) as session:
+            return {r["ref"]: dict(r) for r in session.run(
                 "MATCH (n:Entity:Document) UNWIND coalesce(n.external_ids, []) AS ref "
-                "WITH n, ref WHERE ref STARTS WITH $p RETURN ref, n.content_sha256 AS sha", p=prefix,
-            )
-            return {r["ref"]: r["sha"] for r in rows}
+                "WITH n, ref WHERE ref STARTS WITH $p RETURN ref, n.content_sha256 AS sha, "
+                "n.metadata_sha256 AS metadata_sha, coalesce(n.source_active, true) AS active", p=prefix)}
+
+
+def existing_document_hashes(prefix: str) -> dict[str, str]:
+    return {ref: state['sha'] for ref, state in existing_document_states(prefix).items()}
+
+
+def set_document_active(ref: str, active: bool, *, exclude_uuids=()) -> None:
+    """Withdraw/restore only the last assertion versions, retaining superseded history."""
+    from kg_runtime.search import _get_neo4j_sync_driver
+    with _get_neo4j_sync_driver() as (drv, db):
+        with drv.session(database=db) as session:
+            def update(tx):
+                tx.run("MATCH (n:Entity:Document) WHERE $ref IN coalesce(n.external_ids, []) "
+                       "SET n.source_active = $active", ref=ref, active=active).consume()
+                if active:
+                    tx.run("MATCH ()-[r:RELATES_TO]->() WHERE r.doc_ref = $ref AND r.withdrawn = true "
+                           "AND NOT r.uuid IN $excluded SET r.expired_at = null REMOVE r.withdrawn", ref=ref, excluded=list(exclude_uuids)).consume()
+                    tx.run("MATCH ()-[r:RELATES_TO]->() WHERE r.doc_ref = $ref REMOVE r.withdrawn", ref=ref).consume()
+                else:
+                    tx.run("MATCH ()-[r:RELATES_TO]->() WHERE r.doc_ref = $ref AND r.expired_at IS NULL "
+                           "SET r.expired_at = datetime(), r.withdrawn = true", ref=ref).consume()
+            session.execute_write(update)
+
+
+def refresh_document_metadata(rec, *, names, alias_index, existing_edges, state):
+    """Reconcile deterministic links without re-running or discarding LLM claims."""
+    from jobs.kg_sync_commulingo import fact_changed, expire_edges
+    facts = build_document_facts(rec, names=names, alias_index=alias_index, use_llm=False)
+    facts, _ = filter_resolved_self_loops(facts)
+    prefix = "doc:" + rec.ref + ":"
+    old = {k: v for k, v in existing_edges.items() if k.startswith(prefix)
+           and not k[len(prefix):].startswith("llm")}
+    changes = [f for f in facts if f['attributes']['sync_key'] not in old
+               or fact_changed(f, old[f['attributes']['sync_key']])]
+    if changes:
+        result = write_document_facts(rec, changes)
+        if (result.get('status') != 'ok' or result.get('facts_written') != len(changes)
+                or len(result.get('edge_uuids', [])) != len(changes)):
+            raise RuntimeError(f"Deterministic document links failed: {rec.ref}")
+        keep = set(result['edge_uuids'])
+    else:
+        keep = set()
+    keys = {f['attributes']['sync_key'] for f in facts}
+    replaced = {f['attributes']['sync_key'] for f in changes}
+    expire_edges([uuid for key, edge in old.items() if key not in keys or key in replaced
+                  for uuid in edge.get('active_uuids', [edge['uuid']] if not edge['expired'] else []) if uuid not in keep])
+    if not state.get('active', True):
+        excluded = [edge['uuid'] for key, edge in old.items()
+                    if (key not in keys or key in replaced) and edge['uuid'] not in keep]
+        set_document_active(rec.ref, True, exclude_uuids=excluded)
+    extra = [uuid for edge in old.values() for uuid in edge.get('active_uuids', [])
+             if uuid != edge['uuid'] and uuid not in keep]
+    if extra:
+        expire_edges(extra)
+    if changes or state.get('metadata_sha') != rec.metadata_sha or not state.get('active', True):
+        stamp_document_node(rec)
+    return len(changes)
 
 
 def _extract_document(rec: DocRecord, *, names=None, alias_index=None, use_llm: bool | None = None,
@@ -533,7 +609,7 @@ def _extract_document(rec: DocRecord, *, names=None, alias_index=None, use_llm: 
     expired = 0
     if successful:
         expired = expire_document_edges(rec.ref, keep_uuids=res.get("edge_uuids", []))
-        stamp_document_node(rec)
+        stamp_document_node(rec, clear_withdrawn=True)
     # Put the actual rejection first so bounded sync/health alerts retain it.
     rejected = [{"index": item.get("index"), "reason": item.get("reason", "unknown rejection")}
                 for item in res.get("rejected_facts", [])]
@@ -556,20 +632,98 @@ def extract_document(rec: DocRecord, **kwargs) -> dict:
 
 # ── Convenience for publish hooks ─────────────────────────────────────────────
 
+def current_research_record(slug):
+    from db import query_one
+    row = query_one("SELECT * FROM research_documents WHERE slug = %s AND status = 'public'", (slug,))
+    return research_record(row) if row else None
+
+
+def reconcile_document(rec, *, names=None, alias_index=None, use_llm=None, force=False,
+                       allow_extract=True):
+    """Read current state inside the per-document lock shared with publication hooks."""
+    from kg_runtime.locks import kg_write_lock
+    from jobs.kg_sync_commulingo import existing_sync_edges
+    with kg_write_lock("document:" + rec.ref):
+        if rec['kind'] == 'research':
+            fresh = current_research_record(rec['ident'])
+            if fresh is None:
+                set_document_active(rec.ref, False)
+                return {'ref': rec.ref, 'status': 'withdrawn', 'written': 0}
+            rec = fresh
+        state = existing_document_states(rec.ref).get(rec.ref, {})
+        if not force and state.get('sha') == rec['sha']:
+            written = refresh_document_metadata(rec, names=names or {}, alias_index=alias_index,
+                existing_edges=existing_sync_edges(prefix='doc:' + rec.ref + ':'), state=state)
+            verify_document_state(rec, names or {})
+            return {'ref': rec.ref, 'status': 'metadata' if written else 'unchanged', 'written': written}
+        if not allow_extract:
+            return {'ref': rec.ref, 'status': 'pending', 'written': 0}
+        result = _extract_document(rec, names=names, alias_index=alias_index, use_llm=use_llm,
+                                   force=force, existing_sha=state.get('sha'))
+        if result['status'] == 'ok':
+            verify_document_state(rec, names or {})
+        return result
+
+
+def verify_document_state(rec, names):
+    from jobs.kg_sync_commulingo import existing_sync_edges, compare_sync_facts
+    state = existing_document_states(rec.ref).get(rec.ref, {})
+    if state.get('sha') != rec['sha'] or state.get('metadata_sha') != rec.metadata_sha or not state.get('active'):
+        raise RuntimeError(f"Document checkpoint mismatch after sync: {rec.ref}")
+    links = [collection_fact(rec), *curated_link_facts(rec, names)]
+    edges = existing_sync_edges('doc:' + rec.ref + ':')
+    curated = {key: edge for key, edge in edges.items() if ':about:' in key or key.endswith(':collection')}
+    check = compare_sync_facts(links, curated)
+    if check['unresolved']:
+        raise RuntimeError(f"Document links mismatch after sync: {rec.ref}: {check['differences'][:3]}")
+
+
+def withdraw_document(ref):
+    from kg_runtime.locks import kg_write_lock
+    with kg_write_lock('document:' + ref):
+        # A publication can race the nightly snapshot; never retract a newly public document.
+        if ref.startswith('research:') and current_research_record(ref.split(':', 1)[1]) is not None:
+            return
+        set_document_active(ref, False)
+
+
 def extract_research_by_slug(slug: str, *, use_llm: bool | None = None) -> dict:
-    """Publish-hook entry: extract one public research document by slug.
-    Never raises (returns {"error": ...}); the nightly job is the backstop."""
+    """Best-effort publication hook; always re-read status under the shared lock."""
     try:
-        from publishing.research_store import get_document
         from kg_runtime.identity import get_alias_index
-        row = get_document(slug)
-        if not row or row.get("status") != "public":
-            return {"ref": f"research:{slug}", "status": "skipped", "reason": "not public"}
-        rec = research_record(row)
+        rec = research_record({'slug': slug})
         idx = get_alias_index()
-        idx.ensure_loaded()
-        existing = existing_document_hashes(rec.ref)
-        return extract_document(rec, alias_index=idx, use_llm=use_llm, existing_sha=existing.get(rec.ref))
+        if not idx.ensure_loaded():
+            raise RuntimeError("Document alias index unavailable")
+        return reconcile_document(rec, alias_index=idx, use_llm=use_llm)
     except Exception as exc:
         logger.warning("[doc-extract] research %s failed: %s", slug, exc)
         return {"ref": f"research:{slug}", "error": str(exc)}
+
+
+def schedule_research_sync(slug: str) -> None:
+    """One bounded background worker; nightly reconciliation recovers process termination."""
+    # Single daemon drains coalesced slugs; publishers never wait for embedding/LLM.
+    with _publish_lock:
+        _publish_pending.add(slug)
+        global _publish_running
+        if _publish_running:
+            return
+        _publish_running = True
+    threading.Thread(target=_drain_publications, name='kg-publications', daemon=True).start()
+
+
+def _drain_publications():
+    global _publish_running
+    while True:
+        with _publish_lock:
+            if not _publish_pending:
+                _publish_running = False
+                return
+            slug = _publish_pending.pop()
+        extract_research_by_slug(slug)
+
+
+_publish_lock = threading.Lock()
+_publish_pending = set()
+_publish_running = False

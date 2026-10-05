@@ -42,7 +42,7 @@ from graphiti_core.search.search_config import (
     EdgeReranker,
     NodeReranker,
 )
-from graphiti_core.search.search_filters import SearchFilters
+from graphiti_core.search.search_filters import SearchFilters, DateFilter, ComparisonOperator
 
 from graphiti_core.prompts.models import Message
 
@@ -504,6 +504,7 @@ class GraphMemoryService:
         node_labels: list[str] | None = None,
         center_node_uuid: str | None = None,
         num_results: int = 10,
+        read_policy=None,
     ) -> dict:
         """지식 그래프 하이브리드 검색.
 
@@ -515,7 +516,23 @@ class GraphMemoryService:
         graphiti = self._ensure_initialized()
 
         # SearchFilters 구성
+        from kg_runtime.read_policy import ReadPolicy, edge_where
+        from kg_runtime.search import _run_rows
+        policy = read_policy or ReadPolicy()
+        params = await asyncio.to_thread(policy.params)
         search_filter = SearchFilters()
+        if not policy.include_expired:
+            search_filter.expired_at = [[DateFilter(comparison_operator=ComparisonOperator.is_null)]]
+        if policy.as_of:
+            instant = datetime.fromisoformat(policy.as_of)
+            search_filter.valid_at = [[DateFilter(comparison_operator=ComparisonOperator.is_null)],
+                [DateFilter(date=instant, comparison_operator=ComparisonOperator.less_than_equal)]]
+            search_filter.invalid_at = [[DateFilter(comparison_operator=ComparisonOperator.is_null)],
+                [DateFilter(date=instant, comparison_operator=ComparisonOperator.greater_than)]]
+        if params['hidden_refs']:
+            rows = await asyncio.to_thread(_run_rows,
+                'MATCH ()-[r:RELATES_TO]->() WHERE ' + edge_where() + ' RETURN r.uuid AS uuid', **params)
+            search_filter.edge_uuids = [r['uuid'] for r in rows] or ['__no_visible_edge__']
         if edge_types:
             search_filter.edge_types = edge_types
         if node_labels:
@@ -530,7 +547,7 @@ class GraphMemoryService:
                 search_methods=[NodeSearchMethod.bm25, NodeSearchMethod.cosine_similarity],
                 reranker=NodeReranker.rrf,
             ),
-            limit=num_results,
+            limit=num_results + len(params['hidden_nodes']),
         )
 
         results = await graphiti.search_(
@@ -549,7 +566,7 @@ class GraphMemoryService:
                 "summary": node.summary,
                 "uuid": node.uuid,
             }
-            for node in results.nodes
+            for node in results.nodes if node.uuid not in params['hidden_nodes']
         ]
         edges = [
             {
@@ -558,10 +575,10 @@ class GraphMemoryService:
                 "invalid_at": str(edge.invalid_at) if edge.invalid_at else None,
                 "uuid": edge.uuid,
             }
-            for edge in results.edges
+            for edge in results.edges[:num_results]
         ]
 
-        return {"nodes": nodes, "edges": edges}
+        return {"nodes": nodes[:num_results], "edges": edges}
 
     async def query_chatbot(
         self,

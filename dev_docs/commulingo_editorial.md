@@ -80,6 +80,13 @@ confidence만으로 승인하지 않는다.
 `agents/commulingo_reviewer.py`는 작성자 문맥을 물려받지 않는 전용 AgentSpec이다.
 검토자는 조사와 내부 `commulingo_review_decision`만 사용하며 저장·승인 API를 직접 호출하지 않는다.
 이 도구는 소유자와 commulingo_reviewer 호출자만 허용한다.
+검토 세션마다 `decision_tool(proposal)`이 현재 source_refs의 S1… ID와 원래 citation 문자열을
+schema enum으로 제공한다. 잘못된 ID는 유효 선택지를 알려주고 거절하며 대체하지 않는다.
+파이프라인 검토 문맥 도구는 현재 대상의 실제 필드 목록을 enum과 설명에 제시하고,
+required_corrections는 현재 제안에 있는 /fields/... 경로를 안내한다.
+원문 캐시 도구의 `{}`/`passages: []` 목록 조회는 유지한다. source_id와 passages를 함께
+제출하거나 없는 ID/라벨을 보내면 `ToolRejection`과 유효 선택지를 반환한다. 잘못된 라벨을
+source_id로 자동 대체하지 않는다. 기존 passage·독립 근거·인용 지지·revision 검증은 유지한다.
 별도 review.timer는 비활성이고 자동 editor 검토는 파이프라인 내부에서 수행한다.
 
 검토 checks는 citation_id(S1=source_refs[0]), 직접 조회한 P 문단 라벨, finding을 담는다.

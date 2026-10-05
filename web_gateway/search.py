@@ -26,7 +26,7 @@ import httpx
 from provenance.runtime import _wrap_external
 from web_gateway.credentials import credential
 from web_gateway.budget import PaidWebBudgetError, paid_request
-from tool_gateway.results import ToolFailure
+from tool_gateway.results import ToolFailure, ToolResult
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +63,7 @@ async def _cached_search(key: tuple, ttl: float, search: Callable[[], Awaitable[
     if cached is not None:
         _SEARCH_CACHE.move_to_end(key)
         logger.info("web_search cache=hit provider_order=%s", key[0])
-        return cached[1]
+        return ToolResult(cached[1], {**(getattr(cached[1], "result_metadata", None) or {}), "cache_hit": True})
 
     # Tasks belong to an event loop; never await one from a different loop.
     inflight_key = (asyncio.get_running_loop(), key)
@@ -239,7 +239,7 @@ def _format_results(
     advanced: bool,
 ) -> str:
     if not results:
-        return f"No results for: {query}\nSearch returned no matches; this is not evidence that the event or claim does not exist."
+        return ToolResult(f"No results for: {query}\nSearch returned no matches; this is not evidence that the event or claim does not exist.", {"result_count": 0, "empty": True, "path": provider, "cache_hit": False})
     snippet_cap = 1000 if advanced else 500
     lines: list[str] = []
     for result in results:
@@ -255,13 +255,13 @@ def _format_results(
         header = f"### {title}" + (f" ({published})" if published else "")
         header += "\n[source_kind=search_snippet; publication=" + (published or "unknown") + "; event_date=unknown]"
         lines.append(f"{header}\n{url}\n{content}".rstrip())
-    return _wrap_external(
+    return ToolResult(_wrap_external(
         "Search snippets, not full source pages. Retrieved at "
         + datetime.now(timezone.utc).isoformat()
         + "; cache reuse preserves this retrieval time. Publication date is not event date.\n\n"
         + "\n\n".join(lines),
         f"web_search:{provider}:{query}",
-    )
+    ), {"result_count": len(results), "empty": False, "path": provider, "cache_hit": False})
 
 
 async def _search_tavily(
@@ -412,7 +412,7 @@ async def execute_web_search(
         include = _normalize_domains(include_domains)
         exclude = _normalize_domains(exclude_domains)
     except ValueError as exc:
-        return ToolFailure(str(exc))
+        return ToolFailure(str(exc), {"failure_type": type(exc).__name__})
     if include and all(any(_domain_matches(d, e) for e in exclude) for d in include):
         return ToolFailure("All included domains are excluded. Correct the domain filters before searching.")
     max_results = max(1, min(int(max_results), 10))
@@ -470,7 +470,7 @@ async def _execute_provider_chain(
             )
         except PaidWebBudgetError as exc:
             # A shared local budget stop is not an outage; never route around it.
-            return ToolFailure(str(exc))
+            return ToolFailure(str(exc), {"failure_type": type(exc).__name__})
         except SearchRequestUnsupported as exc:
             # Input limitations are not provider outages; don't open a circuit.
             errors.append(f"{provider}: {exc}")
@@ -485,4 +485,4 @@ async def _execute_provider_chain(
             )
             errors.append(f"{provider}{status}: {exc}")
 
-    return ToolFailure("Web search failed across configured providers: " + "; ".join(errors))
+    return ToolFailure("Web search failed across configured providers: " + "; ".join(errors), {"failure_type": "provider_failure"})

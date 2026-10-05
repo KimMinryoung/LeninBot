@@ -1,7 +1,6 @@
 """Patch-centred workflow over the existing durable queue, leases and budget."""
 import asyncio
 import logging
-from copy import deepcopy
 
 from . import service
 from .editor import Editor
@@ -23,7 +22,7 @@ class Review:
         from .stages import latest, current_artifacts, write_request, model_call, stage_evidence, READS
         from agents.commulingo_reviewer import COMMULINGO_REVIEWER
         from commulingo.review_handlers import make_handlers, review_risks
-        from commulingo.review_policy import DECISION_TOOL
+        from commulingo.review_policy import DECISION_TOOL, decision_tool
         from runtime_tools.registry import TOOL_HANDLERS
         draft = latest(artifacts,'draft')
         research = latest(artifacts,'research')
@@ -55,10 +54,11 @@ class Review:
         from .store import Store
         backoff = FetchBackoff(self.store if self.store is not None else Store(), job, usage, artifacts)
         handlers = make_handlers({k:backoff.wrap(k,TOOL_HANDLERS[k]) for k in READS},proposal,snapshots,box,gate=gate)
-        tool = deepcopy(DECISION_TOOL)
+        tool = decision_tool(proposal)
         tool['input_schema']['properties'].update({
             'required_corrections':{'type':'array','items':{'type':'object','additionalProperties':False,
-                'properties':{'path':{'type':'string','pattern':'^/fields/'},
+                'properties':{'path':{'type':'string','pattern':'^/fields/',
+                    'description':'Select a field in this proposed patch: ' + ', '.join('/fields/' + k.replace('~','~0').replace('/','~1') for k in draft['fields'])},
                               'reason':{'type':'string','minLength':10}}, 'required':['path','reason']}},
             'optional_suggestions':{'type':'array','items':{'type':'string'}},
             'coverage': {'type':'object','additionalProperties':False,
@@ -126,7 +126,7 @@ class Review:
         await model_call(spec=COMMULINGO_REVIEWER,prompt=prompt,tool=tool,handler=finish,reads=READS,
             read_wrap=lambda name,call:handlers[name],usage=usage,budget=budget,
             scope_id=f'commulingo_pipeline:{job["id"]}:review',job=job,
-            local_tools=[context_tool(current)])
+            local_tools=[context_tool(current, proposal["target_type"])])
         if box['decision']=='revise':
             return Result(box, 'draft')
         if box['decision']!='approve':

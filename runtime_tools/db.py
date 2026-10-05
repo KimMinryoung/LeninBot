@@ -1,20 +1,8 @@
-"""runtime_tools.db — Direct SQL tool for the programmer agent.
+"""Internal SQL implementation, retired from the global model tool registry.
 
-Gives programmer a first-class DB handle instead of routing every query through
-`execute_python + db.query(...)`. Benefits:
-
-- Ergonomics: one tool call per query, SQL visible in the tool_use block rather
-  than buried inside a Python snippet.
-- Audit: every SQL statement shows up in tool call logs verbatim — much easier
-  to review than scrolling through execute_python source.
-- Least privilege: this tool can only touch Postgres. It does not import modules,
-  read files, or make HTTP calls. `execute_python` still exists for genuine
-  code/filesystem/network work.
-
-Exposed to the programmer agent only. SELECT results are row-capped by default
-to keep responses small. No operation-type allowlist — the programmer is trusted
-at the `execute_python` level already, so adding an artificial DDL/DML gate here
-would be theater.
+Preserved for explicit internal callers and direct tests. It supports writes and
+is classified accordingly. Operator diagnostics use scripts/query-db or the MCP
+readonly_query_db adapter, which enforce read-only transactions.
 """
 
 from __future__ import annotations

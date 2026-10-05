@@ -28,8 +28,8 @@ TOOLS = [
         "name": "vector_search",
         "description": (
             "Search the Marxist-Leninist document DB (pgvector); returns excerpts with "
-            "author/year/title. Query in the layer's language: cross-language queries "
-            "return almost nothing."
+            "author/year/title and chunk UUID. Korean queries add an English translation for "
+            "core_theory; English queries add Korean for modern_analysis. Translation is best effort."
         ),
         "input_schema": {
             "type": "object",
@@ -37,7 +37,7 @@ TOOLS = [
                 "query": {
                     "type": "string",
                     "description": (
-                        "Search query, in the layer's language (see layer)."
+                        "Search query; Korean/English cross-language retrieval is supported (see description)."
                     ),
                 },
                 "num_results": {"type": "integer", "description": "Results count (1-10).", "default": 5},
@@ -103,6 +103,8 @@ TOOLS = [
                         "Exact entity name or alias (e.g. 'Nikita Khrushchev'); returns its neighbourhood."
                     ),
                 },
+                "as_of": {"type": "string", "description": "Optional ISO date/datetime: valid_at <= as_of < invalid_at; omitted includes historical assertions."},
+                "include_expired": {"type": "boolean", "default": False, "description": "Include superseded assertion versions for audit. Private documents remain excluded."},
                 "mode": {
                     "type": "string",
                     "enum": ["auto", "entity", "semantic"],
@@ -183,7 +185,7 @@ TOOLS = [
 
 
 async def _exec_kg_search(query: str = "", num_results: int = 10, entity: str | None = None,
-                          mode: str = "auto") -> str:
+                          mode: str = "auto", as_of: str | None = None, include_expired: bool = False) -> str:
     """Execute knowledge graph search (entity view or semantic) off the event loop."""
     try:
         from kg_runtime.search import search_knowledge_graph
@@ -194,6 +196,7 @@ async def _exec_kg_search(query: str = "", num_results: int = 10, entity: str | 
         result = await asyncio.to_thread(
             search_knowledge_graph, query, num_results, None,
             entity=(entity or "").strip() or None, mode=mode or "auto",
+            as_of=as_of, include_expired=include_expired,
         )
         if not result:
             from tool_gateway.results import ToolResult
@@ -482,6 +485,19 @@ def _normalize_tool_schemas_inplace(tools: list[dict]) -> None:
         if schema.get("type") == "object" and "additionalProperties" not in schema:
             schema["additionalProperties"] = False
 
+
+from runtime_tools.corpus import READ_CORPUS_PASSAGE_TOOL, read_corpus_passage
+TOOLS.append(READ_CORPUS_PASSAGE_TOOL)
+TOOL_HANDLERS["read_corpus_passage"] = read_corpus_passage
+
+# Retired from global discovery/dispatch; domain implementations remain callable.
+RETIRED_TOOL_NAMES = frozenset({
+    "write_kg", "query_db", "kg_admin", "execute_python", "patch_file",
+    "swap_eth_to_usdc", "transfer_usdc", "pay_and_fetch",
+})
+TOOLS = [tool for tool in TOOLS if tool["name"] not in RETIRED_TOOL_NAMES]
+for _retired_name in RETIRED_TOOL_NAMES:
+    TOOL_HANDLERS.pop(_retired_name, None)
 
 TOOLS = dedupe_tool_registry(TOOLS)
 _normalize_tool_schemas_inplace(TOOLS)

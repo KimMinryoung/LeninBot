@@ -32,7 +32,7 @@ def make_handlers(read_handlers, proposal, snapshots, box, gate=None, triage=Non
     ``gate(value)`` (async) may annotate the resolved decision or raise
     ValueError to send it back to the reviewer before it is boxed;
     ``triage(text)`` (async) sees each rendered web_search result (shadow)."""
-    from tool_gateway.results import ToolRejection
+    from tool_gateway.results import ToolRejection, ToolResult, is_failure
     from commulingo.pipeline.evidence import Passages
     from provenance.runtime import external_body
     handlers = {}
@@ -41,6 +41,8 @@ def make_handlers(read_handlers, proposal, snapshots, box, gate=None, triage=Non
         def wrap(tool_name, call):
             async def wrapped(**kwargs):
                 result = await call(**kwargs)
+                if is_failure(result):
+                    return result
                 text = str(result)
                 if tool_name == 'web_search' and triage is not None:
                     await triage(text)
@@ -50,9 +52,10 @@ def make_handlers(read_handlers, proposal, snapshots, box, gate=None, triage=Non
                     for url in urls:
                         if isinstance(url,str) and external_url(url):
                             source_id, labelled = review_source(url, body[1], snapshots, passages, base=int(kwargs.get('offset') or 0))
-                            return (f'Review source_id={source_id}; each paragraph below starts with its immutable '
+                            return ToolResult(f'Review source_id={source_id}; each paragraph below starts with its immutable '
                                     'passage label; a check cites the labels actually shown.\n'
-                                    + text[:body.start(1)] + labelled + text[body.end(1):])
+                                    + text[:body.start(1)] + labelled + text[body.end(1):],
+                                    getattr(result, 'result_metadata', None))
                 return result
             return wrapped
         handlers[name] = wrap(name,handler)

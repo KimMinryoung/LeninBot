@@ -68,7 +68,7 @@ def grep_matches_text(text, grep) -> bool:
 
 
 
-def fetch_server_logs(service: str = "api", hours_back: int = 1, grep: str | list[str] | tuple[str, ...] | None = None, limit: int = 200) -> list[dict]:
+def fetch_server_logs(service: str = "api", hours_back: int = 1, grep: str | list[str] | tuple[str, ...] | None = None, limit: int = 200, *, level: str | None = None) -> list[dict]:
     """Fetch local systemd/journald service logs.
 
     Args:
@@ -82,11 +82,8 @@ def fetch_server_logs(service: str = "api", hours_back: int = 1, grep: str | lis
     """
     import subprocess
 
-    service_map = {
-        "api": "leninbot-api",
-        "telegram": "leninbot-telegram",
-        "nginx": "nginx",
-    }
+    from ops.diagnostics import SERVICE_UNITS, safe_text
+    service_map = SERVICE_UNITS
 
     if isinstance(service, (list, tuple, set)):
         service = next((str(item).strip() for item in service if str(item).strip()), "api")
@@ -111,21 +108,26 @@ def fetch_server_logs(service: str = "api", hours_back: int = 1, grep: str | lis
         "-o",
         "short-iso",
     ]
+    if level:
+        priorities = {"debug": "7", "info": "6", "notice": "5", "warning": "4", "error": "3", "critical": "2"}
+        if level not in priorities:
+            return [{"error": "Unknown log level"}]
+        cmd += ["--priority", priorities[level]]
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=15, check=False)
     except Exception as e:
-        logger.error("[shared] fetch_server_logs error: %s", e)
-        return [{"error": str(e)}]
+        logger.error("[shared] fetch_server_logs error: %s", safe_text(e))
+        return [{"error": safe_text(e)}]
 
-    if proc.returncode not in (0, 1):
+    if proc.returncode != 0 or "permission" in (proc.stderr or "").lower() or "not seeing messages" in (proc.stderr or "").lower():
         err = (proc.stderr or proc.stdout or "journalctl failed").strip()
-        logger.error("[shared] fetch_server_logs journalctl failure: %s", err)
-        return [{"error": err}]
+        logger.error("[shared] fetch_server_logs journalctl failure: %s", safe_text(err))
+        return [{"error": safe_text(err)}]
 
     rows = []
     for line in (proc.stdout or "").splitlines():
-        text = line.strip()
-        if not text:
+        text = safe_text(line.strip())
+        if not text or text == "-- No entries --":
             continue
         if grep_terms_lower and not grep_matches_text(text, grep_terms_lower):
             continue

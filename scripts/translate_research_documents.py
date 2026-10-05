@@ -22,6 +22,7 @@ if str(ROOT) not in sys.path:
 from publishing import research_store
 from translation_runtime import TranslationProviderError
 from translation_runtime.batch_state import BatchState
+from translation_runtime.freshness import pending_translation_sql
 from db import execute_returning_rowcount, query as db_query
 from scripts.translate_research_markdown import (
     FEATURE,
@@ -34,7 +35,7 @@ def _select_rows(*, limit: int, max_chars: int, force: bool) -> list[dict[str, A
     research_store.ensure_research_table()
     where = "status = 'public'"
     if not force:
-        where += " AND (NULLIF(BTRIM(COALESCE(markdown_en, '')), '') IS NULL OR markdown_en_source_sha256 IS DISTINCT FROM content_sha256)"
+        where += f" AND ({pending_translation_sql('research')})"
     params: list[Any] = []
     limit_sql = ""
     if max_chars > 0:

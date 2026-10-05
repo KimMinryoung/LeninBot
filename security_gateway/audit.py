@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import logging
 import queue
+import os
 from security_gateway.redaction import redact_log_text, tool_input_summary, redact_value
 
 from ops import audit_sink
@@ -177,6 +178,11 @@ def audit(
             error_excerpt = error_excerpt[:_ERROR_EXCERPT_CAP] + "…"
         error_excerpt = redact_log_text(error_excerpt) if error_excerpt else error_excerpt
 
+        metadata = dict(result_metadata or {})
+        execution_kind = os.getenv("LENINBOT_EXECUTION_KIND") or getattr(ctx, "execution_kind", "unknown")
+        metadata["execution_kind"] = execution_kind if execution_kind in {"runtime", "test"} else "unknown"
+        if result_status in {"error", "rejected", "invalid_args", "denied", "outcome_unknown"}:
+            metadata.setdefault("failure_type", result_status)
         row = {
             "interface": ctx.interface,
             "agent_name": ctx.agent_name,
@@ -216,7 +222,7 @@ def audit(
             "result_status": result_status,
             "latency_ms": latency_ms,
             "error_excerpt": error_excerpt,
-            "result_metadata": redact_value(result_metadata) if result_metadata else result_metadata,
+            "result_metadata": redact_value(metadata),
         }
 
         # Sink 1: structured log line (always, synchronous, cheap).
@@ -230,6 +236,7 @@ def audit(
         )
 
         # Sink 2: Postgres, via the background worker (fire-and-forget).
-        _WRITER.enqueue(row)
+        if os.getenv("LENINBOT_TOOL_AUDIT_DB", "1") != "0":
+            _WRITER.enqueue(row)
     except Exception as e:  # pragma: no cover - defensive
         logger.warning("audit() failed (ignored) for %s: %s", tool_name, e)

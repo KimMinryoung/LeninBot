@@ -44,6 +44,7 @@ COMMULINGO_NARROW_WRITE_TOOLS = frozenset({
 
 TELEGRAM_ORCHESTRATOR_PROFILE = "telegram.orchestrator"
 TELEGRAM_ORCHESTRATOR_TOOLS = frozenset({
+    "read_corpus_passage",
     "delegate",
     "multi_delegate",
     "mission",
@@ -141,6 +142,7 @@ MCP_INSPECT_PROFILE = "mcp.inspect"
 MCP_OPERATOR_PROFILE = "mcp.operator"
 
 MCP_SAFE_RUNTIME_TOOLS = frozenset({
+    "read_corpus_passage",
     "vector_search",
     "knowledge_graph_search",
     "fetch_url",
@@ -160,6 +162,14 @@ MCP_GATEWAY_INSPECT_TOOLS = frozenset({
 })
 
 MCP_GATEWAY_OPERATOR_TOOLS = frozenset({
+    "service_health_snapshot",
+    "get_service_logs",
+    "get_effective_runtime_config",
+    "pipeline_status",
+    "usage_and_budget_report",
+
+    "tool_usage_report",
+    "trace_tool_run",
     "readonly_query_db",
     "kg_maintenance_run",
 })

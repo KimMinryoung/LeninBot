@@ -38,7 +38,7 @@ def _run_smoke_search(query: str, *, mode: str = "auto", expected_entity: str | 
         "Knowledge graph search failed",
     )
     metadata = getattr(result, "result_metadata", {}) or {}
-    degraded = result.startswith(degraded_prefixes) or bool(metadata.get("fallback"))
+    degraded = result.startswith(degraded_prefixes) or bool(metadata.get("fallback")) or bool(metadata.get("degraded"))
     expected_match = not expected_entity or f"- {expected_entity} [" in result
     if mode == "semantic" and metadata.get("path") != "semantic":
         degraded = True
@@ -75,6 +75,13 @@ def healthcheck_status(status: dict, *, metrics_enabled: bool = False) -> dict:
         for name, value in metrics.items():
             if isinstance(value, dict) and value.get("error"):
                 failures.append(f"metrics.{name}: {value['error']}")
+        graph = metrics.get('graph', {})
+        for field in ('duplicate_active_sync_keys', 'inactive_document_active_edges'):
+            if graph.get(field):
+                failures.append(f"graph.{field}: {graph[field]}")
+        for source, state in metrics.get('sync', {}).items():
+            if isinstance(state, dict) and (state.get('reconciliation') or {}).get('unresolved'):
+                failures.append(f"sync.{source}: unresolved source reconciliation")
         sync = metrics.get("sync", {})
         for name in ("commulingo", "documents"):
             state = sync.get(name)

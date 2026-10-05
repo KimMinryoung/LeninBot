@@ -1,4 +1,6 @@
 """Reuse the existing persistent fetch cache; never concatenate source pages."""
+from tool_gateway.results import ToolRejection, ToolResult, is_failure
+
 import asyncio
 import json
 import re
@@ -30,9 +32,9 @@ class Sources:
 
     def display(self, source):
         if source['expires_at'] <= datetime.now(timezone.utc) or not source.get('body'):
-            raise ValueError('source expired; retrieve the page again')
+            raise ToolRejection('source expired; retrieve the page again')
         if len(source['body']) > MAX_SNAPSHOT_CHARS:
-            raise ValueError('source page is too large; request a smaller page')
+            raise ToolRejection('source page is too large; request a smaller page')
         self.sources[source['id']] = source
         labelled = self.passages.show(source['id'], source['body'])
         return (f"Source ID: {source['id']}\nURL: {source['url']}\nRetrieved: {source['fetched_at']}\n"
@@ -51,26 +53,24 @@ class Sources:
     def cached_tool(self, on_read=None):
         async def read(passages=None, source_id=None):
             if (passages is None or passages == []) and source_id is None:
-                return json.dumps(self.context(), default=str, ensure_ascii=False)
+                context = self.context()
+                return ToolResult(json.dumps(context, default=str, ensure_ascii=False),
+                                  {"cache_hit": True, "result_count": len(context['available_pages']),
+                                   "empty": not bool(context['available_pages'])})
             note = ''
             if passages and source_id is not None:
-                # Both arrived: answer whichever is usable instead of spending a
-                # round on an error. Known labels are the narrower request;
-                # otherwise opening the page yields its labels.
-                if all(label in self.passages.shown for label in passages):
-                    source_id = None
-                    note = '\nsource_id was ignored because passages were given; call with only source_id to open a page.'
-                else:
-                    passages = None
+                raise ToolRejection('Supply passages OR source_id, not both. Valid pages: '
+                                    + json.dumps(self.context()['available_pages'], default=str, ensure_ascii=False))
             if source_id is not None:
                 source = self.sources.get(source_id)
                 if not source:
-                    raise ValueError('Unknown source_id; copy an exact source_id from available_pages: '
+                    raise ToolRejection('Unknown source_id; copy an exact source_id from available_pages: '
                                      + json.dumps(self.context()['available_pages'], default=str, ensure_ascii=False))
                 text = self.display(source)
                 if on_read:
                     await on_read()
-                return text
+                return ToolResult(text, {"cache_hit": True, "extracted_chars": len(source['body']),
+                                         "empty": False})
             # Requests for 9-30 labels were rejected outright and cost a round each
             # (2026-09-25 logs); show the first batch and name the rest instead.
             passages = list(dict.fromkeys(passages))
@@ -85,17 +85,18 @@ class Sources:
                     available = [p for p, (sid, _, _) in self.passages.shown.items()
                                  if sid in self.sources and self.sources[sid].get('body')
                                  and self.sources[sid]['expires_at'] > now]
-                    raise ValueError(f'unknown cached passage: {label}; available labels: {available[:16]}. '
+                    raise ToolRejection(f'unknown cached passage: {label}; available labels: {available[:16]}. '
                                      'Use source_id from source_cache.available_pages to open an unlabelled page; '
                                      'if no valid page exists, fetch the original first. Never guess P1. '
                                      'Call this tool with {} to list current available_pages and exact source IDs.')
                 source_id, start, end = self.passages.shown[label]
                 source = self.sources.get(source_id)
                 if not source or not source.get('body') or source['expires_at'] <= now:
-                    raise ValueError(f'{label} expired or unavailable; fetch its original again')
+                    raise ToolRejection(f'{label} expired or unavailable; fetch its original again')
                 self.passages.resolve([label],lambda sid:self.sources[sid]['body'])
                 output.append(f"[{label}] URL: {source['url']}\n" + source['body'][start:end])
-            return '<external source="pipeline-cache">\n'+'\n\n'.join(output)+'\n</external>'+note
+            text = '<external source="pipeline-cache">\n'+'\n\n'.join(output)+'\n</external>'+note
+            return ToolResult(text, {"cache_hit": True, "returned_chars": len(text), "empty": not bool(output)})
         return ({'name':'commulingo_pipeline_cached_passages',
             'description':'Read cached originals without network access. Call with {} or passages: [] to list current available_pages. If the list is empty, fetch an original first. Supply existing passage labels (P-numbers, not source hashes) OR an exact source_id from that list to display a page and obtain its labels. Never guess IDs or labels. Retrieval timestamps are unchanged.',
             'input_schema':{'type':'object','additionalProperties':False,
@@ -116,6 +117,8 @@ class Sources:
                 page = cached
             else:
                 raw = await call(**args)
+                if is_failure(raw):
+                    return raw
                 text = str(raw)
                 body = external_body(text)
                 urls = [args.get('url')] if name == 'fetch_url' else re.findall(r'https?://[^\s<>\]"\)]+', text[:1000])
@@ -123,7 +126,7 @@ class Sources:
                 if not body or not url:
                     return raw
                 if len(body[1]) > MAX_SNAPSHOT_CHARS:
-                    raise ValueError('source page is too large; request a smaller page')
+                    raise ToolRejection('source page is too large; request a smaller page')
                 page = snapshot(url, body[1])
                 await asyncio.to_thread(self.store.save_source, page)
                 await asyncio.to_thread(self.store.cache_source, name, args, page['id'])
@@ -131,5 +134,7 @@ class Sources:
             request = {'tool':name, 'args':args, 'source_id':page['id']}
             if request not in self.requests:
                 self.requests.append(request)
-            return self.display(page)
+            return ToolResult(self.display(page), {
+                **((getattr(raw, 'result_metadata', None) or {}) if not cached else {}),
+                'cache_hit': bool(cached), 'extracted_chars': len(page['body']), 'empty': False})
         return fetched

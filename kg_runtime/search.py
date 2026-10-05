@@ -24,6 +24,8 @@ from kg_runtime.service_runtime import get_kg_service, reset_kg_service, run_kg_
 from secrets_loader import get_secret
 from tool_gateway.results import ToolFailure, ToolResult
 
+from kg_runtime.read_policy import ReadPolicy, current_policy, edge_where, _current
+
 logger = logging.getLogger(__name__)
 # Neo4j emits a WARNING notification whenever a query touches a property key
 # or label that no node has yet (external_ids / alias_keys / :Document before
@@ -159,11 +161,12 @@ RETURN r.uuid AS uuid, r.name AS predicate, coalesce(r.fact, '') AS fact,
        toString(r.valid_at) AS valid_at, toString(r.invalid_at) AS invalid_at,
        toString(r.expired_at) AS expired_at, toString(r.created_at) AS created_at,
        r.group_id AS group_id, r.sync_key AS sync_key, r.reference_type AS reference_type,
-       r.doc_ref AS doc_ref, ep_names, ep_sources
+       r.doc_ref AS doc_ref, r.source_url AS source_url, r.doc_kind AS doc_kind,
+       r.extraction AS extraction, r.verification_status AS verification_status, ep_names, ep_sources
 """
 
 _HYDRATE_NODES_CYPHER = """
-MATCH (n:Entity) WHERE n.uuid IN $uuids
+MATCH (n:Entity) WHERE n.uuid IN $uuids AND NOT n.uuid IN $hidden_nodes
 RETURN n.uuid AS uuid, coalesce(n.curated_name, n.name) AS name, labels(n) AS labels, CASE WHEN coalesce(n.curated_summary, '') <> '' THEN n.curated_summary ELSE coalesce(n.summary, '') END AS summary,
        CASE WHEN coalesce(n.curated_summary, '') <> '' THEN n.curated_source ELSE null END AS summary_source,
        coalesce(n.aliases, []) AS aliases, coalesce(n.external_ids, []) AS external_ids
@@ -175,6 +178,7 @@ RETURN n.uuid AS uuid, coalesce(n.curated_name, n.name) AS name, labels(n) AS la
 _NEIGHBORHOOD_CYPHER = """
 MATCH (n:Entity {uuid: $uuid})
 MATCH (n)-[r:RELATES_TO]-(m:Entity)
+WHERE __EDGE_POLICY__
 WITH r, (r.expired_at IS NULL) AS active,
      CASE WHEN r.name = 'Reference' THEN 1 ELSE 0 END AS ref_rank
 ORDER BY active DESC, ref_rank ASC, coalesce(r.valid_at, r.created_at) DESC
@@ -200,6 +204,9 @@ def _source_label(row: dict) -> str:
     if any(re.match(r"^(?:\[T:[^]]+\]\s*|T-(?:anchor|corroborated|single)-)?scout-patrol-",
                     str(name or "")) for name in row.get("ep_names") or ()):
         return "internal_scout_report"
+    doc_ref = row.get("doc_ref")
+    if doc_ref:
+        return str(doc_ref)
     key = row.get("sync_key") or ""
     if key:
         head = key.split(":", 1)[0]
@@ -234,8 +241,22 @@ def _hydrate_edges(edge_uuids: list[str]) -> dict[str, dict]:
     if not uuids:
         return {}
     out: dict[str, dict] = {}
+    policy = current_policy()
     for row in _run_rows(_HYDRATE_EDGES_CYPHER, uuids=uuids):
+        if not policy.allows(row):
+            continue
         row["tier"] = _tier_from_names(row.get("ep_names"))
+        if row.get('doc_ref'):
+            if row['tier'] == 'corroborated' and row.get('verification_status') != 'corroborated':
+                row['tier'] = 'single'
+                row['verification_status'] = 'legacy_unverified'
+            if not row.get('source_url'):
+                kind, _, ident = row['doc_ref'].partition(':')
+                route = {'research': 'research', 'archival': 'commulingo/docs'}.get(kind)
+                if route:
+                    row['source_url'] = f'https://cyber-lenin.com/{route}/{ident}'
+            row['doc_kind'] = row.get('doc_kind') or row['doc_ref'].split(':', 1)[0]
+            row['extraction'] = row.get('extraction') or ('llm' if ':llm' in (row.get('sync_key') or '') else 'deterministic')
         row["source"] = _source_label(row)
         row["subject_type"] = _label_of(row.get("subject_labels"))
         row["object_type"] = _label_of(row.get("object_labels"))
@@ -247,7 +268,7 @@ def _hydrate_nodes(node_uuids: list[str]) -> dict[str, dict]:
     uuids = [u for u in node_uuids if u]
     if not uuids:
         return {}
-    return {row["uuid"]: row for row in _run_rows(_HYDRATE_NODES_CYPHER, uuids=uuids)}
+    return {row["uuid"]: row for row in _run_rows(_HYDRATE_NODES_CYPHER, uuids=uuids, hidden_nodes=current_policy().hidden[1])}
 
 
 def _entity_neighborhood(uuid: str, cap: int = ENTITY_NEIGHBORHOOD_CAP) -> tuple[dict | None, list[dict]]:
@@ -256,7 +277,7 @@ def _entity_neighborhood(uuid: str, cap: int = ENTITY_NEIGHBORHOOD_CAP) -> tuple
     node = nodes.get(uuid)
     if not node:
         return None, []
-    rows = _run_rows(_NEIGHBORHOOD_CYPHER, uuid=uuid, cap=int(cap))
+    rows = _run_rows(_NEIGHBORHOOD_CYPHER.replace("__EDGE_POLICY__", edge_where()), uuid=uuid, cap=int(cap), **current_policy().params())
     hydrated = _hydrate_edges([r["uuid"] for r in rows])
     edges = [hydrated[r["uuid"]] for r in rows if r["uuid"] in hydrated]
     return node, edges
@@ -265,7 +286,7 @@ def _entity_neighborhood(uuid: str, cap: int = ENTITY_NEIGHBORHOOD_CAP) -> tuple
 _FACTS_BY_EXTERNAL_ID_CYPHER = """
 MATCH (n:Entity) WHERE $eid IN coalesce(n.external_ids, [])
 MATCH (n)-[r:RELATES_TO]-(m:Entity)
-WHERE r.expired_at IS NULL AND (r.sync_key IS NULL OR NOT r.sync_key STARTS WITH $skip_prefix)
+WHERE __EDGE_POLICY__ AND (r.sync_key IS NULL OR NOT r.sync_key STARTS WITH $skip_prefix)
 WITH r ORDER BY coalesce(r.valid_at, r.created_at) DESC
 RETURN r.uuid AS uuid LIMIT $limit
 """
@@ -275,7 +296,7 @@ def kg_facts_for_external_id(external_id: str, *, limit: int = 5, skip_prefix: s
     """Formatted non-mirror facts attached to the node carrying ``external_id``
     (e.g. news/analysis facts about a CommuLingo person). Empty on any failure."""
     try:
-        rows = _run_rows(_FACTS_BY_EXTERNAL_ID_CYPHER, eid=external_id, skip_prefix=skip_prefix, limit=int(limit))
+        rows = _run_rows(_FACTS_BY_EXTERNAL_ID_CYPHER.replace("__EDGE_POLICY__", edge_where()), eid=external_id, skip_prefix=skip_prefix, limit=int(limit), **current_policy().params())
         hydrated = _hydrate_edges([r["uuid"] for r in rows])
         return [_format_edge_line(hydrated[r["uuid"]]) for r in rows if r["uuid"] in hydrated]
     except Exception as exc:
@@ -323,6 +344,14 @@ def _format_edge_line(e: dict) -> str:
     src = e.get("source")
     if src and src != "?":
         meta.append(f"src: {src}")
+    if e.get('source_url'):
+        meta.append('url: ' + e['source_url'])
+    if e.get('doc_kind'):
+        meta.append('kind: ' + e['doc_kind'])
+    if e.get('extraction'):
+        meta.append('extraction: ' + e['extraction'])
+    if e.get('verification_status') == 'legacy_unverified':
+        meta.append('교차 검증 미확인')
     line = f"- [{'|'.join(flags)}] {subj} —{pred}→ {obj}: {e.get('fact') or ''}"
     if meta:
         line += " (" + "; ".join(meta) + ")"
@@ -349,7 +378,10 @@ def _format_kg_results(nodes: list[dict], edges: list[dict], edge_tier: dict[str
                 lines.append(f"- [{e.get('tier') or '?'}] {e['fact']}")
             else:
                 lines.append(_format_edge_line(e))
-    return _result("\n".join(lines), "entity" if entity_header else "semantic", len(nodes), len(edges))
+    result = _result("\n".join(lines), "entity" if entity_header else "semantic", len(nodes), len(edges))
+    result.result_metadata.update(source_identified=sum(bool(e.get('source') and e['source'] not in ('?', 'doc')) for e in edges),
+                                  source_measured=len(edges))
+    return result
 
 
 # ── Direct Cypher fallback ────────────────────────────────────────────────────
@@ -383,25 +415,25 @@ def _direct_cypher_search(query: str, num_results: int = 10) -> str | None:
     try:
         node_rows = _run_rows(
             "MATCH (n:Entity) "
-            "WHERE any(term IN $terms WHERE "
+            "WHERE NOT n.uuid IN $hidden_nodes AND ( any(term IN $terms WHERE "
             "  toLower(coalesce(n.name, '')) CONTAINS term OR "
             "  toLower(coalesce(n.alias_text, '')) CONTAINS term OR "
             "  toLower(coalesce(n.summary, '')) CONTAINS term) "
-            "RETURN n.uuid AS uuid, n.name AS name, labels(n) AS labels, "
+            ") RETURN n.uuid AS uuid, n.name AS name, labels(n) AS labels, "
             "       coalesce(n.summary, '') AS summary, coalesce(n.aliases, []) AS aliases, "
             "       coalesce(n.external_ids, []) AS external_ids "
             "LIMIT $limit",
-            terms=terms, limit=num_results,
+            terms=terms, limit=num_results, **current_policy().params(),
         )
         edge_rows = _run_rows(
             "MATCH (a:Entity)-[r:RELATES_TO]->(b:Entity) "
-            "WHERE any(term IN $terms WHERE "
+            "WHERE " + edge_where() + " AND any(term IN $terms WHERE "
             "  toLower(coalesce(r.fact, '')) CONTAINS term OR "
             "  toLower(coalesce(a.name, '')) CONTAINS term OR "
             "  toLower(coalesce(b.name, '')) CONTAINS term) "
             "RETURN r.uuid AS uuid "
             "LIMIT $limit",
-            terms=terms, limit=num_results,
+            terms=terms, limit=num_results, **current_policy().params(),
         )
     except Exception as e:
         logger.warning("[KG] direct Cypher fallback failed (query=%s): %s", query[:50], e)
@@ -409,14 +441,16 @@ def _direct_cypher_search(query: str, num_results: int = 10) -> str | None:
 
     nodes = [r for r in node_rows if r.get("name")]
     display = _hydrate_nodes([n["uuid"] for n in nodes])
-    nodes = [display.get(n["uuid"], n) for n in nodes]
+    nodes = [display[n["uuid"]] for n in nodes if n["uuid"] in display]
     hydrated = _hydrate_edges([r["uuid"] for r in edge_rows])
     edges = list(hydrated.values())
     if not nodes and not edges:
         return None
     nodes, edges = _cap_results(nodes, edges, num_results)
-    return _result("[Knowledge Graph fallback: direct Cypher text match]\n" + _format_kg_results(nodes, edges),
-                   "fallback", len(nodes), len(edges), fallback=True)
+    rendered = _format_kg_results(nodes, edges)
+    return ToolResult("[Knowledge Graph fallback: direct Cypher text match]\n" + rendered,
+                      dict(rendered.result_metadata, path='fallback', fallback=True))
+
 
 
 # ── Stats ─────────────────────────────────────────────────────────────────────
@@ -564,7 +598,7 @@ def _entity_mode_result(hit, cap: int = ENTITY_NEIGHBORHOOD_CAP) -> str | None:
 
 # ── Public search ─────────────────────────────────────────────────────────────
 
-def search_knowledge_graph(query: str = "", num_results: int = 10, query_en: str | None = None,
+def _search_knowledge_graph(query: str = "", num_results: int = 10, query_en: str | None = None,
                            *, entity: str | None = None, mode: str = "auto") -> str | None:
     """Search the knowledge graph and return formatted results.
 
@@ -589,6 +623,8 @@ def search_knowledge_graph(query: str = "", num_results: int = 10, query_en: str
     hits = []
     if mode != "semantic":
         hits = _alias_hits(entity or query, limit=20, strict=bool(entity) or mode == "entity")
+        if any('Document' in h.labels for h in hits):
+            hits = [h for h in hits if h.uuid not in current_policy().hidden[1]]
         simple = bool(entity) or mode == "entity" or _simple_entity_query(query, hits)
         if simple and len(hits) > 1:
             nodes = list(_hydrate_nodes([h.uuid for h in hits[:num_results]]).values())
@@ -632,7 +668,7 @@ def search_knowledge_graph(query: str = "", num_results: int = 10, query_en: str
         _svc_ref = [svc]
         for attempt in range(2):
             try:
-                return run_kg_task(_svc_ref[0].search, query=q, group_ids=None, num_results=num_results)
+                return run_kg_task(_svc_ref[0].search, query=q, group_ids=None, num_results=num_results, read_policy=current_policy())
             except Exception as e:
                 err_msg = str(e).lower()
                 is_conn_error = any(k in err_msg for k in _CONN_ERRORS)
@@ -697,17 +733,37 @@ def search_knowledge_graph(query: str = "", num_results: int = 10, query_en: str
 
     all_nodes, all_edges = _prioritize_canonical_hits(all_nodes, all_edges, query)
 
-    # Hydrate: endpoints, dates, tier, source in one pass each.
+    # Never fall back to unhydrated assertions: their visibility/provenance is unknown.
+    degraded = False
     try:
-        node_rows = _hydrate_nodes([n["uuid"] for n in all_nodes])
-        all_nodes = [dict(n, **node_rows.get(n["uuid"], {})) for n in all_nodes]
+        node_rows = _hydrate_nodes([n['uuid'] for n in all_nodes])
+        all_nodes = [node_rows[n['uuid']] for n in all_nodes if n['uuid'] in node_rows]
     except Exception as exc:
-        logger.debug("[KG] node hydration skipped: %s", exc)
+        logger.warning('[KG] node hydration failed: %s', exc)
+        all_nodes = []
+        degraded = True
     try:
-        edge_rows = _hydrate_edges([e["uuid"] for e in all_edges])
-        all_edges = [edge_rows.get(e["uuid"], e) for e in all_edges]
+        edge_rows = _hydrate_edges([e['uuid'] for e in all_edges])
+        all_edges = [edge_rows[e['uuid']] for e in all_edges if e['uuid'] in edge_rows]
     except Exception as exc:
-        logger.debug("[KG] edge hydration skipped: %s", exc)
+        logger.warning('[KG] edge hydration failed: %s', exc)
+        all_edges = []
+        degraded = True
 
     all_nodes, all_edges = _cap_results(all_nodes, all_edges, num_results)
-    return _format_kg_results(all_nodes, all_edges)
+    result = _format_kg_results(all_nodes, all_edges)
+    result.result_metadata['degraded'] = degraded
+    if degraded and not all_nodes and not all_edges:
+        return _result('Knowledge graph source hydration failed; do not treat this as no KG data.', 'error', error=True)
+    return result
+
+
+def search_knowledge_graph(query: str = '', num_results: int = 10, query_en: str | None = None,
+                           *, entity: str | None = None, mode: str = 'auto',
+                           as_of: str | None = None, include_expired: bool = False):
+    policy = ReadPolicy(as_of=as_of, include_expired=include_expired)
+    token = _current.set(policy)
+    try:
+        return _search_knowledge_graph(query, num_results, query_en, entity=entity, mode=mode)
+    finally:
+        _current.reset(token)

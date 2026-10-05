@@ -64,7 +64,11 @@ class RuntimeContextTests(unittest.TestCase):
                  patch.object(search, '_alias_hits', return_value=[SimpleNamespace(uuid='u')]), \
                  patch.object(search, '_entity_neighborhood', return_value=(
                      {'name': 'Entity'}, [{validity_field: '2020-01-01', 'fact': 'obsolete'}])):
-                self.assertEqual(recall.entity_gated_kg_block('Entity'), '')
+                result = recall.entity_gated_kg_block('Entity')
+                if validity_field == 'expired_at':
+                    self.assertEqual(result, '')
+                else:
+                    self.assertIn('valid … → 2020-01-01', result)
 
     def test_legacy_scout_origin(self):
         from kg_runtime.search import _source_label

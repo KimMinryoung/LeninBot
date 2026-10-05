@@ -41,6 +41,28 @@ def graph_metrics() -> dict:
     out["duplicate_name_groups"] = dup.get("groups", 0)
     out["duplicate_name_nodes"] = dup.get("nodes", 0)
     out["expired_edges"] = one("MATCH ()-[r:RELATES_TO]->() WHERE r.expired_at IS NOT NULL RETURN count(r) AS c").get("c", 0)
+    out['active_edges'] = out['edges'] - out['expired_edges']
+    out['active_reference_edges'] = one("MATCH ()-[r:RELATES_TO]->() WHERE r.expired_at IS NULL AND r.name = 'Reference' RETURN count(r) AS c").get('c', 0)
+    out['active_substantive_edges'] = out['active_edges'] - out['active_reference_edges']
+    substantive = one("MATCH (n:Entity) OPTIONAL MATCH (n)-[r:RELATES_TO]-() "
+        "WHERE r.expired_at IS NULL AND r.name <> 'Reference' WITH n, count(r) AS d "
+        "RETURN sum(CASE WHEN d = 0 THEN 1 ELSE 0 END) AS isolated, "
+        "sum(CASE WHEN d <= 2 THEN 1 ELSE 0 END) AS low, count(*) AS total")
+    out['substantive_orphans'] = substantive.get('isolated', 0)
+    out['substantive_degree_le2_share'] = round(substantive.get('low', 0) / max(substantive.get('total', 0), 1), 3)
+    out['duplicate_active_sync_keys'] = one("MATCH ()-[r:RELATES_TO]->() WHERE r.sync_key IS NOT NULL AND r.expired_at IS NULL "
+        "WITH r.sync_key AS key, count(*) AS c WHERE c > 1 RETURN count(*) AS c").get('c', 0)
+    out['inactive_document_active_edges'] = one("MATCH (d:Entity:Document) WHERE d.source_active = false "
+        "MATCH ()-[r:RELATES_TO]->() WHERE r.doc_ref IN coalesce(d.external_ids, []) AND r.expired_at IS NULL RETURN count(DISTINCT r) AS c").get('c', 0)
+    out['unattributed_active_edges'] = one("MATCH ()-[r:RELATES_TO]->() "
+        "WHERE r.expired_at IS NULL AND r.sync_key IS NULL AND r.doc_ref IS NULL "
+        "AND NOT EXISTS { MATCH (ep:Episodic) WHERE ep.uuid IN coalesce(r.episodes, []) } RETURN count(r) AS c").get('c', 0)
+    out['growth_per_week'] = _cypher_rows(
+        "MATCH ()-[r:RELATES_TO]->() WITH coalesce(r.sync_key, r.uuid) AS key, min(r.created_at) AS first, collect(r.created_at) AS versions "
+        "UNWIND versions AS created WITH first, created WHERE created >= datetime() - duration('P56D') "
+        "WITH date(datetime(created)) AS d, sum(CASE WHEN created = first THEN 1 ELSE 0 END) AS added, "
+        "sum(CASE WHEN created <> first THEN 1 ELSE 0 END) AS replaced "
+        "RETURN toString(d.weekYear) + '-W' + toString(d.week) AS week, sum(added) AS added, sum(replaced) AS replaced ORDER BY week")
     out["edges_by_source"] = {
         (r["src"] or "agent/news"): r["c"]
         for r in _cypher_rows(
@@ -69,10 +91,10 @@ def graph_metrics() -> dict:
     return out
 
 
-def sync_metrics() -> dict:
+def sync_metrics(*, query=None) -> dict:
     try:
         from db import query as db_query
-        rows = db_query("SELECT source, watermark, last_run_at, last_full_at, last_attempt_at, stats FROM kg_sync_state")
+        rows = (query or db_query)("SELECT source, watermark, last_run_at, last_full_at, last_attempt_at, stats FROM kg_sync_state")
     except Exception as exc:
         if "kg_sync_state" in str(exc) and "does not exist" in str(exc):
             return {}
@@ -84,6 +106,8 @@ def sync_metrics() -> dict:
         stats = r.get("stats") or {}
         out[r["source"]] = {
             "last_run_at": str(last)[:19] if last else None,
+            "watermark": str(r.get('watermark')) if r.get('watermark') else None,
+            "reconciliation": stats.get('reconciliation'),
             "lag_hours": round((now - last).total_seconds() / 3600, 1) if last else None,
             "last_full_at": str(r.get("last_full_at"))[:19] if r.get("last_full_at") else None,
             "mode": stats.get("mode"), "error": stats.get("error"),
@@ -108,10 +132,12 @@ def usage_metrics(days: int = 14) -> dict:
                    count(*) FILTER (WHERE result_metadata->>'empty' = 'true') AS empty,
                    count(*) FILTER (WHERE result_metadata->>'fallback' = 'true') AS fallback,
                    count(*) FILTER (WHERE result_metadata IS NOT NULL) AS diagnosed,
+                   sum(coalesce((result_metadata->>'source_identified')::int, 0)) AS source_identified,
+                   sum(coalesce((result_metadata->>'source_measured')::int, 0)) AS source_measured,
                    max(ts) AS last_call_at
             FROM tool_audit_log
             WHERE ts > now() - (%s || ' days')::interval
-              AND tool_name IN ('knowledge_graph_search', 'write_kg_structured')
+              AND tool_name IN ('knowledge_graph_search', 'write_kg_structured', 'kg_entity_recall')
               AND agent_name IS DISTINCT FROM 'kg_verification'
             GROUP BY 1, 2, 3, 4 ORDER BY 5 DESC
             """,
@@ -144,6 +170,12 @@ def usage_metrics(days: int = 14) -> dict:
         c["unknown"] = c["n"] - c["measured"]
     return {
         "days": days, "searches": searches, "writes": writes,
+        "recall": {"attempts": sum(r['n'] for r in rows if r['tool_name'] == 'kg_entity_recall'),
+                   "injected": sum(r['n'] - r['empty'] for r in rows if r['tool_name'] == 'kg_entity_recall' and r['result_status'] == 'ok'),
+                   "empty": sum(r['empty'] for r in rows if r['tool_name'] == 'kg_entity_recall' and r['result_status'] == 'ok'),
+                   "failed": sum(r['n'] for r in rows if r['tool_name'] == 'kg_entity_recall' and r['result_status'] != 'ok')},
+        "source_identified": sum(r.get('source_identified', 0) or 0 for r in rows if r['tool_name'] == 'knowledge_graph_search'),
+        "source_measured": sum(r.get('source_measured', 0) or 0 for r in rows if r['tool_name'] == 'knowledge_graph_search'),
         "callers": list(callers.values()),
         "search_failure_rate": round(sum(r["n"] for r in rows if r["tool_name"] == "knowledge_graph_search" and r["result_status"] != "ok") / searches, 3) if searches else None,
         "by_caller": [
@@ -163,16 +195,18 @@ def source_coverage_metrics() -> dict:
     from jobs.kg_sync_commulingo import load_source, build_facts, existing_sync_edges, fact_changed
     from jobs.kg_sync_documents import load_records, _commulingo_names
     from kg_runtime import doc_extract as dx
-    from graph_memory.graphiti_patches import normalize_entity_names_in_text
     expected = build_facts(load_source())
     existing = existing_sync_edges()
     missing = changed = 0
+    differences = []
     for fact in expected:
         edge = existing.get(fact["attributes"]["sync_key"])
         if edge is None:
             missing += 1
+            differences.append({"source": "commulingo", "key": fact["attributes"]["sync_key"], "kind": "missing"})
         elif fact_changed(fact, edge):
             changed += 1
+            differences.append({"source": "commulingo", "key": fact["attributes"]["sync_key"], "kind": "changed"})
     records = load_records()
     docs = {r.ref: r["sha"] for r in records}
     names = _commulingo_names()
@@ -184,8 +218,46 @@ def source_coverage_metrics() -> dict:
     graph_docs = {r["ref"]: r["sha"] for r in _cypher_rows(
         "MATCH (n:Entity:Document) UNWIND coalesce(n.external_ids, []) AS ref "
         "RETURN ref, n.content_sha256 AS sha")}
+    expected_keys = {f['attributes']['sync_key'] for f in expected}
+    stale = [key for key, edge in existing.items() if key not in expected_keys and not edge['expired']]
+    link_keys = {f['attributes']['sync_key'] for f in links}
+    obsolete_links = [key for key, edge in document_edges.items() if not edge['expired'] and key not in link_keys
+                      and (':about:' in key or key.endswith(':collection'))]
+    for key in stale:
+        differences.append({'source': 'commulingo', 'key': key, 'kind': 'obsolete'})
+    for fact in links:
+        key = fact['attributes']['sync_key']
+        if key not in document_edges or fact_changed(fact, document_edges[key]):
+            differences.append({'source': 'documents', 'key': key, 'kind': 'missing' if key not in document_edges else 'changed'})
+    for key in obsolete_links:
+        differences.append({'source': 'documents', 'key': key, 'kind': 'obsolete'})
+    states = dx.existing_document_states()
+    metadata_changed = [r.ref for r in records if r.ref in states and states[r.ref].get('metadata_sha') != r.metadata_sha]
+    inactive = [r.ref for r in records if r.ref in states and not states[r.ref].get('active', True)]
+    extra_active = [ref for ref, state in states.items() if ref not in docs and state.get('active', True)]
+    # Timestamp classification is conservative: absent source timestamps stay unknown.
+    updated = {r.ref: r.get('source_updated_at') or None for r in records}
+    from db import query_one
+    revision = query_one('SELECT max(created_at) AS ts FROM commulingo_people_revisions') or {}
+    comm_updated = revision.get('ts')
+    checkpoints = sync_metrics()
+    for item in differences:
+        ref = item['key'][4:].rsplit(':collection', 1)[0].split(':about:', 1)[0] if item['source'] == 'documents' else None
+        changed_at = updated.get(ref) if ref else comm_updated
+        item['source_updated_at'] = str(changed_at) if changed_at else None
+        watermark = checkpoints.get(item['source'], {}).get('watermark')
+        item['state'] = 'unknown'
+        if changed_at and watermark:
+            from graph_memory.fact_version import canonical_date
+            try:
+                item['state'] = 'pending' if canonical_date(changed_at) > canonical_date(watermark) else 'needs_reconciliation'
+            except (ValueError, TypeError):
+                pass
     return {"commulingo_expected": len(expected), "commulingo_missing": missing,
-            "commulingo_changed": changed, "documents_expected": len(docs),
+            "commulingo_changed": changed, "commulingo_obsolete": len(stale), "documents_expected": len(docs),
+            "document_links_obsolete": len(obsolete_links), "documents_metadata_changed": metadata_changed,
+            "documents_inactive": inactive, "documents_obsolete_active": extra_active,
+            "differences": differences[:100], "difference_count": len(differences),
             "document_links_missing": link_missing, "document_links_changed": link_changed,
             "documents_missing": sorted(docs.keys() - graph_docs.keys()),
             "documents_changed": sum(graph_docs.get(ref) != sha for ref, sha in docs.items() if ref in graph_docs)}
@@ -225,12 +297,17 @@ def format_report(m: dict) -> str:
             f"관계 없는 노드 {g.get('orphans', 0):,} (완전 미연결 {g.get('disconnected', 0):,}) · 차수≤2 {g.get('degree_le2_share', 0):.0%} · 빈 summary {g.get('empty_summary', 0):,} · "
             f"동명 중복 {g.get('duplicate_name_groups', 0)}그룹/{g.get('duplicate_name_nodes', 0)}노드 · 외부id {g.get('with_external_ids', 0):,}"
         )
+        lines.append(f"미만료 관계 {g.get('active_edges', 0):,}: 실질 {g.get('active_substantive_edges', 0):,} · 참조 {g.get('active_reference_edges', 0):,}; "
+                     f"실질 관계 없는 노드 {g.get('substantive_orphans', 0):,} · 실질 차수≤2 {g.get('substantive_degree_le2_share', 0):.0%}")
+        if g.get('growth_per_week'):
+            lines.append('주간 논리 관계 신규/버전 교체: ' + ' · '.join(f"{w['week']}={w['added']}/{w['replaced']}" for w in g['growth_per_week']))
+        lines.append(f"원천 에피소드가 없는 미만료 관계 {g.get('unattributed_active_edges', 0):,}")
         docs = g.get("documents_by_kind") or {}
         if docs:
             lines.append("문서 노드: " + ", ".join(f"{k} {v}" for k, v in docs.items()))
         weeks = g.get("edges_per_week") or []
         if weeks:
-            lines.append("주간 신규 엣지: " + " · ".join(f"{w['week'][-3:]}={w['edges']}" for w in weeks[-8:]))
+            lines.append("주간 생성 관계 버전: " + " · ".join(f"{w['week'][-3:]}={w['edges']}" for w in weeks[-8:]))
         src = g.get("edges_by_source") or {}
         if src:
             lines.append("출처별 엣지: " + ", ".join(f"{k} {v:,}" for k, v in list(src.items())[:6]))
@@ -246,6 +323,10 @@ def format_report(m: dict) -> str:
         lines.append(f"usage: ERROR {u['error'][:120]}")
     else:
         lines.append(f"최근 {u.get('days')}일 검색 {u.get('searches', 0)} · 쓰기 {u.get('writes', 0)}")
+        if u.get('recall'):
+            r = u['recall']
+            lines.append(f"자동 회상: 시도 {r['attempts']} · 주입 {r['injected']} · 빈 결과 {r['empty']} · 실패 {r['failed']}")
+        lines.append(f"검색 출처 식별: {u.get('source_identified', 0)}/{u.get('source_measured', 0)} 관계")
         for c in u.get("callers") or []:
             recency = ""
             if c.get("failed"):
@@ -258,5 +339,8 @@ def format_report(m: dict) -> str:
             lines.append("검색 호출자: " + ", ".join(f"{c['interface']}/{c['agent'] or '-'} {c['status']} {c['n']} (empty={rate(c['empty_rate'])}, fallback={rate(c['fallback_rate'])}, p95={c['p95_ms']}ms)" for c in top))
     coverage = m.get("coverage") or {}
     if coverage:
-        lines.append("원천 대조: " + str(coverage))
+        summary = {k: (len(v) if isinstance(v, list) else v) for k, v in coverage.items() if k != 'differences'}
+        lines.append("원천 대조: " + str(summary))
+        for item in coverage.get('differences', [])[:5]:
+            lines.append(f"  {item['kind']} {item['key']} ({item.get('state', 'unknown')}, source_updated_at={item.get('source_updated_at')})")
     return "\n".join(lines)

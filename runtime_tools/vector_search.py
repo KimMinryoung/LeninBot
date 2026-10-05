@@ -5,7 +5,7 @@ import logging
 import re
 
 from llm.json_utils import extract_json_object as _extract_json_object
-from tool_gateway.results import ToolFailure
+from tool_gateway.results import ToolFailure, ToolResult
 
 logger = logging.getLogger(__name__)
 
@@ -181,6 +181,8 @@ async def search_corpus_multilingual(
             for _label, q, search_layer in searches
         ]
         batches = await asyncio.gather(*tasks, return_exceptions=True)
+        if all(isinstance(batch, Exception) for batch in batches):
+            raise RuntimeError("All corpus searches failed")
         merged = []
         seen: set[tuple[str, str]] = set()
         for batch in batches:
@@ -233,7 +235,7 @@ async def exec_vector_search(
             keywords=keywords,
         )
         if not docs:
-            return "No documents found."
+            return ToolResult("No documents found.", {"result_count": 0, "empty": True, "path": "corpus"})
         results = []
         for i, doc in enumerate(docs, 1):
             meta = doc.metadata
@@ -245,6 +247,8 @@ async def exec_vector_search(
             if meta.get("chunk_count", 1) and int(meta.get("chunk_count", 1)) > 1:
                 idx = int(meta.get("chunk_index", 0)) + 1
                 header += f"\nChunk: {idx}/{meta.get('chunk_count')}"
+            if meta.get("chunk_id"):
+                header += f"\nUUID: {meta['chunk_id']}"
             body = doc.page_content
             if (
                 meta.get("layer") == "self_produced_analysis"
@@ -257,12 +261,13 @@ async def exec_vector_search(
                     center_index=int(meta.get("chunk_index", 0)),
                     window=1,
                     max_chars=9000,
+                    layer=meta.get("layer"),
                 )
-                if expanded and len(expanded) > len(body):
+                if expanded and not isinstance(expanded, ToolFailure) and len(expanded) > len(body):
                     body = expanded
                     header += "\nContext: expanded with adjacent chunks from the same public document"
             results.append(f"{header}\n{body}")
-        return "\n\n".join(results)
+        return ToolResult("\n\n".join(results), {"result_count": len(docs), "empty": False, "path": "corpus"})
     except Exception as e:
         logger.error("vector_search error: %s", e)
-        return ToolFailure(f"Vector search failed: {e}")
+        return ToolFailure(f"Vector search failed: {e}", {"path": "corpus", "failure_type": type(e).__name__})

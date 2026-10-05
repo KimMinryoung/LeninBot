@@ -359,3 +359,12 @@ DB 싱크 워커는 daemon 스레드다. 오래 사는 서비스에서는 문제
 `token_semantics=anthropic`을 전달한다. 기존 감사 행의 제공자별 토큰 의미와 비용 계산은
 그대로다. 새 계측은 provider fallback에서도 누적되고 예외 시 이미 받은 응답을 보존한다.
 `observed_llm_cost_usd`는 부분 관측치일 수 있으므로 그 값만으로 미정산 예약을 해제하지 않는다.
+
+## Operator MCP cost and budget report
+
+`usage_and_budget_report` reuses `ops.llm_balances` official billing and local estimation
+collectors. Local query failure yields unknown, not zero. `/audit/spend/today` supplies
+live UTC budget accounting separately from the requested cost window; caps are interpreted
+through this process's `load_policy`, with running proxy policy application marked unknown.
+Remaining is a labelled calculation and null for uncapped/unavailable amounts. Provider
+filtering never reduces the spend used for a global cap. See [MCP gateway](mcp_gateway.md).

@@ -517,3 +517,10 @@ tracker에 남지만, 부분 관측 비용만으로 예약을 정산하지 않�
 해당 예약을 정산한다. `tick`도 이 복구를 수행한다. 완료된 작업이라는 사실이나 감사 로그의
 시각별 비용 합만으로 비용을 추정하지 않는다. 이전 중단 작업에 완결된 비용 기록이 없으면
 예약을 보존한다. DB schema 변경은 없다.
+
+## Operator MCP status
+
+`pipeline_status(pipeline="commulingo")` reads queue counts, expired leases, ready/deferred
+jobs eligible for over 24 hours, recent errors/deferrals, last systemd run and next timer.
+It never claims, retries, releases or publishes a job. SQL is read-only with a 5-second
+statement timeout; a failed component is reported alongside successful observations.

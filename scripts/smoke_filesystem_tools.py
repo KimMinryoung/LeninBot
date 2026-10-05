@@ -14,6 +14,7 @@ if str(ROOT) not in sys.path:
 
 async def _run() -> None:
     from runtime_tools.filesystem import _exec_read_file
+    from tool_gateway.results import ToolRejection
 
     converted_dir = ROOT / "data" / "converted"
     converted_dir.mkdir(parents=True, exist_ok=True)
@@ -30,12 +31,13 @@ async def _run() -> None:
         assert "chars 15-35" in char_page
         assert "(next: char_offset=35)" in char_page
 
-        beyond_line_page = await _exec_read_file(str(smoke_path), offset=50, limit=2)
-        assert "offset is a 1-indexed line number" in beyond_line_page
-        assert "char_offset and char_limit explicitly" in beyond_line_page
-
-        beyond_page = await _exec_read_file(str(smoke_path), char_offset=len(text) + 1, char_limit=20)
-        assert "char_offset is beyond end of file" in beyond_page
+        for args in ({"offset":50,"limit":2}, {"char_offset":len(text)+1,"char_limit":20}):
+            try:
+                await _exec_read_file(str(smoke_path), **args)
+            except ToolRejection as exc:
+                assert "beyond end of file" in str(exc)
+            else:
+                raise AssertionError("invalid offset must reject")
     finally:
         smoke_path.unlink(missing_ok=True)
 

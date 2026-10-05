@@ -516,20 +516,37 @@ def existing_sync_edges(prefix: str | None = None) -> dict[str, dict]:
             rows = s.run(
                 "MATCH (a:Entity)-[r:RELATES_TO]->(b:Entity) WHERE r.sync_key STARTS WITH $prefix "
                 "RETURN r.sync_key AS key, r.uuid AS uuid, r.fact AS fact, r.expired_at AS expired_at, "
-                "coalesce(a.external_ids, []) AS subject_ids, coalesce(b.external_ids, []) AS object_ids "
+                "coalesce(a.external_ids, []) AS subject_ids, coalesce(b.external_ids, []) AS object_ids, "
+                "a.uuid AS subject_uuid, b.uuid AS object_uuid, "
+                "r.name AS predicate, toString(r.valid_at) AS valid_at, toString(r.invalid_at) AS invalid_at, r {.*, fact_embedding: null} AS props "
                 "ORDER BY (r.expired_at IS NULL) ASC, r.created_at ASC",
                 prefix=prefix,
             )
-            return {r["key"]: {"uuid": r["uuid"], "fact": r["fact"], "expired": r["expired_at"] is not None,
-                               "subject_ids": r["subject_ids"], "object_ids": r["object_ids"]}
-                    for r in rows}
+            result = {}
+            for r in rows:
+                active = result.get(r['key'], {}).get('active_uuids', [])
+                if r['expired_at'] is None:
+                    active = [*active, r['uuid']]
+                result[r['key']] = {"uuid": r["uuid"], "fact": r["fact"], "expired": r["expired_at"] is not None,
+                    "subject_ids": r["subject_ids"], "object_ids": r["object_ids"], "active_uuids": active,
+                    "subject_uuid": r["subject_uuid"], "object_uuid": r["object_uuid"],
+                    "predicate": r["predicate"], "valid_at": r["valid_at"], "invalid_at": r["invalid_at"],
+                    "attributes": {k: v for k, v in r["props"].items() if k not in
+                        {"uuid", "source_node_uuid", "target_node_uuid", "name", "fact", "fact_embedding", "group_id", "episodes", "created_at", "expired_at", "valid_at", "invalid_at"}}}
+            return result
+
 
 
 def fact_changed(fact: dict, old: dict) -> bool:
-    from graph_memory.graphiti_patches import normalize_entity_names_in_text
-    return (old["expired"] or (old["fact"] or "") != normalize_entity_names_in_text(fact["fact"])
+    from graph_memory.fact_version import relation_content
+    return (old["expired"] or relation_content(fact.get("predicate"), fact.get("fact"),
+                fact.get("valid_at"), fact.get("invalid_at"), fact.get("attributes")) !=
+            relation_content(old.get("predicate"), old.get("fact"), old.get("valid_at"),
+                old.get("invalid_at"), old.get("attributes"))
             or any(fact.get(side + "_external_id") and side + "_ids" in old
-                   and fact[side + "_external_id"] not in old[side + "_ids"] for side in ("subject", "object")))
+                   and fact[side + "_external_id"] not in old[side + "_ids"] for side in ("subject", "object"))
+            or any(fact.get(side + "_uuid") and fact[side + "_uuid"] != old.get(side + "_uuid")
+                   for side in ("subject", "object")))
 
 
 def expire_edges(uuids: list[str]) -> int:
@@ -604,7 +621,7 @@ def write_facts(facts: list[dict], *, batch_size: int = BATCH_SIZE, group_id: st
 def run(*, since: datetime | None = None, full: bool = False, limit: int | None = None,
         dry_run: bool = False) -> dict:
     src = load_source()
-    changed = None if (full or since is None) else changed_since(since)
+    changed = None  # Every run reconciles the complete deterministic source snapshot.
     facts = build_facts(src, changed=changed)
     stats: dict = {
         "source_rows": {"people": len(src.people), "events": len(src.events), "terms": len(src.terms),
@@ -623,11 +640,11 @@ def run(*, since: datetime | None = None, full: bool = False, limit: int | None 
             to_write.append(f)
         elif fact_changed(f, old):
             if not old["expired"]:
-                replacements[key] = old["uuid"]
+                replacements[key] = old.get("active_uuids", [old["uuid"]])
             to_write.append(f)
-    if full and existing:
+    if existing:
         current_keys = {f["attributes"]["sync_key"] for f in facts}
-        stale = [v["uuid"] for k, v in existing.items() if k not in current_keys and not v["expired"]]
+        stale = [uuid for k, v in existing.items() if k not in current_keys for uuid in v.get("active_uuids", [v["uuid"]] if not v["expired"] else [])]
         stats["stale_expired"] = len(stale)
     pending = len(to_write)
     if limit is not None:
@@ -648,12 +665,20 @@ def run(*, since: datetime | None = None, full: bool = False, limit: int | None 
     stats["failed"] = len(to_write) - len(successful)
     stats["remaining"] += stats["failed"]
     stats["complete"] = stats["remaining"] == 0 and not stats["write"]["errors"]
-    stats["expired"] = expire_edges([uuid for key, uuid in replacements.items() if key in successful])
-    if full and stats["complete"]:
-        stats["expired"] += expire_edges(stale)
-    stats["curated_profiles"] = refresh_curated_profiles(facts)
+    stats["expired"] = expire_edges([uuid for key, uuids in replacements.items() if key in successful for uuid in uuids])
+    if stats["complete"]:
+        extra = [uuid for key, edge in existing.items() if key not in replacements
+                 for uuid in edge.get('active_uuids', []) if uuid != edge['uuid']]
+        stats["expired"] += expire_edges(stale + extra)
+    stats["curated_profiles"] = refresh_curated_profiles(facts, source=src)
     # After the writes so a first (full) run already sees the canonical nodes.
     stats["redirects"] = apply_redirects(src.redirects)
+    if stats['complete']:
+        stats['reconciliation'] = compare_sync_facts(facts, existing_sync_edges())
+        if stats['reconciliation']['unresolved']:
+            stats['complete'] = False
+            stats['remaining'] += stats['reconciliation']['unresolved']
+            stats['error'] = 'source reconciliation failed after writes'
     if stats["write"]["errors"]:
         stats["error"] = f"{len(stats['write']['errors'])} batch(es) failed: {stats['write']['errors'][0][:200]}"
     elif stats["failed"]:
@@ -661,7 +686,7 @@ def run(*, since: datetime | None = None, full: bool = False, limit: int | None 
     return stats
 
 
-def refresh_curated_profiles(facts: list[dict]) -> int:
+def refresh_curated_profiles(facts: list[dict], *, source=None) -> int:
     """Refresh source-owned display fields even when no relation changed."""
     profiles = {}
     for fact in facts:
@@ -670,12 +695,56 @@ def refresh_curated_profiles(facts: list[dict]) -> int:
             if eid and eid.startswith(NAMESPACE + ":"):
                 profiles[eid] = {"id": eid, "name": fact.get(side + "_name_ko") or fact[side + "_name"],
                                  "summary": fact.get(side + "_summary") or ""}
+    from kg_runtime.identity import upsert_identities_sync
+    identities = {}
+    for fact in facts:
+        for side in ("subject", "object"):
+            eid = fact.get(side + "_external_id")
+            if eid:
+                identities[eid] = {k: fact.get(side + "_" + k) for k in
+                                   ("name", "aliases", "name_ko", "name_en", "summary")}
+    if source is not None:
+        for kind, rows, make in (("person", source.people, source.person),
+                                 ("term", source.terms, source.term),
+                                 ("event", source.events, source.event)):
+            for ident in rows:
+                hint = make(ident)
+                if hint:
+                    eid = ext_id(kind, ident)
+                    identities[eid] = hint
+                    profiles[eid] = {"id": eid, "name": hint["name"], "summary": hint.get("summary", "")}
     with _neo4j_session() as (drv, db):
         with drv.session(database=db) as session:
+            located = list(session.run("MATCH (n:Entity) UNWIND coalesce(n.external_ids, []) AS eid "
+                                       "WITH n, eid WHERE eid IN $ids RETURN eid, n.uuid AS uuid", ids=list(identities)))
+            updates = []
+            for row in located:
+                hint = identities[row['eid']]
+                updates.append(dict(uuid=row['uuid'], external_ids=[row['eid']],
+                    aliases=hint.get('aliases') or [], name=hint.get('name'),
+                    name_ko=hint.get('name_ko'), name_en=hint.get('name_en')))
+                if row['eid'] in profiles:
+                    profiles[row['eid']]['uuid'] = row['uuid']
+            for start in range(0, len(updates), 200):
+                upsert_identities_sync(session, updates[start:start + 200])
             row = session.run(
-                "UNWIND $profiles AS p MATCH (n:Entity) WHERE p.id IN coalesce(n.external_ids, []) "
+                "UNWIND $profiles AS p MATCH (n:Entity {uuid: p.uuid}) "
                 "SET n.curated_name = coalesce(n.reviewed_name, p.name), n.curated_summary = p.summary, "
                 "n.curated_source = p.id, n.curated_updated_at = datetime() RETURN count(n) AS c",
-                profiles=list(profiles.values()),
+                profiles=[p for p in profiles.values() if p.get("uuid")],
             ).single()
             return row['c'] if row else 0
+
+
+def compare_sync_facts(facts, existing):
+    expected = {f['attributes']['sync_key']: f for f in facts}
+    details = []
+    for key, fact in expected.items():
+        if key not in existing or fact_changed(fact, existing[key]):
+            details.append({'key': key, 'kind': 'missing' if key not in existing else 'changed'})
+    for key, edge in existing.items():
+        if key not in expected and not edge['expired']:
+            details.append({'key': key, 'kind': 'obsolete'})
+        if len(edge.get('active_uuids', [])) > 1:
+            details.append({'key': key, 'kind': 'duplicate_active'})
+    return {'unresolved': len(details), 'differences': details[:100]}

@@ -222,3 +222,11 @@ Provider-facing tool definitions are compacted before API calls: long human-read
 `llm/claude_loop.py` owns the Anthropic-native equivalent and pricing/cost accounting for Claude calls and non-web DeepSeek agent-harness calls. The round/forced-final control flow of both loops is the shared engine `llm.agent_loop.run_tool_loop` (see above); `tests/test_claude_loop_rounds.py`, `tests/test_openai_loop_rounds.py`, and `tests/test_agent_loop_engine.py` pin its contracts. DeepSeek OpenAI-compatible DSML argument spillover is treated as provider serialization leakage, not as an autonomous publication policy or content gate.
 
 Both Anthropic-native Claude calls and Anthropic-compatible DeepSeek calls retry transient provider failures at the API-call boundary: connection/timeouts, 408/409/429, 5xx, and 529 are retried up to three attempts with a short backoff. Non-transient protocol/auth/schema errors are not retried. Streaming callers can opt into a provider idle timeout; `/writer` uses it so a DeepSeek stream that returns HTTP 200 but then produces no text/final event is converted into a transient timeout and retried server-side. For streaming callers such as `/writer`, retry progress can be surfaced as `provider_retry`; final `done` still comes from the successful response, and already-executed local tools are not duplicated because retries happen before each model response is processed.
+
+## Read-only effective configuration audit
+
+`ops/model_runtime.py` owns the allowlisted snapshot used by
+`scripts/model_runtime_audit.py` and operator MCP `get_effective_runtime_config`.
+`llm.runtime_profile.runtime_limits` is shared with execution for token/round/budget
+defaults. The snapshot includes source chains and explicitly labels current-process
+interpretation; running service application is unknown without live attestation.

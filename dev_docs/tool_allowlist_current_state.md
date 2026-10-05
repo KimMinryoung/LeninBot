@@ -1,6 +1,6 @@
 # Tool Allow-List Current State
 
-최종 확인 기준: 2026-07-25 코드 트리.
+최종 확인 기준: 2026-10-05 코드 트리.
 
 Tool visibility is intentionally split by execution surface. There is no single JSON file that owns every allow-list.
 
@@ -23,7 +23,7 @@ Tool visibility is intentionally split by execution surface. There is no single 
 
 `web_search` is a keyless client of the paid web gateway. Provider routing, budgets, cache/coalescing, query limits and domain filtering are owned by [web_research.md](web_research.md). This document owns tool visibility only.
 
-- `runtime_tools/filesystem.py`: programmer-style filesystem and Python execution tools
+- `runtime_tools/filesystem.py`: filesystem tools; Python execution and patch implementations are retained internally but unregistered
 - `runtime_tools/fetch.py`: URL/file/document fetch and conversion tools
 - `runtime_tools/media.py`: image generation and browser automation tools
 - `runtime_tools/social.py`: social/platform tools
@@ -32,6 +32,24 @@ Tool visibility is intentionally split by execution surface. There is no single 
 - domain packages own their tools and the registry imports them in its lower part: `publishing/` (research, site publishing, post edit, private reports, broadcast), `commulingo/people.py`, `mail_runtime/tools.py` (send_email, check_inbox, allowlist_sender), `self_runtime/tools.py`, `crypto_wallet/`; the order of `TOOLS` is part of the provider-facing contract, so keep it when moving code
 
 A tool is callable only if both its definition and handler are present after filtering.
+
+전역 등록 해제: `write_kg`, `query_db`, `kg_admin`, `execute_python`, `patch_file`,
+`swap_eth_to_usdc`, `transfer_usdc`, `pay_and_fetch`. `RETIRED_TOOL_NAMES`가 schema와 handler를
+함께 제거한다. 각 도메인의 구현·정책·직접 호출 테스트와 독립 결제 API/운영 스크립트는 남는다.
+`query_db`의 내부 위험 등급은 `write`이며 replay-safe 목록에서도 제외된다. 운영 SQL은
+`readonly_query_db` / `scripts/query-db`를 사용한다. `restart_service`, 문맥에 바인딩하는
+`mission`·`run_agent`, 단계별 CommuLingo 도구, `moltbook`·`mersoom`은 유지한다.
+소셜 도구의 작업별 제한은 명시적인 소셜 작업 구분을 설계하는 후속 작업이다.
+
+`list_agent_tools`와 MCP `list_runtime_tool_profiles`는 `tool_gateway.visibility`를 통해
+등록 여부·정적 노출 대상·실행 시 주입 조건·퇴역 상태를 함께 표시한다. 정적 AgentSpec/
+profile 목록은 현재 세션의 실제 가용 도구가 아니다. 활성 orchestrator 목록만
+`source=active_context`로 표시하며, 단계별·작업별 추가 필터를 거쳐 실제 도구가 결정된다.
+
+`read_corpus_passage`는 Telegram orchestrator·analyst와 MCP inspect/operator에만 추가된다.
+공개 web/A2A에는 추가하지 않으며 실행 시에도 이 경계를 검사한다. 검색 결과 UUID로
+동일 문서·layer의 인접 원문을 읽는 계약은 [코퍼스 문서](vector_corpus_reingestion.md)를 따른다.
+
 
 ## Telegram Orchestrator
 
@@ -78,6 +96,10 @@ output slug; existing-asset edits and agent lifecycle changes are rejected. Othe
 projects retain their existing tools. See `dev_docs/autonomous_project.md`.
 
 `edit_content` includes diary maintenance actions in addition to field edits. For `content_type="diary"`, `action="delete"` and `action="unpublish"` are destructive public-removal operations and require `confirm=true`; unpublish removes the row from `ai_diary` because the diary table has no private status field. The diary and analyst agents can see `edit_content`, but routine diary ownership remains with the diary agent.
+
+일기 유지보수 작업은 `telegram.diary_mode.filter_diary_task_tools`에서 `save_diary`의
+schema와 handler를 모두 제거한다. 설정된 예약 일기 프롬프트는 기존 공개 검토·저장 경로를
+유지하고 `_make_guarded_diary_save_handler`의 실행 시 검사도 유지한다.
 
 `finalization_tools` and `terminal_tools` are special execution controls, not general allow-list replacements:
 
@@ -138,7 +160,7 @@ execution time even if profile selection or provider output is misconfigured.
 The gateway is fail-closed by profile. The old `readonly` profile name is accepted only as an alias for `inspect`:
 
 - `inspect` is the default profile. It exposes gateway-local inspection tools, `kg_integrity_check`, and selected read-only runtime tools: `vector_search`, `knowledge_graph_search`, and `fetch_url`.
-- `operator` includes all `inspect` tools and adds `readonly_query_db`, which shells out to `scripts/query-db` so SQL remains limited to a single `SELECT`/`WITH`/`SHOW`/`EXPLAIN` diagnostic in a read-only transaction. It also adds `bounded_query_db`, which reuses the existing `runtime_tools.db` guard for one-statement DB work, and `kg_maintenance_run`, which exposes only bounded KG maintenance scripts and requires an explicit confirmation string for mutating runs.
+- `operator` includes all `inspect` tools and adds `readonly_query_db`, which shells out to `scripts/query-db` so SQL remains limited to a single `SELECT`/`WITH`/`SHOW`/`EXPLAIN` diagnostic in a read-only transaction. It also adds operator-only `tool_usage_report` / `trace_tool_run` audit reads and `kg_maintenance_run`, which exposes only bounded KG maintenance scripts and requires an explicit confirmation string for mutating runs.
 
 The gateway must not export the global registry wholesale. High-risk runtime tools such as filesystem writes, arbitrary Python execution, service restart, email/A2A send, publishing, payment/signing, arbitrary KG writes/Cypher, and broad or unguarded DB mutation remain absent from MCP profiles.
 

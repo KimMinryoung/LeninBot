@@ -1609,6 +1609,9 @@ async def _process_task_wrapper(b: Bot, task: dict):
     # Filter base tools to agent's allowed set
     agent_tools, agent_handlers = spec.filter_tools(BASE_TOOLS, BASE_HANDLERS)
 
+    from telegram.diary_mode import filter_diary_task_tools
+    agent_tools, agent_handlers = filter_diary_task_tools(task, agent_tools, agent_handlers)
+
     # Add task-context tools (save_finding), except for Stasova whose
     # publication-security tool surface is deliberately minimal.
     if agent_type != "stasova":

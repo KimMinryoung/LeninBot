@@ -3,6 +3,10 @@
 
 from __future__ import annotations
 
+import os
+os.environ["LENINBOT_EXECUTION_KIND"] = "test"
+os.environ["LENINBOT_TOOL_AUDIT_DB"] = "0"
+
 import socket
 import sys
 from pathlib import Path

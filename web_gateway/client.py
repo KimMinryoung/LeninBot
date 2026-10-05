@@ -4,7 +4,7 @@ from __future__ import annotations
 import httpx
 
 from security_gateway.context import get_caller
-from tool_gateway.results import ToolFailure
+from tool_gateway.results import ToolFailure, ToolResult
 
 BASE_URL = "http://127.0.0.1:8111"
 # Two 60s provider attempts plus validation; no automatic HTTP retry.
@@ -51,10 +51,11 @@ async def search(arguments: dict) -> str:
         text = result["result"]
         if not isinstance(text, str) or not isinstance(result.get("error"), bool):
             raise WebGatewayError("Invalid search gateway response")
-        return ToolFailure(text) if result["error"] else text
+        return (ToolFailure if result["error"] else ToolResult)(text, result.get("result_metadata"))
     except (httpx.HTTPError, ValueError, KeyError, WebGatewayError) as exc:
         return ToolFailure(f"Web gateway search unavailable ({type(exc).__name__}); "
-                           "reuse saved evidence/free sources. No direct-provider fallback.")
+                           "reuse saved evidence/free sources. No direct-provider fallback.",
+                           {"failure_type": type(exc).__name__})
 
 
 def extract(url: str) -> dict:

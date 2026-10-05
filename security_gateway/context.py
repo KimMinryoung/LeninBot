@@ -53,6 +53,7 @@ class CallerContext:
     scope_type: str | None = None
     scope_id: str | None = None
     chat_log_id: int | None = None
+    execution_kind: str = "runtime"
 
     def with_agent(self, agent_name: str | None) -> "CallerContext":
         """Return a copy scoped to a delegated agent (interface stays the same)."""
@@ -103,6 +104,7 @@ def new_run_context(
     scope_type=_UNSET,
     scope_id=_UNSET,
     chat_log_id=_UNSET,
+    execution_kind=_UNSET,
 ) -> CallerContext:
     """Build a correlated context for one concrete LLM/tool-loop run.
 
@@ -134,6 +136,7 @@ def new_run_context(
         scope_type=_value(scope_type, "scope_type"),
         scope_id=_value(scope_id, "scope_id"),
         chat_log_id=_value(chat_log_id, "chat_log_id"),
+        execution_kind=_value(execution_kind, "execution_kind"),
     )
 
 

@@ -142,3 +142,21 @@ SELECT metadata->>'author' AS author,
 - Existing rows without `chunk_size` may be usable, but they are hard to audit and hard to compare.
 - For very long works, decide source granularity before embedding. Whole work gives better document-level context; chapter-level source gives easier citation and reingestion. In either case, preserve both formal title and section/chapter title in metadata.
 - `vector_search` now supports optional `author`, `title`, `year`, and `keywords` filters. Good metadata directly improves retrieval quality.
+
+
+## UUID 원문 확인
+
+`vector_search`는 기존 `lenin_corpus.id` UUID를 각 검색 결과에 표시한다. 한국어 질의는
+core_theory용 영어 질의를, modern_analysis에 대한 영어 질의는 한국어 질의를 best effort로
+추가한다. 원문 언어로 직접 검색할 수도 있으며, 병렬 검색이 모두 실패하면 빈 검색 성공으로
+표시하지 않는다.
+
+`read_corpus_passage(chunk_id, window=1, max_chars=20000)`는 기존
+`fetch_corpus_source_context`를 확장한 읽기 도구다. UUID로 중심 청크를 찾은 뒤 source와
+layer가 같은 인접 청크만 chunk_index 순서로 읽는다. window는 0–3, max_chars는 1–20,000이며
+헤더와 구분자를 포함한 전체 반환 문자열에 상한을 적용한다. 중심 청크에 우선 분량을
+배정한 뒤 가까운 이웃을 채우고 표시 순서는 chunk_index를 따른다. 삭제/재수집된 UUID, 조회 중
+사라진 청크, source/layer/index가 없는 과거 행, 같은 범위의 중복 index는 명시적으로 실패한다.
+다른 문서나 layer로 대체하지 않는다. Telegram orchestrator·analyst와 MCP inspect/operator에만
+노출하고 공개 web/A2A는 그대로 유지한다. self_produced_analysis의 기존 자동 문맥 확장도
+같은 layer 조건을 사용한다.

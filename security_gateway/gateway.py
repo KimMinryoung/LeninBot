@@ -132,6 +132,20 @@ def _authorize(
             "taxonomy",
         )
 
+    if tool_name in {
+        "tool_usage_report", "trace_tool_run", "service_health_snapshot", "get_service_logs",
+        "get_effective_runtime_config", "pipeline_status", "usage_and_budget_report",
+    } and not (
+        ctx.interface == "mcp" and ctx.agent_name == "operator" and ctx.is_owner
+    ):
+        return Decision(False, DENY, rclass, "MCP operator only", mode, "interface")
+    if tool_name == "read_corpus_passage" and not (
+        (ctx.interface == "mcp" and ctx.agent_name in {"inspect", "operator"})
+        or (ctx.interface == "telegram" and ctx.agent_name in {None, "orchestrator", "analyst"})
+        or (ctx.interface == "agent" and ctx.agent_name == "analyst")
+    ):
+        return Decision(False, DENY, rclass, "Corpus passage profile restriction", mode, "interface")
+
     public_allowed = {
         "webchat": policy.WEBCHAT_ALLOWED_RISK_CLASSES,
         "a2a": policy.A2A_ALLOWED_RISK_CLASSES,

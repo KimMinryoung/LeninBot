@@ -94,3 +94,15 @@ in `leninbot-autonomous.service`. Graphiti and direct Cypher reject missing pass
 before opening a driver. Provider keys remain exclusively at the LLM proxy.
 
 `leninbot-kg-verify.service` is an on-demand retrieval probe using only Neo4j and DB credentials; it sends no notifications.
+
+### Local MCP KG bootstrap
+
+`mcp_gateway.credentials.bootstrap_kg_credentials()` is a narrow MCP startup adapter,
+not a change to the common loader. Existing environment/.env or explicit credential
+configuration is authoritative. Only when neither supplies KG configuration, and the
+process UID owns the repository, it reads only `neo4j_password` from API then Telegram
+`/run/credentials/<unit>/` mounts. Unreadable API may fall through to readable Telegram.
+No provider/DB/token credentials are copied, no credential directory is reassigned, and
+passwords are passed to KG subprocesses only through environment. Missing configuration
+and permission denial are separate diagnostics; help/list/docs need no live credential.
+See [MCP gateway](mcp_gateway.md#failure-semantics-and-credential-bootstrap).

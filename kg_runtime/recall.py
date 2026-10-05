@@ -21,14 +21,14 @@ def enabled() -> bool:
     return os.getenv("KG_ENTITY_GATED_RECALL", "0").strip().lower() in ("1", "true", "yes", "on")
 
 
-def entity_gated_kg_block(text: str, provider: str = "claude", *, max_entities: int = 2,
-                          max_facts: int = 6) -> str:
+def _entity_gated_kg_block(text: str, provider: str = "claude", *, max_entities: int = 2,
+                          max_facts: int = 6, _outcome=None) -> str:
     if not enabled() or not text or not text.strip():
         return ""
     try:
         from kg_runtime.search import _alias_hits, _entity_neighborhood, _format_edge_line
 
-        hits = _alias_hits(text[:2000], limit=max_entities, broad=False)
+        hits = _alias_hits(text[:2000], limit=max_entities, broad=False, strict=True)
         if not hits:
             return ""
         lines: list[str] = []
@@ -36,7 +36,7 @@ def entity_gated_kg_block(text: str, provider: str = "claude", *, max_entities: 
             node, edges = _entity_neighborhood(hit.uuid, cap=max_facts * 3)
             if not node:
                 continue
-            active = [e for e in edges if not e.get("expired_at") and not e.get("invalid_at")]
+            active = [e for e in edges if not e.get("expired_at")]
             # "Document X mentions it" edges are bookkeeping, not knowledge:
             # they neither qualify a node for recall nor appear in the block.
             active = [e for e in active if e.get("predicate") != "Reference"]
@@ -75,5 +75,36 @@ def entity_gated_kg_block(text: str, provider: str = "claude", *, max_entities: 
             "Verify with knowledge_graph_search when it matters."
         )
     except Exception as exc:
+        if _outcome is not None:
+            _outcome["failed"] = True
         logger.debug("[KG recall] skipped: %s", exc)
         return ""
+
+
+def entity_gated_kg_block(text: str, provider: str = 'claude', *, max_entities: int = 2,
+                          max_facts: int = 6) -> str:
+    if not enabled() or not text or not text.strip():
+        return ''
+    import time
+    from kg_runtime.read_policy import ReadPolicy, _current
+    token = _current.set(ReadPolicy())
+    started = time.monotonic()
+    outcome = {'empty': True, 'injected': False, 'failed': False}
+    try:
+        result = _entity_gated_kg_block(text, provider, max_entities=max_entities, max_facts=max_facts,
+                                         _outcome=outcome)
+        outcome.update(empty=not bool(result), injected=bool(result))
+        return result
+    finally:
+        _current.reset(token)
+        _audit_recall(outcome, round((time.monotonic() - started) * 1000))
+
+
+def _audit_recall(outcome, latency_ms):
+    from security_gateway.audit import audit
+    from security_gateway.context import get_caller
+    from security_gateway.gateway import Decision
+    audit(get_caller(), 'kg_entity_recall', {},
+          Decision(True, 'allow', 'read', '', 'observe', 'automatic_recall'),
+          result_status='error' if outcome['failed'] else 'ok',
+          latency_ms=latency_ms, result_metadata=outcome)

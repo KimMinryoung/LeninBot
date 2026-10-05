@@ -540,6 +540,8 @@ async def execute_tool(
             except Exception as store_exc:
                 logger.error("failed to persist outcome_unknown for %s: %s", name, store_exc)
 
+    result_metadata = getattr(result, "result_metadata", None)
+    continued = is_continuation(result)
     if not isinstance(result, str):
         result = str(result) if result is not None else "(no result)"
 
@@ -579,13 +581,13 @@ async def execute_tool(
                 result_status=(
                     "outcome_unknown"
                     if is_error and durable_record is not None
-                    else "continued" if is_continuation(result)
+                    else "continued" if continued
                     else "rejected" if rejected
                     else "error" if is_error else "ok"
                 ),
                 latency_ms=int((time.perf_counter() - started) * 1000),
                 error_excerpt=result if is_error else None,
-                result_metadata=getattr(result, "result_metadata", None),
+                result_metadata=result_metadata,
             )
     except Exception as exc:
         logger.warning("gateway audit failed (ignored) for %s: %s", name, exc)
@@ -598,6 +600,7 @@ PARALLEL_SAFE_TOOLS = frozenset({
     "fetch_x_post",
     "web_search",
     "vector_search",
+    "read_corpus_passage",
     "knowledge_graph_search",
     "read_file",
     "search_files",

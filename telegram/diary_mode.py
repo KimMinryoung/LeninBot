@@ -45,3 +45,11 @@ def is_diary_writing_task(task: dict | None, content: str | None = None) -> bool
         return False
     task_content = normalize_diary_prompt(content if content is not None else task.get("content"))
     return task_content in scheduled_diary_prompts()
+
+
+def filter_diary_task_tools(task, tools, handlers):
+    """Maintenance tasks cannot see or dispatch the scheduled publication tool."""
+    if task.get("agent_type") == "diary" and not is_diary_writing_task(task):
+        return ([t for t in tools if t.get("name") != "save_diary"],
+                {k: v for k, v in handlers.items() if k != "save_diary"})
+    return tools, handlers

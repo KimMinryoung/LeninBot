@@ -13,7 +13,7 @@ import logging
 import re
 import urllib.parse
 import urllib.request
-from tool_gateway.results import ToolFailure
+from tool_gateway.results import ToolFailure, ToolRejection, ToolResult
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +109,7 @@ async def _exec_wiki_search(query: str, language: str = "en", limit: int = 5) ->
         )
         results = (data.get("query") or {}).get("search") or []
         if not results:
-            return f"No {lang}.wikipedia.org results for: {query}"
+            return ToolResult(f"No {lang}.wikipedia.org results for: {query}", {"result_count": 0, "empty": True, "path": "wiki"})
         from provenance.runtime import _wrap_external
 
         lines = []
@@ -119,10 +119,10 @@ async def _exec_wiki_search(query: str, language: str = "en", limit: int = 5) ->
             url = f"https://{lang}.wikipedia.org/wiki/{urllib.parse.quote(title.replace(' ', '_'))}"
             lines.append(f"### {title}\n{url}\n{snippet}")
         body = _wrap_external("\n\n".join(lines), f"wiki_search:{lang}:{query}")
-        return f"[wiki_search] {lang}.wikipedia.org — open a result with wiki_get(title=..., language='{lang}')\n\n{body}"
+        return ToolResult(f"[wiki_search] {lang}.wikipedia.org — open a result with wiki_get(title=..., language='{lang}')\n\n{body}", {"result_count": len(results), "empty": False, "path": "wiki"})
     except Exception as e:
         logger.error("wiki_search error: %s", e)
-        return ToolFailure(f"Wikipedia search failed: {e}")
+        return ToolFailure(f"Wikipedia search failed: {e}", {"path": "wiki", "failure_type": type(e).__name__})
 
 
 async def _exec_wiki_get(
@@ -133,9 +133,11 @@ async def _exec_wiki_get(
     except (TypeError, ValueError):
         max_chars = 12000
     try:
-        start = max(0, int(offset or 0))
+        start = int(offset)
+        if start < 0:
+            raise ValueError()
     except (TypeError, ValueError):
-        start = 0
+        raise ToolRejection("offset must be a non-negative integer")
     try:
         data, lang = await asyncio.to_thread(
             _api_get,
@@ -156,12 +158,13 @@ async def _exec_wiki_get(
                 f"Use wiki_search to find the exact title first."
             )
         text = page.get("extract") or ""
-        if not text:
-            return f"Article '{page.get('title', title)}' has no extractable text."
+        if not text.strip():
+            return ToolFailure(f"Article '{page.get('title', title)}' has no extractable text.",
+                               {"empty": True, "extracted_chars": 0, "path": "wiki", "failure_type": "empty_extraction"})
         canonical = page.get("title", title)
         url = f"https://{lang}.wikipedia.org/wiki/{urllib.parse.quote(canonical.replace(' ', '_'))}"
         if start >= len(text):
-            return (
+            raise ToolRejection(
                 f"[wiki_get] {url}\n"
                 f"Error: offset {start} is beyond the article ({len(text)} chars)."
             )
@@ -178,10 +181,13 @@ async def _exec_wiki_get(
             f"[wiki_get] {url}\n"
             f"chars {start}:{end} of {len(text)} truncated={more}{next_hint}\n\n"
         )
-        return header + _wrap_external(text[start:end], f"url:{url}")
+        return ToolResult(header + _wrap_external(text[start:end], f"url:{url}"),
+                          {"path": "wiki", "extracted_chars": len(text), "returned_chars": end - start, "empty": False, "cache_hit": False})
+    except ToolRejection:
+        raise
     except Exception as e:
         logger.error("wiki_get error: %s", e)
-        return ToolFailure(f"Wikipedia fetch failed: {e}")
+        return ToolFailure(f"Wikipedia fetch failed: {e}", {"path": "wiki", "failure_type": type(e).__name__})
 
 
 WIKI_TOOL_HANDLERS = {

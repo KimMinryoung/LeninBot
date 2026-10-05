@@ -217,6 +217,7 @@ def upsert_document(
             content_hash, published_at, updated_at,
         ),
     )
+    _schedule_kg_sync(slug)
     return dict(row), existing is not None
 
 
@@ -233,6 +234,17 @@ def set_status(filename_or_slug: str, status: str) -> dict | None:
         """,
         (status, fname, slug),
     )
+    if row:
+        _schedule_kg_sync(row['slug'])
     return _row_to_dict(row)
 
 
+
+
+def _schedule_kg_sync(slug):
+    try:
+        from kg_runtime.doc_extract import schedule_research_sync
+        schedule_research_sync(slug)
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("KG publication hook scheduling failed: %s", slug)

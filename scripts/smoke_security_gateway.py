@@ -9,6 +9,10 @@ open when Redis is absent, which we assert). Run:
 
 from __future__ import annotations
 
+import os
+os.environ["LENINBOT_EXECUTION_KIND"] = "test"
+os.environ["LENINBOT_TOOL_AUDIT_DB"] = "0"
+
 import sys
 import uuid
 import asyncio

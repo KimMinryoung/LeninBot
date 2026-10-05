@@ -76,8 +76,9 @@ class SourceAndIssueTests(EditorCase):
         self.assertFalse(set(tool['input_schema']) & {'not','oneOf','anyOf','allOf','enum','const'})
         with self.assertRaisesRegex(ValueError, 'source_id.*Never guess P1'):
             await read(passages=['P1'])
-        # With both arguments an unknown label opens the page instead of failing.
-        self.assertIn('[P1]', await read(source_id=page['id'], passages=['P1']))
+        # Unknown labels must not be silently replaced by opening another input.
+        with self.assertRaises(ToolRejection):
+            await read(source_id=page['id'], passages=['P1'])
         self.assertIn('[P1]', await read(source_id=page['id'], passages=[]))
         fetched_at, expires_at = page['fetched_at'], page['expires_at']
         self.assertIn('[P1]', await read(source_id=page['id']))
@@ -108,9 +109,9 @@ class SourceAndIssueTests(EditorCase):
             await read(source_id='S1')
         self.assertIn(page['id'], str(error.exception))
         self.assertEqual(session.passages.shown, before)
-        both = await read(source_id=page['id'], passages=['P1'])
-        self.assertIn(BODY, both)
-        self.assertIn('source_id was ignored', both)
+        with self.assertRaises(ToolRejection):
+            await read(source_id=page['id'], passages=['P1'])
+        self.assertIn(BODY, await read(passages=['P1']))
 
     async def test_oversized_passage_request_shows_first_batch_and_names_the_rest(self):
         page = snapshot(URL, BODY)

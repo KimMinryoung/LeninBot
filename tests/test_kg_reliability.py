@@ -32,7 +32,7 @@ class SyncTests(unittest.TestCase):
         with patch.object(comm, 'load_source', return_value=source), patch.object(comm, 'build_facts', return_value=facts), \
              patch.object(comm, 'existing_sync_edges', return_value=old), patch.object(comm, 'write_facts', side_effect=write), \
              patch.object(comm, 'expire_edges', side_effect=expire), patch.object(comm, 'refresh_curated_profiles', return_value=0), \
-             patch.object(comm, 'apply_redirects', return_value={}):
+             patch.object(comm, 'apply_redirects', return_value={}), patch.object(comm, 'compare_sync_facts', return_value={'unresolved': 0}):
             stats = comm.run(full=full, limit=limit)
         return stats, order
 
@@ -98,11 +98,11 @@ class SyncTests(unittest.TestCase):
         recs = [dx.research_record({'slug': f's{i}', 'title': 'T', 'markdown': str(i)}) for i in range(4)]
         existing = {recs[0].ref: recs[0]['sha']}
         with patch.object(docs, 'load_records', return_value=recs), patch.object(docs, '_commulingo_names', return_value={}), \
-             patch.object(dx, 'existing_document_hashes', return_value=existing), \
+             patch.object(dx, 'existing_document_states', return_value={r: {'sha': sha} for r, sha in existing.items()}), \
              patch.object(identity, 'get_alias_index', return_value=Mock()), \
-             patch.object(dx, 'extract_document', side_effect=RuntimeError('offline')) as extract:
+             patch.object(dx, 'reconcile_document', side_effect=[{'status': 'unchanged'}, RuntimeError('offline')]) as extract:
             stats = docs.run(limit=1)
-        self.assertEqual(extract.call_count, 1)
+        self.assertEqual(extract.call_count, 2)
         self.assertEqual(stats['remaining'], 3)
         self.assertEqual(stats['failed'], 1)
         self.assertFalse(stats['complete'])
@@ -153,8 +153,8 @@ class SearchTests(unittest.TestCase):
         result = {'nodes': [{'uuid': 'u', 'name': '레닌', 'labels': ['Person']}],
                   'edges': [{'uuid': str(i), 'fact': f'relevant {i}'} for i in range(10)]}
         with patch.object(search, '_alias_hits', return_value=[hit]), patch.object(search, 'get_kg_service', return_value=Mock()), \
-             patch.object(search, 'run_kg_task', return_value=result) as run, patch.object(search, '_hydrate_nodes', return_value={}), \
-             patch.object(search, '_hydrate_edges', return_value={}), patch.object(search, '_entity_neighborhood', side_effect=AssertionError('neighbours')):
+             patch.object(search, 'run_kg_task', return_value=result) as run, patch.object(search, '_hydrate_nodes', return_value={'u': result['nodes'][0]}), \
+             patch.object(search, '_hydrate_edges', return_value={e['uuid']: e for e in result['edges']}), patch.object(search, '_entity_neighborhood', side_effect=AssertionError('neighbours')):
             out = search.search_knowledge_graph('레닌의 제국주의 분석', 3)
         run.assert_called_once()
         self.assertEqual(out.result_metadata['result_count'], 3)

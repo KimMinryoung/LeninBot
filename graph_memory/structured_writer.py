@@ -62,6 +62,7 @@ WILDCARD_ALLOWED = set(EDGE_TYPE_MAP.get(("Entity", "Entity"), []))
 # not expose them); they let a writer attach stable external ids / aliases /
 # a deterministic summary to the entities it touches.
 IDENTITY_FACT_FIELDS = (
+    "subject_uuid", "object_uuid",
     "subject_external_id", "object_external_id",
     "subject_aliases", "object_aliases",
     "subject_summary", "object_summary",
@@ -90,6 +91,8 @@ def validate_fact(fact: dict, idx: int, *, allow_sync_predicates: bool = False) 
     """
     if not isinstance(fact, dict):
         return f"fact[{idx}] must be an object"
+    if not allow_sync_predicates and any(fact.get(f"{side}_uuid") for side in ("subject", "object")):
+        return f"fact[{idx}] explicit entity UUIDs are reserved for sync jobs"
 
     required = ("subject_name", "subject_type", "predicate",
                 "object_name", "object_type", "fact")
@@ -133,11 +136,13 @@ def validate_fact(fact: dict, idx: int, *, allow_sync_predicates: bool = False) 
             f"{sorted(allowed_for_pair) or 'none'}; wildcard: {sorted(WILDCARD_ALLOWED)}"
         )
 
-    if fact.get("valid_at"):
-        try:
-            datetime.fromisoformat(str(fact["valid_at"]))
-        except (ValueError, TypeError):
-            return f"fact[{idx}] valid_at must be an ISO date or datetime"
+    from graph_memory.fact_version import canonical_date
+    try:
+        start, end = (canonical_date(fact.get(k)) for k in ('valid_at', 'invalid_at'))
+    except (ValueError, TypeError):
+        return f"fact[{idx}] valid_at / invalid_at must be ISO dates or datetimes"
+    if start and end and start >= end:
+        return f"fact[{idx}] invalid_at must be after valid_at"
 
     return None
 
@@ -164,6 +169,19 @@ async def find_canonical_entity_uuid(
             trusted=trusted,
         )
         return hit.uuid
+
+
+async def find_pinned_entity_uuid(driver_client, database: str, uuid: str, entity_type: str) -> str:
+    """A deterministic alias-index hit must reuse that node or fail closed."""
+    async with driver_client.session(database=database) as session:
+        result = await session.run(
+            "MATCH (n:Entity {uuid: $uuid}) WHERE $label IN labels(n) RETURN n.uuid AS uuid",
+            uuid=uuid, label=entity_type,
+        )
+        row = await result.single()
+        if row is None:
+            raise ValueError(f"Pinned entity missing or type changed: {uuid} ({entity_type})")
+        return row["uuid"]
 
 
 async def _untrusted_aliases(driver_client, database: str, name: str, aliases) -> list[str]:
@@ -230,8 +248,9 @@ def _make_entity_edge(source_uuid: str, target_uuid: str, predicate: str,
                       invalid_at: datetime | None = None) -> EntityEdge:
     sync_key = (attributes or {}).get("sync_key")
     # A retry after a committed batch must not duplicate the same fact version.
-    version = json.dumps([group_id, sync_key, source_uuid, target_uuid, predicate,
-                          fact_text, str(valid_at), str(invalid_at)], ensure_ascii=False)
+    from graph_memory.fact_version import relation_content
+    version = json.dumps([group_id, sync_key, source_uuid, target_uuid,
+                          relation_content(predicate, fact_text, valid_at, invalid_at, attributes)], ensure_ascii=False)
     return EntityEdge(
         uuid=str(uuid5(NAMESPACE_URL, version)) if sync_key else str(uuid4()),
         source_node_uuid=source_uuid,
@@ -268,6 +287,7 @@ def _side(fact: dict, side: str) -> dict:
         aliases = [aliases]
     external_id = fact.get(f"{side}_external_id") or None
     return {
+        "uuid": fact.get(f"{side}_uuid") or None,
         "name": fact[f"{side}_name"],
         "type": fact[f"{side}_type"],
         "external_id": external_id,
@@ -419,13 +439,13 @@ async def write_structured_facts(
         resolver (external id → alias/name across groups → optional NN)."""
         name, etype = side["name"], side["type"]
         trusted = side.get("trusted", True)
-        key = (side["external_id"] or name, etype)
+        key = (side["uuid"] or side["external_id"] or name, etype)
         if key in entity_lookup_cache:
             uuid = entity_lookup_cache[key]
             if trusted or uuid in new_uuids:
                 _remember_hints(uuid, side)
             return uuid, uuid in new_uuids
-        existing = await find_canonical_entity_uuid(
+        existing = await find_pinned_entity_uuid(driver_client, database, side["uuid"], etype) if side["uuid"] else await find_canonical_entity_uuid(
             driver_client, database, name, etype,
             external_id=side["external_id"], aliases=side["aliases"], embedder=embedder,
             trusted=trusted,

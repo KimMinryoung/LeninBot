@@ -19,6 +19,8 @@ venv/bin/python scripts/check_python_names.py
 # Keep the suite hermetic: the LLM gateway's journald sink still logs, but no
 # DB writer thread is spawned and no insert is attempted.
 export LENINBOT_LLM_AUDIT_DB=0
+export LENINBOT_EXECUTION_KIND=test
+export LENINBOT_TOOL_AUDIT_DB=0
 
 PATTERN="${1:-}"
 # unittest imports pytest-style modules but never runs their module-level

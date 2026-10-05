@@ -118,9 +118,23 @@ def normalize_row(kind: str, row: dict) -> dict:
             value = json.loads(val) if isinstance(val, str) else val
             if not isinstance(value, dict):
                 raise ValueError(f"{col} must be an object")
-            allowed = {"path", "node_count", "edge_count", "result_count", "empty", "fallback"}
+            allowed = {"path", "node_count", "edge_count", "result_count", "empty", "fallback", "execution_kind", "extracted_chars", "returned_chars", "cache_hit", "failure_type", "source_identified", "source_measured", "degraded", "failed", "injected"}
             if set(value) - allowed:
                 raise ValueError(f"unsupported {col} fields")
+            for key, item in value.items():
+                if item is None:
+                    continue
+                if key in {"empty", "fallback", "cache_hit", "degraded", "failed", "injected"}:
+                    valid = type(item) is bool
+                elif key == "execution_kind":
+                    valid = item in {"runtime", "test", "unknown"} if isinstance(item, str) else False
+                elif key in {"path", "failure_type"}:
+                    import re
+                    valid = isinstance(item, str) and re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", item) is not None
+                else:
+                    valid = type(item) is int and 0 <= item <= 2**63 - 1
+                if not valid:
+                    raise ValueError(f"invalid {col}.{key}")
             encoded = json.dumps(value, ensure_ascii=False, allow_nan=False)
             if len(encoded) > cap:
                 raise ValueError(f"{col} exceeds {cap} characters")

@@ -12,6 +12,8 @@ from typing import Any, Awaitable, Callable
 
 from mcp_gateway.policy import allowed_tool_names
 from tool_gateway.selection import build_toolset
+from tool_gateway.results import ToolFailure, ToolRejection, is_failure
+from ops.diagnostics import safe_text
 
 ROOT = Path(__file__).resolve().parents[1]
 DEV_DOCS_DIR = ROOT / "dev_docs"
@@ -41,7 +43,7 @@ GATEWAY_TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "list_runtime_tool_profiles",
-        "description": "List LeninBot runtime subjects and their allowed tools: orchestrator, specialist agents, web/A2A/roleplay surfaces, and optionally MCP profiles.",
+        "description": "List static LeninBot profiles, registration, retirement and injection conditions for orchestrator, agents, web/A2A/roleplay and optional MCP profiles. This is not current-session availability.",
         "input_schema": _schema(
             {
                 "subject": {
@@ -241,19 +243,22 @@ def _slice_text(text: str | None, max_chars: int, offset: int = 0) -> tuple[str,
 
 
 def _bounded_int(value: Any, default: int, minimum: int, maximum: int) -> int:
-    try:
-        return max(minimum, min(int(value), maximum))
-    except (TypeError, ValueError):
-        return default
+    if type(value) is not int or not minimum <= value <= maximum:
+        raise ToolRejection(f"integer must be between {minimum} and {maximum}")
+    return value
 
 
 async def gateway_status(*, profile: str = "inspect", **_: Any) -> str:
-    names = allowed_tool_names(profile)
+    names = {tool["name"] for tool in build_tool_catalog(profile)}
+    from security_gateway.policy import risk_class
+    mutable = sorted(name for name in names if risk_class(name) in {"write", "state", "admin", "publish", "send", "pay", "exec"})
     return _json_text({
         "status": "ok",
         "profile": profile,
         "tool_count": len(names),
-        "write_tools_exposed": False,
+        "write_tools_exposed": bool(mutable),
+        "mutable_tools": mutable,
+        "scope": "gateway only; use service_health_snapshot for dependencies",
     })
 
 
@@ -279,6 +284,9 @@ async def list_runtime_tool_profiles(
     from runtime_tools.allowlists import ORCHESTRATOR_TOOL_NAMES
     from tool_gateway.profiles import iter_tool_profiles
 
+    from tool_gateway.visibility import tool_inventory
+    inventory = tool_inventory()
+    inventory_by_name = {item["name"]: item for item in inventory}
     wanted_subject = (subject or "").strip()
     wanted_surface = (surface or "").strip().lower()
     rows: list[dict[str, Any]] = []
@@ -293,6 +301,13 @@ async def list_runtime_tool_profiles(
         tools = sorted(str(name) for name in row.get("tools", []))
         row["tools"] = tools
         row["tool_count"] = len(tools)
+        row["availability_scope"] = "static_profile_not_current_session"
+        row["tool_details"] = [inventory_by_name[name] for name in tools if name in inventory_by_name]
+        row["retired_tools"] = [item["name"] for item in inventory if item["retired"]]
+        if row_subject in {"agent.commulingo_curator", "agent.commulingo_reviewer"}:
+            row["stage_injected_tools"] = [item for item in inventory
+                if item["name"].startswith("commulingo_") and item["injection_condition"]
+                and (("review" in item["name"]) == (row_subject == "agent.commulingo_reviewer"))]
         rows.append(row)
 
     add_row({
@@ -328,7 +343,7 @@ async def list_runtime_tool_profiles(
 async def search_dev_docs(query: str, limit: int = 20, **_: Any) -> str:
     needle = (query or "").strip().lower()
     if not needle:
-        return "Error: query is required."
+        raise ToolRejection("query is required")
     limit = _bounded_int(limit, 20, 1, 50)
     matches: list[dict[str, Any]] = []
     for path in sorted(DEV_DOCS_DIR.glob("*.md")):
@@ -406,7 +421,7 @@ async def get_task_status(
     offset = _bounded_int(offset, 0, 0, 10_000_000)
     selected_field = (field or ("result" if include_result else "content")).strip()
     if selected_field not in {"content", "result", "tool_log"}:
-        selected_field = "result" if include_result else "content"
+        raise ToolRejection("field must be content, result, or tool_log")
     rows = await asyncio.to_thread(
         query,
         """
@@ -534,32 +549,39 @@ async def corpus_metadata_audit(
 
 
 def _run_project_command(command: list[str], timeout_seconds: int) -> str:
-    proc = subprocess.run(
-        command,
-        cwd=str(ROOT),
-        capture_output=True,
-        text=True,
-        timeout=timeout_seconds,
-    )
+    try:
+        proc = subprocess.run(
+            command,
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+        )
+    except OSError as exc:
+        return ToolFailure(f"Error: command could not start: {safe_text(exc)}")
     output = (proc.stdout or "").strip()
     error = (proc.stderr or "").strip()
-    body = "\n".join(part for part in [output, error] if part)
+    body = safe_text("\n".join(part for part in [output, error] if part))
     if len(body) > 30000:
         body = body[:30000] + "\n...[truncated at 30000 chars]"
     if proc.returncode == 0:
         return body or "(no output)"
-    return f"Error: command exited {proc.returncode}\n{body}"
+    return ToolFailure(f"Error: command exited {proc.returncode}\n{body}")
 
 
 async def kg_integrity_check(smoke_query: str = "", timeout_seconds: int = 120, **_: Any) -> str:
     timeout_seconds = _bounded_int(timeout_seconds, 120, 10, 600)
+    from mcp_gateway.credentials import bootstrap_kg_credentials
+    credential = bootstrap_kg_credentials()
+    if credential['status'] != 'configured':
+        return ToolFailure(_json_text({'error': credential['status'], 'source': credential['source']}))
     command = [str(ROOT / "venv" / "bin" / "python"), "scripts/check_kg_integrity.py"]
     if smoke_query:
         command.extend(["--smoke-query", smoke_query])
     try:
         return await asyncio.to_thread(_run_project_command, command, timeout_seconds)
     except subprocess.TimeoutExpired:
-        return f"Error: KG integrity check timed out after {timeout_seconds}s"
+        return ToolFailure(f"Error: KG integrity check timed out after {timeout_seconds}s")
 
 
 def _kg_maintenance_command(action: str, execute: bool) -> list[str] | None:
@@ -603,11 +625,11 @@ async def kg_maintenance_run(
     action = (action or "").strip()
     command = _kg_maintenance_command(action, bool(execute))
     if command is None:
-        return "Error: unknown KG maintenance action."
+        raise ToolRejection("unknown KG maintenance action")
 
     mutating = action in {"merge_exact_name_dupes", "cleanup_orphans", "classify_untyped", "full_cleanup"}
     if execute and mutating and confirm != "APPLY_KG_MAINTENANCE":
-        return "Error: execute=true requires confirm='APPLY_KG_MAINTENANCE'."
+        raise ToolRejection("execute=true requires confirm='APPLY_KG_MAINTENANCE'")
 
     try:
         sections: list[str] = []
@@ -618,21 +640,19 @@ async def kg_maintenance_run(
             backup_output = await asyncio.to_thread(
                 _run_project_command, backup_cmd, min(timeout_seconds, 600),
             )
-            if backup_output.startswith("Error:"):
-                return "Error: KG backup failed; mutation refused.\n" + backup_output
+            if is_failure(backup_output):
+                return ToolFailure("Error: KG backup failed; mutation refused.\n" + backup_output)
             try:
                 verified = _verify_kg_backup(backup_output, backup_started)
             except (ValueError, OSError, json.JSONDecodeError) as exc:
-                return f"Error: KG backup artifact invalid; mutation refused: {exc}"
+                return ToolFailure(f"Error: KG backup artifact invalid; mutation refused: {exc}")
             sections.append("## Pre-mutation KG backup\n" + backup_output + f"\nVerified: {verified}")
-        sections.append(f"## KG maintenance: {action} ({'execute' if execute else 'dry-run'})\n" + await asyncio.to_thread(
-            _run_project_command,
-            command,
-            timeout_seconds,
-        ))
-        return "\n\n".join(sections)
+        result = await asyncio.to_thread(_run_project_command, command, timeout_seconds)
+        sections.append(f"## KG maintenance: {action} ({'execute' if execute else 'dry-run'})\n" + result)
+        body = "\n\n".join(sections)
+        return ToolFailure(body) if is_failure(result) else body
     except subprocess.TimeoutExpired:
-        return f"Error: KG maintenance action '{action}' timed out after {timeout_seconds}s"
+        return ToolFailure(f"Error: KG maintenance action '{action}' timed out after {timeout_seconds}s")
 
 
 def _verify_kg_backup(output: str, started: float) -> str:
@@ -659,7 +679,7 @@ def _verify_kg_backup(output: str, started: float) -> str:
 async def readonly_query_db(sql: str, timeout_seconds: int = 30, **_: Any) -> str:
     timeout_seconds = _bounded_int(timeout_seconds, 30, 1, 120)
     if not (sql or "").strip():
-        return "Error: sql is required."
+        raise ToolRejection("sql is required")
 
     def _run() -> str:
         proc = subprocess.run(
@@ -673,12 +693,18 @@ async def readonly_query_db(sql: str, timeout_seconds: int = 30, **_: Any) -> st
         error = (proc.stderr or "").strip()
         if proc.returncode == 0:
             return output or "(no output)"
-        return f"Error: scripts/query-db exited {proc.returncode}\n{error or output}"
+        if proc.returncode == 2 and error.startswith("query-db:") and (
+            "multiple statements" in error or "only SELECT/WITH/SHOW/EXPLAIN" in error
+        ):
+            raise ToolRejection(safe_text(error))
+        return ToolFailure(f"Error: scripts/query-db exited {proc.returncode}\n{safe_text(error or output)}")
 
     try:
         return await asyncio.to_thread(_run)
     except subprocess.TimeoutExpired:
-        return f"Error: query timed out after {timeout_seconds}s"
+        return ToolFailure(f"Error: query timed out after {timeout_seconds}s")
+    except OSError as exc:
+        return ToolFailure(f"Error: query could not start: {safe_text(exc)}")
 
 
 GATEWAY_HANDLERS: dict[str, ToolHandler] = {
@@ -695,6 +721,14 @@ GATEWAY_HANDLERS: dict[str, ToolHandler] = {
     "readonly_query_db": readonly_query_db,
     "kg_maintenance_run": kg_maintenance_run,
 }
+
+
+from mcp_gateway.audit_tools import AUDIT_TOOLS, AUDIT_HANDLERS
+from mcp_gateway.diagnostic_tools import DIAGNOSTIC_TOOLS, DIAGNOSTIC_HANDLERS
+GATEWAY_TOOLS.extend(DIAGNOSTIC_TOOLS)
+GATEWAY_HANDLERS.update(DIAGNOSTIC_HANDLERS)
+GATEWAY_TOOLS.extend(AUDIT_TOOLS)
+GATEWAY_HANDLERS.update(AUDIT_HANDLERS)
 
 
 def _mcp_tool(tool: dict[str, Any]) -> dict[str, Any]:

@@ -129,3 +129,14 @@ root에서 `/sys/fs/cgroup<ControlGroup>/cgroup.procs`(하위 cgroup 포함)의 
 CPUUsageNSec 두 표본의 차이를 관찰 초와 1e9로 나누고 100을 곱하면 한 코어 기준 CPU%다.
 DB 조회는 `scripts/query-db`의 read-only guard를 사용한다.
 본문 수집 Chromium은 기본 5분 유휴 뒤 자동 해제한다([web_research.md](web_research.md#로컬-브라우저-수명)).
+
+## Operator MCP observations
+
+`service_health_snapshot` uses `ops/diagnostics.py` read-only probes, without running the
+state-writing/notification health scripts. Systemd observations and dependency probes
+have separate collection status, UTC timestamps and elapsed time. Observed unhealthy
+services differ from unavailable observations; successful parts survive partial failure.
+`get_service_logs` extends `ops.logs.fetch_server_logs` with an explicit unit allowlist,
+priority threshold, timeout and masked bounded output. Both are operator-only. Limits
+and service names are in [MCP gateway](mcp_gateway.md#operational-diagnostics).
+`pipeline_status` also supplies last run, timer and bounded recent failure log excerpts.

@@ -2119,12 +2119,16 @@ def get_agent_tool_manifest(
     from agents import get_agent, list_agents
     from runtime_tools.registry import TOOLS as BASE_TOOLS, TOOL_HANDLERS as BASE_HANDLERS
 
+    from tool_gateway.visibility import tool_inventory
+    inventory = tool_inventory()
+    inventory_by_name = {item["name"]: item for item in inventory}
     requested = (agent or "all").strip().lower()
     base_tools = _dedupe_tools(BASE_TOOLS)
 
     def format_tools(tools: list[dict]) -> list[dict]:
         return [
-            _compact_tool(t, include_descriptions=include_descriptions, include_schemas=include_schemas)
+            {**_compact_tool(t, include_descriptions=include_descriptions, include_schemas=include_schemas),
+             **inventory_by_name.get(t.get("name"), {})}
             for t in _dedupe_tools(tools)
         ]
 
@@ -2135,7 +2139,8 @@ def get_agent_tool_manifest(
             tools = _dedupe_tools(select_orchestrator_tools(base_tools))
             return {
                 "runtime": "orchestrator",
-                "available": True,
+                "available": None,
+                "availability_scope": "static_allowlist_not_current_session",
                 "source": "static_allowlist",
                 "reason": "reported from runtime_tools.allowlists outside an active orchestrator context",
                 "tool_count": len(tools),
@@ -2162,6 +2167,7 @@ def get_agent_tool_manifest(
             )
         return {
             "runtime": "agent",
+            "availability_scope": "static_allowlist_not_current_session",
             "agent": name,
             "delegatable": name in _DELEGATABLE_AGENTS,
             "provider": spec.provider,
@@ -2184,7 +2190,8 @@ def get_agent_tool_manifest(
             tools = _dedupe_tools(list(web_tools))
             return {
                 "runtime": "web_chat",
-                "available": True,
+                "available": None,
+                "availability_scope": "static_allowlist_not_current_session",
                 "provider": None,
                 "tool_count": len(tools),
                 "handler_count": len(web_handlers),
@@ -2207,6 +2214,7 @@ def get_agent_tool_manifest(
     if requested in {"", "all", "*"}:
         return {
             "generated_at": generated_at,
+            "tool_inventory": inventory,
             "delegatable_agents": list(_DELEGATABLE_AGENTS),
             "content_store_guide": _CONTENT_STORE_GUIDE,
             "orchestrator": orchestrator_manifest(),

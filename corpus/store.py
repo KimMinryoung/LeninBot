@@ -75,7 +75,7 @@ def similarity_search(
                     params = [embedding_str] + params + [embedding_str, fetch_k]
                     cur.execute(
                         f"""
-                        SELECT content, metadata,
+                        SELECT id, content, metadata,
                                1 - (embedding <=> %s::vector) AS similarity
                           FROM lenin_corpus
                          WHERE {' AND '.join(clauses)}
@@ -96,13 +96,15 @@ def similarity_search(
             logger.warning("[shared] similarity_search timeout")
         else:
             logger.warning("[shared] similarity_search error: %s", e)
-        return []
+        raise
 
     docs = []
     for row in rows:
         if not row.get("content"):
             continue
         metadata = dict(row.get("metadata") or {})
+        if row.get("id") is not None:
+            metadata["chunk_id"] = str(row["id"])
         if row.get("similarity") is not None:
             metadata["similarity"] = round(float(row["similarity"]), 4)
         docs.append(Document(page_content=row["content"], metadata=metadata))
@@ -255,47 +257,68 @@ def fetch_corpus_source_context(
     center_index: int = 0,
     window: int = 1,
     max_chars: int = 9000,
+    layer: str | None = None,
+    chunk_id: str | None = None,
 ) -> str:
-    """Fetch neighboring chunks from one corpus source for parent-context expansion."""
+    """Read same-source/layer neighbors, optionally resolving a stable chunk UUID.
+
+    Legacy callers must supply a layer; ambiguous records never cross documents.
+    """
     from db import query as db_query
+    from tool_gateway.results import ToolFailure, ToolRejection, ToolResult
+    from uuid import UUID
 
-    source = (source or "").strip()
-    if not source:
-        return ""
-    center_index = max(0, int(center_index or 0))
-    window = max(0, int(window or 0))
-    max_chars = max(1000, int(max_chars or 9000))
-    lo = max(0, center_index - window)
-    hi = center_index + window
-    try:
-        rows = db_query(
-            """
-            SELECT content, metadata
-              FROM lenin_corpus
-             WHERE metadata->>'source' = %s
-               AND COALESCE((metadata->>'chunk_index')::int, 0) BETWEEN %s AND %s
-             ORDER BY COALESCE((metadata->>'chunk_index')::int, 0)
-            """,
-            (source, lo, hi),
-        )
-    except Exception as e:
-        logger.warning("[shared] fetch_corpus_source_context error: %s", e)
-        return ""
-
-    parts: list[str] = []
-    total = 0
-    for row in rows:
-        text = str(row.get("content") or "").strip()
-        if not text:
-            continue
-        remaining = max_chars - total
+    if (type(window) is not int or type(max_chars) is not int
+            or not 0 <= window <= 3 or not 1 <= max_chars <= 20000):
+        raise ToolRejection("window must be 0..3 and max_chars 1..20000")
+    if chunk_id is not None:
+        try:
+            chunk_id = str(UUID(chunk_id))
+        except (ValueError, TypeError, AttributeError) as exc:
+            raise ToolRejection("chunk_id must be an existing search-result UUID") from exc
+        rows = db_query("SELECT id, content, metadata FROM lenin_corpus WHERE id = %s::uuid", (chunk_id,))
+        if not rows:
+            return ToolFailure("Chunk not found: it may have been deleted or reingested. Search again for a current UUID.",
+                               {"failure_type": "chunk_missing"})
+        meta = rows[0].get("metadata") or {}
+        source, layer, center_index = meta.get("source"), meta.get("layer"), meta.get("chunk_index")
+    if not source or not layer or type(center_index) is not int or center_index < 0:
+        return ToolFailure("Insufficient document context: source, layer and a valid chunk_index are required; neighbors were not guessed.",
+                           {"failure_type": "insufficient_context"})
+    rows = db_query(
+        """SELECT id, content, metadata FROM lenin_corpus
+             WHERE metadata->>'source' = %s AND metadata->>'layer' = %s
+               AND CASE WHEN metadata->>'chunk_index' ~ '^[0-9]{1,9}$'
+                        THEN (metadata->>'chunk_index')::int END BETWEEN %s AND %s
+             ORDER BY (metadata->>'chunk_index')::int, id LIMIT 8""",
+        (source, layer, max(0, center_index - window), center_index + window),
+    )
+    if chunk_id is not None and not any(str(row["id"]) == chunk_id for row in rows):
+        return ToolFailure("Chunk disappeared during context retrieval; search again for a current UUID.",
+                           {"failure_type": "chunk_missing"})
+    indices = [str((r.get("metadata") or {}).get("chunk_index")) for r in rows]
+    if len(indices) != len(set(indices)):
+        return ToolFailure("Ambiguous document context: duplicate chunk indices in this source/layer; neighbors were not guessed.",
+                           {"failure_type": "insufficient_context"})
+    # Spend the character budget on the requested chunk first; a large preceding
+    # neighbor must not consume the entire response before the anchor is shown.
+    selected = []
+    remaining = max_chars
+    separator = "\n\n---\n\n"
+    for row in sorted(rows, key=lambda r: (abs(int(r['metadata']['chunk_index']) - center_index),
+                                           int(r['metadata']['chunk_index']))):
+        if selected:
+            remaining -= len(separator)
         if remaining <= 0:
             break
-        if len(text) > remaining:
-            text = text[:remaining].rstrip() + "\n... (context truncated)"
-        parts.append(text)
-        total += len(text)
-    return "\n\n---\n\n".join(parts)
+        block = f"[chunk_id={row['id']} index={row['metadata']['chunk_index']}]\n{row.get('content') or ''}"
+        if len(block) > remaining:
+            marker = "\n[truncated]"
+            block = block[:remaining - len(marker)] + marker if remaining > len(marker) else block[:remaining]
+        selected.append((int(row['metadata']['chunk_index']), block))
+        remaining -= len(block)
+    text = separator.join(block for _, block in sorted(selected))
+    return ToolResult(text, {"path": "corpus", "result_count": len(selected), "empty": not bool(text), "returned_chars": len(text)})
 
 
 def delete_corpus_source(source: str, layer: str | None = None) -> int:

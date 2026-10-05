@@ -50,7 +50,7 @@ Chromium과 Playwright 드라이버를 종료한다. 다음 요청은 저장된 
 | 메서드 | 경로 | 계약 |
 |---|---|---|
 | GET | `/health` | 키 존재·예산 설정·장부 접근 준비 확인. 유료 요청 없음 |
-| POST | `/search` | `{arguments: <기존 web_search 인자>, caller?: {...}}` → `{result: string, error: bool}` |
+| POST | `/search` | `{arguments: <기존 web_search 인자>, caller?: {...}}` → `{result: string, error: bool, result_metadata?: object}` |
 | POST | `/extract` | `{url: string, caller?: {...}}` → `{results: [{raw_content}], error: false}` 또는 `{error: true, message}` |
 | GET | `/usage?days=7&by=service` | 1~366일 서비스별 집계. `by=task`는 작업/요청별 |
 
@@ -137,3 +137,22 @@ venv/bin/python scripts/smoke_url_security.py
 
 위 테스트는 모의 공급자를 사용한다. 운영 검증도 `/health`, `/usage`, 잘못된 요청의
 거절과 파일 접근 거절로 진행할 수 있으며 실제 유료 검색을 할 필요가 없다.
+
+
+## 다운로드·추출 결과 진단
+
+`download_file`과 `download_image`는 공통 `safe_requests_get`으로 최초 주소와 매 리다이렉트를
+검증한다. 파일 100 MiB, 이미지 20 MiB를 Content-Length와 실제 스트리밍 바이트 수 양쪽에서
+제한한다. 같은 출력 디렉터리의 임시 파일에 받은 뒤 성공 시 원자적으로 교체하므로 실패한
+부분 파일은 제거되고 기존 완성 파일은 보존된다. 빈 응답·용량 초과·이미지 형식 오류도 실패다.
+
+web/wiki/vector 검색은 알려진 결과 수와 빈 결과 여부를 `ToolResult.result_metadata`에 담고,
+추출은 실제 얻은/반환한 문자 수, 경로(browser/http/document/paid_extract/wiki), 확인 가능한
+캐시 여부를 추가한다. Web gateway의 JSON 응답이 이를 client까지 전달하며 캐시 hit는 호출별로
+표시한다. CommuLingo의 영속 캐시·검토 wrapper도 진단을 보존한다. 원문·URL·검색어는 진단
+메타데이터에 넣지 않는다. 성공한 빈 검색은 성공이고, 빈 추출은 실패이며 offset 범위 오류는
+입력 거절이다. 감사 싱크를 먼저 갱신해야 하는 배포 순서는 [security_gateway.md](security_gateway.md)를 따른다.
+
+Operator MCP `usage_and_budget_report` reads `/usage` for period usage and separately
+`/usage?days=1` for today's UTC shared cap, reservations and remaining budget. It does
+not subtract multiday spend from a daily cap, and reports unavailable values as unknown.

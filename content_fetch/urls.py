@@ -1,5 +1,7 @@
 """URL extraction, fetch diagnostics, and URL content fallback fetching."""
 
+from tool_gateway.results import ToolResult
+
 import asyncio
 import logging
 import re as _re
@@ -236,7 +238,7 @@ def _fetch_url_fallbacks(url: str, max_chars: int = 10000) -> _Optional[str]:
         if document is not None:
             text = _clean_text(document)
             if not _is_low_quality(text):
-                return text[:max_chars]
+                return ToolResult(text[:max_chars], {"path": "document", "cache_hit": False})
             raise ValueError("document has no extractable text")
         resp.encoding = resp.apparent_encoding or "utf-8"
 
@@ -275,9 +277,9 @@ def _fetch_url_fallbacks(url: str, max_chars: int = 10000) -> _Optional[str]:
 
         if len(text) > 50:
             if not _is_low_quality(text):
-                return text[:max_chars]
+                return ToolResult(text[:max_chars], {"path": "http", "cache_hit": False})
             if best_fallback is None or len(text) > len(best_fallback):
-                best_fallback = text[:max_chars]
+                best_fallback = ToolResult(text[:max_chars], {"path": "http", "cache_hit": False, "fallback": True})
     except Exception as e:
         logger.warning("[URL] requests fallback도 실패 (%s): %s", url[:60], e)
 
@@ -291,9 +293,9 @@ def _fetch_url_fallbacks(url: str, max_chars: int = 10000) -> _Optional[str]:
             if len(content) > 50:
                 cleaned = _clean_text(content)[:max_chars]
                 if not _is_low_quality(cleaned):
-                    return cleaned
+                    return ToolResult(cleaned, {"path": "paid_extract", "cache_hit": False})
                 if best_fallback is None or len(cleaned) > len(best_fallback):
-                    best_fallback = cleaned
+                    best_fallback = ToolResult(cleaned, {"path": "paid_extract", "cache_hit": False, "fallback": True})
     except Exception as e:
         logger.info("[URL] gateway extraction failed (%s): %s", url[:60], type(e).__name__)
 
@@ -307,7 +309,7 @@ def fetch_url_content(url: str, max_chars: int = 10000) -> _Optional[str]:
     try:
         result = _playwright_fetch(url, max_chars)
         if result and not _is_low_quality(result):
-            return result
+            return ToolResult(result, {"path": "browser", "cache_hit": False})
     except Exception as e:
         logger.info("[URL] Playwright 실패 (%s): %s", url[:60], e)
     return _fetch_url_fallbacks(url, max_chars)
@@ -320,7 +322,7 @@ async def fetch_url_content_async(url: str, max_chars: int = 10000) -> _Optional
         fut = _pw_submit(_playwright_fetch_async(url, max_chars))
         result = await asyncio.wrap_future(fut)
         if result and not _is_low_quality(result):
-            return result
+            return ToolResult(result, {"path": "browser", "cache_hit": False})
     except Exception as e:
         logger.info("[URL] Playwright 실패 (%s): %s", url[:60], e)
     return await asyncio.to_thread(_fetch_url_fallbacks, url, max_chars)

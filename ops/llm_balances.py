@@ -86,7 +86,7 @@ def read_local_spend(days: int) -> tuple[dict[str, dict], str | None]:
     # use the shared pool without spawning psql.  The CLI fallback remains
     # useful for operator shells, where scripts/query-db resolves credentials.
     try:
-        from db import query
+        from ops.readonly_query import query
 
         rows = query(sql)
         return {
@@ -181,7 +181,7 @@ def collect(proxy_base: str, days: int) -> dict:
             {
                 "provider": provider,
                 "official": official[provider],
-                **({"local_audit": local.get(provider, {"calls": 0, "spend_usd": 0.0})}
+                **({"local_audit": None if local_error else local.get(provider, {"calls": 0, "spend_usd": 0.0})}
                    if provider in ESTIMATED_PROVIDERS else {}),
             }
             for provider in PROVIDERS

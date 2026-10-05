@@ -1,7 +1,8 @@
 # 지식그래프 스키마 설계
 
 **버전:** v3.0 (저장소 간 허브)  
-**최종 확인 기준:** 2026-09-03 코드 트리  
+**최종 확인 기준:** 2026-10-05 코드 트리 및 레거시 출처 저장 규칙
+
 **기반 프레임워크:** Graphiti + Pydantic
 
 ---
@@ -63,6 +64,8 @@ graphiti 기본 속성(`uuid`, `name`, `summary`, `group_id`, `created_at`, `nam
 | **Reference** (동기화 전용) | Document → Entity / Concept ↔ Concept / Person·Organization → Concept / Concept → Incident·Campaign·Person / Incident → Concept | 문서·큐레이션 참조. `reference_type` ∈ about, mentions, collection, related_term, parent_term, category, person_term, event_term, people_group. `validate_fact(allow_sync_predicates=True)`로만 통과 (`REFERENCE_EDGE_PAIRS`, `sync_predicate_allowed`) | `reference_type`, `note` |
 
 모든 동기화 엣지는 `attributes.sync_key`(예: `commulingo:event_person:<event>:<person>`, `doc:research:<slug>:mention:<uuid8>`)를 갖고, 문서 유래 엣지는 `attributes.doc_ref`도 갖는다. 재실행은 sync_key로 멱등이며, 사라진 원본 행은 `expired_at`으로 만료된다(삭제 안 함).
+
+별칭 인덱스로 만든 문서 언급은 동기화 전용 `subject_uuid`/`object_uuid` 힌트로 실제 매칭 노드를 재사용한다. 지정 UUID의 존재와 타입을 확인하며, 실패 시 새 동명 노드로 대체하지 않는다. 이 힌트는 일반 에이전트 쓰기에서 거부된다.
 
 ---
 
@@ -199,3 +202,31 @@ CommuLingo 외부 ID로 연결된 Entity에는 `curated_name`(한국어 표시�
 전체 동기화는 관계 문장뿐 아니라 양 끝의 외부 ID도 비교한다. 잘못 합쳐졌던
 활성 원천 ID를 분리한 뒤에는 이전 끝점을 유지하는 관계를 새 버전으로 대체한다.
 리다이렉트된 옛 ID는 별도 활성 엔티티로 취급하지 않는다.
+
+## 관계 버전·문서 상태·시간 조회 (2026-10-05)
+
+관계 버전은 양 끝 UUID, 원천 `sync_key`, group, 술어, 정규화 문장, UTC 유효기간과 의미 있는 속성으로 결정한다. `same_subject`, `role_in_incident` 같은 속성 변경도 새 버전이며, URL·추출 실행 정보는 버전을 바꾸지 않는다. `valid_at`과 `invalid_at`은 ISO 날짜/시간이고 둘 다 있으면 시작 < 종료여야 한다.
+
+Document의 추가 필드: `metadata_sha256`, `source_active`(기존 노드의 누락값은 true), `curated_name`, `curated_summary`, `curated_source`. 본문 해시는 LLM 재추출 여부, 메타데이터 해시는 프로필 갱신 여부를 결정한다. 문서 관계에는 `source_url`, `doc_kind`, `extraction`, `verification_status`를 저장한다. 문서 철회로 만료된 마지막 버전만 `withdrawn=true`로 표시하여 동일 본문 재공개 시 복구한다. 일반 버전 교체로 만료된 관계는 복구하지 않는다.
+
+검색 기본값은 만료되지 않은 주장 버전이다. 종료일이 있는 역사적 관계도 출력한다. `as_of`는 `[valid_at, invalid_at)` 구간으로 제한하고 `include_expired`는 대체된 버전을 명시적으로 포함한다. 비활성 문서와 현재 비공개 research 문서는 어느 옵션에서도 일반 검색·회상에 노출하지 않는다.
+
+## 레거시 원천 에피소드 표기
+
+기존 활성 관계 중 `sync_key`와 `doc_ref`가 없고 `episodes`의 어느 UUID도 실제 `Episodic` 노드로 연결되지 않는 관계에는, 사용자가 요청한 관리용 레거시 에피소드를 연결한다. 원천을 확인할 수 없다는 이유로 해당 관계를 비활성화하지 않는다. 이 처리는 기존 데이터에 대한 명시적 보수이며, 새로 발생하는 출처 누락을 자동으로 레거시로 분류하는 동작은 없다.
+
+에피소드는 관계의 `group_id`별로 구분하며 다음 정보를 저장한다.
+
+| 필드 | 값·의미 |
+|---|---|
+| `name` | `[T:unverified]레거시데이터` |
+| `source` | `text` |
+| `source_description` | `레거시데이터 (원천 미확인)` — 검색 결과의 출처 표시 |
+| `provenance_status` | `legacy_unattributed` — 관리용 에피소드 식별자 |
+| `content` | 원천 미확인 데이터를 유지하기 위한 표기이며, 원본 복원이나 사실 검증을 의미하지 않는다는 설명 |
+| `created_at`, `valid_at` | 레거시 표기를 추가한 시각. 원래 사실의 발생·수집 시각이 아님 |
+| `entity_edges` | 연결한 기존 관계 UUID 목록 |
+
+관계의 기존 `episodes` 목록에 관리용 에피소드 UUID를 추가하고, 원래 UUID 목록은 유실된 참조를 포함해 보존한다. 관계 UUID·양 끝 엔티티·본문·`created_at`·`valid_at`·`invalid_at`·`expired_at`은 변경하지 않는다. 에피소드에는 해당 관계의 양 끝 엔티티로 향하는 `MENTIONS`도 연결한다. 따라서 관계는 계속 검색 가능하며 `unverified` 등급과 레거시 출처로 표시된다.
+
+`unattributed_active_edges`는 실제 에피소드 연결이 없는 관계 수이므로 이 표기 후에는 해당 관계를 집계하지 않는다. 검색의 `source_identified`도 표시 가능한 출처 이름을 세므로 레거시 표기를 포함한다. 두 지표의 개선은 원본 출처 복원이나 신뢰도 상승을 뜻하지 않는다. 레거시 표기 관계를 별도로 조회할 때는 연결된 에피소드의 `provenance_status=legacy_unattributed`를 사용한다.

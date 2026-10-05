@@ -10,7 +10,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from tool_gateway.results import ToolFailure
+from tool_gateway.results import ToolFailure, ToolRejection
 
 FILESYSTEM_TOOLS = [
     {
@@ -49,7 +49,7 @@ FILESYSTEM_TOOLS = [
     },
     {
         "name": "write_file",
-        "description": "Write ENTIRE content to a file. WARNING: overwrites the whole file. For modifying existing code, prefer patch_file instead.",
+        "description": "Write ENTIRE content to a file. WARNING: overwrites the whole file. Read the current file first and preserve content outside the requested change.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -186,9 +186,9 @@ async def _exec_read_file(
             "or targeted source files instead."
         )
     if not os.path.exists(path):
-        return f"Error: File not found: {path}"
+        return ToolFailure(f"Error: File not found: {path}", {"failure_type": "file_missing"})
     if os.path.isdir(path):
-        return f"Error: Path is a directory: {path}"
+        raise ToolRejection(f"Error: Path is a directory: {path}")
     basename = os.path.basename(path)
     if basename == ".env" or basename.startswith(".env."):
         return "Error: Access to .env files is blocked for security reasons."
@@ -213,23 +213,25 @@ async def _exec_read_file(
 
     if char_offset is not None:
         try:
-            start_char = max(0, int(char_offset or 0))
+            start_char = int(char_offset)
+            if start_char < 0:
+                raise ValueError()
         except (TypeError, ValueError):
-            start_char = 0
+            raise ToolRejection("char_offset must be a non-negative integer")
         try:
             eff_char_limit = int(char_limit) if char_limit else 20_000
         except (TypeError, ValueError):
             eff_char_limit = 20_000
         eff_char_limit = max(1, min(eff_char_limit, _READ_MAX_CHARS))
         end_char = min(len(text), start_char + eff_char_limit)
-        if start_char >= len(text):
-            return (
+        if start_char >= len(text) and not (start_char == 0 and not text):
+            raise ToolRejection(
                 f"[{path}] chars {start_char}-{start_char} of {len(text)}\n"
                 f"Error: char_offset is beyond end of file. Last valid char_offset is {max(len(text) - 1, 0)}."
             )
         body = text[start_char:end_char]
         if len(body) > _READ_MAX_CHARS:
-            return (
+            return ToolFailure(
                 f"Error: read range chars {start_char}-{end_char} is {len(body)} chars "
                 f"(>{_READ_MAX_CHARS}). Use a smaller char_limit."
             )
@@ -239,11 +241,13 @@ async def _exec_read_file(
         return header + "\n" + _externalize(body)
 
     try:
-        start = max(1, int(offset or 1))
+        start = int(offset) if offset is not None else 1
+        if start < 1:
+            raise ValueError()
     except (TypeError, ValueError):
-        start = 1
-    if start > total:
-        return (
+        raise ToolRejection("offset must be a positive line number")
+    if start > total and not (start == 1 and not text):
+        raise ToolRejection(
             f"[{path}] lines {start}-{start} of {total}\n"
             f"Error: offset is a 1-indexed line number and is beyond end of file. "
             f"Last valid line offset is {max(total, 1)}. "
@@ -259,7 +263,7 @@ async def _exec_read_file(
     selected = lines[start - 1 : end]
     body = "".join(selected)
     if len(body) > _READ_MAX_CHARS:
-        return (
+        return ToolFailure(
             f"Error: read range {start}-{end} is {len(body)} chars (>{_READ_MAX_CHARS}). "
             f"Use a smaller limit or narrower offset range."
         )

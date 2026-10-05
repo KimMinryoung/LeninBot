@@ -5,10 +5,9 @@
 
 Each source module exposes ``run(*, since, full, limit, dry_run) -> stats``.
 State (watermark per source, last run, last stats) lives in the Postgres
-table ``kg_sync_state`` so incremental runs only touch rows changed since the
-previous run. A full reconciliation pass (``--full``, or automatically when
-the last full pass is older than FULL_EVERY_DAYS) also expires edges whose
-source rows disappeared.
+table ``kg_sync_state``. Both sources reconcile deterministic content daily;
+only differences are written, and document LLM extraction remains content-hash
+gated. Legacy full/incremental checkpoint fields and --full remain compatible.
 
 Runs under ``systemd/leninbot-kg-sync.service`` nightly; ad-hoc runs need
 ``LENINBOT_ALLOW_WRITE=1`` for the state table (the graph itself is not

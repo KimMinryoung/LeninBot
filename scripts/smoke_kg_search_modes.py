@@ -41,6 +41,9 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default=None)
     ap.add_argument("--mode", default="auto", choices=["auto", "entity", "semantic"])
+    ap.add_argument("--as-of", help="ISO date/datetime; valid_at <= as_of < invalid_at")
+    ap.add_argument("--include-expired", action="store_true")
+    ap.add_argument("--evaluate", action="store_true", help="Fail on empty/degraded results or unidentified relation sources")
     ap.add_argument("queries", nargs="*")
     args = ap.parse_args()
 
@@ -52,12 +55,20 @@ def main() -> int:
 
     queries = args.queries or DEFAULT_QUERIES
     out_lines = [f"# KG search smoke — {datetime.now().isoformat(timespec='seconds')} mode={args.mode}", ""]
+    failures = 0
     for q in queries:
         t0 = time.monotonic()
         try:
-            res = search_knowledge_graph(q, 10, mode=args.mode)
+            res = search_knowledge_graph(q, 10, mode=args.mode, as_of=args.as_of, include_expired=args.include_expired)
         except Exception as exc:
             res = f"<error: {exc}>"
+        metadata = getattr(res, 'result_metadata', {}) or {}
+        if args.evaluate:
+            ok = (bool(metadata) and metadata.get('path') != 'error' and not metadata.get('empty')
+                  and not metadata.get('fallback') and not metadata.get('degraded')
+                  and metadata.get('source_identified', 0) == metadata.get('edge_count', 0))
+            failures += int(not ok)
+            out_lines.append(f"Evaluation: {'PASS' if ok else 'FAIL'} {metadata}")
         dt = time.monotonic() - t0
         text = str(res) if res else "<no results>"
         n_facts = sum(1 for l in text.splitlines() if l.startswith("- [") )
@@ -70,7 +81,7 @@ def main() -> int:
     if args.out:
         Path(args.out).write_text(body, encoding="utf-8")
         print(f"\n[saved {args.out}]")
-    return 0
+    return 1 if failures else 0
 
 
 if __name__ == "__main__":

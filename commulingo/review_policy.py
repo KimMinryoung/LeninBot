@@ -29,6 +29,19 @@ DECISION_TOOL = {"name": "commulingo_review_decision", "description": "Submit on
         }, "required": ["decision", "reason", "resolved_risks", "checks"]}}
 
 
+def decision_tool(proposal):
+    """Bind source choices to this proposal; never repair an invalid identifier."""
+    from copy import deepcopy
+    tool = deepcopy(DECISION_TOOL)
+    refs = proposal.get("source_refs") or []
+    properties = tool["input_schema"]["properties"]["checks"]["items"]["properties"]
+    properties["citation_id"]["enum"] = [f"S{i}" for i in range(1, len(refs) + 1)]
+    properties["citation"]["enum"] = list(refs)
+    tool["description"] += " Current citations: " + json.dumps(
+        {f"S{i}": ref for i, ref in enumerate(refs, 1)}, ensure_ascii=False)
+    return tool
+
+
 def keep_citation_id(args, schema):
     """A check naming its source twice keeps the S-number and drops the copy.
 
@@ -82,7 +95,9 @@ def resolve_review_checks(value, proposal, snapshots, passages):
             refs = proposal.get("source_refs") or []
             ref_index = int(match[1]) - 1 if match else -1
             if "citation" in check or not 0 <= ref_index < len(refs):
-                raise ValueError(f"check {index}: citation_id must select an original source_refs entry; do not also supply citation")
+                raise ValueError(f"check {index}: invalid citation_id; valid choices: "
+                                 + ", ".join(f"S{i}" for i in range(1, len(refs) + 1))
+                                 + "; do not also supply citation")
             check["citation"] = refs[ref_index]
         labels = [str(label) for label in (check.pop("passages", None) or [])]
         if not labels:

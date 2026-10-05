@@ -27,6 +27,12 @@ logger = logging.getLogger(__name__)
 TOOL_RISK_CLASS: dict[str, str] = {
     # Local MCP gateway diagnostics. Profile membership is checked separately.
     "gateway_status": "read",
+    "service_health_snapshot": "read",
+    "get_service_logs": "read",
+    "get_effective_runtime_config": "read",
+    "pipeline_status": "read",
+    "usage_and_budget_report": "read",
+
     "list_mcp_tools": "read",
     "list_runtime_tool_profiles": "read",
     "search_dev_docs": "read",
@@ -59,6 +65,9 @@ TOOL_RISK_CLASS: dict[str, str] = {
     # Read / search / fetch
     "knowledge_graph_search": "read",
     "vector_search": "read",
+    "read_corpus_passage": "read",
+    "tool_usage_report": "read",
+    "trace_tool_run": "read",
     "web_search": "fetch",
     "research_web": "fetch",  # writer: light-agent web research delegation
     "fetch_url": "fetch",
@@ -78,7 +87,7 @@ TOOL_RISK_CLASS: dict[str, str] = {
     "read_manuscript": "read",
     "read_document": "read",
     "search_documents": "read",
-    "query_db": "read",
+    "query_db": "write",
     "commulingo_people": "read",
     # Runner-local typed discovery terminal; validates through read-only duplicate lookup.
     "commulingo_candidate_select": "read",

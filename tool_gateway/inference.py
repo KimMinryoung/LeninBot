@@ -24,7 +24,6 @@ REPLAY_SAFE_TOOLS = frozenset({
     "knowledge_graph_search",
     "list_agent_tools",
     "list_directory",
-    "query_db",
     "read_document",
     "read_file",
     "read_manuscript",
@@ -35,6 +34,7 @@ REPLAY_SAFE_TOOLS = frozenset({
     "search_files",
     "search_manuscript",
     "vector_search",
+    "read_corpus_passage",
     "web_search",
 })
 

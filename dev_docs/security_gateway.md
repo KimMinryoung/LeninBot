@@ -270,11 +270,48 @@ are enforced from day one.
 
 ## Bounded result diagnostics
 
-The additive `tool-audit-log` migration adds nullable `result_metadata JSONB`.
-`audit_sink` accepts only `path`, `node_count`, `edge_count`, `result_count`, `empty`,
-and `fallback`, capped at 2,000 JSON characters. Old rows remain null/unknown.
-Apply the migration and refresh the proxy sink before deploying metadata-producing
-consumers. Existing text responses, status codes, redaction and append-only rules remain.
+`result_metadata JSONB` is additive (`tool-audit-log` migration), bounded to 2,000 JSON
+characters and validated by `ops/audit_sink.py`. Allowed fields are `path`, `node_count`,
+`edge_count`, `result_count`, `empty`, `fallback`, `execution_kind`, `extracted_chars`,
+`returned_chars`, `cache_hit`, `failure_type`, plus KG `source_identified`, `source_measured`,
+`degraded`, `failed`, `injected` (KG recall flags). Counts are nonnegative integers,
+flags are booleans, and path/failure values
+are short identifiers, never source text, URLs, arguments, or secrets. Unknown facts
+are omitted (legacy KG diagnostics can be null). `extracted_chars` is the amount actually
+obtained by this call; a paginated fetch does not claim the full remote document length.
+
+New audit events take `execution_kind` from CallerContext (`runtime` by default);
+`LENINBOT_EXECUTION_KIND=test` explicitly labels test processes. Historical absent/null
+metadata remains `unknown`; no audit rows are backfilled. `scripts/run_unit_tests.sh` and
+the allowlist/security/URL/MCP smoke entrypoints set the test label and disable tool DB
+audit delivery with `LENINBOT_TOOL_AUDIT_DB=0`, retaining structured test logs. Tests that
+exercise the sink explicitly mock it. This switch is for hermetic tests, not deployment.
+
+MCP now propagates `ToolFailure`, `ToolRejection`, `ToolContinue` and diagnostic metadata
+into `error`, `rejected`, `continued` audit outcomes, like runtime dispatch. Runtime
+truncation preserves the original metadata and continuation state. Successful empty
+searches remain `ok`; failed extraction, missing files, and size limits use ToolFailure;
+invalid offsets/source identifiers use ToolRejection. Existing durable idempotency
+continues to block uncertain side effects from blind retry.
+
+Operator-only `tool_usage_report` and `trace_tool_run` use bounded read-only transactions
+with a 5-second statement timeout. They never update the append-only ledger. Their
+period, pagination and historical classification limits are in [mcp_gateway.md](mcp_gateway.md).
+
+Before deploying consumers, confirm `result_metadata` exists (apply `tool-audit-log` if
+needed), then restart **leninbot-llm-proxy** with the expanded sink whitelist. An old sink
+rejects the new fields; producers spool rejected audit batches for later replay. Next
+restart **leninbot-web-gateway** for search diagnostics, then consumers that import the
+changed registry/security modules (Telegram, main API, A2A, roleplay and writer as
+applicable). Restart local MCP client processes to reload their catalog. Scheduled
+CommuLingo/autonomous processes load code on their next invocation; let an active run
+finish before replacing its code. No dependency or new table migration is required.
+2026-10-05 운영 적용에서 기존 DB 컬럼을 확인하고 프록시·웹 게이트웨이·main API·A2A·
+writer·roleplay·browser·Telegram을 재시작했다. HTTP health, 봇 폴링, browser ping,
+MCP inspect/operator 권한 분리와 신규 메타데이터 저장을 확인했다. 기존 KG recall의
+`failed`·`injected` boolean 필드도 허용해 대기 감사 기록의 재전송을 완료했다.
+기존 MCP stdio 연결은 클라이언트에서 재연결해야 새 도구 목록을 읽는다. 진행 중인 개발
+세션을 서버 재시작만으로 강제 종료하지 않는다. 예약 프로세스는 다음 실행부터 새 코드를 사용한다.
 
 Paid web search/extraction additionally reserves its cost at the provider boundary inside the dedicated `leninbot-web-gateway.service` through `web_gateway/budget.py`; this is a shared UTC daily budget, independent of tool rate limits and enforce/shadow mode. CallerContext attributes costs to services and task scopes. See [web_research.md](web_research.md).
 

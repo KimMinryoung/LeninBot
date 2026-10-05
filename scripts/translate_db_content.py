@@ -26,6 +26,8 @@ from ops.paths import FRONTEND_DIR
 from secrets_loader import get_secret
 from translation_runtime import TranslationProviderError
 from translation_runtime.batch_state import BatchState
+from translation_runtime.freshness import (source_hash_sql as _source_hash_sql,
+    missing_translation_sql as _missing_translation_sql, pending_translation_sql)
 from scripts._translation_common import (
     TranslationCallError,
     field_translation_problems,
@@ -103,7 +105,7 @@ def _select_rows(conn, target_name: str, table: str, *, ids: list[int], limit: i
         where = "WHERE id = ANY(%s)"
         params.append(ids)
     elif not force:
-        where = f"WHERE ({_missing_translation_sql(target_name)}) OR translation_source_sha256 IS DISTINCT FROM {_source_hash_sql(target_name)}"
+        where = f"WHERE {pending_translation_sql(target_name)}"
     order_column = "published_at" if target_name == "curation" else "created_at"
     order_limit = f"ORDER BY {order_column} DESC, id DESC"
     if limit > 0:
@@ -135,20 +137,6 @@ def _select_rows(conn, target_name: str, table: str, *, ids: list[int], limit: i
             )
         rows = [dict(row) for row in cur.fetchall()]
     return rows
-
-
-def _source_fields(target_name):
-    return ('title', 'source_title', 'selection_rationale', 'context') if target_name == 'curation' else ('title', 'content')
-
-
-def _source_hash_sql(target_name):
-    fields = ', '.join(_source_fields(target_name))
-    return f"encode(sha256(convert_to(jsonb_build_array({fields})::text, 'UTF8')), 'hex')"
-
-
-def _missing_translation_sql(target_name):
-    fields = ('title_en', 'selection_rationale_en', 'context_en') if target_name == 'curation' else ('title_en', 'content_en')
-    return ' OR '.join(f"NULLIF(BTRIM(COALESCE({field}, '')), '') IS NULL" for field in fields)
 
 
 def translation_freshness_migration_sql():

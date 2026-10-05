@@ -649,6 +649,19 @@ def upsert_identity_sync(session, uuid: str, *, external_ids=(), aliases=(),
     return dict(rec) if rec else None
 
 
+def upsert_identities_sync(session, identities: list[dict]) -> int:
+    """Batch trusted profile refreshes using the exact single-node union rules."""
+    if not identities:
+        return 0
+    updates = [_upsert_params(item['uuid'], item.get('external_ids', ()), item.get('aliases', ()),
+                             item.get('name_ko'), item.get('name_en'), item.get('summary'), item.get('name'))
+               for item in identities]
+    query = re.sub(r'\$(\w+)', r'u.\1', CYPHER_UPSERT_IDENTITY).replace('WITH n,', 'WITH n, u,')
+    row = session.run('UNWIND $updates AS u CALL { WITH u ' + query +
+                      ' } RETURN count(*) AS updated', updates=updates).single()
+    return row['updated'] if row else 0
+
+
 async def upsert_identity_async(session, uuid: str, *, external_ids=(), aliases=(),
                                 name_ko=None, name_en=None, summary=None, name=None) -> dict | None:
     params = _upsert_params(uuid, external_ids, aliases, name_ko, name_en, summary, name)

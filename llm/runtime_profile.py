@@ -72,6 +72,35 @@ def _effective_provider(kind: str, provider_override: str | None = None) -> str:
     return str(_config.get("provider", "claude") or "claude")
 
 
+def runtime_limits(kind: str, provider: str) -> tuple[int, int, float]:
+    """Read the same process-local limits for execution and operator diagnostics."""
+    from bot_config import (_config, _CLAUDE_MAX_TOKENS, _CLAUDE_MAX_TOKENS_TASK,
+                            _WEBCHAT_MAX_TOKENS, _KIMI_MIN_OUTPUT_TOKENS)
+    if kind == "chat":
+        default_rounds = int(_config.get("max_rounds_chat", 50))
+        default_budget = float(_config.get("chat_budget", 0.30))
+        default_tokens = _CLAUDE_MAX_TOKENS
+    elif kind == "webchat":
+        default_rounds = 20
+        default_budget = float(_config.get("webchat_budget", _config.get("chat_budget", 0.30)))
+        default_tokens = _coerce_positive_int(
+            os.getenv("WEBCHAT_MAX_TOKENS"),
+            _WEBCHAT_MAX_TOKENS,
+        )
+    else:
+        default_rounds = int(_config.get("max_rounds_task", 50))
+        default_budget = float(_config.get("task_budget", 1.00))
+        default_tokens = _CLAUDE_MAX_TOKENS_TASK
+
+    # K3 always uses max-effort reasoning, which shares the completion-token
+    # budget with visible output. Avoid the small 4k chat/web ceiling cutting
+    # the reasoning phase off before a user-facing answer is produced.
+    if provider == "kimi":
+        default_tokens = max(default_tokens, _KIMI_MIN_OUTPUT_TOKENS)
+
+    return default_rounds, default_tokens, default_budget
+
+
 async def resolve_runtime_profile(
     kind: str = "chat",
     *,
@@ -84,10 +113,6 @@ async def resolve_runtime_profile(
 ) -> RuntimeProfile:
     """Resolve provider/model/runtime limits for a chat-like execution path."""
     from bot_config import (
-        _CLAUDE_MAX_TOKENS,
-        _CLAUDE_MAX_TOKENS_TASK,
-        _KIMI_MIN_OUTPUT_TOKENS,
-        _WEBCHAT_MAX_TOKENS,
         _config,
         _display_name_for_model_id,
         _get_model_by_alias,
@@ -119,27 +144,7 @@ async def resolve_runtime_profile(
             model_id = await _get_model_by_alias(alias)
             resolved = alias in _resolved_models
 
-    if kind == "chat":
-        default_rounds = int(_config.get("max_rounds_chat", 50))
-        default_budget = float(_config.get("chat_budget", 0.30))
-        default_tokens = _CLAUDE_MAX_TOKENS
-    elif kind == "webchat":
-        default_rounds = 20
-        default_budget = float(_config.get("webchat_budget", _config.get("chat_budget", 0.30)))
-        default_tokens = _coerce_positive_int(
-            os.getenv("WEBCHAT_MAX_TOKENS"),
-            _WEBCHAT_MAX_TOKENS,
-        )
-    else:
-        default_rounds = int(_config.get("max_rounds_task", 50))
-        default_budget = float(_config.get("task_budget", 1.00))
-        default_tokens = _CLAUDE_MAX_TOKENS_TASK
-
-    # K3 always uses max-effort reasoning, which shares the completion-token
-    # budget with visible output. Avoid the small 4k chat/web ceiling cutting
-    # the reasoning phase off before a user-facing answer is produced.
-    if provider == "kimi":
-        default_tokens = max(default_tokens, _KIMI_MIN_OUTPUT_TOKENS)
+    default_rounds, default_tokens, default_budget = runtime_limits(kind, provider)
 
     max_rounds = default_rounds if max_rounds_override is None else int(max_rounds_override)
     max_tokens = default_tokens if max_tokens_override is None else int(max_tokens_override)

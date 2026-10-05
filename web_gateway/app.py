@@ -103,7 +103,8 @@ async def search(request: Request):
     token = budget.usage_identity.set(payload.caller.model_dump())
     try:
         result = await execute_web_search(**payload.arguments.model_dump())
-        return {"result": str(result), "error": isinstance(result, ToolFailure)}
+        return {"result": str(result), "error": isinstance(result, ToolFailure),
+                "result_metadata": getattr(result, "result_metadata", None)}
     finally:
         budget.usage_identity.reset(token)
 
