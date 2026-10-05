@@ -36,13 +36,12 @@ import re
 from datetime import date, datetime
 from decimal import Decimal
 
-from psycopg2.extras import RealDictCursor
 
-from db import query as db_query, query_one as db_query_one, get_conn
-from ops.paths import COMMULINGO_DATA_DIR, commulingo_data_file
+from ops.paths import commulingo_data_file
 from tool_gateway.results import ToolFailure
-from commulingo.periods import PERIOD_COLUMNS, PERIOD_SCHEMA, format_period, period_columns
+from commulingo.periods import PERIOD_SCHEMA, period_columns
 from commulingo.person_service import call_person_service
+from commulingo.reads import reads as _reads
 
 logger = logging.getLogger(__name__)
 
@@ -391,16 +390,14 @@ _TERM_CATEGORY_FALLBACK = (
 
 
 def _load_term_categories() -> tuple[tuple[str, ...], str]:
-    """(slugs, hint line) for the schema enum and the rejection messages."""
-    rows = []
-    try:
-        rows = db_query(
-            """SELECT id, label_en FROM commulingo_term_categories
-               ORDER BY sort_order, id"""
-        ) or []
-    except Exception as exc:  # missing table, no DB, no credentials — all fall back
-        logger.warning("term categories unavailable (%s); using the built-in list", exc)
-    pairs = [(r["id"], r["label_en"]) for r in rows] or list(_TERM_CATEGORY_FALLBACK)
+    """(slugs, hint line) for the schema enum and the rejection messages.
+
+    The list mirrors CommuLingo's commulingo_term_categories (12 kinds since
+    frontend migration 286). It is not fetched at import: CommuLingo is reached
+    only through its admin MCP, and its editorial store rejects an unknown
+    category on save, so a stale copy here can only make a message less exact.
+    """
+    pairs = list(_TERM_CATEGORY_FALLBACK)
     hint = ", ".join(
         slug if slug.replace("-", " ") == label.lower() else f"{slug} ({label.lower()})"
         for slug, label in pairs
@@ -634,77 +631,41 @@ def _list_groups() -> list[dict]:
     # 진영」 collected every non-Soviet politician who ever opposed Moscow —
     # Roosevelt, Marshall, Paasikivi, and a Finnish foreign minister — when the
     # blurb says the group is for those who took up arms against a revolution.
-    return db_query(
-        """SELECT g.id, g.shelf, g.range_label, g.title_ko, g.title_en,
-                  g.blurb_ko, g.blurb_en,
-                  COUNT(p.id) AS people_count
-           FROM commulingo_people_groups g
-           LEFT JOIN commulingo_people p ON p.group_id = g.id
-           GROUP BY g.id, g.shelf, g.sort_order, g.range_label, g.title_ko, g.title_en,
-                    g.blurb_ko, g.blurb_en
-           ORDER BY g.sort_order, g.id"""
-    )
+    return _reads.groups()
 
 
 def _search_people(q: str, group_id: str, limit: int, function_id: str = "", affiliation_id: str = "") -> list[dict]:
+    affiliations = ()
     if function_id or affiliation_id:
         from commulingo.activities import activity_search_params
         params = activity_search_params(function_id, affiliation_id)
-        params.update(q=q, g=group_id, limit=limit)
-        return db_query(
-            """SELECT p.id, p.group_id, p.name_ko, p.name_en, p.cyrillic,
-                      p.years_label, p.epithet_ko, p.fate_kind
-               FROM commulingo_people p
-               WHERE (%(q)s = '' OR p.id ILIKE '%%' || %(q)s || '%%'
-                      OR p.name_ko ILIKE '%%' || %(q)s || '%%'
-                      OR p.name_en ILIKE '%%' || %(q)s || '%%'
-                      OR p.cyrillic ILIKE '%%' || %(q)s || '%%')
-                 AND (%(g)s = '' OR p.group_id = %(g)s)
-                 AND EXISTS (
-                   SELECT 1 FROM jsonb_array_elements(COALESCE(p.activities, '[]'::jsonb)
-                   ) a WHERE (%(function)s = '' OR a->>'functionId' = %(function)s)
-                     AND (%(affiliation)s = '' OR a->>'affiliationId' = ANY(%(descendants)s::text[]))
-                 ) ORDER BY p.sort_order, p.id LIMIT %(limit)s""", params)
-    return db_query(
-        """SELECT id, group_id, name_ko, name_en, cyrillic, years_label,
-                  epithet_ko, fate_kind
-           FROM commulingo_people
-           WHERE (%(q)s = ''
-                  OR id ILIKE '%%' || %(q)s || '%%'
-                  OR name_ko ILIKE '%%' || %(q)s || '%%'
-                  OR name_en ILIKE '%%' || %(q)s || '%%'
-                  OR cyrillic ILIKE '%%' || %(q)s || '%%')
-             AND (%(g)s = '' OR group_id = %(g)s)
-           ORDER BY sort_order, id
-           LIMIT %(limit)s""",
-        {"q": q, "g": group_id, "limit": limit},
-    )
+        affiliations = params["descendants"] if affiliation_id else ()
+    rows = _reads.people_search(q, group_id, limit, function_id, affiliations)
+    keys = ("id", "group_id", "name_ko", "name_en", "cyrillic", "years_label", "epithet_ko", "fate_kind")
+    return [{k: row.get(k) for k in keys} for row in rows]
 
 
-def _office_snapshot(cur, office_id: str) -> dict | None:
-    cur.execute(
-        """SELECT id, range_label, title_ko, title_en, blurb_ko, blurb_en
-           FROM commulingo_offices WHERE id = %s""",
-        (office_id,),
-    )
-    office = cur.fetchone()
+def _office_snapshot(office_id: str) -> dict | None:
+    office = _reads.office(office_id)
     if not office:
         return None
-    office = dict(office)
-    cur.execute(
-        f"""SELECT id AS row_id, {', '.join(PERIOD_COLUMNS)}, body_ko, body_en, person_id,
-                  name_ko, name_en, note_ko, note_en
-           FROM commulingo_office_rows
-           WHERE office_id = %s ORDER BY sort_order, id""",
-        (office_id,),
-    )
-    office["rows"] = [{**dict(r), "years": format_period(r)} for r in cur.fetchall()]
-    return office
+    return {
+        "id": office["id"], "range_label": office.get("range", ""),
+        "title_ko": office["title"]["ko"], "title_en": office["title"]["en"],
+        "blurb_ko": office["blurb"]["ko"], "blurb_en": office["blurb"]["en"],
+        "rows": [{
+            "row_id": int(row["id"]), "period": row.get("period"), "years": (row.get("years") or {}).get("ko", ""),
+            "body_ko": row["body"]["ko"], "body_en": row["body"]["en"], "person_id": row.get("personId") or None,
+            "name_ko": row["name"]["ko"], "name_en": row["name"]["en"],
+            "note_ko": row["note"]["ko"], "note_en": row["note"]["en"],
+        } for row in office.get("rows", [])],
+    }
 
 
 def _get_person(person_id: str) -> dict | None:
     # The revision and fields are read in the shared store's one MVCC snapshot.
-    person = call_person_service({"command": "read", "id": person_id})
+    person = _reads.person(person_id)
+    person = dict(person) if person else None
     if person:
         person["office_rows"] = [
             {"row_id": r["id"], "office_id": r["officeId"], "office_title_ko": r["officeTitle"]["ko"],
@@ -742,26 +703,17 @@ def _search_all(q: str, limit: int) -> dict:
     forcing a follow-up get_* call for an unambiguous hit was pure overhead.
     Only a multi-match result needs the follow-up, and only then is `hint` sent.
     """
-    like = f"%{q}%"
-    events = db_query(
-        """SELECT id, period_label, title_ko, title_en
-             FROM commulingo_history_events
-            WHERE id ILIKE %(like)s OR title_ko ILIKE %(like)s OR title_en ILIKE %(like)s
-            ORDER BY sort_order, id LIMIT %(limit)s""",
-        {"like": like, "limit": limit},
-    )
-    offices = db_query(
-        """SELECT id, range_label, title_ko, title_en
-             FROM commulingo_offices
-            WHERE id ILIKE %(like)s OR title_ko ILIKE %(like)s OR title_en ILIKE %(like)s
-            ORDER BY sort_order, id LIMIT %(limit)s""",
-        {"like": like, "limit": limit},
-    )
+    needle = q.casefold()
+    events = [{"id": e["id"], "period_label": e.get("period") or "", "title_ko": e["title"]["ko"], "title_en": e["title"]["en"]}
+              for e in _reads.events(q)][:limit]
+    offices = [{"id": o["id"], "range_label": o.get("range", ""), "title_ko": o["title"]["ko"], "title_en": o["title"]["en"]}
+               for o in _reads.offices()
+               if needle in o["id"].casefold() or needle in o["title"]["ko"].casefold() or needle in o["title"]["en"].casefold()][:limit]
     result = {
         "people": _search_people(q, "", limit),
         "terms": _list_terms(q)[:limit],
-        "events": [dict(r) for r in events],
-        "offices": [dict(r) for r in offices],
+        "events": events,
+        "offices": offices,
     }
     total = sum(len(rows) for rows in result.values())
     if total == 1:
@@ -787,67 +739,34 @@ def _search_all(q: str, limit: int) -> dict:
 
 
 def _list_offices() -> list[dict]:
-    return db_query(
-        """SELECT o.id, o.range_label, o.title_ko, o.title_en,
-                  COUNT(r.id) AS row_count
-           FROM commulingo_offices o
-           LEFT JOIN commulingo_office_rows r ON r.office_id = o.id
-           GROUP BY o.id, o.sort_order, o.range_label, o.title_ko, o.title_en
-           ORDER BY o.sort_order, o.id"""
-    )
+    return [{"id": o["id"], "range_label": o.get("range", ""), "title_ko": o["title"]["ko"], "title_en": o["title"]["en"],
+             "row_count": o.get("rowCount", 0)} for o in _reads.offices()]
 
 
 def _get_office(office_id: str) -> dict | None:
-    with get_conn() as conn:
-        with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            return _office_snapshot(cur, office_id)
+    return _office_snapshot(office_id)
 
 
 def _get_sections(person_id: str) -> list[dict] | None:
     """Sections in the exact person_section patch shape (read → edit → write back)."""
-    if not db_query_one("SELECT 1 FROM commulingo_people WHERE id = %s", (person_id,)):
+    person = _reads.person(person_id)
+    if not person:
         return None
-    rows = db_query(
-        """SELECT slug, sort_order, heading_ko, heading_en, body_ko, body_en, sources
-           FROM commulingo_person_sections
-           WHERE person_id = %s ORDER BY sort_order, id""",
-        (person_id,),
-    )
     return [
-        {
-            "slug": r["slug"],
-            "sortOrder": r["sort_order"],
-            "heading": {"ko": r["heading_ko"], "en": r["heading_en"]},
-            "body": {"ko": r["body_ko"], "en": r["body_en"]},
-            "sources": r["sources"],
-        }
-        for r in rows
+        {"slug": s["slug"], "sortOrder": s["sortOrder"], "heading": s["heading"], "body": s["body"],
+         "sources": s.get("sources") or []}
+        for s in person.get("sections") or []
     ]
 
 
 def _list_events() -> list[dict]:
-    return db_query(
-        """SELECT e.id, e.period_label, e.title_ko, e.title_en,
-                  COUNT(ep.person_id)::int AS people_count,
-                  length(e.body_ko) AS body_ko_chars,
-                  jsonb_array_length(e.timeline) AS timeline_entries
-             FROM commulingo_history_events e
-             LEFT JOIN commulingo_history_event_people ep ON ep.event_id = e.id
-            GROUP BY e.id, e.sort_order, e.period_label, e.title_ko, e.title_en,
-                     e.body_ko, e.timeline
-            ORDER BY e.sort_order, e.id"""
-    )
+    return [{"id": e["id"], "period_label": e.get("period") or "", "title_ko": e["title"]["ko"], "title_en": e["title"]["en"],
+             "people_count": e.get("people", 0), "body_ko_chars": e.get("bodyKoChars", 0),
+             "timeline_entries": e.get("timelineEntries", 0)} for e in _reads.events()]
 
 
 def _get_event(event_id: str) -> dict | None:
-    event = db_query_one(
-        """SELECT id, period_label, title_ko, title_en, question_ko, question_en,
-                  summary_ko, summary_en, outcome_ko, outcome_en,
-                  body_ko, body_en, timeline, sources,
-                  to_jsonb(e)->'focus' AS focus, to_jsonb(e)->'sides' AS sides
-             FROM commulingo_history_events e WHERE id = %s""",
-        (event_id,),
-    )
+    event = _reads.event(event_id)
     if not event:
         return None
     event = dict(event)
@@ -870,121 +789,27 @@ def _get_event(event_id: str) -> dict | None:
             "relation": {"ko": row["relation_ko"], "en": row["relation_en"]},
             "note": {"ko": row["note_ko"], "en": row["note_en"]},
         }
-        for row in db_query(
-            """SELECT person_id, sort_order, relation_kind, side,
-                      relation_ko, relation_en, note_ko, note_en
-                 FROM commulingo_history_event_people
-                WHERE event_id = %s ORDER BY sort_order, person_id""",
-            (event_id,),
-        )
+        for row in event.get("people") or []
     ]
     return event
 
 
-def _term_snapshot(cur, term_id: str) -> dict | None:
-    """Full glossary term via an existing cursor, in the term patch shape."""
-    cur.execute(
-        """SELECT id, term_ko, term_en, original, period_label,
-                  period_ko, period_en, start_year, end_year, category,
-                  definition_ko, definition_en, body_ko, body_en, sources,
-                  parent_id
-           FROM commulingo_terms WHERE id = %s""",
-        (term_id,),
-    )
-    row = cur.fetchone()
-    if not row:
-        return None
-    term = {
-        "id": row["id"],
-        "term": {"ko": row["term_ko"], "en": row["term_en"]},
-        "original": row["original"],
-        "period": {
-            "ko": row["period_ko"] or row["period_label"],
-            "en": row["period_en"] or row["period_label"],
-        },
-        "startYear": row["start_year"],
-        "endYear": row["end_year"],
-        "category": row["category"],
-        "definition": {"ko": row["definition_ko"], "en": row["definition_en"]},
-        "body": {"ko": row["body_ko"], "en": row["body_en"]},
-        "sources": row["sources"] if isinstance(row["sources"], list) else [],
-        "parentId": row["parent_id"],
-    }
-    cur.execute(
-        """SELECT lang, alias FROM commulingo_term_aliases
-           WHERE term_id = %s ORDER BY lang, sort_order, alias""",
-        (term_id,),
-    )
-    term["aliases"] = {"ko": [], "en": []}
-    for alias_row in cur.fetchall():
-        if alias_row["lang"] in term["aliases"]:
-            term["aliases"][alias_row["lang"]].append(alias_row["alias"])
-    cur.execute(
-        "SELECT person_id FROM commulingo_term_people WHERE term_id = %s ORDER BY sort_order, person_id",
-        (term_id,),
-    )
-    term["people"] = [r["person_id"] for r in cur.fetchall()]
-    cur.execute(
-        "SELECT event_id FROM commulingo_term_events WHERE term_id = %s ORDER BY sort_order, event_id",
-        (term_id,),
-    )
-    term["events"] = [r["event_id"] for r in cur.fetchall()]
-    return term
-
-
 def _list_terms(q: str = "") -> list[dict]:
-    # Unfiltered this is ~150 terms carrying ~1300 aliases. A curator checking
+    # Unfiltered this is ~1300 terms with their aliases. A curator checking
     # whether one candidate is already registered used to pull that whole blob,
     # hit the tool-result cap, and pull it again — three rounds spent to not get
     # an answer. 'q' answers the same question in one small result.
-    rows = db_query(
-        """SELECT t.id, t.term_ko, t.term_en, t.original,
-                  COALESCE(a.aliases, ARRAY[]::text[]) AS aliases
-             FROM commulingo_terms t
-             LEFT JOIN (
-                 SELECT term_id, array_agg(alias ORDER BY lang, sort_order) AS aliases
-                   FROM commulingo_term_aliases GROUP BY term_id
-             ) a ON a.term_id = t.id
-            WHERE %(q)s = ''
-               OR t.id ILIKE %(like)s
-               OR t.term_ko ILIKE %(like)s
-               OR t.term_en ILIKE %(like)s
-               OR t.original ILIKE %(like)s
-               OR EXISTS (SELECT 1 FROM commulingo_term_aliases x
-                           WHERE x.term_id = t.id AND x.alias ILIKE %(like)s)
-            ORDER BY t.sort_order, t.id""",
-        {"q": q, "like": f"%{q}%"},
-    )
-    return [
-        {
-            "id": row["id"],
-            "term": {"ko": row["term_ko"], "en": row["term_en"]},
-            "original": row["original"],
-            "aliases": list(row["aliases"] or []),
-        }
-        for row in rows
-    ]
+    return [{"id": t["id"], "term": t["term"], "original": t.get("original") or "", "aliases": t.get("aliases") or []}
+            for t in _reads.terms(q)]
 
 
 def _get_term(term_id: str) -> dict | None:
-    from commulingo.pipeline.config import load
-    if load()['term_editorial_service']:
-        return call_person_service({'command':'read','target':'term','id':term_id})
-    with get_conn() as conn:
-        with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            return _term_snapshot(cur, term_id)
+    return _reads.term_editorial(term_id)
 
 
 def _list_suggestions(status: str, limit: int) -> list[dict]:
-    return db_query(
-        """SELECT id, target_type, target_id, action, status, confidence,
-                  reviewer, review_note, created_at, reviewed_at
-           FROM commulingo_agent_suggestions
-           WHERE (%(s)s = '' OR status = %(s)s)
-           ORDER BY created_at DESC
-           LIMIT %(limit)s""",
-        {"s": status, "limit": limit},
-    )
+    keys = ("id", "target_type", "target_id", "action", "status", "confidence", "reviewer", "review_note", "created_at", "reviewed_at")
+    return [{k: row.get(k) for k in keys} for row in _reads.suggestions(status, limit)]
 
 
 COMMULINGO_PEOPLE_TOOL = {
@@ -1225,13 +1050,23 @@ def _patronymic_problem(state: dict, native_name: str) -> str | None:
     return None
 
 
+def _stored_person_row(person_id: str) -> dict:
+    """The stored name and nationality columns the write checks compare against."""
+    person = _reads.person(person_id) or {}
+    pick = lambda key, lang: ((person.get(key) or {}).get(lang) or "")
+    return {
+        "cyrillic": person.get("cyrillic") or "",
+        "citizenship_code": (person.get("citizenship") or {}).get("code") or "",
+        "origin_code": (person.get("nationalOrigin") or person.get("origin") or {}).get("code") or "",
+        "given_name_ko": pick("givenName", "ko"), "given_name_en": pick("givenName", "en"),
+        "family_name_ko": pick("familyName", "ko"), "family_name_en": pick("familyName", "en"),
+        "patronymic_ko": pick("patronymic", "ko"), "patronymic_en": pick("patronymic", "en"),
+        "cyrillic_patronymic": person.get("cyrillicPatronymic") or "",
+    } if person else {}
+
+
 def _stored_patronymic_state(cur, person_id: str) -> dict:
-    cur.execute(
-        """SELECT patronymic_ko, patronymic_en, cyrillic_patronymic
-           FROM commulingo_person_patronymics WHERE person_id = %s""",
-        (person_id,),
-    )
-    row = cur.fetchone() or {}
+    row = _stored_person_row(person_id)
     return {
         "ko": row.get("patronymic_ko") or "",
         "en": row.get("patronymic_en") or "",
@@ -1473,8 +1308,7 @@ def _existing_person_match(cur, target_id: str, patch: dict) -> dict | None:
     key_en, key_ko = _dedup_key(name_en), _dedup_key(name_ko)
     segments = set(target_id.split("-"))
 
-    cur.execute("SELECT id, name_ko, name_en, birth_year, death_year FROM commulingo_people")
-    rows = cur.fetchall()
+    rows = _reads.dataset("people")
 
     for row in rows:
         if key_en and _dedup_key(row["name_en"]) == key_en:
@@ -1564,11 +1398,7 @@ def _check_person_native_names(
     """Native-script name checks; also returns the post-patch patronymic state."""
     stored = {}
     if action != "create":
-        cur.execute(
-            "SELECT cyrillic, citizenship_code, origin_code FROM commulingo_people WHERE id = %s",
-            (target_id,),
-        )
-        stored = dict(cur.fetchone() or {})
+        stored = _stored_person_row(target_id)
     cyrillic = str(
         patch.get("cyrillic") if "cyrillic" in patch else stored.get("cyrillic") or ""
     ).strip()
@@ -1618,15 +1448,7 @@ def _check_person_embedded_patronymic(
     if name_touched or "patronymic" in patch:
         stored_name = {}
         if action != "create":
-            cur.execute(
-                """SELECT p.given_name_ko, p.given_name_en, p.family_name_ko, p.family_name_en,
-                          pa.patronymic_ko, pa.patronymic_en
-                   FROM commulingo_people p
-                   LEFT JOIN commulingo_person_patronymics pa ON pa.person_id = p.id
-                   WHERE p.id = %s""",
-                (target_id,),
-            )
-            stored_name = dict(cur.fetchone() or {})
+            stored_name = _stored_person_row(target_id)
         for lang in ("ko", "en"):
             _, _, full = _patch_name_parts(patch, lang, stored_name)
             pat = patronymic_state[lang]
@@ -1658,12 +1480,7 @@ def _check_person_single_name(cur, action: str, target_id: str, patch: dict,
         return None
     stored = {}
     if action != "create":
-        cur.execute(
-            """SELECT given_name_ko, given_name_en, family_name_ko, family_name_en, citizenship_code
-               FROM commulingo_people WHERE id = %s""",
-            (target_id,),
-        )
-        stored = dict(cur.fetchone() or {})
+        stored = _stored_person_row(target_id)
     codes = _name_order_codes(patch, stored)
     ordered = any(code in _SINGLE_NAME or code in _FAMILY_FIRST for code in codes)
     pat = next((patronymic_state.get(k) for k in ("ko", "en", "native") if patronymic_state.get(k)), "")
@@ -1799,8 +1616,7 @@ def _check_person_create(cur, target_id: str, patch: dict) -> str | None:
         return f"Error: patch.id '{patch['id']}' conflicts with target_id '{target_id}' — they must match (or omit patch.id)."
     if not _ID_RE.match(target_id):
         return "Error: target_id must be a lowercase kebab-case slug (e.g. 'ordzhonikidze')."
-    cur.execute("SELECT 1 FROM commulingo_people WHERE id = %s", (target_id,))
-    if cur.fetchone():
+    if _reads.exists("person", target_id):
         return (
             f"Error: person '{target_id}' already exists — edit it with "
             f"{_write_tool_call('person', 'update')}(person_id='{target_id}', ...)."
@@ -1817,8 +1633,7 @@ def _check_person_create(cur, target_id: str, patch: dict) -> str | None:
             "and slug that do not collide with the existing one."
         )
     group = patch.get("groupId") or patch.get("group") or ""
-    cur.execute("SELECT 1 FROM commulingo_people_groups WHERE id = %s", (group,))
-    if not cur.fetchone():
+    if not _reads.exists("group", group):
         return f"Error: unknown group '{group}'. Check commulingo_people(action='list_groups')."
     for lang in ("ko", "en"):
         _, _, full = _patch_name_parts(patch, lang)
@@ -1843,16 +1658,14 @@ def _check_person_create(cur, target_id: str, patch: dict) -> str | None:
 
 
 def _check_person_existing(cur, action: str, target_id: str, patch: dict) -> str | None:
-    cur.execute("SELECT 1 FROM commulingo_people WHERE id = %s", (target_id,))
-    if not cur.fetchone():
+    if not _reads.exists("person", target_id):
         return (
             f"Error: person '{target_id}' not found. Find the id with "
             f"{_reader_call('search_people')}."
         )
     if action == "update" and ("group" in patch or "groupId" in patch):
         group = patch.get("groupId") or patch.get("group") or ""
-        cur.execute("SELECT 1 FROM commulingo_people_groups WHERE id = %s", (group,))
-        if not cur.fetchone():
+        if not _reads.exists("group", group):
             return f"Error: unknown group '{group}'."
     return None
 
@@ -1895,9 +1708,10 @@ def _validate_person(cur, action: str, target_id: str, patch: dict) -> str | Non
 
 
 def _validate_person_section(cur, action: str, target_id: str, patch: dict) -> str | None:
-    cur.execute("SELECT 1 FROM commulingo_people WHERE id = %s", (target_id,))
-    if not cur.fetchone():
+    person = _reads.person(target_id)
+    if not person:
         return f"Error: person '{target_id}' not found (person_section targets a person id)."
+    stored_sections = person.get("sections") or []
     slug = patch.get("slug") or ""
     if not _SLUG_RE.match(slug):
         return "Error: patch.slug is required — a short kebab-case id like 'early-life' or 'purge-role'."
@@ -1921,11 +1735,7 @@ def _validate_person_section(cur, action: str, target_id: str, patch: dict) -> s
                 f"a body this size is two topics — file the second one as its own "
                 f"section instead of trimming this one to fit."
             )
-    cur.execute(
-        "SELECT 1 FROM commulingo_person_sections WHERE person_id = %s AND slug = %s",
-        (target_id, slug),
-    )
-    exists = bool(cur.fetchone())
+    exists = any(section["slug"] == slug for section in stored_sections)
     if action == "create":
         if exists:
             return (
@@ -1941,11 +1751,9 @@ def _validate_person_section(cur, action: str, target_id: str, patch: dict) -> s
         heading = patch.get("heading") or {}
         key_ko, key_en = _dedup_key(heading.get("ko")), _dedup_key(heading.get("en"))
         if key_ko or key_en:
-            cur.execute(
-                "SELECT slug, heading_ko, heading_en FROM commulingo_person_sections "
-                "WHERE person_id = %s", (target_id,)
-            )
-            for row in cur.fetchall():
+            for section in stored_sections:
+                row = {"slug": section["slug"], "heading_ko": section["heading"].get("ko") or "",
+                       "heading_en": section["heading"].get("en") or ""}
                 if (key_ko and _dedup_key(row["heading_ko"]) == key_ko) or (
                     key_en and _dedup_key(row["heading_en"]) == key_en
                 ):
@@ -1969,11 +1777,7 @@ def _validate_person_section(cur, action: str, target_id: str, patch: dict) -> s
 def _validate_history_event_person(cur, action: str, target_id: str, patch: dict) -> str | None:
     if action == "delete":
         return "Error: history_event_person deletion is not available to the unattended curator."
-    cur.execute(
-        "SELECT to_jsonb(e)->'sides' AS sides FROM commulingo_history_events e WHERE id = %s",
-        (target_id,),
-    )
-    event_row = cur.fetchone()
+    event_row = _reads.event(target_id)
     if not event_row:
         return (
             f"Error: history event {target_id} not found. Find the id with "
@@ -1993,8 +1797,7 @@ def _validate_history_event_person(cur, action: str, target_id: str, patch: dict
     person_id = str(patch.get("personId") or "").strip()
     if not person_id:
         return "Error: history_event_person patch.personId is required."
-    cur.execute("SELECT 1 FROM commulingo_people WHERE id = %s", (person_id,))
-    if not cur.fetchone():
+    if not _reads.exists("person", person_id):
         return (
             f"Error: person {person_id} not found. Find the id with "
             f"{_reader_call('search_people')}."
@@ -2034,12 +1837,8 @@ def _validate_history_event(cur, action: str, target_id: str, patch: dict) -> st
             "Error: history events are created and retired by hand. The curator may "
             "only update one that already exists."
         )
-    cur.execute(
-        "SELECT COALESCE(summary_ko, '') = '' AS skeleton "
-        "FROM commulingo_history_events WHERE id = %s",
-        (target_id,),
-    )
-    event_row = cur.fetchone()
+    stored_event = _reads.event(target_id)
+    event_row = {"skeleton": not (stored_event.get("summary_ko") or "")} if stored_event else None
     if not event_row:
         return (
             f"Error: history event '{target_id}' not found. Find the id with "
@@ -2114,11 +1913,7 @@ def _validate_history_event(cur, action: str, target_id: str, patch: dict) -> st
 def _validate_history_event_section(cur, action: str, target_id: str, patch: dict) -> str | None:
     if action == "delete":
         return "Error: event body sections are not deleted by the unattended curator."
-    cur.execute(
-        "SELECT body_ko, body_en FROM commulingo_history_events WHERE id = %s",
-        (target_id,),
-    )
-    row = cur.fetchone()
+    row = _reads.event(target_id)
     if not row:
         return (
             f"Error: history event '{target_id}' not found. Find the id with "
@@ -2276,8 +2071,8 @@ def _check_term_parent(cur, target_id: str, patch: dict) -> str | None:
             return "Error: parentId must be a term id, or null to detach the entry."
         if parent == target_id:
             return f"Error: parentId '{parent}' is the entry itself."
-        cur.execute("SELECT parent_id FROM commulingo_terms WHERE id = %s", (parent,))
-        parent_row = cur.fetchone()
+        parent_term = _reads.term(parent)
+        parent_row = {"parent_id": parent_term.get("parentId")} if parent_term else None
         if not parent_row:
             return (
                 f"Error: parentId '{parent}' is not a registered term. Find it with "
@@ -2290,27 +2085,26 @@ def _check_term_parent(cur, target_id: str, patch: dict) -> str | None:
                 f"'{parent_row['parent_id']}', and the glossary nests one level only. "
                 f"Use '{parent_row['parent_id']}' as the parent, or leave this entry flat."
             )
-        cur.execute("SELECT id FROM commulingo_terms WHERE parent_id = %s LIMIT 1", (target_id,))
-        child = cur.fetchone()
-        if child:
+        own = _reads.term(target_id)
+        if own and own.get("hasChildren"):
             return (
-                f"Error: '{target_id}' already has '{child['id']}' nested under it, so it "
+                f"Error: '{target_id}' already has another entry nested under it, so it "
                 "cannot become a child itself (the glossary nests one level only)."
             )
     return None
 
 
 def _check_term_links(cur, patch: dict) -> str | None:
-    for key, table, reader in (("people", "commulingo_people", "search_people"),
-                               ("events", "commulingo_history_events", "list_events")):
+    for key, table, reader, kind in (("people", "commulingo_people", "search_people", "person"),
+                                     ("events", "commulingo_history_events", "list_events", "event")):
         if key not in patch or patch[key] is None:
             continue
         value = patch[key]
         if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
             return f"Error: {key} must be a list of {table} ids."
+        existing = _reads.existing(kind, value)
         for item in value:
-            cur.execute(f"SELECT 1 FROM {table} WHERE id = %s", (item,))
-            if not cur.fetchone():
+            if item not in existing:
                 return (
                     f"Error: {key} id '{item}' not found. Find it with "
                     f"{_reader_call(reader)}."
@@ -2324,8 +2118,7 @@ def _check_term_create(cur, target_id: str, patch: dict) -> str | None:
         return f"Error: patch.id '{patch['id']}' conflicts with target_id '{target_id}'."
     if not _ID_RE.match(target_id):
         return "Error: target_id must be a lowercase kebab-case slug (e.g. 'nomenklatura')."
-    cur.execute("SELECT 1 FROM commulingo_terms WHERE id = %s", (target_id,))
-    if cur.fetchone():
+    if _reads.exists("term", target_id):
         return (
             f"Error: term '{target_id}' already exists — edit it with "
             f"{_write_tool_call('term', 'update')}(term_id='{target_id}', ...), "
@@ -2350,16 +2143,8 @@ def _check_term_create(cur, target_id: str, patch: dict) -> str | None:
         candidates.update(v for v in values if isinstance(v, str))
     candidates.discard(None)
     for candidate in candidates:
-        cur.execute(
-            """SELECT t.id FROM commulingo_terms t
-                WHERE lower(btrim(t.term_ko)) = lower(btrim(%(c)s))
-                   OR lower(btrim(t.term_en)) = lower(btrim(%(c)s))
-               UNION
-               SELECT a.term_id FROM commulingo_term_aliases a
-                WHERE lower(btrim(a.alias)) = lower(btrim(%(c)s))""",
-            {"c": candidate},
-        )
-        row = cur.fetchone()
+        owner = _reads.label_owner("term", candidate)
+        row = {"id": owner} if owner else None
         if row:
             return (
                 f"Error: '{candidate}' is already registered on term "
@@ -2373,8 +2158,7 @@ def _check_term_create(cur, target_id: str, patch: dict) -> str | None:
 
 
 def _check_term_existing(cur, target_id: str) -> str | None:
-    cur.execute("SELECT 1 FROM commulingo_terms WHERE id = %s", (target_id,))
-    if not cur.fetchone():
+    if not _reads.exists("term", target_id):
         return (
             f"Error: term '{target_id}' not found. Find the id with "
             f"{_reader_call('list_terms')}."
@@ -2416,8 +2200,7 @@ def _validate_office_row(cur, action: str, target_id: str, patch: dict) -> str |
                 "a plain string would silently blank the other language."
             )
     if action == "create":
-        cur.execute("SELECT 1 FROM commulingo_offices WHERE id = %s", (target_id,))
-        if not cur.fetchone():
+        if not _reads.exists("office", target_id):
             return f"Error: office '{target_id}' not found (office_row create targets an office id)."
     else:
         if not target_id.isdigit():
@@ -2425,12 +2208,10 @@ def _validate_office_row(cur, action: str, target_id: str, patch: dict) -> str |
                 f"Error: office row '{target_id}' not found (office_row update/delete "
                 "targets a numeric row id from get_office/get_person)."
             )
-        cur.execute("SELECT 1 FROM commulingo_office_rows WHERE id = %s", (int(target_id),))
-        if not cur.fetchone():
+        if not _reads.exists("office_row", target_id):
             return f"Error: office row '{target_id}' not found."
     if patch.get("personId"):
-        cur.execute("SELECT 1 FROM commulingo_people WHERE id = %s", (patch["personId"],))
-        if not cur.fetchone():
+        if not _reads.exists("person", patch["personId"]):
             return f"Error: personId '{patch['personId']}' does not exist."
     return None
 
@@ -2519,19 +2300,6 @@ def _find_event_section(parts: list[tuple[str, str]], heading: str) -> int:
         if existing and _dedup_key(existing) == key:
             return index
     return -1
-
-
-def _event_snapshot(cur, event_id: str) -> dict | None:
-    """Full history event via an existing cursor, for the revision log."""
-    cur.execute(
-        """SELECT id, period_label, title_ko, title_en, question_ko, question_en,
-                  summary_ko, summary_en, outcome_ko, outcome_en,
-                  body_ko, body_en, timeline, sources
-             FROM commulingo_history_events WHERE id = %s""",
-        (event_id,),
-    )
-    row = cur.fetchone()
-    return dict(row) if row else None
 
 
 def _public_page(target_type: str, target_id: str) -> str:
@@ -2636,18 +2404,11 @@ def _run_edit(target_type: str, action: str, target_id: str, patch: dict,
     # History events, their sections and people, office rows. The curator
     # checks below give the model specific guidance; the CommuLingo editorial
     # service re-checks integrity and owns the write.
-    with get_conn() as conn:
-        with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            error = _validate(cur, target_type, action, target_id, patch)
-            if error:
-                return error
-            cur.execute(
-                """SELECT id FROM commulingo_agent_suggestions
-                   WHERE target_type = %s AND target_id = %s AND action = %s AND status = 'pending'
-                   ORDER BY created_at DESC LIMIT 1""",
-                (target_type, target_id, action),
-            )
-            pending = cur.fetchone()
+    error = _validate(None, target_type, action, target_id, patch)
+    if error:
+        return error
+    pending = next((row for row in _reads.suggestions("pending", 20, target_type, target_id)
+                    if row.get("action") == action), None)
     try:
         result = call_person_service({"command": "submit", "target": target_type, "action": action,
             "id": target_id, "fields": patch, "sources": sources, "confidence": confidence,
@@ -3885,95 +3646,6 @@ COMMULINGO_GAP_REPORT_TOOL = {
 }
 
 
-_PAREN_RE = re.compile(r"[（(][^）)]*[)）]")
-
-
-def _label_variants(label: str) -> list[str]:
-    """The forms of a filed label worth looking up, most specific first.
-
-    Labels arrive as the event text writes them, and the dictionaries store
-    headwords. The two disagree in small ways that an exact match cannot see:
-    「소브나르호스(국민경제회의)」 is the entry `sovnarkhoz` plus its own alias in
-    brackets, 「식량 배급제 (프로드라즈베르스트카)」 is `prodrazvyorstka` behind a
-    gloss, 「국가비상사태위원회 (GKChP)」 is `gkchp` with the acronym spelled out.
-    Eleven of the twenty-two glossary gaps dismissed on 2026-08-09 were of this
-    shape, and each cost a full curator run to look up and reject.
-
-    So: the label itself, the label without its bracket, and the bracket's own
-    contents (often the registered alias), each also without spaces.
-    """
-    forms: list[str] = []
-    raw = (label or "").strip()
-    if not raw:
-        return forms
-    candidates = [raw, _PAREN_RE.sub(" ", raw).strip()]
-    candidates += [inner.strip() for inner in re.findall(r"[（(]([^）)]*)[)）]", raw)]
-    for candidate in candidates:
-        for form in (candidate, candidate.replace(" ", "")):
-            if form and form not in forms:
-                forms.append(form)
-    return forms
-
-
-_DOC_MANIFEST = str(COMMULINGO_DATA_DIR / "docs" / "manifest.json")
-# Document names are dressed in title marks that the same title wears
-# inconsistently: the manifest lists 「대전환의 해」 and 대전환의 해 as separate
-# aliases of one entry, and a curator writing a gap picks whichever its sentence
-# used. The marks carry no identity, so neither side keeps them.
-_DOC_TITLE_MARKS = dict.fromkeys(map(ord, "『』「」《》〈〉<>\"'“”‘’ "))
-_doc_index_cache: tuple[float, dict] = (0.0, {})
-
-
-def _doc_key(value: str) -> str:
-    return (value or "").strip().lower().translate(_DOC_TITLE_MARKS)
-
-
-def _doc_index() -> dict:
-    """Every name a published reference document answers to, mapped to its id.
-
-    Documents are the one dictionary that does not live in a table: they are
-    files listed in the frontend manifest. So the coverage check below had
-    nothing to ask and let every document gap through, and the queue collected
-    requests for documents already on the site — four of the thirty published by
-    2026-08-09 were sitting in it a second time.
-
-    Re-read when the file's mtime moves, which is exactly when a document is
-    published. A manifest that is missing or malformed yields no index, and the
-    gap is filed as before rather than lost.
-    """
-    global _doc_index_cache
-    try:
-        stamp = os.path.getmtime(_DOC_MANIFEST)
-    except OSError:
-        return {}
-    cached_stamp, cached = _doc_index_cache
-    if cached and stamp == cached_stamp:
-        return cached
-    try:
-        with open(_DOC_MANIFEST, encoding="utf-8") as handle:
-            docs = json.load(handle).get("docs") or []
-    except (OSError, ValueError):
-        logger.warning("commulingo doc manifest unreadable at %s", _DOC_MANIFEST)
-        return {}
-    index: dict = {}
-    for doc in docs:
-        doc_id = str(doc.get("id") or "").strip()
-        if not doc_id:
-            continue
-        names = [doc_id]
-        for field in ("title", "aliases"):
-            block = doc.get(field) or {}
-            for lang in ("ko", "en"):
-                value = block.get(lang)
-                names += value if isinstance(value, list) else [value or ""]
-        for name in names:
-            key = _doc_key(str(name))
-            if key:
-                index.setdefault(key, doc_id)
-    _doc_index_cache = (stamp, index)
-    return index
-
-
 def registered_event_labels() -> list[str]:
     """Event-dictionary titles as 'ko (en)', for prompts that must not re-register one.
 
@@ -3982,148 +3654,20 @@ def registered_event_labels() -> list[str]:
     at import time, so importing it from another lane would relabel that lane's
     writes.
     """
-    with get_conn() as conn:
-        with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute("SELECT title_ko, title_en FROM commulingo_history_events")
-            rows = cur.fetchall() or []
     labels = []
-    for row in rows:
-        ko = str(row.get("title_ko") or "").strip()
-        en = str(row.get("title_en") or "").strip()
+    for event in _reads.events():
+        ko = str(event["title"].get("ko") or "").strip()
+        en = str(event["title"].get("en") or "").strip()
         labels.append(f"{ko} ({en})" if ko and en else ko or en)
     return sorted(label for label in labels if label)
 
 
-def _already_covered(cur, kind: str, label: dict, target_id: str) -> str:
-    """The id of an existing entry this gap is asking for, or ''.
-
-    The event curator files gaps from what its own text leans on, and a good
-    section leans on plenty the dictionaries already have — the first day of the
-    lane queued 블라디미르 레닌 as a missing person. Each of those costs a full
-    curator run to look up and dismiss, so they are matched here, where the check
-    is one indexed query.
-    """
-    if target_id:
-        return ""  # an explicit target means "this exists but is too thin"
-    ko = (label.get("ko") or "").strip()
-    en = (label.get("en") or "").strip()
-    if not (ko or en):
-        return ""
-    if kind == "person":
-        sql = """SELECT p.id FROM commulingo_people p
-                  WHERE replace(lower(p.name_ko), ' ', '') = replace(lower(%(v)s), ' ', '')
-                     OR replace(lower(p.name_en), ' ', '') = replace(lower(%(v)s), ' ', '')
-                  UNION
-                 SELECT a.person_id FROM commulingo_person_aliases a
-                  WHERE replace(lower(a.alias), ' ', '') = replace(lower(%(v)s), ' ', '')
-                  LIMIT 1"""
-    elif kind == "term":
-        sql = """SELECT t.id FROM commulingo_terms t
-                  WHERE replace(lower(t.term_ko), ' ', '') = replace(lower(%(v)s), ' ', '')
-                     OR replace(lower(t.term_en), ' ', '') = replace(lower(%(v)s), ' ', '')
-                  UNION
-                 SELECT a.term_id FROM commulingo_term_aliases a
-                  WHERE replace(lower(a.alias), ' ', '') = replace(lower(%(v)s), ' ', '')
-                  LIMIT 1"""
-    elif kind == "doc":
-        sql = ""
-    else:
-        return ""
-
-    # A history event is not a glossary term. The event curator files its gaps
-    # from what its own prose calls things, so an event it narrates comes back as
-    # a missing concept: on 2026-08-09 「홀로도모르와 집단화 기근 (1932~1933)」 and
-    # 「소련-일본 국경 전쟁과 중립조약 (1938~1941)」 were registered as terms beside
-    # the events of the same name, and the reader got the same account twice in
-    # two dictionaries. The events dictionary is part of what "the site already
-    # covers this" means, so it is probed here too. The answer is returned as
-    # 'event:<id>' because the id names a row in another table, and callers write
-    # it into a resolution note rather than dereferencing it as a term.
-    event_sql = "" if kind != "term" else """
-        SELECT e.id FROM commulingo_history_events e
-         WHERE replace(lower(e.title_ko), ' ', '') = replace(lower(%(v)s), ' ', '')
-            OR replace(lower(e.title_en), ' ', '') = replace(lower(%(v)s), ' ', '')
-         LIMIT 1"""
-
-    if kind == "doc":
-        index = _doc_index()
-
-        def probe(value: str) -> str:
-            return index.get(_doc_key(value), "")
-    else:
-        def probe(value: str) -> str:
-            cur.execute(sql, {"v": value})
-            row = cur.fetchone()
-            if row:
-                return str(row["id"])
-            if not event_sql:
-                return ""
-            cur.execute(event_sql, {"v": value})
-            row = cur.fetchone()
-            return f"event:{row['id']}" if row else ""
-
-    # Try the whole label in either language first; only then the stripped forms,
-    # so an entry that matches outright always wins over one reached by peeling a
-    # bracket off. A hit from a stripped form has to agree across languages when
-    # both are given, because that is where a disambiguating bracket could
-    # otherwise collapse two entries into one (인민전선 (소련 말기) and the 1930s
-    # Popular Front are not the same entry).
-    for whole in (v for v in (ko, en) if v):
-        found = probe(whole)
-        if found:
-            return found
-    hits = {}
-    for lang, raw in (("ko", ko), ("en", en)):
-        for form in _label_variants(raw)[1:]:  # [0] is the whole label, tried above
-            found = probe(form)
-            if found:
-                hits[lang] = found
-                break
-    if len(hits) == 2:
-        return hits["ko"] if hits["ko"] == hits["en"] else ""
-    if len(hits) == 1 and not (ko and en):
-        return next(iter(hits.values()))
-    if len(hits) == 1:
-        # One language resolved and the other said nothing. Accept it only when
-        # the silent side has no headword of its own to contradict with.
-        lang, found = next(iter(hits.items()))
-        other = en if lang == "ko" else ko
-        return "" if probe(other) else found
-    return ""
-
-
 def _file_gaps(gaps: list, event_id: str) -> dict:
-    filed, duplicates, covered = [], [], []
-    with get_conn() as conn:
-        with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            for gap in gaps:
-                label = gap.get("label") or {}
-                existing = _already_covered(
-                    cur, gap["kind"], label, (gap.get("target_id") or "").strip()
-                )
-                if existing:
-                    covered.append(f"{label.get('ko') or label.get('en')} -> {existing}")
-                    continue
-                cur.execute(
-                    """INSERT INTO commulingo_curation_gaps
-                          (kind, event_id, target_id, label_ko, label_en, reason,
-                           priority, created_by)
-                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                       ON CONFLICT DO NOTHING
-                       RETURNING id""",
-                    (
-                        gap["kind"], event_id, (gap.get("target_id") or "").strip(),
-                        (label.get("ko") or "").strip(), (label.get("en") or "").strip(),
-                        (gap.get("reason") or "").strip(), int(gap.get("priority") or 0),
-                        _SUGGESTED_BY,
-                    ),
-                )
-                row = cur.fetchone()
-                # The partial unique index makes a re-file a no-op, which is the
-                # point: two sections of one event needing the same person must
-                # not queue that person twice.
-                (filed if row else duplicates).append(label.get("ko") or label.get("en") or "?")
-    return {"filed": filed, "already_queued": duplicates, "already_covered": covered}
+    """File through CommuLingo (admin MCP gap_file), which skips gaps its
+    dictionaries already cover (names, aliases, bracket variants, event titles
+    for terms, document titles) and re-files as no-ops."""
+    from commulingo.mcp_client import call_tool
+    return call_tool("gap_file", {"gaps": gaps, "eventId": event_id, "changedBy": _SUGGESTED_BY})
 
 
 async def _exec_commulingo_gap_report(gaps: list, event_id: str) -> str:

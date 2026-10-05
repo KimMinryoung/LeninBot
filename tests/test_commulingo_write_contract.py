@@ -1,8 +1,8 @@
 """Current author schemas and shared write validation, without live storage."""
 from copy import deepcopy
 import unittest
-from unittest.mock import Mock
-from commulingo_test_support import no_external_io
+from unittest.mock import patch
+from commulingo_test_support import FakeReads, no_external_io
 
 from commulingo.pipeline.decisions import Decisions
 from commulingo.pipeline.engine import Usage
@@ -12,8 +12,10 @@ from commulingo import people
 
 class WriteContractTests(unittest.TestCase):
     def setUp(self):
-        self.cursor = Mock()
-        self.cursor.fetchone.return_value = None
+        self.cursor = None
+        reads = patch.object(people, '_reads', FakeReads())
+        reads.start()
+        self.addCleanup(reads.stop)
         self.term = {
             'term': {'ko': '전시 공산주의', 'en': 'War communism'},
             'original': 'Военный коммунизм',
@@ -87,9 +89,11 @@ class WriteContractTests(unittest.TestCase):
                     self.assertIn('too long', people._validate(self.cursor, 'person', 'update', 'fixture', {field: value}))
 
     def test_section_duplicate_topics_and_length_are_rejected(self):
-        cursor = Mock()
-        cursor.fetchone.side_effect = lambda: None if 'WHERE person_id' in cursor.execute.call_args.args[0] else {'ok': 1}
-        cursor.fetchall.return_value = [{'slug': 'existing', 'heading_ko': '기존 제목', 'heading_en': 'Existing heading'}]
+        cursor = None
+        existing = {'sections': [{'slug': 'existing', 'heading': {'ko': '기존 제목', 'en': 'Existing heading'}}]}
+        reads = patch.object(people, '_reads', FakeReads(people={'fixture': existing}))
+        reads.start()
+        self.addCleanup(reads.stop)
         section = {'slug': 'new-section', 'heading': {'ko': '기존 제목', 'en': 'Existing heading'},
                    'body': {'ko': '본문', 'en': 'Body'}}
         self.assertIn('already covers this topic', people._validate(cursor, 'person_section', 'create', 'fixture', section))

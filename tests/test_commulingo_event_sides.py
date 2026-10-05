@@ -5,27 +5,14 @@ for. The writer refuses a side the event does not name, a side on an event
 without sides, and opponent on an event with sides.
 """
 import unittest
+from unittest.mock import patch as mock_patch
 
+from commulingo import people
 from commulingo.people import _validate_history_event_person
+from commulingo_test_support import FakeReads
 
 SIDES = [{'id': 'china', 'label': {'ko': '중국', 'en': 'China'}},
          {'id': 'vietnam', 'label': {'ko': '베트남', 'en': 'Vietnam'}}]
-
-
-class FakeCursor:
-    def __init__(self, sides):
-        self.sides, self.row = sides, None
-
-    def execute(self, sql, params=()):
-        if 'commulingo_history_events' in sql:
-            self.row = {'sides': self.sides}
-        elif 'commulingo_people' in sql:
-            self.row = {'?column?': 1}
-        else:
-            raise AssertionError(sql)
-
-    def fetchone(self):
-        return self.row
 
 
 def patch(**extra):
@@ -36,7 +23,9 @@ def patch(**extra):
 
 class EventSideValidationTests(unittest.TestCase):
     def check(self, sides, **extra):
-        return _validate_history_event_person(FakeCursor(sides), 'create', 'sino-vietnamese-war-1979', patch(**extra))
+        reads = FakeReads(events={'sino-vietnamese-war-1979': {'sides': sides}}, existing={'person': {'xu-shiyou'}})
+        with mock_patch.object(people, '_reads', reads):
+            return _validate_history_event_person(None, 'create', 'sino-vietnamese-war-1979', patch(**extra))
 
     def test_a_named_side_is_accepted(self):
         self.assertIsNone(self.check(SIDES, side='china'))

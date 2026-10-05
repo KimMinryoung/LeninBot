@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from commulingo import id_sync, people  # noqa: E402
+from commulingo_test_support import FakeReads  # noqa: E402
 
 
 class FakeCursor:
@@ -41,8 +42,9 @@ def fake_conn(cursor):
 
 class EventWritesThroughMcp(unittest.TestCase):
     def run_edit(self, result, pending=None, direct=True):
-        cursor = FakeCursor([pending] if pending else [])
-        with patch.object(people, "get_conn", fake_conn(cursor)), \
+        reads = FakeReads(suggestions=[{"id": pending["id"], "action": "create", "target_type": "history_event_person",
+                                        "target_id": "civil-war"}] if pending else [])
+        with patch.object(people, "_reads", reads), \
                 patch.object(people, "_validate", return_value=None), \
                 patch.object(people, "direct_apply_enabled", return_value=direct), \
                 patch.object(people, "call_person_service", return_value=result) as rpc:
@@ -68,15 +70,14 @@ class EventWritesThroughMcp(unittest.TestCase):
         self.assertIn("suggestion #40", message)
 
     def test_store_rejection_is_returned_to_the_model(self):
-        cursor = FakeCursor()
-        with patch.object(people, "get_conn", fake_conn(cursor)), \
+        with patch.object(people, "_reads", FakeReads()), \
                 patch.object(people, "_validate", return_value=None), \
                 patch.object(people, "call_person_service", side_effect=ValueError("400: side must be one of reds")):
             message = people._run_edit("history_event_person", "create", "civil-war", {}, [], None)
         self.assertEqual(message, "Error: 400: side must be one of reds")
 
     def test_curator_policy_runs_first(self):
-        with patch.object(people, "get_conn", fake_conn(FakeCursor())), \
+        with patch.object(people, "_reads", FakeReads()), \
                 patch.object(people, "_validate", return_value="Error: too long"), \
                 patch.object(people, "call_person_service") as rpc:
             self.assertEqual(people._run_edit("history_event", "update", "x", {}, [], None), "Error: too long")

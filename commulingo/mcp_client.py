@@ -65,15 +65,16 @@ def _reset(exc: Exception) -> bool:
     return isinstance(reason, (ConnectionResetError, http.client.RemoteDisconnected))
 
 
-def call_tool(name: str, arguments: dict | None = None, *, timeout: float = 120) -> dict:
-    """Call one MCP tool and return its structured result."""
+def call_tool(name: str, arguments: dict | None = None, *, timeout: float = 120, retry: bool = True) -> dict:
+    """Call one MCP tool and return its structured result. retry=False fails at once
+    (for callers that have a fallback, such as module-import registries)."""
     body = json.dumps({"jsonrpc": "2.0", "id": next(_ids), "method": "tools/call",
                        "params": {"name": name, "arguments": arguments or {}}}, ensure_ascii=False).encode()
     request = urllib.request.Request(
         os.environ.get("COMMULINGO_MCP_URL", DEFAULT_URL), data=body, method="POST",
         headers={"Content-Type": "application/json", "Accept": "application/json, text/event-stream",
                  "Authorization": f"Bearer {_token()}"})
-    for delay in (*REFUSED_RETRIES, None):
+    for delay in ((*REFUSED_RETRIES, None) if retry else (None,)):
         try:
             with urllib.request.urlopen(request, timeout=timeout) as response:
                 message = json.loads(response.read())
