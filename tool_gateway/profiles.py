@@ -58,6 +58,7 @@ TELEGRAM_ORCHESTRATOR_TOOLS = frozenset({
     "recall_experience",
     "save_self_analysis",
     "write_kg_structured",
+    "retract_kg_fact",
     "read_self",
     "route_task",
     "list_agent_tools",
@@ -206,6 +207,7 @@ MCP_FORBIDDEN_TOOL_NAMES = frozenset({
     "write_file",
     "write_kg",
     "write_kg_structured",
+    "retract_kg_fact",
 }) | COMMULINGO_NARROW_WRITE_TOOLS
 
 TOOL_PROFILES: dict[str, ToolProfile] = {

@@ -759,6 +759,29 @@ SELF_TOOLS = [
         },
     },
     {
+        "name": "retract_kg_fact",
+        "description": (
+            "Expire one wrong fact in the knowledge graph (not deleted: it leaves default search and keeps "
+            "your reason). Use only when a source shows the stored fact is false, misattributed, a duplicate "
+            "of another active fact, or not a fact about the world (e.g. a work note). Name the fact exactly "
+            "as knowledge_graph_search shows it: subject, predicate, object. If several active facts match, "
+            "the result lists them with edge_id; call again with the edge_id of the wrong one. Facts mirrored "
+            "from CommuLingo or published documents are refused, because the next sync restores them. "
+            "To correct, retract the wrong fact and write the right one with write_kg_structured."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "subject_name": {"type": "string", "description": "Subject exactly as search shows it."},
+                "predicate": {"type": "string", "description": "Predicate as shown, e.g. Involvement."},
+                "object_name": {"type": "string", "description": "Object exactly as search shows it."},
+                "reason": {"type": "string", "description": "Why it is wrong, with the source that contradicts it."},
+                "edge_id": {"type": "string", "description": "Only after an ambiguous result: the edge_id it listed."},
+            },
+            "required": ["subject_name", "predicate", "object_name", "reason"],
+        },
+    },
+    {
         "name": "delegate",
         "description": (
             "Dispatch an async task to one specialist agent. If routing is unclear, call "
@@ -2106,6 +2129,32 @@ async def _exec_write_kg_structured(
         return ToolFailure(f"Failed to store structured facts: {msg}", write_metadata)
 
 
+async def _exec_retract_kg_fact(
+    subject_name: str,
+    predicate: str,
+    object_name: str,
+    reason: str,
+    edge_id: str = "",
+) -> str:
+    """Expire one wrong agent-written KG fact (append-only retraction)."""
+    from provenance.runtime import get_provenance_buffer
+    from kg_runtime.writes import retract_kg_fact
+
+    buf = get_provenance_buffer()
+    result = await asyncio.to_thread(
+        retract_kg_fact,
+        subject_name=subject_name, predicate=predicate, object_name=object_name,
+        reason=reason, edge_id=edge_id,
+        agent=buf.agent if buf is not None else "agent",
+        task=buf.mission_id if buf is not None else None,
+    )
+    metadata = {"retract_status": result["status"]}
+    text = json.dumps(result, ensure_ascii=False, indent=2)
+    if result["status"] in {"retracted", "ambiguous"}:
+        return ToolResult(text, metadata)
+    return ToolFailure(text, metadata)
+
+
 def _compact_tool(tool: dict, *, include_descriptions: bool, include_schemas: bool) -> dict:
     item = {"name": tool.get("name", "")}
     if include_descriptions:
@@ -3428,6 +3477,7 @@ SELF_TOOL_HANDLERS = {
     "save_self_analysis": _exec_save_self_analysis,
     "write_kg": _exec_write_kg,
     "write_kg_structured": _exec_write_kg_structured,
+    "retract_kg_fact": _exec_retract_kg_fact,
     "delegate": _exec_delegate,
     "multi_delegate": _exec_multi_delegate,
     "route_task": _exec_route_task,

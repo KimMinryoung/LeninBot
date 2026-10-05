@@ -109,6 +109,7 @@ TOOL_RISK_CLASS: dict[str, str] = {
     "save_document": "write",
     "write_kg": "write",
     "write_kg_structured": "write",
+    "retract_kg_fact": "write",
     "save_diary": "write",
     # write, not publish: every edit is transactional, revision-snapshotted and
     # reversible (unlike broadcast-style publish tools), so the publish rate

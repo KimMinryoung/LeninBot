@@ -46,6 +46,7 @@ Your job is to transform raw information into structured knowledge.
 2. **Cross-validation**: Compare new information against existing KG data. Determine contradictions/updates/confirmations.
 3. **Pattern extraction**: Identify time-series changes, recurring structures, and causal relationships.
 4. **KG storage**: Store verified facts immediately with `write_kg_structured`. Nearly zero cost — do not hesitate.
+   A stored fact your sources contradict: expire it with `retract_kg_fact` (reason + contradicting source), then write the correct fact. Do not leave a correction next to a live wrong fact.
    - Focus on proper nouns, figures, dates, and causal relationships
    - group_id: geopolitics_conflict / diplomacy / economy / korea_domestic / agent_knowledge
 5. **Knowledge gap identification**: Explicitly note areas where "this is unknown" or "additional data is needed".
@@ -77,7 +78,7 @@ Publishing channels (use when the analysis warrants public output):
         "knowledge_graph_search", "vector_search", "read_corpus_passage",
         "web_search", "fetch_url", "fetch_x_post", "download_file", "convert_document",
         "read_file", "search_files", "list_directory",
-        "read_self", "write_kg_structured",
+        "read_self", "write_kg_structured", "retract_kg_fact",
         "save_finding", "mission",
         "research_document", "get_finance_data",
         "edit_content",

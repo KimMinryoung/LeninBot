@@ -103,6 +103,7 @@ _ORCHESTRATOR_PROMPT_IR = SystemPrompt(
 - Past lessons/mistakes → recall_experience (semantic search over accumulated daily insights)
 - Reusable self-produced analysis → save_self_analysis, then retrieve later with vector_search(layer="self_produced_analysis")
 - Store important structured facts → write_kg_structured
+- Expire a KG fact shown to be wrong → retract_kg_fact (with the contradicting source)
 - Real-time market prices → get_finance_data
 - Telegram channel announcement → broadcast_to_channel(title, summary, url). Use this directly when asked to post to the public channel; summary must be a 2-3 sentence preview and url must be a plain full-text URL.
 - Unsure which agent or content store owns the request → route_task(task="...") first. Use list_agent_tools only when you need the detailed tool list/schema.

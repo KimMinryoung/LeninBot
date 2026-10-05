@@ -14,7 +14,7 @@ Cyber-Lenin's knowledge graph is the **hub across the project's knowledge stores
 | Sync jobs | `jobs/kg_sync.py`, `jobs/kg_sync_commulingo.py`, `jobs/kg_sync_documents.py` | nightly mirrors with `kg_sync_state` watermarks |
 | Graph implementation | `graph_memory/service.py` | Graphiti initialization, Neo4j access, episode ingestion, hybrid search, post-episode cross-group merge |
 | Schema | `graph_memory/entities.py`, `edges.py`, `config.py`, `conformance.py`, `structured_writer.py` | entity/edge models, type mapping, sync-only subsets, deterministic structured writes, integrity checks |
-| Tool surface | `runtime_tools/registry.py` (`knowledge_graph_search`), `self_runtime/tools.py` (`write_kg_structured`) | agent-facing read/write |
+| Tool surface | `runtime_tools/registry.py` (`knowledge_graph_search`), `self_runtime/tools.py` (`write_kg_structured`, `retract_kg_fact`) | agent-facing read/write |
 
 New code should import from `kg_runtime/*` unless it is changing the KG implementation itself.
 
@@ -106,6 +106,7 @@ See `knowledge_graph_schema.md` for field-level schema details and the mirror ma
   the write: only lines that state a fact about the world (threshold `thresholds.keep`, default 0.8) are stored, at most 7, and a
   report that is all mailbox bookkeeping writes no episode. The group classifier then sees the kept facts, not the raw findings.
   When the judgement is unavailable every line is kept as before. Baseline: [Jev evaluation limits](jev_system_one_adoption.md#평가-근거와-한계).
+- **`retract_kg_fact`** (analyst, general, Telegram orchestrator; risk class `write`, MCP-forbidden): expires one active fact by subject/predicate/object as search shows them (`kg_runtime.writes.retract_kg_fact`). Nothing is deleted: `expired_at`, `retracted_reason`, `retracted_by`, `retracted_task` are set and `include_expired=True` still shows it. Several matches return candidates with an 8-character `edge_id` for a second call; facts with a `sync_key` (CommuLingo/document mirror) are refused because the next sync restores them; the reason must be at least 15 characters. Added 2026-10-06 after an analyst could only add a correction beside a wrong live fact.
 - `write_kg` (LLM extraction tool) stays deprecated.
 
 Typical `group_id` values for agent writes: `geopolitics_conflict`, `diplomacy`, `economy`, `korea_domestic`, `agent_knowledge`. Do not create diary-specific or project-specific groups for ordinary facts.
