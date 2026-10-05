@@ -106,14 +106,9 @@ def validate_fact(fact: dict, idx: int, *, allow_sync_predicates: bool = False) 
 
     # Common nouns and schema labels are not entities (2026-09-03: 국가/개인/
     # 경찰/Organization nodes from the first document extraction). Lazy import:
-    # kg_runtime.identity imports this module's schema helpers. A sync side with
-    # an external id is a source record, not a guessed name (2026-10-05: the
-    # CommuLingo term category "경제" rejected all 182 of its term edges).
+    # kg_runtime.identity imports this module's schema helpers.
     from kg_runtime.identity import is_generic_entity_name
-    for side in ("subject", "object"):
-        if allow_sync_predicates and fact.get(f"{side}_external_id"):
-            continue
-        side = f"{side}_name"
+    for side in ("subject_name", "object_name"):
         if is_generic_entity_name(fact[side]):
             return (f"fact[{idx}] {side} '{fact[side]}' is a generic noun or type label, not an entity; "
                     "name the concrete actor (person, organization, place, titled work) or drop the fact")

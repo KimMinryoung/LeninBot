@@ -77,7 +77,6 @@ def fixture(sync):
         terms=[{"id": "smoke-term", "term_ko": "스모크주의", "term_en": "Smokeism", "original": "Смоукизм",
                 "definition_ko": "스모크 테스트 용어.", "category": None, "parent_id": None}],
         term_aliases=[{"term_id": "smoke-term", "lang": "ko", "alias": "스모크 이론"}],
-        term_categories=[],
         term_relations=[],
         term_people=[{"term_id": "smoke-term", "person_id": "smoke-a"}],
         term_events=[{"term_id": "smoke-term", "event_id": "smoke-event", "same_subject": True}],

@@ -9,18 +9,19 @@ so re-runs are idempotent and full passes can expire vanished rows):
   commulingo:event:<id>          Incident   title_ko, summary_ko, period_label
   commulingo:location:<slug>     Location   event map pins (label.ko / label.en)
   commulingo:term:<id>           Concept    term_ko, aliases term_en/original/term_aliases
-  commulingo:term-category:<id>  Concept    term category (이념·이론 …)
 
   Person→Role       Affiliation   primary activity officeId, office_rows (valid_at/invalid_at)
   Person→Concept    Reference     people_group, person_term
   Person→Incident   Involvement   history_event_people (role_in_incident = relation_kind)
   Incident→Location Presence      history_events.locations
-  Concept→Concept   Reference     term_relations (related_term), parent_id (parent_term), category
+  Concept→Concept   Reference     term_relations (related_term), parent_id (parent_term)
   Concept→Incident  Reference     term_events (event_term)
 
 The legacy person role (role categories) was retired on 2026-09-30; the
 office lineage now comes from the primary activity's officeId, and the old
-person_role edges expire on the next full pass.
+person_role edges expire on the next full pass. Term categories were dropped
+on 2026-10-05: a category is a CommuLingo display grouping, not knowledge, and
+its generic labels (경제) fail validate_fact. Old category edges expire as stale.
 
 Career entries (17k free-text rows) are folded into the Person summary, not
 materialized as edges. ``commulingo_id_redirects`` are honoured: a node still
@@ -190,16 +191,6 @@ def people_group_side(g: dict) -> dict:
     }
 
 
-def term_category_side(c: dict) -> dict:
-    name = _clean(c.get("label_ko")) or _clean(c.get("label_en")) or c["id"]
-    return {
-        "name": name, "type": "Concept", "external_id": ext_id("term-category", c["id"]),
-        "aliases": [a for a in [_clean(c.get("label_en"))] if a and a != name],
-        "summary": f"CommuLingo 용어 범주: {name}",
-        "name_ko": _clean(c.get("label_ko")) or None, "name_en": _clean(c.get("label_en")) or None,
-    }
-
-
 def location_side(loc: dict) -> dict | None:
     label = loc.get("label") or {}
     if isinstance(label, str):
@@ -262,7 +253,6 @@ class Source:
         self.term_aliases: dict[str, list[str]] = {}
         for a in tables.get("term_aliases", []):
             self.term_aliases.setdefault(a["term_id"], []).append(_clean(a["alias"]))
-        self.term_categories = {c["id"]: c for c in tables.get("term_categories", [])}
         self.term_relations = tables.get("term_relations", [])
         self.term_people = tables.get("term_people", [])
         self.term_events = tables.get("term_events", [])
@@ -390,18 +380,11 @@ def build_facts(src: Source, *, changed: dict[str, set[str]] | None = None) -> l
             attributes={"role_in_incident": link.get("relation_kind") or relation, "relation_label": relation},
         ))
 
-    # terms → category, parent, related, people, events
+    # terms → parent, related, people, events
     for tid, t in src.terms.items():
         if not touched("term", tid):
             continue
         ts = src.term(tid)
-        cat = src.term_categories.get(t.get("category"))
-        if cat:
-            cs = term_category_side(cat)
-            facts.append(make_fact(
-                ts, "Reference", cs, f"{ts['name']}{josa(ts['name'], '은/는')} '{cs['name']}' 범주의 용어이다",
-                sync_key=sync_key("term_category", tid), attributes={"reference_type": "category"},
-            ))
         parent = src.term(t["parent_id"]) if t.get("parent_id") else None
         if parent:
             facts.append(make_fact(
@@ -465,7 +448,6 @@ def load_source() -> Source:
         event_people=d("event_people"),
         terms=d("terms"),
         term_aliases=d("term_aliases"),
-        term_categories=d("term_categories"),
         term_relations=d("term_relations"),
         term_people=d("term_people"),
         term_events=d("term_events"),

@@ -51,7 +51,6 @@ def _source():
                 "period_label": "1956", "definition_ko": "제20차 당대회 연설.", "category": "party-state", "parent_id": None},
                {"id": "thaw-term", "term_ko": "해빙", "term_en": "Thaw", "category": "party-state", "parent_id": "secret-speech"}],
         term_aliases=[{"term_id": "secret-speech", "lang": "ko", "alias": "흐루쇼프 비밀연설"}],
-        term_categories=[{"id": "party-state", "label_ko": "당·국가 기구", "label_en": "Party and state"}],
         term_relations=[{"term_id": "thaw-term", "related_id": "secret-speech"}],
         term_people=[{"term_id": "secret-speech", "person_id": "khrushchev"}],
         term_events=[{"term_id": "secret-speech", "event_id": "great-terror", "same_subject": False}],
@@ -106,12 +105,6 @@ class BuildFactsTests(unittest.TestCase):
         self.assertTrue(refs)
         self.assertIsNotNone(validate_fact(refs[0], 0))
 
-    def test_generic_named_source_record_passes_sync_validation_only(self):
-        cat = dict(self.by_key["commulingo:term_category:secret-speech"], object_name="경제")
-        self.assertIsNone(validate_fact(cat, 0, allow_sync_predicates=True))
-        self.assertIn("generic noun", validate_fact({**cat, "object_external_id": None}, 0,
-                                                    allow_sync_predicates=True) or "")
-
     def test_sync_keys_unique(self):
         keys = [f["attributes"]["sync_key"] for f in self.facts]
         self.assertEqual(len(keys), len(set(keys)))
@@ -144,9 +137,7 @@ class BuildFactsTests(unittest.TestCase):
         self.assertEqual(loc["attributes"]["presence_type"], "main")
 
     def test_term_links(self):
-        cat = self.by_key["commulingo:term_category:secret-speech"]
-        self.assertEqual(cat["attributes"]["reference_type"], "category")
-        self.assertEqual(cat["object_external_id"], "commulingo:term-category:party-state")
+        self.assertFalse([k for k in self.by_key if k.startswith("commulingo:term_category:")])
         parent = self.by_key["commulingo:term_parent:thaw-term"]
         self.assertEqual(parent["object_name"], "비밀연설")
         rel = self.by_key["commulingo:term_relation:thaw-term:secret-speech"]
@@ -171,7 +162,7 @@ class BuildFactsTests(unittest.TestCase):
         self.assertIn("commulingo:event_person:great-terror:yezhov", keys)
         self.assertIn("commulingo:person_office:yezhov:state-security", keys)
         self.assertNotIn("commulingo:office_row:2", keys)
-        self.assertNotIn("commulingo:term_category:secret-speech", keys)
+        self.assertNotIn("commulingo:term_parent:thaw-term", keys)
         self.assertEqual(sync.build_facts(self.src, changed={"person": set(), "event": set(), "term": set(), "office": set()}), [])
 
 

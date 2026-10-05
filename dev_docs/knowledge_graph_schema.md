@@ -61,7 +61,7 @@ graphiti 기본 속성(`uuid`, `name`, `summary`, `group_id`, `created_at`, `nam
 | **Participation** | Person/Org → Campaign | 캠페인 참여 (주도, 수행, 지원, 반대, 자금조달 등) | `role`, `contribution`, `commitment_level` |
 | **Statement** | Entity → Entity | 발화, 성명, 발표, 비판, 저술, 공개 주장 | `statement_type`, `medium`, `audience`, `statement_date`, `verbatim_excerpt` |
 | **Causation** | Entity → Entity | 원인, 기여요인, 촉발, 가속, 완화 같은 분석적 인과 관계 | `causal_type`, `confidence`, `mechanism`, `evidence_basis` |
-| **Reference** (동기화 전용) | Document → Entity / Concept ↔ Concept / Person·Organization → Concept / Concept → Incident·Campaign·Person / Incident → Concept | 문서·큐레이션 참조. `reference_type` ∈ about, mentions, collection, related_term, parent_term, category, person_term, event_term, people_group. `validate_fact(allow_sync_predicates=True)`로만 통과 (`REFERENCE_EDGE_PAIRS`, `sync_predicate_allowed`) | `reference_type`, `note` |
+| **Reference** (동기화 전용) | Document → Entity / Concept ↔ Concept / Person·Organization → Concept / Concept → Incident·Campaign·Person / Incident → Concept | 문서·큐레이션 참조. `reference_type` ∈ about, mentions, collection, related_term, parent_term, person_term, event_term, people_group. `validate_fact(allow_sync_predicates=True)`로만 통과 (`REFERENCE_EDGE_PAIRS`, `sync_predicate_allowed`) | `reference_type`, `note` |
 
 모든 동기화 엣지는 `attributes.sync_key`(예: `commulingo:event_person:<event>:<person>`, `doc:research:<slug>:mention:<uuid8>`)를 갖고, 문서 유래 엣지는 `attributes.doc_ref`도 갖는다. 재실행은 sync_key로 멱등이며, 사라진 원본 행은 `expired_at`으로 만료된다(삭제 안 함).
 
@@ -117,7 +117,7 @@ graphiti 기본 속성(`uuid`, `name`, `summary`, `group_id`, `created_at`, `nam
 | commulingo_people | Person (name=name_ko, aliases=name_en·cyrillic·person_aliases, summary=별칭·생몰·bio·주요 경력 6줄) | Person→Role(기관 계보, 대표 활동의 officeId) Affiliation, Person→Concept(시대 그룹) Reference(people_group) |
 | commulingo_offices / office_rows | Role | Person→Role Affiliation (`valid_at`/`invalid_at` = 재임 연도, attributes.position) |
 | commulingo_history_events / event_people / locations | Incident, Location | Person→Incident Involvement (role_in_incident=relation_kind), Incident→Location Presence |
-| commulingo_terms / term_* | Concept | Concept→Concept Reference(category·parent_term·related_term), Person→Concept Reference(person_term), Concept→Incident Reference(event_term) |
+| commulingo_terms / term_* | Concept | Concept→Concept Reference(parent_term·related_term) (용어 범주는 2026-10-05부터 미러링 안 함), Person→Concept Reference(person_term), Concept→Incident Reference(event_term) |
 | research_documents(public) / archival manifest / autonomous_project_notes(synthesis) | Document | Document→Concept Reference(collection), Document→Entity Reference(about: manifest 큐레이션 링크, mentions: 별칭 인덱스 매칭·LLM 추출 엔티티), LLM 추출 fact(`KG_DOC_EXTRACT_LLM=1`, attributes.doc_ref) |
 
 경력 17k행은 엣지가 아니라 Person summary에 접힌다. `commulingo_id_redirects`는 병합(`merge_entity_nodes_sync`) 또는 external_ids 추가로 반영된다.
