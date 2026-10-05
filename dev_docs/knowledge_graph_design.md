@@ -88,7 +88,7 @@ Every Entity may carry `external_ids`, `aliases`, `alias_keys`, `name_ko`, `name
 
 Primary entity types: `Person`, `Organization`, `Location`, `Asset`, `Incident`, `Policy`, `Campaign`, `Concept`, `Role`, `Industry`, plus the sync-only `Document`.
 
-Primary relation predicates: `Affiliation`, `PersonalRelation`, `OrgRelation`, `Funding`, `AssetTransfer`, `ThreatAction`, `Involvement`, `Presence`, `PolicyEffect`, `Participation`, `Statement`, `Causation`, plus the sync-only `Reference` (`reference_type` = about / mentions / collection / related_term / parent_term / person_term / event_term / people_group).
+Primary relation predicates: `Affiliation`, `PersonalRelation`, `OrgRelation`, `Funding`, `AssetTransfer`, `ThreatAction`, `Involvement`, `Presence`, `PolicyEffect`, `Participation`, `Statement`, `Causation`, plus the sync-only `Reference` (`reference_type` = about / mentions / collection / related_term / parent_term / person_term / event_term).
 
 The edge compatibility map lives in `graph_memory/config.py` as `EDGE_TYPE_MAP` (unchanged, handed to the graphiti extractor). `Reference` pairs live separately in `REFERENCE_EDGE_PAIRS` / `sync_predicate_allowed()`. `SYNC_ONLY_ENTITY_TYPES` / `SYNC_ONLY_PREDICATES` are removed from the extractor schema (`service.EXTRACTION_ENTITY_TYPES` / `EXTRACTION_EDGE_TYPES`) and from `validate_fact` unless `allow_sync_predicates=True`. The conformance gate knows the same rule.
 

@@ -35,8 +35,6 @@ def _source():
                         {"person_id": "khrushchev", "lang": "ko", "alias": "흐루쇼프"}],
         career=[{"person_id": "khrushchev", "sort_order": 0, "start_year": 1953, "end_year": 1964, "role_ko": "제1서기"},
                 {"person_id": "khrushchev", "sort_order": 1, "start_year": 1958, "end_year": 1964, "role_ko": "각료회의 의장"}],
-        people_groups=[{"id": "thaw", "range_label": "1953–1985", "title_ko": "해빙과 정체의 사람들", "title_en": "People of the thaw"},
-                       {"id": "stalin-era", "range_label": "1929–1953", "title_ko": "스탈린 시대의 사람들", "title_en": "Stalin era"}],
         offices=[{"id": "party-leadership", "title_ko": "당 지도부", "title_en": "Party leadership", "blurb_ko": "서기장 계보"},
                  {"id": "state-security", "title_ko": "국가보안 기관", "title_en": "State security agencies"}],
         office_rows=[{"id": 2, "office_id": "party-leadership", "start_year": 1953,
@@ -115,7 +113,6 @@ class BuildFactsTests(unittest.TestCase):
             self.assertTrue(any(
                 f.get("subject_external_id") == ext or f.get("object_external_id") == ext for f in self.facts
             ), pid)
-        # person with no group/role/office gets the collection fallback
         self.assertIn("commulingo:person_collection:lonely", self.by_key)
 
     def test_office_row_dated_affiliation(self):
@@ -149,12 +146,12 @@ class BuildFactsTests(unittest.TestCase):
         self.assertEqual((te["subject_type"], te["object_type"]), ("Concept", "Incident"))
         self.assertIs(te["attributes"]["same_subject"], False)
 
-    def test_people_group_reference(self):
-        f = self.by_key["commulingo:person_group:khrushchev"]
-        self.assertEqual(f["object_external_id"], "commulingo:people-group:thaw")
-        self.assertEqual(f["object_name"], "해빙과 정체의 사람들")
-        self.assertIn("니키타 흐루쇼프는 CommuLingo 인물사전의 '해빙과 정체의 사람들' (1953–1985)", f["fact"])
-        self.assertEqual(f["attributes"]["reference_type"], "people_group")
+    def test_people_collection_reference(self):
+        self.assertFalse([k for k in self.by_key if k.startswith("commulingo:person_group:")])
+        f = self.by_key["commulingo:person_collection:khrushchev"]
+        self.assertEqual(f["object_external_id"], "commulingo:collection:people")
+        self.assertEqual(f["fact"], "니키타 흐루쇼프는 CommuLingo 인물사전에 수록되어 있다")
+        self.assertEqual(f["attributes"]["reference_type"], "collection")
 
     def test_incremental_filter(self):
         facts = sync.build_facts(self.src, changed={"person": {"yezhov"}, "event": set(), "term": set(), "office": set()})

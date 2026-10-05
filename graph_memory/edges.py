@@ -444,15 +444,15 @@ class Reference(BaseModel):
     문서·큐레이션 참조 관계. 저장소 미러 잡만 쓴다 (툴/추출 비노출).
 
     - Document → Entity: 문서가 엔티티를 다룸/언급 (about | mentions)
-    - Concept ↔ Concept: 용어 상호 참조, 상위 용어 (related_term | parent_term | category)
-    - Person → Concept: 용어와 연관된 인물 (person_term), 시대 그룹 (people_group)
+    - Concept ↔ Concept: 용어 상호 참조, 상위 용어 (related_term | parent_term)
+    - Person → Concept: 용어와 연관된 인물 (person_term), 인물사전 수록 (collection)
     - Concept → Incident: 용어와 연관된 사건 (event_term)
     """
     reference_type: Optional[str] = Field(
         None,
         description=(
-            "about / mentions / related_term / parent_term / category / "
-            "person_term / event_term / people_group"
+            "about / mentions / collection / related_term / parent_term / "
+            "person_term / event_term"
         )
     )
     note: Optional[str] = Field(

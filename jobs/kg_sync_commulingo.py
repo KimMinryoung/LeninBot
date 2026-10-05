@@ -5,13 +5,13 @@ so re-runs are idempotent and full passes can expire vanished rows):
 
   commulingo:person:<id>         Person     name=name_ko, aliases=name_en/cyrillic/person_aliases
   commulingo:office:<id>         Role       title_ko (office lineage, e.g. 국가보안 기관)
-  commulingo:people-group:<id>   Concept    era group (스탈린 시대의 사람들 …)
+  commulingo:collection:people   Concept    CommuLingo 인물사전 (every person)
   commulingo:event:<id>          Incident   title_ko, summary_ko, period_label
   commulingo:location:<slug>     Location   event map pins (label.ko / label.en)
   commulingo:term:<id>           Concept    term_ko, aliases term_en/original/term_aliases
 
   Person→Role       Affiliation   primary activity officeId, office_rows (valid_at/invalid_at)
-  Person→Concept    Reference     people_group, person_term
+  Person→Concept    Reference     collection (인물사전), person_term
   Person→Incident   Involvement   history_event_people (role_in_incident = relation_kind)
   Incident→Location Presence      history_events.locations
   Concept→Concept   Reference     term_relations (related_term), parent_id (parent_term)
@@ -21,7 +21,8 @@ The legacy person role (role categories) was retired on 2026-09-30; the
 office lineage now comes from the primary activity's officeId, and the old
 person_role edges expire on the next full pass. Term categories were dropped
 on 2026-10-05: a category is a CommuLingo display grouping, not knowledge, and
-its generic labels (경제) fail validate_fact. Old category edges expire as stale.
+its generic labels (경제) fail validate_fact. Era groups (스탈린 시대의 사람들 …)
+went the same way; every person now references the 인물사전 collection instead.
 
 Career entries (17k free-text rows) are folded into the Person summary, not
 materialized as edges. ``commulingo_id_redirects`` are honoured: a node still
@@ -180,17 +181,6 @@ def primary_office_id(p: dict) -> str | None:
     return None
 
 
-def people_group_side(g: dict) -> dict:
-    name = _clean(g.get("title_ko")) or _clean(g.get("title_en")) or g["id"]
-    period = _clean(g.get("range_label"))
-    return {
-        "name": name, "type": "Concept", "external_id": ext_id("people-group", g["id"]),
-        "aliases": [a for a in [_clean(g.get("title_en"))] if a and a != name],
-        "summary": _truncate(((period + ". ") if period else "") + _clean(g.get("blurb_ko") or g.get("blurb_en"))),
-        "name_ko": _clean(g.get("title_ko")) or None, "name_en": _clean(g.get("title_en")) or None,
-    }
-
-
 def location_side(loc: dict) -> dict | None:
     label = loc.get("label") or {}
     if isinstance(label, str):
@@ -244,7 +234,6 @@ class Source:
         self.career: dict[str, list[dict]] = {}
         for c in sorted(tables.get("career", []), key=lambda r: (r.get("sort_order") or 0)):
             self.career.setdefault(c["person_id"], []).append(c)
-        self.groups = {g["id"]: g for g in tables.get("people_groups", [])}
         self.offices = {o["id"]: o for o in tables.get("offices", [])}
         self.office_rows = tables.get("office_rows", [])
         self.events = {e["id"]: e for e in tables.get("events", [])}
@@ -280,12 +269,11 @@ def build_facts(src: Source, *, changed: dict[str, set[str]] | None = None) -> l
 
     facts: list[dict] = []
 
-    # people → office lineage (primary activity) / era group
+    # people → office lineage (primary activity) / 인물사전 collection
     for pid, p in src.people.items():
         if not touched("person", pid):
             continue
         ps = src.person(pid)
-        produced = 0
         office = src.offices.get(primary_office_id(p))
         if office:
             facts.append(make_fact(
@@ -294,28 +282,16 @@ def build_facts(src: Source, *, changed: dict[str, set[str]] | None = None) -> l
                 sync_key=sync_key("person_office", pid, office['id']),
                 attributes={"affiliation_type": "office_lineage"},
             ))
-            produced += 1
-        group = src.groups.get(p.get("group_id"))
-        if group:
-            gs = people_group_side(group)
-            facts.append(make_fact(
-                ps, "Reference", gs,
-                f"{ps['name']}{josa(ps['name'], '은/는')} CommuLingo 인물사전의 '{gs['name']}' ({_clean(group.get('range_label'))}) 그룹에 수록되어 있다",
-                sync_key=sync_key("person_group", pid),
-                attributes={"reference_type": "people_group"},
-            ))
-            produced += 1
-        if produced == 0:
-            facts.append(make_fact(
-                ps, "Reference",
-                {"name": "CommuLingo 인물사전", "type": "Concept",
-                 "external_id": ext_id("collection", "people"), "aliases": ["CommuLingo people"],
-                 "summary": "cyber-lenin.com CommuLingo 인물사전 수록 인물", "name_ko": "CommuLingo 인물사전",
-                 "name_en": "CommuLingo people"},
-                f"{ps['name']}{josa(ps['name'], '은/는')} CommuLingo 인물사전에 수록되어 있다",
-                sync_key=sync_key("person_collection", pid),
-                attributes={"reference_type": "people_group"},
-            ))
+        facts.append(make_fact(
+            ps, "Reference",
+            {"name": "CommuLingo 인물사전", "type": "Concept",
+             "external_id": ext_id("collection", "people"), "aliases": ["CommuLingo people"],
+             "summary": "cyber-lenin.com CommuLingo 인물사전 수록 인물", "name_ko": "CommuLingo 인물사전",
+             "name_en": "CommuLingo people"},
+            f"{ps['name']}{josa(ps['name'], '은/는')} CommuLingo 인물사전에 수록되어 있다",
+            sync_key=sync_key("person_collection", pid),
+            attributes={"reference_type": "collection"},
+        ))
 
     # office rows → dated Person→Role affiliations
     for row in src.office_rows:
@@ -441,7 +417,6 @@ def load_source() -> Source:
         people=d("people"),
         person_aliases=d("person_aliases"),
         career=d("career"),
-        people_groups=d("people_groups"),
         offices=d("offices"),
         office_rows=d("office_rows"),
         events=d("events"),
