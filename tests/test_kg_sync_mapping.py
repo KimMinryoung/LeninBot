@@ -106,6 +106,12 @@ class BuildFactsTests(unittest.TestCase):
         self.assertTrue(refs)
         self.assertIsNotNone(validate_fact(refs[0], 0))
 
+    def test_generic_named_source_record_passes_sync_validation_only(self):
+        cat = dict(self.by_key["commulingo:term_category:secret-speech"], object_name="경제")
+        self.assertIsNone(validate_fact(cat, 0, allow_sync_predicates=True))
+        self.assertIn("generic noun", validate_fact({**cat, "object_external_id": None}, 0,
+                                                    allow_sync_predicates=True) or "")
+
     def test_sync_keys_unique(self):
         keys = [f["attributes"]["sync_key"] for f in self.facts]
         self.assertEqual(len(keys), len(set(keys)))
