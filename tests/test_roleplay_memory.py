@@ -180,12 +180,12 @@ class RoleplayMemoryTests(unittest.TestCase):
     def test_dictionary_link_validation_and_removal(self):
         with self.owner():
             memory.roleplay_person('save', 'rodos', changes={'name': '로도스', 'observed': '역할극 사건'})
-            with patch('db.query_one', return_value={'id': 'boris-rodos'}) as query:
+            with patch('commulingo.reads.reads.exists', return_value=True) as exists:
                 result = json.loads(memory.roleplay_person('save', 'rodos', changes={'commulingo_id': 'boris-rodos'}))
-                self.assertEqual(query.call_args.args[1], ('boris-rodos',))
+                self.assertEqual(exists.call_args.args, ('person', 'boris-rodos'))
             self.assertEqual(result['commulingo_url'], 'https://cyber-lenin.com/commulingo/people/boris-rodos')
             self.assertEqual(memory.people_context(1, [])['index'][0]['commulingo_id'], 'boris-rodos')
-            with patch('db.query_one', return_value=None):
+            with patch('commulingo.reads.reads.exists', return_value=False):
                 with self.assertRaises(ValueError):
                     memory.roleplay_person('save', 'rodos', changes={'commulingo_id': 'missing', 'observed': '덮어쓰기'})
             saved = memory.load_people(1)[0]

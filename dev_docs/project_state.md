@@ -63,8 +63,7 @@ systemd timers
         |-- leninbot-kg-integrity.timer -> scripts/check_kg_integrity.py
         |-- research-document-translation.timer -> scripts/run_translation_batch.py -> research/DB translation scripts
         |-- leninbot-email-poller.timer -> scripts/email_poll_once.py
-        |-- leninbot-commulingo-pipeline.timer -> scripts/commulingo_pipeline.py tick (durable people/term stages)
-        |-- (no timer) leninbot-commulingo-{maintainer,new,enrich,terms,gap}.service -> manual-start legacy lanes
+        |-- leninbot-worker.service -> worker/service.py (agent tasks queued over /worker/mcp, e.g. the frontend CommuLingo pipeline)
 
 developer MCP clients
         |
@@ -105,15 +104,9 @@ Nginx·프런트엔드의 역방향 HTTP 프록시와 내부 서비스 게이트
 | `leninbot-autonomous.service` | `venv/bin/python -m jobs.autonomous_project` | one autonomous project tick |
 | `leninbot-experience.service` | `jobs/experience_writer.py` | daily experience memory write |
 | `leninbot-kg-integrity.service` | `scripts/check_kg_integrity.py` | KG maintenance check |
+| `leninbot-worker.service` | `python -m worker.service` | 상시. 다른 서비스가 `/worker/mcp`(leninbot-api)로 맡긴 에이전트 작업 실행. CommuLingo 보강 세션 포함([agent_worker.md](agent_worker.md)) |
 | `leninbot-kg-sync.service` | `python -m jobs.kg_sync --source commulingo,documents --documents-limit 40 --notify-on-error` | nightly 04:00 KST — CommuLingo·발행 문서를 KG로 미러 (결정적 관계는 매일 전체 대조, 문서 LLM 추출은 본문 해시 기준 증분) |
 | `leninbot-kg-report.service` | `scripts/kg_weekly_report.py --notify` | Mon 09:30 KST — KG 건강 리포트 (성장·중복·동기화 지연·검색 사용량) |
-| `leninbot-commulingo-review.service` | `scripts/commulingo_person_reviewer.py` | 독립 timer는 비활성. pipeline이 공통 검토 함수를 사용하며 `/commulingo_review`는 수동 조회·처리용 |
-| `leninbot-commulingo-pipeline.service` | `scripts/commulingo_pipeline.py tick` | 대상별 보강 묶음과 최대 12단계 연속 실행; live 반영(건수 제한 없음)·일일 공용 예산은 `config/commulingo_pipeline.json` |
-| `leninbot-commulingo-maintainer.service` | `scripts/commulingo_people_maintainer.py` | 수동 실행 전용(timer 없음). one sourced CommuLingo edit or pending review. 2026-09-20 daily batch 폐지 뒤 pipeline이 정기 편집을 맡는다 |
-| `leninbot-commulingo-new.service` | `scripts/commulingo_people_parallel.py --mode new` | 수동 실행 전용(timer 없음). new-person discovery/create lane |
-| `leninbot-commulingo-enrich.service` | `scripts/commulingo_people_parallel.py --mode enrich` | 수동 실행 전용(timer 없음). existing-person enrichment lane |
-| `leninbot-commulingo-terms.service` | `scripts/commulingo_terms_maintainer.py` | 수동 실행 전용(timer 없음). glossary-term creation lane |
-| `leninbot-commulingo-gap.service` | `scripts/commulingo_gap_worker.py` | 수동 실행 전용(timer 없음). curation gap queue lane |
 
 Dependency direction is simple: `leninbot-llm-proxy.service` waits for network-online and a credential-complete `/health`, then every LLM-consuming unit starts after it; Neo4j/Redis and embedding also start before Telegram/API; browser starts after Telegram. API can optionally run Telegram in-process only when `RUN_TELEGRAM_IN_API=true`, but production uses the dedicated Telegram unit.
 
@@ -169,7 +162,7 @@ Current default chunking for new corpus ingestion is language-specific in `corpu
 | KG implementation | `graph_memory/service.py`, `graph_memory/entities.py`, `graph_memory/edges.py`, `graph_memory/structured_writer.py` |
 | Public content | `publishing/research_store.py`, `publishing/site_publishing.py`, `publishing/publication_records.py`, `publishing/research.py`, `publishing/post_edit.py`, `api_routes/private_reports.py` (JSON), frontend `/admin/private-reports` shell |
 | Hub 큐레이션 (`/curate`) | `telegram/curate.py` (URL 정규화·중복 검사·태스크 등록, 쓰기 경계 검증 래퍼, 결정적 결과 DM), `agents/hub_curator.py` (DeepSeek V4.1 Flash 작성자 스펙, `CURATION_LIMITS` 단일 출처), `publishing/site_publishing.py` (`publish_hub_curation` 툴, `hub_curations` 테이블) |
-| CommuLingo 인물·용어 사전 | `commulingo/people.py` (read + six target-specific narrow writes; shared normalization, structured errors; direct/staging switch in `config/commulingo_people.json`), `tool_gateway/profiles.py` + `agents/analyst.py` (Telegram direct/delegated narrow-write surfaces), `agents/commulingo_curator.py` + `scripts/commulingo_people_maintainer.py` / `scripts/commulingo_terms_maintainer.py` (typed discovery and stage-scoped scheduled direct maintenance; 레인 공용 설정·카운터·단계 실행기는 `commulingo/lane.py`, 인물 레인 선택·프롬프트·`run_once`는 `commulingo/people_lane.py`), `scripts/commulingo_suggestions.py` (staging 리뷰 CLI). 인물/절 저장·승인은 frontend 공통 서비스의 Docker RPC를 사용한다. 필수 버전·근거·검토·보강 상태는 [인물 편집 계약](commulingo_editorial.md), 데이터/렌더링은 별도 저장소 `/home/grass/frontend/dev_docs/commulingo_people_handoff.md` 참고 |
+| CommuLingo 인물·용어 사전 | `commulingo/people.py` (read + target-specific narrow writes; shared normalization, structured errors; direct/staging switch in `config/commulingo_people.json`), `tool_gateway/profiles.py` + `agents/analyst.py` (Telegram direct/delegated narrow-write surfaces), `scripts/commulingo_suggestions.py`·`/commulingo_review` (staging 리뷰). CommuLingo는 별개 서비스다: 읽기는 `commulingo/reads.py`, 쓰기는 `commulingo/person_service.py`가 frontend 관리자 MCP(`commulingo/mcp_client.py`)로 한다. 보강 파이프라인은 frontend가 운영하고 leninbot은 세션 일꾼만 맡는다([commulingo_pipeline.md](commulingo_pipeline.md), [agent_worker.md](agent_worker.md)). 필수 버전·근거·검토·보강 상태는 [인물 편집 계약](commulingo_editorial.md), 데이터/렌더링은 별도 저장소 `/home/grass/frontend/dev_docs/commulingo-admin-mcp.md` 참고 |
 | 웹 검색 gateway | `leninbot-web-gateway.service` (`127.0.0.1:8111`) owns Tavily/Brave keys, routing, cache/coalescing and the $10/UTC-day budget. `runtime_tools/web_search.py` and paid `content_fetch/urls.py` extraction use `web_gateway/client.py`; no direct-provider fallback. Policy: `config/web_research.json`; private ledger: `/var/lib/leninbot-web-gateway/usage.sqlite3`. See [web_research.md](web_research.md). |
 | Admin user API routes | `api_routes/admin_users.py` |
 | Chat history/API routes | `api_routes/chat_history.py`, `services/chat_history_sanitize.py`, `services/web_chat.py` |
@@ -202,7 +195,7 @@ Current default chunking for new corpus ingestion is language-specific in `corpu
 
 ## Design Notes
 
-- **도메인 패키지 (2026-09-25 정리)**: CommuLingo 코드는 `commulingo/`(편집 도구·레인·조사 기억·`pipeline/`), 공개 콘텐츠는 `publishing/`(보고서 저장소·게시·검토, 정적 페이지, 게시물 편집, 비공개 보고서, 게시 기록, 자율 게시 통제, Cloudflare 퍼지, 채널 방송), 역할극 봇은 `roleplay/`, 사료 번역과 번역 메모리는 `translation_runtime/`, 메일 도구는 `mail_runtime/`에 있다. `runtime_tools/`는 전역 도구 등록(`registry.py`)과 도메인에 속하지 않는 범용 도구만 둔다. 소유자 채팅 루프는 `telegram/chat_runtime.py`이며, 라이브러리 코드는 `telegram.bot` 진입점을 import하지 않는다. 그 밖에 `task_store`는 `telegram/`, `redis_state`는 `memory_store/`, `prompt_context`·`skills_loader`는 `llm/`, `audit_sink`는 `ops/`, `self_modification_core`는 `self_runtime/`에 있다. 옛 경로의 호환 shim은 없으므로 import와 patch 대상은 패키지 경로를 쓴다. 루트에 남은 Python 모듈은 `bot_config`, `db`, `secrets_loader`, `shared`뿐이다. 라이브러리 패키지는 `scripts/`를 import하지 않는다.
+- **도메인 패키지 (2026-09-25 정리)**: CommuLingo 코드는 `commulingo/`(큐레이터 도구·MCP 클라이언트·일꾼 세션 `pipeline/`), 공개 콘텐츠는 `publishing/`(보고서 저장소·게시·검토, 정적 페이지, 게시물 편집, 비공개 보고서, 게시 기록, 자율 게시 통제, Cloudflare 퍼지, 채널 방송), 역할극 봇은 `roleplay/`, 사료 번역과 번역 메모리는 `translation_runtime/`, 메일 도구는 `mail_runtime/`에 있다. `runtime_tools/`는 전역 도구 등록(`registry.py`)과 도메인에 속하지 않는 범용 도구만 둔다. 소유자 채팅 루프는 `telegram/chat_runtime.py`이며, 라이브러리 코드는 `telegram.bot` 진입점을 import하지 않는다. 그 밖에 `task_store`는 `telegram/`, `redis_state`는 `memory_store/`, `prompt_context`·`skills_loader`는 `llm/`, `audit_sink`는 `ops/`, `self_modification_core`는 `self_runtime/`에 있다. 옛 경로의 호환 shim은 없으므로 import와 patch 대상은 패키지 경로를 쓴다. 루트에 남은 Python 모듈은 `bot_config`, `db`, `secrets_loader`, `shared`뿐이다. 라이브러리 패키지는 `scripts/`를 import하지 않는다.
 - **알고 유지하는 것**: `bot_config.ANTHROPIC_CLIENT_KEY`/`MOONSHOT_CLIENT_KEY`는 쓰는 곳이 없지만 OPENAI/DEEPSEEK 쪽과 모양을 맞추려고 둔다. `bot_config.set_gateway_enforce_mode`는 코드 호출부가 없지만 `security_gateway.md`의 운영 진입점이다. `_slice_text`(`self_runtime/tools.py`, `mcp_gateway/tools.py`)는 offset이 길이를 넘을 때 반환 위치가 달라 합치지 않았다. standby 백업·복원 스크립트(`scripts/backup_*_to_r2.py`, `scripts/restore_db.py`)는 독립 실행을 위해 `KST`를 자체 정의한다.
 - Telegram is the only full orchestrator path. Web chat has a narrower tool set and separate webchat provider settings.
 - **Hub 큐레이션 `/curate` (2026-09-06)**: 소유자가 Telegram 봇 DM에 `/curate <url> [메모]`를 보내면 `telegram/curate.py`가 SSRF 검사·`hub_curations` 중복 검사(추적 파라미터·www·끝 슬래시 정규화) 후 `telegram_tasks`에 `agent_type="hub_curator"` 행을 넣는다. 일반 태스크 워커가 `agents/hub_curator.py`(DeepSeek V4.1 Flash, terminal=`publish_hub_curation`)를 실행하고, 완료 시 오케스트레이터 LLM 보고 대신 DB 행 존재 여부로 판정한 결정적 DM(`report_curation_outcome`)을 보낸다. 자유 대화 오케스트레이터에는 publish 툴을 노출하지 않고 `/curate`로 안내만 한다. 발행 시 `maybe_broadcast_autonomous_publication`이 그대로 동작하므로 `TELEGRAM_BROADCAST_SITE_ENABLED`가 켜져 있으면 확성기 채널에도 알림이 나간다.

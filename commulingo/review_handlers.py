@@ -1,5 +1,5 @@
 """Review risk flags and the tool-handler wrapper shared by the standalone
-reviewer (``scripts/commulingo_person_reviewer.py``) and the staged pipeline."""
+reviewer (retired 2026-10-05) and the review session the agent worker runs for the frontend pipeline."""
 import re
 
 from commulingo.review_policy import (

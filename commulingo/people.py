@@ -2328,21 +2328,17 @@ def _run_edit(target_type: str, action: str, target_id: str, patch: dict,
             return "Error: activity classification needs cited bio/career evidence with source, locator, claim and excerpt; if already provided, retry the saved draft after the classifier recovers."
         patch = fill_term_category(patch, classification)
     if target_type=='term':
-        from commulingo.pipeline.config import load
-        if load()['term_editorial_service']:
-            prose = {k:v for k,v in patch.items() if k not in {'evidence','sources'}}
-            problems = [p for p in (_em_dash_problem(prose),_script_leak_problem(prose),
-                "Error: use 조선민주주의인민공화국 or 조선" if _contains_north_korea(prose) else None) if p]
-            if problems:
-                return '; '.join(problems)
-            try:
-                result = call_person_service({'command':'submit','target':'term','action':action,
-                    'id':target_id,'fields':patch,'sources':sources,'changedBy':_SUGGESTED_BY})
-            except ValueError as exc:
-                return f'Error: {exc}'
-            return f"OK — {result['status']}: {action} term '{target_id}'. Logged as edit #{result['suggestionId']}. Pending review; no content changed."
-        if 'expectedRevision' in patch or 'evidence' in patch:
-            return 'Error: term editorial service must be deployed and enabled for versioned evidence writes'
+        prose = {k:v for k,v in patch.items() if k not in {'evidence','sources'}}
+        problems = [p for p in (_em_dash_problem(prose),_script_leak_problem(prose),
+            "Error: use 조선민주주의인민공화국 or 조선" if _contains_north_korea(prose) else None) if p]
+        if problems:
+            return '; '.join(problems)
+        try:
+            result = call_person_service({'command':'submit','target':'term','action':action,
+                'id':target_id,'fields':patch,'sources':sources,'changedBy':_SUGGESTED_BY})
+        except ValueError as exc:
+            return f'Error: {exc}'
+        return f"OK — {result['status']}: {action} term '{target_id}'. Logged as edit #{result['suggestionId']}. Pending review; no content changed."
     if target_type in {"person", "person_section"}:
         fields = {k: v for k, v in patch.items() if k not in {"office_rows", "sections", "revision"}}
         if "origin" in fields:
@@ -2399,8 +2395,6 @@ def _run_edit(target_type: str, action: str, target_id: str, patch: dict,
                 f"Logged as edit #{result['suggestionId']}. "
                 + ("Pending review; no content changed." if result["status"] == "pending"
                    else "Applied through the shared Admin store."))
-    if target_type == "term":
-        return "Error: term writes go through the term editorial service; it is disabled in config/commulingo_pipeline.json."
     # History events, their sections and people, office rows. The curator
     # checks below give the model specific guidance; the CommuLingo editorial
     # service re-checks integrity and owns the write.

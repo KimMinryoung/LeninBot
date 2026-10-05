@@ -144,11 +144,12 @@ def _profile(feature: str) -> tuple[bool, float]:
 
 
 def load_term_categories() -> list[dict]:
-    """Rows of commulingo_term_categories, or the built-in fallback pairs."""
+    """CommuLingo's term categories (admin MCP dataset), or the built-in fallback pairs."""
     try:
-        from db import query
-        rows = query("SELECT id, label_ko, label_en FROM commulingo_term_categories ORDER BY sort_order, id") or []
-    except Exception as exc:  # no DB in this process: keep the tool usable
+        from commulingo.reads import reads
+        rows = sorted(reads.dataset("term_categories"), key=lambda r: (r.get("sort_order") or 0, r["id"]))
+        rows = [{"id": r["id"], "label_ko": r["label_ko"], "label_en": r["label_en"]} for r in rows]
+    except Exception as exc:  # CommuLingo unreachable: keep the tool usable
         logger.warning("term categories unavailable for classification (%s); using the built-in list", exc)
         rows = []
     if not rows:
@@ -158,10 +159,11 @@ def load_term_categories() -> list[dict]:
 
 
 def load_term_regions() -> list[dict]:
-    """Rows of commulingo_term_regions; empty (no region question) when unreachable."""
+    """CommuLingo's term regions (admin MCP dataset); empty (no region question) when unreachable."""
     try:
-        from db import query
-        return query("SELECT id, label_ko, label_en FROM commulingo_term_regions ORDER BY sort_order, id") or []
+        from commulingo.reads import reads
+        rows = sorted(reads.dataset("term_regions"), key=lambda r: (r.get("sort_order") or 0, r["id"]))
+        return [{"id": r["id"], "label_ko": r["label_ko"], "label_en": r["label_en"]} for r in rows]
     except Exception as exc:
         logger.warning("term regions unavailable for classification (%s); classifying the kind only", exc)
         return []

@@ -237,9 +237,8 @@ def source_coverage_metrics() -> dict:
     extra_active = [ref for ref, state in states.items() if ref not in docs and state.get('active', True)]
     # Timestamp classification is conservative: absent source timestamps stay unknown.
     updated = {r.ref: r.get('source_updated_at') or None for r in records}
-    from db import query_one
-    revision = query_one('SELECT max(created_at) AS ts FROM commulingo_people_revisions') or {}
-    comm_updated = revision.get('ts')
+    from commulingo.mcp_client import call_tool
+    comm_updated = call_tool('changes_since', {'since': datetime.now(timezone.utc).isoformat()}).get('latestRevisionAt')
     checkpoints = sync_metrics()
     for item in differences:
         ref = item['key'][4:].rsplit(':collection', 1)[0].split(':about:', 1)[0] if item['source'] == 'documents' else None

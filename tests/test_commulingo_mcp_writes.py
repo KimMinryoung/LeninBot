@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from commulingo import id_sync, people  # noqa: E402
+from commulingo import people  # noqa: E402
 from commulingo_test_support import FakeReads  # noqa: E402
 
 
@@ -86,26 +86,6 @@ class EventWritesThroughMcp(unittest.TestCase):
     def test_no_direct_sql_writer_is_left(self):
         for name in ("apply_edit", "_record_suggestion", "_apply_event_section", "_apply_office_row_create"):
             self.assertFalse(hasattr(people, name), name)
-
-
-class FollowRenames(unittest.TestCase):
-    def test_open_rows_follow_each_redirect(self):
-        pages = {"person": {"total": 1, "items": [{"from_id": "old-id", "to_id": "new-id"}]},
-                 "term": {"total": 0, "items": []}}
-        cursor = FakeCursor()
-        with patch.object(id_sync, "call_tool", side_effect=lambda name, args: pages[args["entityType"]]), \
-                patch.object(id_sync, "get_conn", fake_conn(cursor)):
-            moved = id_sync.follow_renames()
-        self.assertEqual(moved, {"commulingo_curation_gaps": 1, "commulingo_pipeline_jobs": 1})
-        sqls = [sql for sql, _ in cursor.executed]
-        self.assertTrue(sqls[0].startswith("UPDATE commulingo_curation_gaps SET target_id"))
-        self.assertIn("SET status = 'cancelled'", sqls[1], "a duplicate active job is cancelled before the move")
-        self.assertTrue(sqls[2].startswith("UPDATE commulingo_pipeline_jobs SET target"))
-        self.assertEqual(cursor.executed[0][1], ("new-id", "person", "old-id"))
-
-    def test_outage_does_not_stop_the_worker(self):
-        with patch.object(id_sync, "call_tool", side_effect=RuntimeError("down")):
-            self.assertIsNone(id_sync.follow_renames_best_effort())
 
 
 class SuggestionReview(unittest.TestCase):

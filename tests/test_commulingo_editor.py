@@ -1,7 +1,6 @@
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import json
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 from commulingo_test_support import EditorCase, citation_result
@@ -28,7 +27,6 @@ def candidate():
             'fields':{'body':{'ko':'근거로 확인한 역사적 맥락이다.','en':'A documented historical context.'}},
             'claims':[{'field':'body','claim':'Historical context is documented.','passages':['P1']}],
             'issue_results':[{'id':'missing:body','status':'resolved','reason':'Supplied both languages with original evidence.'}]}
-
 
 
 def submission(value):
@@ -833,50 +831,6 @@ class EditorContractTests(EditorCase):
                 await decisions.classify(fields, [], {})
             self.assertNotIn(key, decisions.cache)
 
-    async def test_classification_outage_finishes_tool_loop_before_engine_retry(self):
-        from commulingo.pipeline.decisions import ClassificationUnavailable
-        from commulingo.pipeline.stages import model_call
-        from commulingo.pipeline.engine import Engine
-        store, usage = store_mock(), Usage()
-        job = {**JOB, 'kind': 'person', 'action': 'create', 'topic': 'basics',
-               'target': 'new-person', 'attempts': 1}
-
-        async def chat(messages, **kwargs):
-            terminal = kwargs['tool_handlers']['commulingo_pipeline_submit_draft']
-            self.assertIn('Stopped:', await terminal(**person_submission(PERSON_FIELDS)))
-            with self.assertRaisesRegex(ToolRejection, 'stage already completed'):
-                await terminal(**person_submission(PERSON_FIELDS))
-
-        async def model(**kwargs):
-            await fetch_fixture(kwargs)
-            kwargs['reads'] = ()
-            await model_call(**kwargs)
-
-        binding = SimpleNamespace(chat=chat, client=None, model='fixture',
-                                  render_provider='deepseek', reasoning={})
-        with patch('bot_config.resolve_agent_tool_loop', return_value=binding), \
-             patch('commulingo.pipeline.service.call', return_value=None), \
-             patch('commulingo.classify.load_catalogs', return_value=CATALOGS), \
-             patch('commulingo.classify.classify_person_card', return_value=None) as classify, \
-             patch('commulingo.pipeline.stages.model_call', side_effect=model):
-            with self.assertRaises(ClassificationUnavailable):
-                await Editor(store)(job, [], usage, .2)
-        self.assertTrue(usage.complete)
-        self.assertEqual(classify.call_count, 1)
-        self.assertNotIn('preflight_failures', usage.tracker)
-
-        # The dependency exception reaches the bounded engine retry policy.
-        store.claim.return_value = job
-        store.detail.return_value = {'artifacts': []}
-        async def failed_stage(job, artifacts, usage, budget):
-            raise ClassificationUnavailable('Jev classification unavailable')
-        result = await Engine(store, {'research': failed_stage}).run_one()
-        self.assertEqual(result['status'], 'error')
-        self.assertFalse(store.defer.call_args.kwargs['escalate'])
-        store.finish_stage.assert_not_called()
-        job['attempts'] = 3
-        await Engine(store, {'research': failed_stage}).run_one()
-        self.assertTrue(store.defer.call_args.kwargs['escalate'])
 
     async def test_existing_person_classification_is_not_reassigned(self):
         from commulingo.pipeline.decisions import Decisions
@@ -1019,34 +973,6 @@ class EditorContractTests(EditorCase):
 
 
 class ReviewAndPublishTests(EditorCase):
-    async def test_routing_pins_unpinned_authoring_and_rejects_other_workflows(self):
-        store = Mock()
-        editor = {name:AsyncMock(return_value=name) for name in ('discover','research','draft','submit')}
-        with patch('commulingo.pipeline.workflow.stages',return_value=editor):
-            routed = workflow.routed_stages(store)
-        # A job predating the workflow field cannot resume after drafting:
-        # its draft came from the removed two-RPC stages.
-        job = {**JOB,'payload':{}}
-        with self.assertRaisesRegex(ValueError,'post-draft stage'):
-            await routed['submit'](job,[],Usage(),.2)
-        store.pin_editor_workflow.assert_not_called()
-        editor['submit'].assert_not_awaited()
-        # Authoring stages pin it to the editor before running.
-        for stage in ('research','draft','discover'):
-            job = {**JOB,'payload':{}}
-            store.reset_mock()
-            self.assertEqual(await routed[stage](job,[],Usage(),.2),stage)
-            store.pin_editor_workflow.assert_called_once_with(job)
-            self.assertEqual(job['payload']['workflow'],'editor')
-        self.assertEqual(await routed['submit'](job,[],Usage(),.2),'submit')
-        store.reset_mock()
-        with self.assertRaisesRegex(ValueError,'no longer supported'):
-            await routed['research']({**JOB,'payload':{'workflow':'legacy'}},[],Usage(),.2)
-        with self.assertRaisesRegex(ValueError,'no longer supported'):
-            await routed['submit'].prepare({**JOB,'payload':{'workflow':'legacy'}},[],Usage())
-        store.pin_editor_workflow.assert_not_called()
-        with self.assertRaisesRegex(ValueError,'unknown editorial workflow'):
-            workflow.routed_stages(store,'legacy')
 
     def artifacts(self):
         fields = candidate()['fields']
@@ -1088,25 +1014,6 @@ class ReviewAndPublishTests(EditorCase):
             result = await workflow.Review()(JOB,artifacts,Usage(),.2)
         self.assertEqual(result.status,'escalated'); model.assert_not_called()
 
-    async def test_publish_is_one_rpc_and_tampering_requires_new_review(self):
-        artifacts = self.artifacts()
-        digest = patch_hash(write_request(JOB,latest(artifacts,'draft')))
-        decision = {'decision':'approve','approved_patch_hash':digest,'reason':'Independently verified.',
-                    'checks':[{'citation':URL,'source':URL,'quote':BODY,'finding':'Verified.'}]}
-        artifacts.append({'stage':'review','value':decision})
-        with patch('commulingo.pipeline.config.load',return_value={'phase':'live'}), \
-             patch('commulingo.pipeline.service.call',return_value={'status':'approved','suggestionId':123}) as rpc:
-            result = await workflow.publish(JOB,artifacts,Usage(),.2)
-            rpc.assert_called_once()
-            request = rpc.call_args.args[0]
-            self.assertEqual(request['command'],'publish')
-            self.assertEqual(request['approvedPatchHash'],digest)
-            self.assertEqual(result.value['resolved_issues'],['missing:body'])
-            rpc.reset_mock()
-            artifacts[0]['value']['draft']['fields']['body']['ko']='승인 후 변경'
-            result = await workflow.publish(JOB,artifacts,Usage(),.2)
-            rpc.assert_not_called()
-            self.assertEqual(result.next_stage,'review')
 
     def fake_review(self, decisions, prompts=None, proposals=None):
         """Replace only the decision tool's validation; the stage's own routing runs."""
@@ -1229,67 +1136,4 @@ class ReviewAndPublishTests(EditorCase):
             'reason':'Independently verified.','checks':[{'citation':URL,'source':URL,'quote':BODY,'finding':'Verified.'}]}})
         return artifacts, digest
 
-    async def test_publish_replay_is_identical_and_keeps_notes_out_of_fields(self):
-        artifacts, digest = self.approved(notes='examples still unsupported')
-        with patch('commulingo.pipeline.config.load',return_value={'phase':'live'}), \
-             patch('commulingo.pipeline.service.call',return_value={'status':'approved','suggestionId':12}) as rpc:
-            await workflow.publish(JOB,artifacts,Usage(),.2)
-            await workflow.publish(JOB,artifacts,Usage(),.2)
-        first, second = [c.args[0] for c in rpc.call_args_list]
-        self.assertEqual(first,second)
-        self.assertEqual(first['idempotencyKey'],f"pipeline:{JOB['id']}:publish:{digest}")
-        # The author's notes outlive the job: saved with the entry by the same receipt.
-        self.assertEqual(first['notes'],'examples still unsupported')
-        self.assertNotIn('notes',first['fields'])
 
-    async def test_correction_replaces_the_original_only_inside_approved_publication(self):
-        job = {**JOB,'topic':'review-repair:7','payload':{'workflow':'editor','replaces_suggestion_id':7}}
-        artifacts, digest = self.approved(job)
-        pending = {'id':7,'status':'pending','review_note':None}
-        with patch('commulingo.pipeline.config.load',return_value={'phase':'live'}), \
-             patch('commulingo.review_queue.suggestion',return_value=pending), \
-             patch('commulingo.pipeline.service.call',return_value={'status':'approved','suggestionId':8}) as rpc:
-            result = await workflow.publish(job,artifacts,Usage(),.2)
-        self.assertEqual(result.value['status'],'approved')
-        # Replay after this job's own publish replaced the original: the same
-        # request goes out again and the service returns the stored receipt.
-        ours = {'id':7,'status':'rejected','review_note':workflow.REPLACED_NOTE_PREFIX+digest}
-        with patch('commulingo.pipeline.config.load',return_value={'phase':'live'}), \
-             patch('commulingo.review_queue.suggestion',return_value=ours), \
-             patch('commulingo.pipeline.service.call',return_value={'status':'approved','suggestionId':8}) as replay:
-            await workflow.publish(job,artifacts,Usage(),.2)
-        first, second = rpc.call_args.args[0], replay.call_args.args[0]
-        self.assertEqual(first,second)
-        self.assertEqual((first['command'],first['replacesSuggestionId'],first['approvedPatchHash']),('publish',7,digest))
-        # An original resolved by hand (or missing) is no longer ours to replace:
-        # the job completes quietly and nothing is published.
-        for original in ({'id':7,'status':'approved','review_note':'looks right'},
-                         {'id':7,'status':'rejected','review_note':'duplicate'},
-                         None):
-            with self.subTest(original=original), \
-                 patch('commulingo.pipeline.config.load',return_value={'phase':'live'}), \
-                 patch('commulingo.review_queue.suggestion',return_value=original), \
-                 patch('commulingo.pipeline.service.call') as rpc:
-                result = await workflow.publish(job,artifacts,Usage(),.2)
-            rpc.assert_not_called()
-            self.assertEqual((result.next_stage,result.status),('complete','complete'))
-        # Without an approval bound to this patch nothing is written.
-        unapproved = artifacts[:-1]+[{'stage':'review','value':{'decision':'revise'}}]
-        with patch('commulingo.pipeline.config.load',return_value={'phase':'live'}), \
-             patch('commulingo.pipeline.service.call') as rpc:
-            result = await workflow.publish(job,unapproved,Usage(),.2)
-        rpc.assert_not_called()
-        self.assertEqual(result.next_stage,'review')
-
-    async def test_validate_resume_returns_failures_to_authoring(self):
-        artifacts = self.artifacts()
-        for outcome, expected in [({}, 'review'),
-                                  (ValueError('400: evidence required for body'), 'draft'),
-                                  (ValueError('400: definition too long'), 'draft'),
-                                  (ValueError('409: revision_conflict'), 'research')]:
-            with self.subTest(outcome=str(outcome)), \
-                 patch('commulingo.pipeline.service.call',side_effect=[outcome] if isinstance(outcome,Exception) else None,
-                       return_value=outcome) as rpc:
-                result = await workflow.validate(JOB,artifacts,Usage(),.2)
-            self.assertEqual(result.next_stage,expected)
-            self.assertEqual(rpc.call_args.args[0]['command'],'validate')

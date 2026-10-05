@@ -62,7 +62,7 @@
 | `vector_corpus_reingestion.md` | 코퍼스 manifest·metadata·chunking·재등록과 감사 절차 |
 | `mission_state_machine.md` | Telegram mission context lifecycle |
 | `commulingo_editorial.md` | 공통 편집 저장·revision·출처·직접 도구의 제안과 검토 계약 |
-| `commulingo_pipeline.md` | 인물·용어 editor 운영, 원문 캐시·부분 수정·독립 검토·자동 공개·복구 |
+| `commulingo_pipeline.md` | CommuLingo 보강 세션(일꾼 작업 종류)·출처 캐시. 대기열·공개는 frontend로 이전(2026-10-05) |
 | `autonomous_project.md` | hourly autonomous project loop |
 | `skill_import_design.md` | 외부 skill import/conversion 설계 |
 | `x402_design.md` | Base USDC x402 결제 데모의 실행 흐름·와이어 형식·감사 경계 |
@@ -86,7 +86,7 @@
 | `llm/` | provider adapter, 공용 tool-loop engine, gateway, model/runtime profile |
 | `translation_runtime/` | 사료·사이트 번역 공통 실행, 구조 검증, 원자적 파일 저장, 번역 메모리(`translation_memory`), 사료 번역 파이프라인(`archival/`) |
 | `telegram/`, `agents/`, `runtime_tools/` | Telegram 봇·명령·작업(소유자 채팅 루프는 `telegram/chat_runtime.py`), 에이전트 명세, 도메인 패키지에 속하지 않는 범용 도구와 전역 도구 등록(`runtime_tools/registry.py`) |
-| `commulingo/` | CommuLingo 인물·용어·사건 편집 도구와 레인(`people`, `lane`, `people_lane` 등), 영속 편집 파이프라인(`pipeline/`). 저장·렌더링은 frontend 저장소의 RPC가 소유 |
+| `commulingo/` | CommuLingo 큐레이터 도구(`people`), 일꾼이 실행하는 저자·검토·발견 세션(`pipeline/`). 데이터·대기열·렌더링은 frontend가 소유하고 leninbot은 관리자 MCP(`mcp_client`, `reads`)로만 접근 |
 | `publishing/` | cyber-lenin.com 공개 콘텐츠: 보고서 저장소·게시·검토, 정적 페이지·허브 큐레이션, 게시물 편집, 비공개 보고서, 게시 기록, Cloudflare 캐시 퍼지, 채널 방송 |
 | `roleplay/` | 별도 정체성의 역할극 봇(`roleplay.bot`, `leninbot-roleplay.service`)과 게임 상태·판정·기억 모듈 |
 | `scripts/`, `deploy/`, `systemd/` | 운영·검증 스크립트, 배포 자산, unit 원본 |

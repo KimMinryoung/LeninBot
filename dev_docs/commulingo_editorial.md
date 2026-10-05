@@ -14,11 +14,9 @@ Python `commulingo/people.py`와 제안 승인 스크립트는
 `content-editorial-service.js`(MCP `editorial_store`의 history_event·history_event_section·
 history_event_person·office_row 대상)가 검증·반영·제안 기록·리비전을 맡는다. `_run_edit`는
 작성자 정책 검사(`_validate`, 모델용 안내)만 먼저 하고, 승인은 `scripts/commulingo_suggestions.py`가
-같은 MCP로 한다. 운영자 일괄 정리 `commulingo_strip_em_dashes.py`·`commulingo_normalize_names.py`만
-아직 직접 SQL이며 DB 권한 회수 전에 frontend 콘텐츠 작업으로 옮긴다.
-`commulingo_curation_gaps`·`commulingo_person_review_jobs`는 leninbot 작업 상태다. frontend가
-더 건드리지 않으므로 인물·용어 id 변경은 `commulingo/id_sync.py`가 MCP `id_redirects_list`로
-따라간다(파이프라인 tick·gap worker 시작 시).
+같은 MCP로 한다. 읽기와 쓰기 전 검증은 `commulingo/reads.py`가 MCP 조회로 한다(2026-10-05).
+사건 큐레이터의 curation gap 기록은 MCP `gap_file`이 중복 판정과 함께 맡는다. 운영자 일괄 정리
+스크립트(줄표·표기 정규화·국적 백필 등)는 삭제했다: 대량 작업은 frontend에서 직접 한다.
 
 CommuLingo는 별개 서비스다. 저장소 호출은 frontend가 소유한 관리자 MCP
 (`http://127.0.0.1:3100/mcp`, frontend `dev_docs/commulingo-admin-mcp.md`)를
@@ -87,7 +85,7 @@ required_corrections는 현재 제안에 있는 /fields/... 경로를 안내한�
 원문 캐시 도구의 `{}`/`passages: []` 목록 조회는 유지한다. source_id와 passages를 함께
 제출하거나 없는 ID/라벨을 보내면 `ToolRejection`과 유효 선택지를 반환한다. 잘못된 라벨을
 source_id로 자동 대체하지 않는다. 기존 passage·독립 근거·인용 지지·revision 검증은 유지한다.
-별도 review.timer는 비활성이고 자동 editor 검토는 파이프라인 내부에서 수행한다.
+자동 editor 검토는 frontend 파이프라인이 일꾼(`commulingo_review`)에 맡겨 수행한다.
 
 검토 checks는 citation_id(S1=source_refs[0]), 직접 조회한 P 문단 라벨, finding을 담는다.
 check당 1~8개 라벨을 실제 citation/source/quote/finding으로 변환한다.
@@ -96,36 +94,32 @@ check당 1~8개 라벨을 실제 citation/source/quote/finding으로 변환한�
 모든 출처를 하나씩 열거나 위키백과 밖 출처를 의무적으로 추가하지는 않는다.
 자료 접근 불가·미해결 동일인은 내부 보류한다.
 
-Telegram 수동 명령은 `/commulingo_review list|show|approve|reject|retry`이며 승인·반려에 사유가 필요하다.
-자동 검토 요청·재알림은 보내지 않는다. `--notify-only`는 호환용 notifications_disabled를 반환한다.
-기존 pending 제안의 수정·대체는 [원자적 공개 계약](commulingo_pipeline.md#독립-검토와-공개-반영)을 따른다.
+Telegram 수동 명령은 `/commulingo_review list|show|approve|reject`이며 승인·반려에 사유가 필요하다
+(MCP `suggestions_list`·`editorial_store review`). 자동 검토 요청·재알림은 보내지 않는다.
+기존 pending 제안의 수정·대체는 frontend 파이프라인의 원자적 공개(`editorial-pipeline-service.js` publish)를 따른다.
 
 ## 보강 상태와 분류
 
 직접 도구의 no_edit는 주제별 reason/status/sources를 기록한다.
 complete/not_applicable은 180일, sources_unavailable은 90일 후 재검토하며 새 근거가 주제를 다시 열 수 있다.
 no_edit와 pending_review는 별도로 집계한다. 자동 과제 선정은 파이프라인 planner가 담당한다.
-gap 요청은 pending 인물·절 제안이 있으면 중복 등록하지 않고 승인 후 실제 카드와 연결을 확인한다.
+gap 요청의 처리는 frontend 파이프라인 planner가 맡는다.
 
 국가 코드의 원본은 frontend `modern-country-codes.json`과 역사·지역 코드 집합이다.
 Python 허용 목록과 국기·지도 등록을 함께 검증한다. 출신 배경은 출생지나 활동지가 아니라
 문헌의 민족·가계·자기인식으로 판단하며 혼합 배경은 한영 라벨과 근거에 명시한다.
 Jev의 그룹·관직·국가·출신·사망 유형·용어 분류 기준은 [Jev 연동](jev_system_one_adoption.md#분류-기준과-감사)에 모은다.
 
-`commulingo_backfill_nationality.py`와 `commulingo_backfill_person_nationality.py`는 기본적으로 보고서만 만든다.
-검토된 최신 revision·출처·근거가 있는 Admin spec을 `--apply-spec`으로 전달하면
-공통 Admin CLI가 배치 전체를 한 트랜잭션으로 검증·반영한다. 단독 --apply와 직접 SQL 반영은 지원하지 않는다.
+인물 일괄 등록·수정은 `apply_person_spec`(MCP `people_upsert`)이 배치 전체를 한 트랜잭션으로 검증·반영한다.
 
 ## 배포와 검증
 
 frontend의 호스트 마운트 변경은 운영 변경이다. 공통 저장 계약 변경 시 Python과 frontend의 schema를 함께 맞춘다.
 Python을 장기 import하는 서비스는 재시작이 필요하고 스케줄 프로세스는 다음 실행부터 새 코드를 읽는다.
-private RPC의 코드 반영 경계는 [파이프라인 배포](commulingo_pipeline.md#workflow-고정과-배포-경계)를 따른다.
 롤백 때도 기존 근거·보강 상태·검토·대기열 테이블은 보존한다.
 
 `tests/test_commulingo_evidence_diagnostics.py`는 DB 없이 제출 진단을 검사한다.
-`scripts/smoke_commulingo_maintainer.py`는 폐기한 lane의 실행 정책 대신 현재 공통 작성·저장 계약을
-검사한다. `--extended`의 editor 검증 범위와 격리 방식은 [파이프라인 검증](commulingo_pipeline.md#검증과-효율-지표)을 따른다.
-`tests/test_commulingo_editorial_selection.py`는 기존 도구의 선택·완료·pending 종료를 검사한다.
-`tests/test_commulingo_person_rpc.py`의 실제 저장·충돌·승인 검사는 격리 컨테이너와 독립 DB에서만 실행한다.
+`scripts/smoke_commulingo_maintainer.py`는 현재 공통 작성·저장 계약을 검사한다.
+`tests/test_commulingo_mcp_client.py`·`test_commulingo_mcp_writes.py`는 MCP 요청 변환과 작성기 경로를,
+`tests/test_commulingo_person_rpc.py`의 실제 저장·충돌·승인 검사는 격리된 frontend MCP(`COMMULINGO_MCP_URL`)에서만 실행한다.
 frontend `test-commulingo-editorial-db.js`는 근거·검토·롤백·상태 전이를 검사한다.

@@ -9,29 +9,26 @@ Document node) are skipped and do not count against the limit.
 
 from __future__ import annotations
 
-import json
 import logging
 from datetime import datetime
 
 from db import query as db_query
-from ops import paths as _paths
 from kg_runtime import doc_extract as dx
 
 logger = logging.getLogger(__name__)
 
-FRONTEND_DIR = _paths.FRONTEND_DIR
-MANIFEST_PATH = FRONTEND_DIR / "data" / "commulingo" / "docs" / "manifest.json"
 ORDER = ("research", "archival", "autonote")  # research first: closes the webchat content gap
 
 
 def _commulingo_names() -> dict[str, dict[str, str]]:
     names = {"person": {}, "term": {}, "event": {}}
     try:
-        for r in db_query("SELECT id, name_ko, name_en FROM commulingo_people"):
+        from commulingo.reads import reads
+        for r in reads.dataset("people"):
             names["person"][r["id"]] = (r.get("name_ko") or r.get("name_en") or r["id"]).strip()
-        for r in db_query("SELECT id, term_ko, term_en FROM commulingo_terms"):
+        for r in reads.dataset("terms"):
             names["term"][r["id"]] = (r.get("term_ko") or r.get("term_en") or r["id"]).strip()
-        for r in db_query("SELECT id, title_ko, title_en FROM commulingo_history_events"):
+        for r in reads.dataset("events"):
             names["event"][r["id"]] = (r.get("title_ko") or r.get("title_en") or r["id"]).strip()
     except Exception as exc:
         raise RuntimeError("CommuLingo name lookup failed") from exc
@@ -49,24 +46,26 @@ def load_records(kinds=ORDER, *, since: datetime | None = None) -> list[dx.DocRe
         for row in db_query(sql + " ORDER BY published_at DESC", params):
             recs.append(dx.research_record(row))
     if "archival" in kinds:
-        if MANIFEST_PATH.exists():
-            try:
-                manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
-                docs = manifest.get("docs") if isinstance(manifest, dict) else manifest
-                for doc in docs or []:
-                    html_path = MANIFEST_PATH.parent / str(doc.get("file") or "")
-                    if doc.get("file") and not html_path.is_file():
-                        raise FileNotFoundError(f"archival body missing: {doc['id']}")
-                    html = html_path.read_text(encoding="utf-8") if html_path.is_file() else None
-                    rec = dx.archival_record(doc, html)
-                    from datetime import timezone
-                    rec['source_updated_at'] = datetime.fromtimestamp(max(MANIFEST_PATH.stat().st_mtime,
-                        html_path.stat().st_mtime if html_path.is_file() else 0), timezone.utc).isoformat()
-                    recs.append(rec)
-            except Exception as exc:
-                raise RuntimeError(f"archival manifest unreadable: {exc}") from exc
-        else:
-            raise FileNotFoundError(f"archival manifest not found: {MANIFEST_PATH}")
+        # CommuLingo reference documents, through its admin MCP (docs_list, doc_get).
+        try:
+            from commulingo.mcp_client import call_tool
+            ids, offset = [], 0
+            while True:
+                page = call_tool("docs_list", {"limit": 100, "offset": offset})
+                ids += [item["id"] for item in page["items"]]
+                offset += len(page["items"])
+                if not page["items"] or offset >= page["total"]:
+                    break
+            for doc_id in ids:
+                found = call_tool("doc_get", {"id": doc_id})
+                doc, html = found["doc"], found["html"]
+                if doc.get("file") and html is None:
+                    raise FileNotFoundError(f"archival body missing: {doc_id}")
+                rec = dx.archival_record(doc, html)
+                rec['source_updated_at'] = doc.get("modifiedAt")
+                recs.append(rec)
+        except Exception as exc:
+            raise RuntimeError(f"archival documents unreadable: {exc}") from exc
     if "autonote" in kinds:
         sql = "SELECT id, project_id, turn, text, sources, created_at, kind FROM autonomous_project_notes WHERE kind = 'synthesis'"
         params = ()

@@ -202,8 +202,8 @@ def _normalize_person_id(value: str) -> str:
 def _validate_commulingo_id(person_id: str) -> None:
     if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,63}", person_id):
         raise ValueError("Invalid CommuLingo person ID")
-    from db import query_one
-    if not query_one("SELECT id FROM commulingo_people WHERE id = %s", (person_id,)):
+    from commulingo.reads import reads
+    if not reads.exists("person", person_id):
         raise ValueError("CommuLingo person not found; search the dictionary before linking")
 
 

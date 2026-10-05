@@ -40,8 +40,11 @@ def validate_request(request: dict) -> dict:
     budget = request.get("budgetUsd", 0.2)
     if not isinstance(budget, (int, float)) or not 0 < budget <= 0.6:
         raise ValueError("budgetUsd must be > 0 and <= 0.6")
+    settings = payload.get("settings") or {}
+    if not isinstance(settings, dict) or set(settings) - {"term_event_overlap_allow"}:
+        raise ValueError("settings may carry term_event_overlap_allow only")
     return {"kind": kind, "budgetUsd": float(budget),
-            "input": {"job": {k: job.get(k) for k in JOB_KEYS}, "artifacts": [
+            "input": {"job": {k: job.get(k) for k in JOB_KEYS}, "settings": settings, "artifacts": [
                 {"stage": a["stage"], "value": a["value"]} for a in payload["artifacts"]]}}
 
 
@@ -86,7 +89,7 @@ async def run(task_id: int, request: dict) -> dict:
     from commulingo.pipeline.workflow import Review
 
     job = dict(request["input"]["job"])
-    job["payload"] = job.get("payload") or {}
+    job["payload"] = {**(job.get("payload") or {}), **(request["input"].get("settings") or {})}
     artifacts = request["input"]["artifacts"]
     store = TaskStore()
     usage = Usage()

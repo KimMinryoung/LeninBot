@@ -5,21 +5,10 @@ import asyncio
 from ops.readonly_query import query as _query
 from ops.diagnostics import observe, report, systemd_properties, SERVICE_UNITS
 
-PIPELINES = ('commulingo', 'translation', 'kg_sync')
+# The CommuLingo enrichment queue moved to the frontend (its own
+# scripts/commulingo-pipeline); leninbot only executes worker tasks for it.
+PIPELINES = ('translation', 'kg_sync')
 EXCLUSIONS = ['archival translation batches', 'manual static-page translation', 'manual Markdown file translation']
-
-
-def commulingo_queue(limit):
-    counts = _query('''SELECT status, stage, count(*) AS jobs,
-        count(*) FILTER (WHERE status='running' AND lease_until < now()) AS expired_leases,
-        count(*) FILTER (WHERE status IN ('ready','deferred') AND available_at < now() - interval '24 hours') AS stalled_24h,
-        min(created_at) AS oldest_created_at FROM commulingo_pipeline_jobs GROUP BY status,stage ORDER BY 1,2''', ())
-    recent = _query('''SELECT id,kind,action,target,stage,status,attempts,updated_at,available_at,lease_until,
-        left(last_error, 1000) AS last_error FROM commulingo_pipeline_jobs ORDER BY updated_at DESC,id DESC LIMIT %s''', (limit,))
-    failures = _query('''SELECT id,stage,status,updated_at,left(last_error,1000) AS last_error
-        FROM commulingo_pipeline_jobs WHERE COALESCE(last_error,'') <> '' ORDER BY updated_at DESC,id DESC LIMIT %s''', (limit,))
-    return {'counts': counts, 'recent_jobs': recent, 'recent_errors_or_deferrals': failures,
-            'stalled_definition': 'expired running lease or ready/deferred eligible for over 24 hours'}
 
 
 def translation_queue(kind, limit):
@@ -82,6 +71,6 @@ async def snapshot(pipeline, limit):
             parts['queue'] = dict(zip(kinds, await asyncio.gather(*(
                 observe(lambda k=k: translation_queue(k, limit), timeout=30) for k in kinds))))
         else:
-            parts['queue'] = await observe(lambda: commulingo_queue(limit) if name == 'commulingo' else kg_queue())
+            parts['queue'] = await observe(kg_queue)
         return name, parts
     return report(dict(await asyncio.gather(*(one(name) for name in names))), exclusions=EXCLUSIONS)

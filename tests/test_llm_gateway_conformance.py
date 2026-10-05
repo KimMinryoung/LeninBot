@@ -38,10 +38,7 @@ class TestProxyOrdering(unittest.TestCase):
     CONSUMERS = {
         "leninbot-a2a-api.service", "leninbot-api.service",
         "leninbot-autonomous.service", "leninbot-browser.service",
-        "leninbot-commulingo-enrich.service",
-        "leninbot-commulingo-maintainer.service",
-        "leninbot-commulingo-new.service", "leninbot-commulingo-terms.service",
-        "leninbot-event-backfill.service", "leninbot-experience.service",
+        "leninbot-experience.service", "leninbot-worker.service",
         "leninbot-kg-integrity.service", "leninbot-razvedchik.service",
         "leninbot-roleplay.service", "leninbot-telegram.service",
         "novel-writer-api.service",

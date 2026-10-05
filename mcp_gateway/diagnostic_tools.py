@@ -112,7 +112,7 @@ async def pipeline_status(pipeline='all', limit=20, *, profile='inspect'):
 
 
 DIAGNOSTIC_TOOLS.append({'name': 'pipeline_status', 'description': 'Operator-only queues, stale leases, translation freshness and KG sync; excludes archival batches and manual static-page translation.',
-    'input_schema': schema({'pipeline': {'type': 'string', 'enum': ['all', 'commulingo', 'translation', 'kg_sync']}, 'limit': integer(1, 100)})})
+    'input_schema': schema({'pipeline': {'type': 'string', 'enum': ['all', 'translation', 'kg_sync']}, 'limit': integer(1, 100)})})
 DIAGNOSTIC_HANDLERS['pipeline_status'] = pipeline_status
 
 

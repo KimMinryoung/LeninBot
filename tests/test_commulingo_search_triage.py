@@ -55,16 +55,6 @@ class SearchTriageTests(unittest.IsolatedAsyncioTestCase):
             await hook(RENDERED); await hook.flush()
             self.assertEqual(hook.tasks, [])
 
-    async def test_review_wrapper_passes_search_results_to_the_hook_unchanged(self):
-        import importlib.util, os
-        spec = importlib.util.spec_from_file_location('worker', os.path.join(os.path.dirname(__file__), '..', 'scripts', 'commulingo_person_reviewer.py'))
-        worker = importlib.util.module_from_spec(spec); spec.loader.exec_module(worker)
-        seen = []
-        async def triage(text): seen.append(text)
-        handlers = worker.make_handlers({'web_search': AsyncMock(return_value=RENDERED)}, {'source_refs': []}, {}, {}, triage=triage)
-        self.assertEqual(await handlers['web_search'](query='x'), RENDERED)
-        self.assertEqual(seen, [RENDERED])
-
 
 if __name__ == '__main__':
     unittest.main()

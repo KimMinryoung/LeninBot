@@ -1,11 +1,10 @@
-import asyncio
 from unittest import IsolatedAsyncioTestCase, TestCase
 from unittest.mock import AsyncMock, Mock, patch
 
 from commulingo.pipeline.draft_repair import DraftRepair
 from commulingo.pipeline.editor import Editor
 from commulingo.pipeline.evidence import SourceHandles, snapshot, Passages, resolve_passages, compile_evidence
-from commulingo.pipeline.engine import Engine, Result, Usage
+from commulingo.pipeline.engine import Usage
 from scripts.commulingo_write_session import draft_id
 from commulingo_test_support import EditorCase
 
@@ -71,7 +70,6 @@ class EvidenceContracts(TestCase):
         with self.assertRaisesRegex(ToolArgumentValidationError,'empty object.*not parseable'):
             validate_tool_arguments('merge_tool',{},schema=merge,risk_class='state')
         # The editor submit tool accepts parts, so an empty call asks for smaller ones.
-        import commulingo.pipeline.author_draft  # noqa: F401  registers the hint
         with self.assertRaisesRegex(ToolArgumentValidationError,'Do not resend the same call.*in parts'):
             validate_tool_arguments('commulingo_pipeline_submit_draft',{},schema=merge,risk_class='state')
 
@@ -94,43 +92,6 @@ class EvidenceContracts(TestCase):
         # An echoed earlier ID no longer costs a round: the call holds one draft.
         repair.prepare({'draft_id':old,'repairs':[{'op':'set','path':'/fields/years','value':'1900–1950'}]})
         self.assertEqual(repair.draft['args']['fields']['years'],'1900–1950')
-
-
-class BatchContracts(IsolatedAsyncioTestCase):
-    async def test_budget_block_drains_review_then_free_stages(self):
-        engine=Engine(Mock(),{})
-        engine.run_one=AsyncMock(side_effect=[
-            {'status':'budget_deferred','job_id':1,'blocked_stage':'draft'},
-            {'status':'budget_deferred','job_id':2,'blocked_stage':'review'},
-            {'status':'complete','job_id':3,'stage':'complete'}, {'status':'idle'}])
-        await engine.run_batch(draft_only=False)
-        calls=engine.run_one.await_args_list
-        self.assertEqual(calls[1].kwargs['claim_stages'],['validate','judge','submit','review'])
-        self.assertEqual(calls[2].kwargs['claim_stages'],['validate','judge','submit'])
-        self.assertEqual(calls[3].kwargs['claim_stages'],['validate','judge','submit'])
-
-    async def test_explicit_job_budget_wait_stops_without_other_work(self):
-        engine=Engine(Mock(),{})
-        engine.run_one=AsyncMock(return_value={'status':'budget_deferred','job_id':1,'blocked_stage':'draft'})
-        await engine.run_batch(job_id=1,draft_only=False)
-        engine.run_one.assert_awaited_once()
-
-    async def test_failed_stage_records_attempt_and_unknown_cost_is_not_zeroed(self):
-        store=Mock()
-        store.claim.return_value={'id':1,'stage':'research','kind':'person','attempts':1}
-        store.detail.return_value={'artifacts':[]}
-        async def fail(job,artifacts,usage,budget):
-            usage.started=True
-            usage.tracker['rounds_used']=2
-            raise RuntimeError('provider failed')
-        fail.uses_llm=True
-        result=await Engine(store,{'research':fail}).run_one(draft_only=False)
-        self.assertEqual(result['status'],'error')
-        store.settle.assert_not_called()
-        args=store.finish_attempt.call_args.args
-        self.assertEqual(args[1],'error')
-        self.assertEqual(args[3],'provider failed')
-        self.assertEqual(args[5]['rounds_used'],2)
 
 
 class EditorStorageContracts(EditorCase):
@@ -158,14 +119,6 @@ class EditorStorageContracts(EditorCase):
 
 
 class BudgetDrainRegression(IsolatedAsyncioTestCase):
-    async def test_review_requesting_research_does_not_block_remaining_writes(self):
-        engine=Engine(Mock(),{})
-        engine.run_one=AsyncMock(side_effect=[
-            {'status':'budget_deferred','job_id':1,'blocked_stage':'draft'},
-            {'status':'ready','job_id':2,'stage':'research'},
-            {'status':'complete','job_id':3,'stage':'complete'}, {'status':'idle'}])
-        await engine.run_batch(draft_only=False)
-        self.assertIsNone(engine.run_one.await_args_list[2].kwargs['job_id'])
 
     def test_large_claim_sets_compile_without_a_cap(self):
         source=snapshot('https://example.org/archive','A documented definition supported by this archive.')

@@ -163,13 +163,9 @@ The commissioning message identifies the mode and target. Follow it exactly. A s
 narrow write is the end of the run; do not make a second edit.
 """
 
-# The one sentence both lanes were carrying separately. It lives in the agent
-# identity, not in a task builder, because a task builder can be bypassed: the
-# people lane's copy was appended by a monkey-patch installed only in
-# commulingo_people_parallel.py, so running commulingo_people_maintainer.py
-# directly — the documented way to force one candidate — wrote cards with no
-# editorial policy at all. Lane-specific bullets still live with their lane;
-# this is the part that must reach every caller.
+# The editorial policy every caller must carry. It lives in the agent identity,
+# not in a task builder, because a task builder can be bypassed (the retired
+# people lane once wrote cards with no editorial policy that way).
 EDITORIAL_CORE = (
     "polemical anti-Soviet framing is not the voice of this site"
 )

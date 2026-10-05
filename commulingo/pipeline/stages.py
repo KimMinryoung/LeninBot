@@ -272,8 +272,8 @@ class Discover:
                     'reason':{'type':'string','minLength':20}},
                 'required':['kind','target','label','mention','reason']}}},'required':['candidates']}
         box = {}
-        from .config import load
-        overlap_allow = load()['term_event_overlap_allow']
+        # The frontend's pipeline settings travel with the job (worker input).
+        overlap_allow = job['payload'].get('term_event_overlap_allow') or []
         explicit_gap = job['payload']['material_id'].startswith('gap:')
         if explicit_gap:
             # The runner already knows kind, label and mention for a requested
@@ -343,8 +343,3 @@ def prose_problem(fields):
     prose = {k:v for k,v in fields.items() if k not in {'evidence','sources'}}
     return '; '.join(e for e in (_em_dash_problem(prose), _script_leak_problem(prose),
         'Use 조선민주주의인민공화국 or 조선 in Korean text' if _contains_north_korea(prose) else None) if e)
-
-
-def stages(store, workflow='editor'):
-    from .workflow import routed_stages
-    return routed_stages(store, workflow)

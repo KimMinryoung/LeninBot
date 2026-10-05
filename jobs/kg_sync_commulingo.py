@@ -36,7 +36,6 @@ import re
 import unicodedata
 from datetime import datetime
 
-from db import query as db_query
 from kg_runtime.doc_extract import josa
 
 logger = logging.getLogger(__name__)
@@ -450,23 +449,27 @@ def build_facts(src: Source, *, changed: dict[str, set[str]] | None = None) -> l
 # ── Postgres loading ──────────────────────────────────────────────────────────
 
 def load_source() -> Source:
-    q = db_query
+    """CommuLingo's published datasets (admin MCP dataset_rows): the frontend owns
+    the tables and their column contract; this job only mirrors them."""
+    from commulingo.reads import McpReads
+    reads = McpReads()  # a fresh snapshot per sync, never the shared minute cache
+    d = reads.dataset
     return Source(
-        people=q("SELECT * FROM commulingo_people"),
-        person_aliases=q("SELECT person_id, lang, alias FROM commulingo_person_aliases ORDER BY sort_order"),
-        career=q("SELECT * FROM commulingo_person_career_entries"),
-        people_groups=q("SELECT * FROM commulingo_people_groups"),
-        offices=q("SELECT id, sort_order, range_label, title_ko, title_en, blurb_ko, blurb_en FROM commulingo_offices"),
-        office_rows=q("SELECT * FROM commulingo_office_rows"),
-        events=q("SELECT id, period_label, title_ko, title_en, summary_ko, summary_en, locations, updated_at FROM commulingo_history_events"),
-        event_people=q("SELECT * FROM commulingo_history_event_people"),
-        terms=q("SELECT id, term_ko, term_en, original, period_label, definition_ko, definition_en, category, parent_id, updated_at FROM commulingo_terms"),
-        term_aliases=q("SELECT term_id, lang, alias FROM commulingo_term_aliases ORDER BY sort_order"),
-        term_categories=q("SELECT * FROM commulingo_term_categories"),
-        term_relations=q("SELECT term_id, related_id FROM commulingo_term_relations"),
-        term_people=q("SELECT term_id, person_id FROM commulingo_term_people"),
-        term_events=q("SELECT term_id, event_id, same_subject FROM commulingo_term_events"),
-        redirects=q("SELECT entity_type, from_id, to_id FROM commulingo_id_redirects"),
+        people=d("people"),
+        person_aliases=d("person_aliases"),
+        career=d("career"),
+        people_groups=d("people_groups"),
+        offices=d("offices"),
+        office_rows=d("office_rows"),
+        events=d("events"),
+        event_people=d("event_people"),
+        terms=d("terms"),
+        term_aliases=d("term_aliases"),
+        term_categories=d("term_categories"),
+        term_relations=d("term_relations"),
+        term_people=d("term_people"),
+        term_events=d("term_events"),
+        redirects=d("id_redirects"),
     )
 
 
@@ -478,28 +481,11 @@ _REVISION_KIND = {
 
 
 def changed_since(since: datetime) -> dict[str, set[str]]:
-    """Entity ids touched after ``since`` (updated_at columns + revision log).
-    Revision ids like ``event/person`` or ``person/section`` map to their parent."""
-    changed = {"person": set(), "event": set(), "term": set(), "office": set()}
-    for kind, sql in (
-        ("person", "SELECT id FROM commulingo_people WHERE updated_at > %s"),
-        ("event", "SELECT id FROM commulingo_history_events WHERE updated_at > %s"),
-        ("term", "SELECT id FROM commulingo_terms WHERE updated_at > %s"),
-        ("office", "SELECT id FROM commulingo_offices WHERE updated_at > %s"),
-        ("office", "SELECT office_id AS id FROM commulingo_office_rows WHERE updated_at > %s"),
-        ("person", "SELECT person_id AS id FROM commulingo_office_rows WHERE updated_at > %s AND person_id IS NOT NULL"),
-        ("person", "SELECT person_id AS id FROM commulingo_person_career_entries WHERE updated_at > %s"),
-    ):
-        for r in db_query(sql, (since,)):
-            if r.get("id"):
-                changed[kind].add(str(r["id"]))
-    for r in db_query(
-        "SELECT entity_type, entity_id FROM commulingo_people_revisions WHERE created_at > %s", (since,)
-    ):
-        kind = _REVISION_KIND.get(r["entity_type"])
-        if kind and r.get("entity_id"):
-            changed[kind].add(str(r["entity_id"]).split("/", 1)[0])
-    return changed
+    """Entity ids touched after ``since`` (CommuLingo's changes_since: updated_at
+    columns and the revision log, child rows mapped to their parent)."""
+    from commulingo.mcp_client import call_tool
+    feed = call_tool("changes_since", {"since": since.isoformat()})
+    return {kind: set(feed.get(kind) or []) for kind in ("person", "event", "term", "office")}
 
 
 # ── Graph side ────────────────────────────────────────────────────────────────

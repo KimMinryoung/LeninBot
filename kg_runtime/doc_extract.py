@@ -3,7 +3,7 @@
 Three document stores feed the graph:
 
   research:<slug>   research_documents (public)          Postgres
-  archival:<id>     archival translation manifest        $FRONTEND_DIR/data/commulingo/docs
+  archival:<id>     CommuLingo reference documents      admin MCP docs_list/doc_get
   autonote:<id>     autonomous_project_notes (synthesis) Postgres
 
 Two layers per document:

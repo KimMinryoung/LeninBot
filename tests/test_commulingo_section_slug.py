@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 from unittest import IsolatedAsyncioTestCase, TestCase
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 from commulingo.section_slug import generate_section_slug, section_sort_order
 

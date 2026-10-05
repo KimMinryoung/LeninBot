@@ -16,10 +16,10 @@ SERVICE_UNITS = {
     'email': 'leninbot-email-api.service', 'a2a': 'leninbot-a2a-api.service',
     'embedding': 'leninbot-embedding.service', 'llm_proxy': 'leninbot-llm-proxy.service',
     'web_gateway': 'leninbot-web-gateway.service', 'neo4j': 'leninbot-neo4j.service',
-    'nginx': 'nginx.service', 'commulingo': 'leninbot-commulingo-pipeline.service',
+    'nginx': 'nginx.service', 'worker': 'leninbot-worker.service',
     'translation': 'research-document-translation.service', 'kg_sync': 'leninbot-kg-sync.service',
 }
-DAEMONS = tuple(k for k in SERVICE_UNITS if k not in {'commulingo', 'translation', 'kg_sync'})
+DAEMONS = tuple(k for k in SERVICE_UNITS if k not in {'translation', 'kg_sync'})
 HEALTH_SERVICES = (*DAEMONS, 'postgresql', 'redis')
 
 

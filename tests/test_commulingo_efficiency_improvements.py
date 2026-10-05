@@ -5,11 +5,9 @@ from unittest import TestCase
 from unittest.mock import AsyncMock, Mock, patch
 
 from commulingo_test_support import HermeticAsyncCase
-from commulingo.pipeline.engine import Engine, Result, Usage
+from commulingo.pipeline.engine import Usage
 from commulingo.pipeline.fetch_backoff import FetchBackoff
 from commulingo.pipeline.review_context import context, context_tool
-from commulingo.pipeline.store import BudgetUnavailable
-from commulingo.pipeline import workflow
 from tool_gateway.results import ToolFailure
 
 JOB = {'id': 42, 'kind':'term', 'action':'update', 'topic':'history',
@@ -116,62 +114,6 @@ class PreflightTests(HermeticAsyncCase):
         self.assertAlmostEqual(usage.tracker['total_cost'],.031)
         self.assertTrue(usage.complete)
 
-    def store(self, job=None):
-        store = Mock()
-        store.claim.return_value = deepcopy(job or JOB)
-        store.detail.return_value = {'artifacts':[]}
-        store.reserve.side_effect = BudgetUnavailable('daily budget reserved or spent')
-        return store
-
-    async def test_routed_no_edit_completes_even_when_budget_exhausted(self):
-        store = self.store()
-        stages = workflow.routed_stages(store)
-        with patch('commulingo.pipeline.service.call',return_value=CURRENT) as read, \
-             patch('commulingo.pipeline.stages.model_call') as model:
-            result = await Engine(store, stages).run_one()
-        self.assertEqual(result['stage'],'judge')
-        read.assert_called_once()
-        store.reserve.assert_not_called()
-        model.assert_not_called()
-        self.assertTrue(store.finish_attempt.call_args.args[-1]['preflight_no_model'])
-
-    async def test_explicit_request_still_needs_budget(self):
-        store = self.store({**JOB, 'payload':{'workflow':'editor','gap_id':7}})
-        stages = workflow.routed_stages(store)
-        with patch('commulingo.pipeline.service.call',return_value=CURRENT):
-            result = await Engine(store, stages).run_one()
-        self.assertEqual(result['status'],'budget_deferred')
-        store.reserve.assert_called_once()
-        store.settle.assert_not_called()
-        store.finish_stage.assert_not_called()
-
-    async def test_prepare_keeps_lease_and_timeout_protection(self):
-        store = self.store()
-        called = AsyncMock()
-        async def prepare(*args):
-            await asyncio.sleep(1)
-        called.prepare = prepare
-        called.uses_llm = True
-        result = await Engine(store,{'research':called},timeout=.01).run_one()
-        self.assertEqual(result['status'],'error')
-        store.reserve.assert_not_called()
-        called.assert_not_awaited()
-
-    async def test_complete_cost_receipt_survives_settlement_failure(self):
-        store = self.store()
-        store.reserve.side_effect = None
-        store.reserve.return_value = 'reservation'
-        store.settle.side_effect = RuntimeError('DB settlement failed')
-        async def stage(job,artifacts,usage,budget):
-            usage.started = usage.complete = True
-            usage.tracker['total_cost'] = .017
-            return Result({},'review')
-        stage.uses_llm = True
-        with self.assertRaisesRegex(RuntimeError,'settlement failed'):
-            await Engine(store,{'research':stage}).run_one()
-        metrics = store.finish_attempt.call_args.args[-1]
-        self.assertTrue(metrics['cost_complete'])
-        self.assertEqual(metrics['actual_cost_usd'],.017)
 
 
 class FetchTests(HermeticAsyncCase):

@@ -1,16 +1,12 @@
-"""Patch-centred workflow over the existing durable queue, leases and budget."""
+"""Independent review session of the CommuLingo pipeline (worker kind
+commulingo_review). The queue, validation and publication run in the frontend."""
 import asyncio
 import logging
 
 from . import service
-from .editor import Editor
 from .engine import Result
 from .patches import patch_hash, changes
-from .bundles import advance, work_topics
-
-# Note the frontend service leaves on an original it replaced (editorial-pipeline-service.js).
-REPLACED_NOTE_PREFIX = 'Replaced by independently approved patch '
-
+from .bundles import work_topics
 
 class Review:
     uses_llm = True
@@ -148,108 +144,3 @@ class Review:
                 'idempotencyKey':f'pipeline:{job["id"]}:{len(artifacts)}:review-note'})
         except Exception as exc:  # the verdict itself is already persisted as an artifact
             logging.getLogger(__name__).warning('review note not saved for %s: %s', job['target'], exc)
-
-
-async def validate(job, artifacts, usage, budget):
-    """Compatibility resume for queued legacy drafts; schema failures return to the editor."""
-    from .stages import latest, write_request
-    draft = latest(artifacts,'draft')
-    try:
-        result = await asyncio.to_thread(service.call, {'command':'validate', **write_request(job,draft)})
-        return Result(result, 'review')
-    except ValueError as exc:
-        return Result({'error':str(exc)}, 'research' if 'revision_conflict' in str(exc) else 'draft')
-
-
-async def publish(job, artifacts, usage, budget):
-    from .stages import latest, write_request, review_note_checks
-    from .config import load
-    from .store import Store
-    config = load()
-    if config['phase']=='draft':
-        raise ValueError('publication disabled during draft evaluation')
-    draft, decision = latest(artifacts,'draft'), latest(artifacts,'review')
-    request = write_request(job,draft)
-    digest = patch_hash(request)
-    if decision.get('decision')!='approve' or decision.get('approved_patch_hash')!=digest:
-        return Result({'reason':'independent approval does not bind this exact patch'}, 'review')
-    replaced = (job.get('payload') or {}).get('replaces_suggestion_id')
-    if replaced:
-        # An original someone already approved or rejected by hand is no longer
-        # ours to replace; finish quietly instead of failing the atomic publish.
-        # One this job's own earlier publish replaced falls through, so the
-        # replay returns the stored receipt.
-        from commulingo import review_queue as queue
-        original = await asyncio.to_thread(queue.suggestion, replaced)
-        ours = (original or {}).get('status')=='rejected' and \
-            (original.get('review_note') or '')==REPLACED_NOTE_PREFIX+digest
-        if not original or (original['status']!='pending' and not ours):
-            return Result({'reason':'original proposal no longer eligible for replacement'},'complete','complete')
-    if config['phase']=='canary':
-        await asyncio.to_thread(Store().publication_slot,job,config['canary_per_group_per_day'])
-    request.update(command='publish', approvedPatchHash=digest,
-        review={'decision':'approve','reason':decision['reason'],'checks':review_note_checks(decision['checks'])},
-        notes=draft.get('notes',''), jobRef=f'job {job["id"]}',
-        idempotencyKey=f'pipeline:{job["id"]}:publish:{digest}')
-    deferred = [i for i in draft.get('issue_results',[]) if i['status']=='deferred']
-    if deferred:
-        request['notes'] = (request['notes'] + '\nDeferred issues:\n' + '\n'.join(
-            f"{i['id']}: {i['reason']}" for i in deferred)).strip()[:4000]
-    if replaced:
-        request['replacesSuggestionId'] = replaced
-    try:
-        receipt = await asyncio.to_thread(service.call, request)
-    except ValueError as exc:
-        if 'revision_conflict' not in str(exc):
-            raise
-        return Result({'error':str(exc)}, 'research')
-    if receipt.get('status')!='approved':
-        raise ValueError('atomic publication returned no approved receipt')
-    value = advance(job, {**receipt,'patch_hash':digest,
-        'resolved_issues':[i['id'] for i in draft.get('issue_results',[]) if i['status']=='resolved'],
-        'deferred_issues':[i for i in draft.get('issue_results',[]) if i['status']=='deferred']})
-    return Result(value,'research' if value.get('remaining_topics') else 'complete',
-                  'ready' if value.get('remaining_topics') else 'complete')
-
-
-def stages(store):
-    from .stages import Discover, judge
-    editor = Editor(store)
-    return {'discover':Discover(), 'research':editor, 'draft':editor, 'judge':judge,
-            'validate':validate, 'review':Review(store), 'submit':publish}
-
-
-def routed_stages(store, preferred='editor'):
-    """Editor stages behind a guard that pins jobs predating the workflow field.
-
-    The legacy two-RPC stages were removed on 2026-09-24 once no unfinished
-    job used them, so a job pinned to anything else fails loudly instead of
-    falling back to them.
-    """
-    if preferred != 'editor':
-        raise ValueError('unknown editorial workflow')
-    editor = stages(store)
-    routed = {}
-    async def select(job, stage):
-        selected = (job.get('payload') or {}).get('workflow')
-        if selected not in (None, 'editor'):
-            raise ValueError(f'job workflow {selected!r} is no longer supported')
-        if selected is None:
-            if stage not in {'research','draft','discover'}:
-                raise ValueError('job without a workflow reached a post-draft stage')
-            await asyncio.to_thread(store.pin_editor_workflow,job)
-            job['payload'] = {**job.get('payload',{}),'workflow':'editor'}
-        return editor[stage]
-
-    for name in editor:
-        async def execute(job, artifacts, usage, budget, stage=name):
-            selected = await select(job, stage)
-            return await selected(job,artifacts,usage,budget)
-        async def prepare(job, artifacts, usage, stage=name):
-            selected = await select(job, stage)
-            check = getattr(selected, 'prepare', None)
-            return await check(job, artifacts, usage) if check else None
-        execute.prepare = prepare
-        execute.uses_llm = getattr(editor[name], 'uses_llm', False)
-        routed[name] = execute
-    return routed
