@@ -277,6 +277,7 @@ _FAMILY_FIRST: dict[str, dict[str, str | None]] = {
     "japan": {"ko": " ", "en": None},
     "hungary": {"ko": " ", "en": None},
     "cambodia": {"ko": " ", "en": " "},
+    "singapore": {"ko": "", "en": " "},
 }
 
 # Nations whose people carry no surname: the name as people call it lives

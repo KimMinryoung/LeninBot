@@ -1,5 +1,5 @@
 {
-  "version": 22,
+  "version": 23,
   "functions": [
     {
       "id": "political-leadership",
@@ -1763,7 +1763,7 @@
     },
     {
       "id": "russian-narodnaya-volya",
-      "kind": "force",
+      "kind": "party",
       "label": {
         "ko": "인민의 의지",
         "en": "Narodnaya Volya"
@@ -3092,7 +3092,7 @@
     },
     {
       "id": "french-girondins",
-      "kind": "force",
+      "kind": "party",
       "label": {
         "ko": "지롱드파",
         "en": "Girondins"
@@ -4669,6 +4669,1887 @@
         [
           1902,
           1924
+        ]
+      ]
+    },
+    {
+      "id": "party-british-liberal",
+      "kind": "party",
+      "label": {
+        "ko": "영국 자유당",
+        "en": "Liberal Party (UK)"
+      },
+      "termIds": [
+        "liberal-party-uk"
+      ],
+      "countryCode": "uk",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Liberal Party (UK). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1859,
+          1988
+        ]
+      ]
+    },
+    {
+      "id": "party-french-radical",
+      "kind": "party",
+      "label": {
+        "ko": "급진사회당",
+        "en": "Radical Party (France)"
+      },
+      "termIds": [
+        "radical-party-france"
+      ],
+      "countryCode": "france",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Radical Party (France). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1901,
+          null
+        ]
+      ]
+    },
+    {
+      "id": "party-french-democratic-alliance",
+      "kind": "party",
+      "label": {
+        "ko": "민주공화동맹",
+        "en": "Democratic Republican Alliance"
+      },
+      "termIds": [
+        "democratic-republican-alliance"
+      ],
+      "countryCode": "france",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Democratic Republican Alliance. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1901,
+          1978
+        ]
+      ]
+    },
+    {
+      "id": "party-french-mrp",
+      "kind": "party",
+      "label": {
+        "ko": "인민공화운동",
+        "en": "Popular Republican Movement (MRP)"
+      },
+      "termIds": [
+        "popular-republican-movement"
+      ],
+      "countryCode": "france",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Popular Republican Movement (MRP). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1944,
+          1967
+        ]
+      ]
+    },
+    {
+      "id": "party-french-rpf",
+      "kind": "party",
+      "label": {
+        "ko": "프랑스 인민연합",
+        "en": "Rally of the French People (RPF)"
+      },
+      "termIds": [
+        "rally-of-the-french-people"
+      ],
+      "countryCode": "france",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Rally of the French People (RPF). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1947,
+          1955
+        ]
+      ]
+    },
+    {
+      "id": "party-french-psf",
+      "kind": "party",
+      "label": {
+        "ko": "프랑스 사회당 (1936)",
+        "en": "French Social Party (PSF)"
+      },
+      "termIds": [
+        "french-social-party"
+      ],
+      "countryCode": "france",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in French Social Party (PSF). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1936,
+          1940
+        ]
+      ]
+    },
+    {
+      "id": "party-french-republican-federation",
+      "kind": "party",
+      "label": {
+        "ko": "공화연맹",
+        "en": "Republican Federation"
+      },
+      "termIds": [
+        "republican-federation-france"
+      ],
+      "countryCode": "france",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Republican Federation. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1903,
+          1948
+        ]
+      ]
+    },
+    {
+      "id": "party-austrian-christian-social",
+      "kind": "party",
+      "label": {
+        "ko": "기독사회당 (오스트리아)",
+        "en": "Christian Social Party (Austria)"
+      },
+      "termIds": [
+        "christian-social-party-austria"
+      ],
+      "countryCode": "austria",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Christian Social Party (Austria). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1891,
+          1934
+        ]
+      ]
+    },
+    {
+      "id": "party-austrian-sdap",
+      "kind": "party",
+      "label": {
+        "ko": "오스트리아 사회민주당",
+        "en": "Social Democratic Party of Austria (SDAP/SPÖ)"
+      },
+      "termIds": [
+        "social-democratic-party-of-austria"
+      ],
+      "countryCode": "austria",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Social Democratic Party of Austria (SDAP/SPÖ). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1889,
+          1934
+        ],
+        [
+          1945,
+          null
+        ]
+      ]
+    },
+    {
+      "id": "party-austrian-ovp",
+      "kind": "party",
+      "label": {
+        "ko": "오스트리아 국민당",
+        "en": "Austrian People's Party (ÖVP)"
+      },
+      "termIds": [
+        "austrian-peoples-party"
+      ],
+      "countryCode": "austria",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Austrian People's Party (ÖVP). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1945,
+          null
+        ]
+      ]
+    },
+    {
+      "id": "party-spanish-republican-left",
+      "kind": "party",
+      "label": {
+        "ko": "공화좌파",
+        "en": "Republican Left (Spain)"
+      },
+      "termIds": [
+        "republican-left-spain"
+      ],
+      "countryCode": "spain",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Republican Left (Spain). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1934,
+          1960
+        ]
+      ]
+    },
+    {
+      "id": "party-spanish-fet-jons",
+      "kind": "party",
+      "label": {
+        "ko": "팔랑헤",
+        "en": "FET y de las JONS (Falange)"
+      },
+      "termIds": [
+        "fet-y-de-las-jons"
+      ],
+      "countryCode": "spain",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in FET y de las JONS (Falange). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1937,
+          1977
+        ]
+      ]
+    },
+    {
+      "id": "party-swiss-social-democratic",
+      "kind": "party",
+      "label": {
+        "ko": "스위스 사회민주당",
+        "en": "Social Democratic Party of Switzerland"
+      },
+      "termIds": [
+        "social-democratic-party-of-switzerland"
+      ],
+      "countryCode": "switzerland",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Social Democratic Party of Switzerland. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1888,
+          null
+        ]
+      ]
+    },
+    {
+      "id": "party-swiss-communist",
+      "kind": "party",
+      "label": {
+        "ko": "스위스 공산당",
+        "en": "Communist Party of Switzerland"
+      },
+      "termIds": [
+        "communist-party-of-switzerland"
+      ],
+      "countryCode": "switzerland",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Communist Party of Switzerland. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1921,
+          1940
+        ]
+      ]
+    },
+    {
+      "id": "party-german-national-liberal",
+      "kind": "party",
+      "label": {
+        "ko": "국민자유당 (독일)",
+        "en": "National Liberal Party (Germany)"
+      },
+      "termIds": [
+        "national-liberal-party-germany"
+      ],
+      "countryCode": "germany",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in National Liberal Party (Germany). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1867,
+          1918
+        ]
+      ]
+    },
+    {
+      "id": "party-german-dvp",
+      "kind": "party",
+      "label": {
+        "ko": "독일인민당",
+        "en": "German People's Party (DVP)"
+      },
+      "termIds": [
+        "german-peoples-party"
+      ],
+      "countryCode": "germany",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in German People's Party (DVP). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1918,
+          1933
+        ]
+      ]
+    },
+    {
+      "id": "party-german-dnvp",
+      "kind": "party",
+      "label": {
+        "ko": "독일국가인민당",
+        "en": "German National People's Party (DNVP)"
+      },
+      "termIds": [
+        "german-national-peoples-party"
+      ],
+      "countryCode": "germany",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in German National People's Party (DNVP). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1918,
+          1933
+        ]
+      ]
+    },
+    {
+      "id": "party-german-adav",
+      "kind": "party",
+      "label": {
+        "ko": "전독일노동자협회",
+        "en": "General German Workers' Association (ADAV)"
+      },
+      "termIds": [
+        "general-german-workers-association"
+      ],
+      "countryCode": "germany",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in General German Workers' Association (ADAV). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1863,
+          1875
+        ]
+      ]
+    },
+    {
+      "id": "communist-league",
+      "kind": "party",
+      "label": {
+        "ko": "공산주의자동맹",
+        "en": "Communist League"
+      },
+      "termIds": [
+        "communist-league"
+      ],
+      "countryCode": "germany",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Communist League. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1847,
+          1852
+        ]
+      ]
+    },
+    {
+      "id": "party-greek-liberal",
+      "kind": "party",
+      "label": {
+        "ko": "자유당 (그리스)",
+        "en": "Liberal Party (Greece)"
+      },
+      "termIds": [
+        "liberal-party-greece"
+      ],
+      "countryCode": "greece",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Liberal Party (Greece). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1910,
+          1961
+        ]
+      ]
+    },
+    {
+      "id": "party-greek-centre-union",
+      "kind": "party",
+      "label": {
+        "ko": "중도연합",
+        "en": "Centre Union"
+      },
+      "termIds": [
+        "centre-union-greece"
+      ],
+      "countryCode": "greece",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Centre Union. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1961,
+          1976
+        ]
+      ]
+    },
+    {
+      "id": "party-greek-rally",
+      "kind": "party",
+      "label": {
+        "ko": "그리스 연합",
+        "en": "Greek Rally"
+      },
+      "termIds": [
+        "greek-rally"
+      ],
+      "countryCode": "greece",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Greek Rally. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1951,
+          1956
+        ]
+      ]
+    },
+    {
+      "id": "party-finnish-party",
+      "kind": "party",
+      "label": {
+        "ko": "핀란드당",
+        "en": "Finnish Party"
+      },
+      "termIds": [
+        "finnish-party"
+      ],
+      "countryCode": "finland",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Finnish Party. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1860,
+          1918
+        ]
+      ]
+    },
+    {
+      "id": "party-young-finnish",
+      "kind": "party",
+      "label": {
+        "ko": "청년핀란드당",
+        "en": "Young Finnish Party"
+      },
+      "termIds": [
+        "young-finnish-party"
+      ],
+      "countryCode": "finland",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Young Finnish Party. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1894,
+          1918
+        ]
+      ]
+    },
+    {
+      "id": "party-finnish-national-coalition",
+      "kind": "party",
+      "label": {
+        "ko": "국민연합당 (핀란드)",
+        "en": "National Coalition Party (Finland)"
+      },
+      "termIds": [
+        "national-coalition-party-finland"
+      ],
+      "countryCode": "finland",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in National Coalition Party (Finland). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1918,
+          null
+        ]
+      ]
+    },
+    {
+      "id": "party-finnish-agrarian",
+      "kind": "party",
+      "label": {
+        "ko": "농민동맹 (핀란드)",
+        "en": "Agrarian League / Centre Party (Finland)"
+      },
+      "termIds": [
+        "agrarian-league-finland"
+      ],
+      "countryCode": "finland",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Agrarian League / Centre Party (Finland). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1906,
+          null
+        ]
+      ]
+    },
+    {
+      "id": "party-estonian-people",
+      "kind": "party",
+      "label": {
+        "ko": "에스토니아 인민당",
+        "en": "Estonian People's Party"
+      },
+      "termIds": [
+        "estonian-peoples-party-1919"
+      ],
+      "countryCode": "estonia",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Estonian People's Party. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1919,
+          1932
+        ]
+      ]
+    },
+    {
+      "id": "party-estonian-coalition",
+      "kind": "party",
+      "label": {
+        "ko": "연립당 (에스토니아)",
+        "en": "Estonian Coalition Party"
+      },
+      "termIds": [
+        "estonian-coalition-party"
+      ],
+      "countryCode": "estonia",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Estonian Coalition Party. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1991,
+          2002
+        ]
+      ]
+    },
+    {
+      "id": "party-estonian-social-democratic",
+      "kind": "party",
+      "label": {
+        "ko": "에스토니아 사회민주당",
+        "en": "Social Democratic Party (Estonia)"
+      },
+      "termIds": [
+        "social-democratic-party-estonia"
+      ],
+      "countryCode": "estonia",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Social Democratic Party (Estonia). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1990,
+          null
+        ]
+      ]
+    },
+    {
+      "id": "party-latvian-farmers-union",
+      "kind": "party",
+      "label": {
+        "ko": "라트비아 농민연합",
+        "en": "Latvian Farmers' Union"
+      },
+      "termIds": [
+        "latvian-farmers-union"
+      ],
+      "countryCode": "latvia",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Latvian Farmers' Union. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1917,
+          1934
+        ],
+        [
+          1990,
+          null
+        ]
+      ]
+    },
+    {
+      "id": "party-latvias-way",
+      "kind": "party",
+      "label": {
+        "ko": "라트비아의 길",
+        "en": "Latvian Way"
+      },
+      "termIds": [
+        "latvian-way"
+      ],
+      "countryCode": "latvia",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Latvian Way. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1993,
+          2007
+        ]
+      ]
+    },
+    {
+      "id": "party-lithuanian-nationalist-union",
+      "kind": "party",
+      "label": {
+        "ko": "리투아니아 민족주의자연합",
+        "en": "Lithuanian Nationalists' Union"
+      },
+      "termIds": [
+        "lithuanian-nationalist-union"
+      ],
+      "countryCode": "lithuania",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Lithuanian Nationalists' Union. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1924,
+          1940
+        ]
+      ]
+    },
+    {
+      "id": "party-lithuanian-homeland-union",
+      "kind": "party",
+      "label": {
+        "ko": "조국연합 (리투아니아)",
+        "en": "Homeland Union (Lithuania)"
+      },
+      "termIds": [
+        "homeland-union-lithuania"
+      ],
+      "countryCode": "lithuania",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Homeland Union (Lithuania). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1993,
+          null
+        ]
+      ]
+    },
+    {
+      "id": "party-lithuanian-christian-democrats",
+      "kind": "party",
+      "label": {
+        "ko": "리투아니아 기독민주당",
+        "en": "Lithuanian Christian Democrats"
+      },
+      "termIds": [
+        "lithuanian-christian-democrats"
+      ],
+      "countryCode": "lithuania",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Lithuanian Christian Democrats. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1905,
+          2008
+        ]
+      ]
+    },
+    {
+      "id": "party-hungarian-liberal",
+      "kind": "party",
+      "label": {
+        "ko": "자유당 (헝가리)",
+        "en": "Liberal Party (Hungary)"
+      },
+      "termIds": [
+        "liberal-party-hungary"
+      ],
+      "countryCode": "hungary",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Liberal Party (Hungary). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1875,
+          1906
+        ]
+      ]
+    },
+    {
+      "id": "party-hungarian-independence",
+      "kind": "party",
+      "label": {
+        "ko": "독립당 (헝가리)",
+        "en": "Party of Independence and '48"
+      },
+      "termIds": [
+        "party-of-independence-and-48"
+      ],
+      "countryCode": "hungary",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Party of Independence and '48. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1884,
+          1918
+        ]
+      ]
+    },
+    {
+      "id": "party-hungarian-christian-national",
+      "kind": "party",
+      "label": {
+        "ko": "기독교민족연합당",
+        "en": "Christian National Union Party"
+      },
+      "termIds": [
+        "christian-national-union-party"
+      ],
+      "countryCode": "hungary",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Christian National Union Party. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1919,
+          1922
+        ]
+      ]
+    },
+    {
+      "id": "arrow-cross-party",
+      "kind": "party",
+      "label": {
+        "ko": "화살십자당",
+        "en": "Arrow Cross Party"
+      },
+      "termIds": [
+        "arrow-cross-party"
+      ],
+      "countryCode": "hungary",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Arrow Cross Party. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1935,
+          1945
+        ]
+      ]
+    },
+    {
+      "id": "party-hungarian-democratic-forum",
+      "kind": "party",
+      "label": {
+        "ko": "헝가리 민주포럼",
+        "en": "Hungarian Democratic Forum (MDF)"
+      },
+      "termIds": [
+        "hungarian-democratic-forum"
+      ],
+      "countryCode": "hungary",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Hungarian Democratic Forum (MDF). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1987,
+          2011
+        ]
+      ]
+    },
+    {
+      "id": "party-fidesz",
+      "kind": "party",
+      "label": {
+        "ko": "피데스",
+        "en": "Fidesz"
+      },
+      "termIds": [
+        "fidesz"
+      ],
+      "countryCode": "hungary",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Fidesz. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1988,
+          null
+        ]
+      ]
+    },
+    {
+      "id": "party-czech-national-social",
+      "kind": "party",
+      "label": {
+        "ko": "체코슬로바키아 국민사회당",
+        "en": "Czechoslovak National Social Party"
+      },
+      "termIds": [
+        "czechoslovak-national-social-party"
+      ],
+      "countryCode": "czechoslovakia",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Czechoslovak National Social Party. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1897,
+          1948
+        ]
+      ]
+    },
+    {
+      "id": "party-young-czech",
+      "kind": "party",
+      "label": {
+        "ko": "청년체코당",
+        "en": "Young Czech Party"
+      },
+      "termIds": [
+        "young-czech-party"
+      ],
+      "countryCode": "czechoslovakia",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Young Czech Party. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1874,
+          1918
+        ]
+      ]
+    },
+    {
+      "id": "party-czech-ods",
+      "kind": "party",
+      "label": {
+        "ko": "시민민주당",
+        "en": "Civic Democratic Party (ODS)"
+      },
+      "termIds": [
+        "civic-democratic-party-czech"
+      ],
+      "countryCode": "czechia",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Civic Democratic Party (ODS). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1991,
+          null
+        ]
+      ]
+    },
+    {
+      "id": "party-romanian-national",
+      "kind": "party",
+      "label": {
+        "ko": "루마니아 국민당",
+        "en": "Romanian National Party"
+      },
+      "termIds": [
+        "romanian-national-party"
+      ],
+      "countryCode": "romania",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Romanian National Party. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1881,
+          1926
+        ]
+      ]
+    },
+    {
+      "id": "party-romanian-national-peasants",
+      "kind": "party",
+      "label": {
+        "ko": "국민농민당",
+        "en": "National Peasants' Party"
+      },
+      "termIds": [
+        "national-peasants-party-romania"
+      ],
+      "countryCode": "romania",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in National Peasants' Party. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1926,
+          1947
+        ]
+      ]
+    },
+    {
+      "id": "party-romanian-peoples",
+      "kind": "party",
+      "label": {
+        "ko": "인민당 (루마니아)",
+        "en": "People's Party (Romania, 1918–1938)"
+      },
+      "termIds": [
+        "peoples-party-romania-1918"
+      ],
+      "countryCode": "romania",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in People's Party (Romania, 1918–1938). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1918,
+          1938
+        ]
+      ]
+    },
+    {
+      "id": "party-romanian-ploughmens-front",
+      "kind": "party",
+      "label": {
+        "ko": "농민전선",
+        "en": "Ploughmen's Front"
+      },
+      "termIds": [
+        "ploughmens-front"
+      ],
+      "countryCode": "romania",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Ploughmen's Front. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1933,
+          1953
+        ]
+      ]
+    },
+    {
+      "id": "party-bulgarian-agrarian",
+      "kind": "party",
+      "label": {
+        "ko": "불가리아 농민민족동맹",
+        "en": "Bulgarian Agrarian National Union"
+      },
+      "termIds": [
+        "bulgarian-agrarian-national-union"
+      ],
+      "countryCode": "bulgaria",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Bulgarian Agrarian National Union. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1899,
+          null
+        ]
+      ]
+    },
+    {
+      "id": "armenian-revolutionary-federation",
+      "kind": "party",
+      "label": {
+        "ko": "아르메니아 혁명연맹",
+        "en": "Armenian Revolutionary Federation"
+      },
+      "termIds": [
+        "armenian-revolutionary-federation"
+      ],
+      "countryCode": "russia",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Armenian Revolutionary Federation. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1890,
+          null
+        ]
+      ]
+    },
+    {
+      "id": "party-ukrainian-sr",
+      "kind": "party",
+      "label": {
+        "ko": "우크라이나 사회혁명당",
+        "en": "Ukrainian Party of Socialist Revolutionaries"
+      },
+      "termIds": [
+        "ukrainian-party-of-socialist-revolutionaries"
+      ],
+      "countryCode": "ukraine",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Ukrainian Party of Socialist Revolutionaries. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1917,
+          1950
+        ]
+      ]
+    },
+    {
+      "id": "party-ukrainian-sdlp",
+      "kind": "party",
+      "label": {
+        "ko": "우크라이나 사회민주노동당",
+        "en": "Ukrainian Social Democratic Labour Party"
+      },
+      "termIds": [
+        "ukrainian-social-democratic-labour-party"
+      ],
+      "countryCode": "ukraine",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Ukrainian Social Democratic Labour Party. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1905,
+          1950
+        ]
+      ]
+    },
+    {
+      "id": "oun",
+      "kind": "party",
+      "label": {
+        "ko": "우크라이나 민족주의자 조직",
+        "en": "Organization of Ukrainian Nationalists (OUN)"
+      },
+      "termIds": [
+        "organization-of-ukrainian-nationalists"
+      ],
+      "countryCode": "ukraine",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Organization of Ukrainian Nationalists (OUN). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1929,
+          null
+        ]
+      ]
+    },
+    {
+      "id": "party-azerbaijani-popular-front",
+      "kind": "party",
+      "label": {
+        "ko": "아제르바이잔 인민전선당",
+        "en": "Azerbaijani Popular Front Party"
+      },
+      "termIds": [
+        "azerbaijani-popular-front-party"
+      ],
+      "countryCode": "azerbaijan",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Azerbaijani Popular Front Party. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1989,
+          null
+        ]
+      ]
+    },
+    {
+      "id": "party-cup",
+      "kind": "party",
+      "label": {
+        "ko": "통일진보위원회",
+        "en": "Committee of Union and Progress"
+      },
+      "termIds": [
+        "committee-of-union-and-progress"
+      ],
+      "countryCode": "turkey",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Committee of Union and Progress. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1889,
+          1926
+        ]
+      ]
+    },
+    {
+      "id": "party-turkish-chp",
+      "kind": "party",
+      "label": {
+        "ko": "공화인민당",
+        "en": "Republican People's Party (CHP)"
+      },
+      "termIds": [
+        "republican-peoples-party-turkey"
+      ],
+      "countryCode": "turkey",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Republican People's Party (CHP). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1923,
+          null
+        ]
+      ]
+    },
+    {
+      "id": "party-turkish-communist",
+      "kind": "party",
+      "label": {
+        "ko": "터키 공산당",
+        "en": "Communist Party of Turkey"
+      },
+      "termIds": [
+        "communist-party-of-turkey-1920"
+      ],
+      "countryCode": "turkey",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Communist Party of Turkey. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1920,
+          1988
+        ]
+      ]
+    },
+    {
+      "id": "party-japanese-seiyukai",
+      "kind": "party",
+      "label": {
+        "ko": "입헌정우회",
+        "en": "Rikken Seiyūkai"
+      },
+      "termIds": [
+        "rikken-seiyukai"
+      ],
+      "countryCode": "japan",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Rikken Seiyūkai. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1900,
+          1940
+        ]
+      ]
+    },
+    {
+      "id": "imperial-rule-assistance-association",
+      "kind": "party",
+      "label": {
+        "ko": "대정익찬회",
+        "en": "Imperial Rule Assistance Association"
+      },
+      "termIds": [
+        "imperial-rule-assistance-association"
+      ],
+      "countryCode": "japan",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Imperial Rule Assistance Association. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1940,
+          1945
+        ]
+      ]
+    },
+    {
+      "id": "party-japan-democratic",
+      "kind": "party",
+      "label": {
+        "ko": "일본민주당",
+        "en": "Japan Democratic Party"
+      },
+      "termIds": [
+        "japan-democratic-party-1954"
+      ],
+      "countryCode": "japan",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Japan Democratic Party. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1954,
+          1955
+        ]
+      ]
+    },
+    {
+      "id": "party-japanese-ldp",
+      "kind": "party",
+      "label": {
+        "ko": "자유민주당 (일본)",
+        "en": "Liberal Democratic Party (Japan)"
+      },
+      "termIds": [
+        "liberal-democratic-party-japan"
+      ],
+      "countryCode": "japan",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Liberal Democratic Party (Japan). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1955,
+          null
+        ]
+      ]
+    },
+    {
+      "id": "party-cambodian-democratic",
+      "kind": "party",
+      "label": {
+        "ko": "민주당 (캄보디아)",
+        "en": "Democratic Party (Cambodia)"
+      },
+      "termIds": [
+        "democratic-party-cambodia"
+      ],
+      "countryCode": "cambodia",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Democratic Party (Cambodia). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1946,
+          1957
+        ]
+      ]
+    },
+    {
+      "id": "party-sangkum",
+      "kind": "party",
+      "label": {
+        "ko": "상쿰",
+        "en": "Sangkum"
+      },
+      "termIds": [
+        "sangkum-reastr-niyum"
+      ],
+      "countryCode": "cambodia",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Sangkum. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1955,
+          1970
+        ]
+      ]
+    },
+    {
+      "id": "party-funcinpec",
+      "kind": "party",
+      "label": {
+        "ko": "푼신펙",
+        "en": "FUNCINPEC"
+      },
+      "termIds": [
+        "funcinpec"
+      ],
+      "countryCode": "cambodia",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in FUNCINPEC. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1981,
+          null
+        ]
+      ]
+    },
+    {
+      "id": "party-lao-national-progressive",
+      "kind": "party",
+      "label": {
+        "ko": "라오스 국민진보당",
+        "en": "Lao National Progressive Party"
+      },
+      "termIds": [
+        "lao-national-progressive-party"
+      ],
+      "countryCode": "laos",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Lao National Progressive Party. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1950,
+          1958
+        ]
+      ]
+    },
+    {
+      "id": "party-singapore-pap",
+      "kind": "party",
+      "label": {
+        "ko": "인민행동당",
+        "en": "People's Action Party"
+      },
+      "termIds": [
+        "peoples-action-party-singapore"
+      ],
+      "countryCode": "singapore",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in People's Action Party. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1954,
+          null
+        ]
+      ]
+    },
+    {
+      "id": "party-korean-liberal",
+      "kind": "party",
+      "label": {
+        "ko": "자유당 (대한민국)",
+        "en": "Liberal Party (South Korea)"
+      },
+      "termIds": [
+        "liberal-party-south-korea"
+      ],
+      "countryCode": "south-korea",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Liberal Party (South Korea). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1951,
+          1970
+        ]
+      ]
+    },
+    {
+      "id": "party-korean-socialist-1918",
+      "kind": "party",
+      "label": {
+        "ko": "한인사회당",
+        "en": "Korean Socialist Party (1918)"
+      },
+      "termIds": [
+        "korean-socialist-party-1918"
+      ],
+      "countryCode": "korea",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Korean Socialist Party (1918). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1918,
+          1921
+        ]
+      ]
+    },
+    {
+      "id": "party-koryo-communist",
+      "kind": "party",
+      "label": {
+        "ko": "상하이파 고려공산당",
+        "en": "Korean Communist Party (Shanghai faction)"
+      },
+      "termIds": [
+        "korean-communist-party-shanghai-faction"
+      ],
+      "countryCode": "korea",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Korean Communist Party (Shanghai faction). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1921,
+          1922
+        ]
+      ]
+    },
+    {
+      "id": "party-afghan-national-revolutionary",
+      "kind": "party",
+      "label": {
+        "ko": "민족혁명당 (아프가니스탄)",
+        "en": "National Revolutionary Party (Afghanistan)"
+      },
+      "termIds": [
+        "national-revolutionary-party-afghanistan"
+      ],
+      "countryCode": "afghanistan",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in National Revolutionary Party (Afghanistan). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1974,
+          1978
+        ]
+      ]
+    },
+    {
+      "id": "party-wafd",
+      "kind": "party",
+      "label": {
+        "ko": "와프드당",
+        "en": "Wafd Party"
+      },
+      "termIds": [
+        "wafd-party"
+      ],
+      "countryCode": "egypt",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Wafd Party. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1918,
+          1953
+        ],
+        [
+          1978,
+          null
+        ]
+      ]
+    },
+    {
+      "id": "party-palestine-communist",
+      "kind": "party",
+      "label": {
+        "ko": "팔레스타인 공산당",
+        "en": "Palestine Communist Party"
+      },
+      "termIds": [
+        "palestine-communist-party-mandate"
+      ],
+      "countryCode": "palestine",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Palestine Communist Party. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1923,
+          1948
+        ]
+      ]
+    },
+    {
+      "id": "party-somali-rsp",
+      "kind": "party",
+      "label": {
+        "ko": "소말리아 혁명사회당",
+        "en": "Somali Revolutionary Socialist Party"
+      },
+      "termIds": [
+        "somali-revolutionary-socialist-party"
+      ],
+      "countryCode": "somalia",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Somali Revolutionary Socialist Party. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1976,
+          1991
+        ]
+      ]
+    },
+    {
+      "id": "party-benin-prpb",
+      "kind": "party",
+      "label": {
+        "ko": "베냉 인민혁명당",
+        "en": "People's Revolutionary Party of Benin"
+      },
+      "termIds": [
+        "peoples-revolutionary-party-of-benin"
+      ],
+      "countryCode": "benin",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in People's Revolutionary Party of Benin. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1975,
+          1990
+        ]
+      ]
+    },
+    {
+      "id": "party-dahomeyan-unity",
+      "kind": "party",
+      "label": {
+        "ko": "다호메 통일당",
+        "en": "Dahomeyan Unity Party"
+      },
+      "termIds": [
+        "dahomeyan-unity-party"
+      ],
+      "countryCode": "benin",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Dahomeyan Unity Party. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1960,
+          1963
+        ]
+      ]
+    },
+    {
+      "id": "party-benin-renaissance",
+      "kind": "party",
+      "label": {
+        "ko": "베냉 르네상스당",
+        "en": "Renaissance Party of Benin"
+      },
+      "termIds": [
+        "renaissance-party-of-benin"
+      ],
+      "countryCode": "benin",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Renaissance Party of Benin. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1992,
+          null
+        ]
+      ]
+    },
+    {
+      "id": "party-arema",
+      "kind": "party",
+      "label": {
+        "ko": "마다가스카르 혁명전위 (AREMA)",
+        "en": "AREMA (Vanguard of the Malagasy Revolution)"
+      },
+      "termIds": [
+        "arema-madagascar"
+      ],
+      "countryCode": "madagascar",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in AREMA (Vanguard of the Malagasy Revolution). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1976,
+          null
+        ]
+      ]
+    },
+    {
+      "id": "party-tanu",
+      "kind": "party",
+      "label": {
+        "ko": "탕가니카 아프리카 민족연합",
+        "en": "Tanganyika African National Union (TANU)"
+      },
+      "termIds": [
+        "tanganyika-african-national-union"
+      ],
+      "countryCode": "tanzania",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Tanganyika African National Union (TANU). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1954,
+          1977
+        ]
+      ]
+    },
+    {
+      "id": "party-ccm",
+      "kind": "party",
+      "label": {
+        "ko": "혁명당 (탄자니아)",
+        "en": "Chama Cha Mapinduzi (CCM)"
+      },
+      "termIds": [
+        "chama-cha-mapinduzi"
+      ],
+      "countryCode": "tanzania",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Chama Cha Mapinduzi (CCM). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1977,
+          null
+        ]
+      ]
+    },
+    {
+      "id": "party-ghana-cpp",
+      "kind": "party",
+      "label": {
+        "ko": "회의인민당",
+        "en": "Convention People's Party (CPP)"
+      },
+      "termIds": [
+        "convention-peoples-party"
+      ],
+      "countryCode": "ghana",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Convention People's Party (CPP). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1949,
+          null
+        ]
+      ]
+    },
+    {
+      "id": "party-south-african-party",
+      "kind": "party",
+      "label": {
+        "ko": "남아프리카당",
+        "en": "South African Party"
+      },
+      "termIds": [
+        "south-african-party"
+      ],
+      "countryCode": "south-africa",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in South African Party. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1911,
+          1934
+        ]
+      ]
+    },
+    {
+      "id": "party-south-african-united",
+      "kind": "party",
+      "label": {
+        "ko": "연합당 (남아프리카)",
+        "en": "United Party (South Africa)"
+      },
+      "termIds": [
+        "united-party-south-africa"
+      ],
+      "countryCode": "south-africa",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in United Party (South Africa). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1934,
+          1977
+        ]
+      ]
+    },
+    {
+      "id": "party-yemen-gpc",
+      "kind": "party",
+      "label": {
+        "ko": "국민전체회의",
+        "en": "General People's Congress (Yemen)"
+      },
+      "termIds": [
+        "general-peoples-congress-yemen"
+      ],
+      "countryCode": "yemen",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in General People's Congress (Yemen). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1982,
+          null
+        ]
+      ]
+    },
+    {
+      "id": "party-chilean-socialist",
+      "kind": "party",
+      "label": {
+        "ko": "칠레 사회당",
+        "en": "Socialist Party of Chile"
+      },
+      "termIds": [
+        "socialist-party-of-chile"
+      ],
+      "countryCode": "chile",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Socialist Party of Chile. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1933,
+          null
+        ]
+      ]
+    },
+    {
+      "id": "party-cuban-progressive-action",
+      "kind": "party",
+      "label": {
+        "ko": "진보행동당",
+        "en": "Progressive Action Party (Cuba)"
+      },
+      "termIds": [
+        "progressive-action-party-cuba"
+      ],
+      "countryCode": "cuba",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Progressive Action Party (Cuba). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1949,
+          1959
+        ]
+      ]
+    },
+    {
+      "id": "party-cuban-communist-1925",
+      "kind": "party",
+      "label": {
+        "ko": "쿠바 공산당 (1925)",
+        "en": "Communist Party of Cuba (1925)"
+      },
+      "termIds": [
+        "communist-party-of-cuba-1925"
+      ],
+      "countryCode": "cuba",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Communist Party of Cuba (1925). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1925,
+          1961
+        ]
+      ]
+    },
+    {
+      "id": "party-mexican-communist",
+      "kind": "party",
+      "label": {
+        "ko": "멕시코 공산당",
+        "en": "Mexican Communist Party"
+      },
+      "termIds": [
+        "mexican-communist-party"
+      ],
+      "countryCode": "mexico",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Mexican Communist Party. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1919,
+          1981
+        ]
+      ]
+    },
+    {
+      "id": "party-salvadoran-communist",
+      "kind": "party",
+      "label": {
+        "ko": "살바도르 공산당",
+        "en": "Communist Party of El Salvador"
+      },
+      "termIds": [
+        "communist-party-of-el-salvador"
+      ],
+      "countryCode": "el-salvador",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Communist Party of El Salvador. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1930,
+          1995
+        ]
+      ]
+    },
+    {
+      "id": "party-peruvian-socialist",
+      "kind": "party",
+      "label": {
+        "ko": "페루 사회당",
+        "en": "Peruvian Socialist Party (1928)"
+      },
+      "termIds": [
+        "peruvian-socialist-party-1928"
+      ],
+      "countryCode": "peru",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Peruvian Socialist Party (1928). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1928,
+          1930
+        ]
+      ]
+    },
+    {
+      "id": "party-estonian-centre",
+      "kind": "party",
+      "label": {
+        "ko": "에스토니아 중앙당",
+        "en": "Estonian Centre Party"
+      },
+      "termIds": [
+        "estonian-centre-party"
+      ],
+      "countryCode": "estonia",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Estonian Centre Party. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1991,
+          null
         ]
       ]
     }
