@@ -295,8 +295,8 @@ _ENTITY_TYPES = "Person, Organization, Location, Asset, Incident, Policy, Campai
 _PREDICATES = ("Affiliation, PersonalRelation, OrgRelation, Funding, AssetTransfer, ThreatAction, "
                "Involvement, Presence, PolicyEffect, Participation, Statement, Causation")
 
-EXTRACTION_SYSTEM = """You extract knowledge-graph facts from a document for a Korean-language political-economy knowledge base.
-Return ONLY a JSON object: {"facts": [ ... ]}. Each fact:
+# Shared with jobs/news_kg.py: output shape, schema and entity rules.
+FACT_SCHEMA_RULES = """Return ONLY a JSON object: {"facts": [ ... ]}. Each fact:
 {"subject_name": str, "subject_type": T, "predicate": P, "object_name": str, "object_type": T,
  "fact": str, "valid_at": "YYYY-MM-DD" | null, "invalid_at": "YYYY-MM-DD" | null, "subject_aliases": [str], "object_aliases": [str]}
 
@@ -309,9 +309,9 @@ Predicate rules by (subject_type → object_type):
   Presence: any→Location | PolicyEffect: Policy→any, Organization→Policy, Campaign→Policy
   ThreatAction: Person→Organization, Organization→Organization/Person, Campaign→Organization/Asset/Industry
   Funding, AssetTransfer, Statement, Causation: any→any (wildcards). Use Statement for "X said/argued/published Y".
-Guidelines:
-- At most %d facts; prefer the document's central, specific, dated claims. Skip trivia and rhetoric.
-- Entity names: Korean canonical form for Korean people/organizations (e.g. 민주노총, 김문수); well-known
+""" % (_ENTITY_TYPES, _PREDICATES)
+
+ENTITY_GUIDELINES = """- Entity names: Korean canonical form for Korean people/organizations (e.g. 민주노총, 김문수); well-known
   international entities in English (e.g. United States, Anthropic, Nikita Khrushchev). Put the other
   language form in *_aliases. Countries and governments are Organization, not Location.
 - Entities must be specific named things (proper nouns: a person, a named organization, a place, a
@@ -320,10 +320,21 @@ Guidelines:
   Attach such claims to the concrete actor the document names (e.g. 레닌 —Statement→ 『국가와 혁명』),
   or drop the fact. Facts using generic entities are discarded.
 - "fact" must be a self-contained sentence in the document's language, with dates/numbers when present.
-- Never extract the document itself, its author's persona, internal task ids, file names or code.
-- Subject and object must be distinct entities. Never use an actor as its own Statement target;
+"""
+
+DISTINCT_ENDPOINTS_GUIDELINE = """- Subject and object must be distinct entities. Never use an actor as its own Statement target;
   use a specifically named work or claim, or omit the fact when no such target exists.
-""" % (_ENTITY_TYPES, _PREDICATES, MAX_LLM_FACTS)
+"""
+
+EXTRACTION_SYSTEM = ("""You extract knowledge-graph facts from a document for a Korean-language political-economy knowledge base.
+"""
+                     + FACT_SCHEMA_RULES + "Guidelines:\n"
+                     + """- At most %d facts; prefer the document's central, specific, dated claims. Skip trivia and rhetoric.
+""" % MAX_LLM_FACTS
+                     + ENTITY_GUIDELINES
+                     + """- Never extract the document itself, its author's persona, internal task ids, file names or code.
+"""
+                     + DISTINCT_ENDPOINTS_GUIDELINE)
 
 
 def build_llm_prompt(rec: DocRecord) -> str:

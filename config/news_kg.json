@@ -1,0 +1,28 @@
+{
+  "note": "Daily news → KG job (jobs/news_kg.py). One Korean and one English news search per domain (topic=news, time_range=day). The selection step assigns each story a KG group; group here is only a hint shown to it.",
+  "max_stories": 6,
+  "exclude_domains_note": "Press-release wires: an organisation's own release is not an independent report, so it must not count as corroboration.",
+  "exclude_domains": ["prnewswire.com", "businesswire.com", "globenewswire.com", "newswire.co.kr", "einpresswire.com"],
+  "domains": [
+    {
+      "name": "국제정세·전쟁",
+      "group_hint": "geopolitics_conflict / diplomacy",
+      "queries": ["국제 정세 전쟁 외교 주요 뉴스", "world news war conflict diplomacy"]
+    },
+    {
+      "name": "경제·시장",
+      "group_hint": "economy",
+      "queries": ["경제 금융시장 산업 주요 뉴스", "global economy markets trade news"]
+    },
+    {
+      "name": "한국 국내",
+      "group_hint": "korea_domestic",
+      "queries": ["한국 정치 사회 주요 뉴스", "South Korea politics society news"]
+    },
+    {
+      "name": "노동·사회운동",
+      "group_hint": "korea_domestic (국내) / economy·geopolitics_conflict (해외)",
+      "queries": ["노동 파업 노조 시위 뉴스", "workers strike union protest news"]
+    }
+  ]
+}

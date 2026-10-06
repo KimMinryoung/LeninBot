@@ -1,0 +1,11 @@
+[Unit]
+Description=LeninBot daily news → KG timer (07:30 KST, after kg-sync 04:00 KST)
+
+[Timer]
+# 07:30 KST = 22:30 UTC
+OnCalendar=*-*-* 22:30:00 UTC
+Persistent=true
+RandomizedDelaySec=600
+
+[Install]
+WantedBy=timers.target

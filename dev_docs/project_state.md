@@ -105,6 +105,7 @@ Nginx·프런트엔드의 역방향 HTTP 프록시와 내부 서비스 게이트
 | `leninbot-experience.service` | `jobs/experience_writer.py` | daily experience memory write |
 | `leninbot-kg-integrity.service` | `scripts/check_kg_integrity.py` | KG maintenance check |
 | `leninbot-worker.service` | `python -m worker.service` | 상시. 다른 서비스가 `/worker/mcp`(leninbot-api)로 맡긴 에이전트 작업 실행. CommuLingo 보강 세션 포함([agent_worker.md](agent_worker.md)) |
+| `leninbot-news-kg.service` | `python -m jobs.news_kg --notify-on-error` | daily 07:30 KST — 전날 주요 뉴스 ≤6건을 검색·선별·본문 추출해 typed fact로 KG에 쓴다 (`dev_docs/knowledge_graph_design.md` News job) |
 | `leninbot-kg-sync.service` | `python -m jobs.kg_sync --source commulingo,documents --documents-limit 40 --notify-on-error` | nightly 04:00 KST — CommuLingo·발행 문서를 KG로 미러 (결정적 관계는 매일 전체 대조, 문서 LLM 추출은 본문 해시 기준 증분) |
 | `leninbot-kg-report.service` | `scripts/kg_weekly_report.py --notify` | Mon 09:30 KST — KG 건강 리포트 (성장·중복·동기화 지연·검색 사용량) |
 
@@ -133,7 +134,7 @@ Dependency direction is simple: `leninbot-llm-proxy.service` waits for network-o
 | PostgreSQL (`leninbot-pg`, pgvector/pg17, `127.0.0.1:5434`; 활성 `leninbot` + `writer` DBs — Supabase에서 2026-07-28 이전, `db_migration_plan.md`) | `db.py`, `telegram/task_store.py`, `memory_store/*`, `jobs/autonomous_project.py`, `services/email_bridge.py`, `security_gateway/audit.py`, `writer/store.py` | chat logs, task queue, missions, reports, autonomous projects, email metadata, vector corpus metadata, writer projects/messages/manuscripts/revisions, `tool_audit_log` (per-call security audit) |
 | PostgreSQL `legacy_game` DB (`leninbot-pg` 내부, 런타임 미사용·읽기 전용 보관) | 운영자 전용; `scripts/backup_main_db_to_r2.py`, `scripts/restore_db.py` | 옛 게임의 `story_scenes` 415행. main DB에서 2026-07-29 분리했으며 일일 로컬/R2 백업 및 DRI 복구 범위에 포함 |
 | pgvector | `corpus/*`, `memory_store/experiential.py` | core theory, modern analysis, self-produced analysis, experience memory vectors |
-| Neo4j | `graph_memory/*`, `kg_runtime/*`, `jobs/kg_sync*` | typed KG entities, relations, Graphiti episodes; 저장소 간 허브 — CommuLingo·리서치·사료 문서가 external_ids로 미러됨 (`dev_docs/knowledge_graph_design.md`) |
+| Neo4j | `graph_memory/*`, `kg_runtime/*`, `jobs/kg_sync*`, `jobs/news_kg.py` | typed KG entities, relations, Graphiti episodes; 저장소 간 허브 — CommuLingo·리서치·사료 문서가 external_ids로 미러됨 (`dev_docs/knowledge_graph_design.md`) |
 | Redis (DB 1) | `memory_store/redis_state.py` | incremental task progress, task-chain summaries, in-flight web chats, owner alert queue; circuit breaker on outage |
 | R2 | `shared.py`, publication/runtime tools | public uploaded files and generated media |
 

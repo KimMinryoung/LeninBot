@@ -537,5 +537,29 @@
       "type": "disabled"
     },
     "note": "2026-09-22 운영자가 요청한 혼합 역할 897명 이관의 공개 원문 근거 검토. 도구 없는 단발 JSON 검토이며 인물 DB 쓰기 없음. 원문 위치와 정체성·기능·실제 소속을 검토하고 결과는 별도 Jev 근거 검사 및 공통 Admin 이관 전에 검수한다."
+  },
+  "news_kg_select": {
+    "provider": "deepseek",
+    "model": "tier:high",
+    "temperature": 0.0,
+    "timeout": 180,
+    "json_mode": true,
+    "thinking": {
+      "type": "disabled"
+    },
+    "max_tokens": 2048,
+    "note": "일일 뉴스 job(jobs/news_kg.py) 후보 스니펫(≤64)에서 같은 사건 기사를 묶어 주요 사건 ≤6개 선별·group_id 분류. 하루 1회. 2026-10-06 사용자 결정: DeepSeek V4.1 Flash(저렴·충분히 똑똑함), Pro 금지, thinking off"
+  },
+  "news_kg_extraction": {
+    "provider": "deepseek",
+    "model": "tier:high",
+    "temperature": 0.0,
+    "timeout": 180,
+    "json_mode": true,
+    "thinking": {
+      "type": "disabled"
+    },
+    "max_tokens": 4096,
+    "note": "일일 뉴스 job(jobs/news_kg.py) 사건 하나(기사 ≤2건 본문 ≤16k자) → write_kg_structured fact ≤8, valid_at=사건 날짜. 하루 ≤6회. 2026-10-06 사용자 결정: gemini low가 '지난달 30일'을 2025-09-30으로 푼 사례 → 날짜 휴리스틱 검사 대신 DeepSeek V4.1 Flash + 프롬프트의 오늘 날짜(KST·요일)로 해결. Pro 금지, thinking off"
   }
 }
