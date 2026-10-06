@@ -226,6 +226,16 @@ def retract_kg_fact(
         with _get_neo4j_sync_driver() as (driver, database):
             with driver.session(database=database) as session:
                 rows = [dict(r) for r in session.run(CYPHER_RETRACT_CANDIDATES, **params)]
+                if not rows and edge_id:
+                    # A guessed edge_id (search output never shows one) must not
+                    # end the retraction; list the real candidates instead.
+                    rows = [dict(r) for r in session.run(CYPHER_RETRACT_CANDIDATES, **{**params, "edge_id": ""})]
+                    if rows:
+                        return {"status": "ambiguous", "candidates": [
+                            {"edge_id": r["uuid"][:8], "fact": (r["fact"] or "")[:200], "subject": r["subject"],
+                             "object": r["object"], "source_owned": bool(r["sync_key"])} for r in rows],
+                            "message": (f"edge_id '{edge_id}' matches none of these facts; call again with one "
+                                        "of the listed edge_ids")}
                 if not rows:
                     return {"status": "not_found", "message": (
                         f"no active fact '{subject_name} —{predicate}→ {object_name}'. Use the names exactly as "

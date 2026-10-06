@@ -765,7 +765,8 @@ SELF_TOOLS = [
             "your reason). Use only when a source shows the stored fact is false, misattributed, a duplicate "
             "of another active fact, or not a fact about the world (e.g. a work note). Name the fact exactly "
             "as knowledge_graph_search shows it: subject, predicate, object. If several active facts match, "
-            "the result lists them with edge_id; call again with the edge_id of the wrong one. Facts mirrored "
+            "the result lists them with edge_id; call again with the edge_id of the wrong one. Never guess "
+            "an edge_id: search output does not show it; it comes only from that list. Facts mirrored "
             "from CommuLingo or published documents are refused, because the next sync restores them. "
             "To correct, retract the wrong fact and write the right one with write_kg_structured."
         ),
@@ -2015,7 +2016,11 @@ async def _exec_write_kg(
         )
         msg = result["message"]
         if trust_tier == "unverified":
-            msg += " (trust_tier=unverified — no external source recorded this run)"
+            searched_only = buf is not None and buf.external_calls and all(
+                c["tool"] == "web_search" for c in buf.external_calls)
+            msg += (" (trust_tier=unverified — this run saw search-result snippets only; open the article "
+                    "with fetch_url before writing to record it as a source)" if searched_only else
+                    " (trust_tier=unverified — no external source recorded this run)")
         elif trust_tier == "anchor":
             msg += " (trust_tier=anchor — trusted operator chat/task context; no public URL source required)"
         return f"Knowledge stored successfully: {msg}"
@@ -2099,7 +2104,11 @@ async def _exec_write_kg_structured(
         )
         msg = result["message"]
         if trust_tier == "unverified":
-            msg += " (trust_tier=unverified — no external source recorded this run)"
+            searched_only = buf is not None and buf.external_calls and all(
+                c["tool"] == "web_search" for c in buf.external_calls)
+            msg += (" (trust_tier=unverified — this run saw search-result snippets only; open the article "
+                    "with fetch_url before writing to record it as a source)" if searched_only else
+                    " (trust_tier=unverified — no external source recorded this run)")
         elif trust_tier == "anchor":
             msg += " (trust_tier=anchor — trusted operator chat/task context; no public URL source required)"
         if result["status"] == "partial_success":

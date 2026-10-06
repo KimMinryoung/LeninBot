@@ -97,6 +97,13 @@ class AuditMetadataTests(unittest.IsolatedAsyncioTestCase):
                 out = await tools._exec_write_kg_structured([_fact("강신철")], group_id="korea_domestic")
             audit_sink.normalize_row("tool", {"tool_name": "write_kg_structured", "decision": "allow",
                                               "result_metadata": out.result_metadata})
+        from provenance.runtime import init_provenance_buffer
+        buf = init_provenance_buffer(agent="agent")
+        buf.record_external("web_search", "web_search:DMZ 지뢰")
+        with patch("kg_runtime.writes.add_kg_structured_async",
+                   new=AsyncMock(return_value={"status": "ok", "message": "m", "facts_written": 1})):
+            out = await tools._exec_write_kg_structured([_fact("강신철")], group_id="korea_domestic")
+        self.assertIn("search-result snippets only", out)
         for status in ("retracted", "ambiguous", "refused", "not_found", "error"):
             with patch("kg_runtime.writes.retract_kg_fact", return_value={"status": status, "message": "m"}):
                 out = await tools._exec_retract_kg_fact("a", "Statement", "b", "reason long enough here")

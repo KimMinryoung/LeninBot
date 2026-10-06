@@ -84,6 +84,13 @@ class RetractTests(unittest.TestCase):
         result, _ = self._call([_edge("7c557d67-aaaa")], reason="wrong")
         self.assertEqual(result["status"], "refused")
 
+    def test_guessed_edge_id_lists_real_candidates(self):
+        result, session = self._call([_edge("7c557d67-aaaa"), _edge("b2b188cc-bbbb")], edge_id="3ecf0f18")
+        self.assertEqual(result["status"], "ambiguous")
+        self.assertIn("3ecf0f18", result["message"])
+        self.assertEqual([c["edge_id"] for c in result["candidates"]], ["7c557d67", "b2b188cc"])
+        self.assertFalse(session.retracted)
+
     def test_no_match(self):
         result, _ = self._call([])
         self.assertEqual(result["status"], "not_found")
