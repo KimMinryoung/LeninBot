@@ -516,6 +516,15 @@ def _item_rows(story: dict, status: str, facts_written: int) -> list[dict]:
     return rows
 
 
+def rejection_alert(stats: dict) -> str | None:
+    """A run where most facts stay rejected after repair points at a systemic cause (schema or prompt
+    drift), not at single bad facts, so it fails the run; isolated rejections stay silent."""
+    rejected, written = stats.get("facts_rejected") or 0, stats.get("facts_written") or 0
+    if rejected and rejected > written:
+        return f"{rejected} facts rejected after repair vs {written} written"
+    return None
+
+
 def run(*, max_stories: int | None = None, dry_run: bool = False) -> dict:
     config = load_config()
     max_stories = max_stories or int(config.get("max_stories") or 6)
@@ -576,6 +585,8 @@ def run(*, max_stories: int | None = None, dry_run: bool = False) -> dict:
             continue  # infrastructure failure, not recorded: a later run retries these URLs
         # Schema rejections that survived the repair round are a quality outcome, not a run failure.
         record_items(_item_rows(story, "written" if written else "rejected", written))
+    if not dry_run and (msg := rejection_alert(stats)):
+        errors.append(msg)
     if errors:
         stats["error"] = "; ".join(errors)[:1000]
     stats["dry_run"] = dry_run

@@ -149,6 +149,12 @@ class FactTests(unittest.TestCase):
             res = news_kg.write_story(self.story(), [{}], RUN_DATE)
         self.assertEqual((res["status"], res["facts_rejected"], res["message"]), ("rejected", 1, None))
 
+    def test_run_fails_only_when_rejections_outnumber_writes(self):
+        self.assertIsNone(news_kg.rejection_alert({"facts_written": 38, "facts_rejected": 0}))
+        self.assertIsNone(news_kg.rejection_alert({"facts_written": 5, "facts_rejected": 2}))
+        self.assertIsNone(news_kg.rejection_alert({}))
+        self.assertIn("16 facts rejected", news_kg.rejection_alert({"facts_written": 5, "facts_rejected": 16}))
+
     def test_tier_counts_distinct_fetched_outlets(self):
         story = self.story()
         self.assertEqual(news_kg.trust_tier(story), "corroborated")
