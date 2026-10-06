@@ -77,6 +77,7 @@ def _entity_gated_kg_block(text: str, provider: str = "claude", *, max_entities:
     except Exception as exc:
         if _outcome is not None:
             _outcome["failed"] = True
+            _outcome["error"] = f"{type(exc).__name__}: {exc}"
         logger.debug("[KG recall] skipped: %s", exc)
         return ""
 
@@ -107,4 +108,4 @@ def _audit_recall(outcome, latency_ms):
     audit(get_caller(), 'kg_entity_recall', {},
           Decision(True, 'allow', 'read', '', 'observe', 'automatic_recall'),
           result_status='error' if outcome['failed'] else 'ok',
-          latency_ms=latency_ms, result_metadata=outcome)
+          latency_ms=latency_ms, error_excerpt=outcome.pop('error', None), result_metadata=outcome)

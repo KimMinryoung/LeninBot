@@ -185,6 +185,7 @@ class ReadTests(unittest.TestCase):
              patch.object(recall, '_audit_recall') as audit:
             self.assertEqual(recall.entity_gated_kg_block('known name'), '')
         self.assertTrue(audit.call_args.args[0]['failed'])
+        self.assertEqual(audit.call_args.args[0]['error'], 'RuntimeError: offline')
 
 
 class PinnedIdentityTests(unittest.IsolatedAsyncioTestCase):
