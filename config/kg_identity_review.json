@@ -6027,6 +6027,38 @@
       ],
       "external_ids": [],
       "evidence_sync_keys": []
+    },
+    {
+      "uuid": "3e7e7565-72e7-41fc-ae47-503f5b56b85f",
+      "target_uuid": "89f3d2ad-707a-4fab-9889-3139afe7fcf2",
+      "original_name": "한국",
+      "name": "한국",
+      "action": "merge",
+      "reason": "국가 South Korea를 Location 타입으로 쓴 중복 노드; '한국'은 이미 South Korea의 별칭 (2026-10-06)",
+      "types": [
+        "Location"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "evidence_sync_keys": []
+    },
+    {
+      "uuid": "b5762b90-da39-45f6-a6d2-eb9d259d6080",
+      "target_uuid": "89f3d2ad-707a-4fab-9889-3139afe7fcf2",
+      "original_name": "대한민국",
+      "name": "대한민국",
+      "action": "merge",
+      "reason": "국가 South Korea를 Location 타입으로 쓴 중복 노드; '대한민국'은 이미 South Korea의 별칭 (2026-10-06)",
+      "types": [
+        "Location"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "external_ids": [],
+      "evidence_sync_keys": []
     }
   ]
 }
