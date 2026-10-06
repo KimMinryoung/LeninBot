@@ -808,6 +808,7 @@ class AliasIndex:
         self.min_hangul = min_hangul
         self.min_latin = min_latin
         self._loaded_at = 0.0
+        self.last_error: str | None = None
         self._keys: dict[str, list[tuple[str, str, list[str]]]] = {}
         self._lock = threading.Lock()
 
@@ -863,8 +864,10 @@ class AliasIndex:
             return True
         try:
             self.refresh_from_neo4j()
+            self.last_error = None
             return True
         except Exception as exc:
+            self.last_error = f"{type(exc).__name__}: {exc}"
             logger.debug("[KG identity] alias index refresh failed: %s", exc)
             return bool(self._keys)
 

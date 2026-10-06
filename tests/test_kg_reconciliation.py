@@ -187,6 +187,14 @@ class ReadTests(unittest.TestCase):
         self.assertTrue(audit.call_args.args[0]['failed'])
         self.assertEqual(audit.call_args.args[0]['error'], 'RuntimeError: offline')
 
+    def test_alias_index_failure_names_the_cause(self):
+        from kg_runtime.identity import AliasIndex
+        idx = AliasIndex()
+        with patch.object(idx, 'refresh_from_neo4j', side_effect=OSError('connection refused')), \
+             patch('kg_runtime.identity.get_alias_index', return_value=idx):
+            with self.assertRaisesRegex(RuntimeError, r'\(OSError: connection refused\)'):
+                search._alias_hits('known name', strict=True)
+
 
 class PinnedIdentityTests(unittest.IsolatedAsyncioTestCase):
     async def test_same_name_mentions_keep_distinct_known_targets_without_creating_nodes(self):

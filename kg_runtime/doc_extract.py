@@ -705,7 +705,8 @@ def extract_research_by_slug(slug: str, *, use_llm: bool | None = None) -> dict:
         rec = research_record({'slug': slug})
         idx = get_alias_index()
         if not idx.ensure_loaded():
-            raise RuntimeError("Document alias index unavailable")
+            raise RuntimeError("Document alias index unavailable"
+                               + (f" ({idx.last_error})" if idx.last_error else ""))
         return reconcile_document(rec, alias_index=idx, use_llm=use_llm)
     except Exception as exc:
         logger.warning("[doc-extract] research %s failed: %s", slug, exc)

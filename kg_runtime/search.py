@@ -545,7 +545,8 @@ def _alias_hits(text: str, limit: int = 5, *, broad: bool = True, strict: bool =
         idx = get_alias_index()
         if not idx.ensure_loaded():
             if strict:
-                raise RuntimeError("KG alias index unavailable; check Neo4j credentials/connectivity")
+                raise RuntimeError("KG alias index unavailable; check Neo4j credentials/connectivity"
+                                   + (f" ({idx.last_error})" if idx.last_error else ""))
             return []
         return idx.match(text, limit=limit, broad=broad)
     except Exception as exc:

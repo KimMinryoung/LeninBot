@@ -111,7 +111,8 @@ def run(*, since: datetime | None = None, full: bool = False, limit: int | None 
     from kg_runtime.identity import get_alias_index
     idx = get_alias_index()
     if not idx.ensure_loaded():
-        raise RuntimeError("Document alias index unavailable; refusing incomplete reconciliation")
+        raise RuntimeError("Document alias index unavailable; refusing incomplete reconciliation"
+                           + (f" ({idx.last_error})" if idx.last_error else ""))
 
     stats["links_repaired"] = 0
     attempted = 0
