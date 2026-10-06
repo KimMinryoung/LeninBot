@@ -85,8 +85,11 @@ class SideTests(unittest.TestCase):
 
     def test_year_dates(self):
         self.assertEqual(sync._year_date(1953), "1953-01-01")
-        self.assertEqual(sync._year_date(1964, 10, end=True), "1964-10-01")
-        self.assertEqual(sync._year_date(1964, None, end=True), "1964-12-31")
+        self.assertEqual(sync._year_date(1917, 11, 9), "1917-11-09")
+        self.assertEqual(sync._year_date(1964, 10, end=True), "1964-11-01")
+        self.assertEqual(sync._year_date(1964, 12, end=True), "1965-01-01")
+        self.assertEqual(sync._year_date(1917, 11, 21, end=True), "1917-11-22")
+        self.assertEqual(sync._year_date(1964, None, end=True), "1965-01-01")
         self.assertIsNone(sync._year_date(None))
 
 
@@ -112,7 +115,7 @@ class BuildFactsTests(unittest.TestCase):
         self.assertEqual((f["subject_type"], f["predicate"], f["object_type"]), ("Person", "Affiliation", "Role"))
         self.assertEqual(f["object_external_id"], "commulingo:office:party-leadership")
         self.assertEqual(f["valid_at"], "1953-01-01")
-        self.assertEqual(f["invalid_at"], "1964-10-01")
+        self.assertEqual(f["invalid_at"], "1964-11-01")
         self.assertEqual(f["attributes"]["position"], "제1서기 · 각료회의 의장")
 
     def test_event_people_and_location(self):

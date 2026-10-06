@@ -37,7 +37,7 @@ import json
 import logging
 import re
 import unicodedata
-from datetime import datetime
+from datetime import date, datetime, timedelta
 
 from kg_runtime.doc_extract import josa
 
@@ -79,20 +79,26 @@ def _truncate(text: str, limit: int = SUMMARY_MAX) -> str:
     return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
 
 
-def _year_date(year, month=None, *, end: bool = False) -> str | None:
+def _year_date(year, month=None, day=None, *, end: bool = False) -> str | None:
+    """Period point → ISO date. A start is its first day; an end (``end=True``)
+    is the first day after it, so ``invalid_at`` stays after ``valid_at`` even
+    for a tenure inside one month or on one day (1917.11.09–21)."""
     if not year:
         return None
     try:
         y = int(year)
+        m = int(month) if month else None
+        d = int(day) if m and day else None
+        start = date(y, m or 1, d or 1)
     except (TypeError, ValueError):
         return None
-    if month:
-        try:
-            m = int(month)
-            return f"{y:04d}-{m:02d}-01"
-        except (TypeError, ValueError):
-            pass
-    return f"{y:04d}-12-31" if end else f"{y:04d}-01-01"
+    if not end:
+        return start.isoformat()
+    if d:
+        return (start + timedelta(days=1)).isoformat()
+    if m:
+        return (date(y + 1, 1, 1) if m == 12 else date(y, m + 1, 1)).isoformat()
+    return date(y + 1, 1, 1).isoformat()
 
 
 # ── Side (entity) hints ───────────────────────────────────────────────────────
@@ -301,8 +307,8 @@ def build_facts(src: Source, *, changed: dict[str, set[str]] | None = None) -> l
             f"{ps['name']}: {os_['name']} — {body}" + (f" ({period})" if period else ""),
             sync_key=sync_key("office_row", row['id']),
             attributes={"position": body, "affiliation_type": "office_row", "period_label": period},
-            valid_at=_year_date(row.get("start_year"), row.get("start_month")),
-            invalid_at=_year_date(row.get("end_year"), row.get("end_month"), end=True),
+            valid_at=_year_date(row.get("start_year"), row.get("start_month"), row.get("start_day")),
+            invalid_at=_year_date(row.get("end_year"), row.get("end_month"), row.get("end_day"), end=True),
         ))
 
     # events → people involvement, locations
