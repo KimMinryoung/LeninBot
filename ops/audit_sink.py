@@ -121,8 +121,9 @@ def normalize_row(kind: str, row: dict) -> dict:
             allowed = {"path", "node_count", "edge_count", "result_count", "empty", "fallback", "execution_kind", "extracted_chars", "returned_chars", "cache_hit", "failure_type", "source_identified", "source_measured", "degraded", "failed", "injected",
                        # KG write/retract outcomes (write_kg_structured, retract_kg_fact)
                        "write_status", "facts_written", "facts_rejected", "retract_status"}
-            if set(value) - allowed:
-                raise ValueError(f"unsupported {col} fields")
+            extra = sorted(set(value) - allowed)
+            if extra:
+                raise ValueError(f"unsupported {col} fields: {', '.join(extra)}")
             for key, item in value.items():
                 if item is None:
                     continue

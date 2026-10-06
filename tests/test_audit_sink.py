@@ -45,6 +45,11 @@ class NormalizeTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             audit_sink.normalize_rows("llm", [{}] * (audit_sink.MAX_ROWS_PER_REQUEST + 1))
 
+    def test_unsupported_metadata_names_the_keys(self):
+        with self.assertRaisesRegex(ValueError, r"unsupported result_metadata fields: bogus, zeta$"):
+            audit_sink.normalize_row("tool", {"tool_name": "x", "decision": "allow",
+                                              "result_metadata": {"empty": True, "zeta": 1, "bogus": 2}})
+
     def test_tool_row_bools_and_json_strings(self):
         row = audit_sink.normalize_row("tool", {
             "tool_name": "web_search", "decision": "allow", "is_owner": 1,
