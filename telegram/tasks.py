@@ -49,6 +49,9 @@ _DIARY_ACTIVITY_CHAT_LIMIT = 16
 _DIARY_ACTIVITY_TASK_LIMIT = 10
 _DIARY_ACTIVITY_REPORT_LIMIT = 6
 _DIARY_ACTIVITY_PROJECT_LIMIT = 6
+_DIARY_LEDGER_LIMIT = 6
+_DIARY_LEDGER_LEAD_CHARS = 120
+_DIARY_LEDGER_CLOSING_CHARS = 200
 
 
 # ── Current State Builder (shared by orchestrator + task agents) ─────
@@ -243,6 +246,47 @@ def _format_ts_for_diary(ts) -> str:
     return str(ts or "?")[:19]
 
 
+def _format_recent_diary_ledger() -> str:
+    """List recent diaries by title, opening and closing instead of full bodies.
+
+    Full recent bodies in context became templates the next entry copied
+    (closing formulas, title shapes, re-narrated background). The ledger keeps
+    topic continuity visible while the rules forbid reusing the phrasing.
+    """
+    try:
+        rows = _query(
+            "SELECT id, title, content, created_at FROM ai_diary ORDER BY created_at DESC LIMIT %s",
+            (_DIARY_LEDGER_LIMIT,),
+        )
+    except Exception as e:
+        logger.debug("Diary ledger load failed: %s", e)
+        return ""
+    if not rows:
+        return ""
+
+    lines = [
+        "Recent diaries (newest first), each as the start of every paragraph plus its closing. "
+        "Topics here are already covered: write only what is new since. "
+        "Titles and closings here are already used: do not reuse their shape, formulas, or signature metaphors.",
+    ]
+    for row in rows:
+        paragraphs = [" ".join(p.split()) for p in str(row.get("content") or "").split("\n") if p.strip()]
+        leads = [
+            p[:_DIARY_LEDGER_LEAD_CHARS] + ("…" if len(p) > _DIARY_LEDGER_LEAD_CHARS else "")
+            for p in paragraphs
+        ]
+        body = " ".join(paragraphs)
+        closing = body[-_DIARY_LEDGER_CLOSING_CHARS:]
+        if len(body) > _DIARY_LEDGER_CLOSING_CHARS:
+            closing = "…" + closing
+        lines.append(
+            f"- #{row.get('id')} [{_format_ts_for_diary(row.get('created_at'))}] \"{row.get('title') or ''}\"\n"
+            + "".join(f"  lead: {lead}\n" for lead in leads)
+            + f"  closing: {closing}"
+        )
+    return "\n".join(lines)
+
+
 def _format_diary_activity_context(provider: str | None) -> str:
     """Inject a compact activity digest anchored to the latest diary timestamp."""
     hours_back = _DIARY_ACTIVITY_FALLBACK_HOURS
@@ -270,6 +314,10 @@ def _format_diary_activity_context(provider: str | None) -> str:
         sections.append(
             f"Anchor: no previous diary timestamp was found; use roughly the last {hours_back} hours."
         )
+
+    ledger = _format_recent_diary_ledger()
+    if ledger:
+        sections.append(ledger)
 
     try:
         from memory_store.queries import fetch_chat_logs

@@ -365,7 +365,7 @@ Agent tasks receive structured context rather than a passive chat dump:
 | agent execution history | latest completed/handed-off task by same user and agent in the same mission, only when no parent-chain context was recovered |
 | task chain | Redis `task_result:*` and DB fallback |
 | agent board | `telegram_mission_events` rows with `event_type='agent_message'` (latest 50; kept out of the mission timeline) |
-| diary activity preflight | scheduled diary-writing prompt only: latest diary anchor plus recent Telegram context, completed tasks/reports, public or staged research documents, and autonomous project state are injected automatically so new entries can focus on the period since the last diary |
+| diary activity preflight | scheduled diary-writing prompt only: latest diary anchor, a recent-diary ledger (last 6 entries as title, paragraph starts and closing — not full bodies, so the writer sees covered topics without copying phrasing), plus recent Telegram context, completed tasks/reports, public or staged research documents, and autonomous project state are injected automatically so new entries can focus on the period since the last diary |
 | diary web-chat preflight | scheduled diary-writing prompt only: recent public web `chat_logs` are injected automatically so correction, omission, non-publication, and topic-priority instructions from web chat reach the next scheduled diary run |
 | task | orchestrator delegation text |
 
