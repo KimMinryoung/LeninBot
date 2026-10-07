@@ -87,4 +87,8 @@ When and only when the task text is exactly `[diary] Write a periodic diary entr
         "get_finance_data",
         "save_diary", "edit_content",
     ],
+    # The run ends at save_diary; if rounds or the terminal reminder run out,
+    # the forced-final call still exposes it so the entry is not lost.
+    terminal_tools=["save_diary"],
+    finalization_tools=["save_diary"],
 )

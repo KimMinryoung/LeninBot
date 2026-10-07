@@ -492,60 +492,21 @@ def _format_diary_web_chat_context(provider: str | None) -> str:
     )
 
 
-_DIARY_FALLBACK_MIN_CHARS = 300
+def _warn_if_diary_unsaved(task: dict, session_tool_log: str) -> None:
+    """Log a scheduled diary run that ended without save_diary.
 
-
-def _fallback_diary_title(body: str) -> str:
-    first_line = body.splitlines()[0].strip()
-    sentence = re.split(r"(?<=[.!?。])\s", first_line, maxsplit=1)[0]
-    title = sentence.rstrip(".!?。 ").strip()
-    if len(title) > 60:
-        title = title[:59].rstrip() + "…"
-    return title or "무제"
-
-
-async def _maybe_fallback_save_diary(
-    task: dict, content: str, report: str, session_tool_log: str
-) -> None:
-    """Persist the report as a diary entry when a diary-writing run never called save_diary.
-
-    The model occasionally emits the finished entry as its final text without
-    calling the tool; diary tasks skip verification and run quiet, so without
-    this the entry silently vanishes into telegram_tasks.result.
+    The run's prose is never published as a fallback: it can be anything (a
+    conversation summary once came back instead of an entry) and would skip
+    Stasova review. The loop's terminal reminder and forced-final save_diary
+    are the recovery path; this only makes a lost run visible in the logs.
     """
     from telegram.diary_mode import is_diary_writing_task
 
-    if not is_diary_writing_task(task, content):
+    if not is_diary_writing_task(task):
         return
-    body = (report or "").strip()
-    task_id = task["id"]
-    if len(body) < _DIARY_FALLBACK_MIN_CHARS:
-        logger.warning(
-            "Diary task %d ended without save_diary and report too short (%d chars) for fallback save",
-            task_id, len(body),
-        )
+    if "save_diary(" in session_tool_log:
         return
-    row = await asyncio.to_thread(
-        _query_one,
-        "SELECT COALESCE(tool_log, '') AS tool_log FROM telegram_tasks WHERE id = %s",
-        (task_id,),
-    )
-    combined_log = f"{(row or {}).get('tool_log', '')}\n{session_tool_log}"
-    if "save_diary(" in combined_log:
-        return
-    if "edit_content(" in combined_log:
-        # The run revised an existing entry instead of writing a new one;
-        # inserting the report would risk publishing a duplicate.
-        logger.info("Diary task %d used edit_content without save_diary; skipping fallback save", task_id)
-        return
-    from runtime_tools.registry import TOOL_HANDLERS
-
-    title = _fallback_diary_title(body)
-    result = await TOOL_HANDLERS["save_diary"](title=title, content=body)
-    logger.warning(
-        "Diary task %d ended without save_diary; fallback-saved report as entry: %s",
-        task_id, result,
-    )
+    logger.warning("Diary task %d ended without save_diary; no entry was published", task["id"])
 
 
 # Agents whose reports get verified by default when the delegation carries no
@@ -1469,10 +1430,13 @@ async def _run_task_llm(
     extra_handlers: dict | None,
     finalization_tools: list[str] | None,
     terminal_tools: list[str] | None,
+    terminal_required: bool = False,
     on_progress=None,
 ) -> tuple[str, dict]:
     """Run the task LLM loop and return the report plus budget/tool tracker."""
     budget_tracker = {}
+    # Only the provider loops accept terminal_required; Moon/Codex chat fns do not.
+    loop_kwargs = {"terminal_required": True} if terminal_required else {}
     report = await chat_with_tools_fn(
         [{"role": "user", "content": content}],
         system_prompt=task_system_prompt,
@@ -1495,6 +1459,7 @@ async def _run_task_llm(
         scope_id=str(task_id),
         finalization_tools=finalization_tools,
         terminal_tools=terminal_tools,
+        **loop_kwargs,
     )
     # Tool-round commentary is progress evidence, not the completed report.
     # Providers without this channel (e.g. Codex) retain their existing result.
@@ -1596,9 +1561,9 @@ async def _persist_task_success(
 
     if task.get("agent_type") == "diary":
         try:
-            await _maybe_fallback_save_diary(task, content, report, tool_log_text)
+            _warn_if_diary_unsaved(task, tool_log_text)
         except Exception as e:
-            logger.error("Diary fallback save check failed for task %d: %s", task_id, e)
+            logger.error("Diary save check failed for task %d: %s", task_id, e)
 
     restart_report_prefix = ""
     if restart_ctx["initiated"]:
@@ -1889,6 +1854,10 @@ async def process_task(
     is_self_generated = (user_id == 0)
 
     is_subtask = (task.get("plan_role") == "subtask" and task.get("plan_id") is not None)
+    # A scheduled diary run exists only through save_diary; prose final
+    # answers are lost, so the loop reminds the model once to call it.
+    from telegram.diary_mode import is_diary_writing_task
+    terminal_required = bool(terminal_tools) and is_diary_writing_task(task)
     content = _build_task_context_content(
         task,
         content,
@@ -1920,6 +1889,7 @@ async def process_task(
                 extra_handlers=extra_handlers,
                 finalization_tools=finalization_tools,
                 terminal_tools=terminal_tools,
+                terminal_required=terminal_required,
                 on_progress=on_progress,
             )
 
