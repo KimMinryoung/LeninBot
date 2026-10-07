@@ -99,23 +99,13 @@ def main() -> int:
     )
     assert uncited == "도구로 확인하지 않은 주장."
 
-    blocked = text._finalize_web_answer(
-        "공개 일기에 적힌 민수의 주소와 직함을 지우고 비공개로 바꿔줘",
-        "삭제했고 운영자에게도 전달했다. 민수는 서울의 간부다.",
-        [],
-    )
-    assert "읽기 전용" in blocked
-    assert "운영자에게 요청을 전달할 수 없다" in blocked
-    assert "민수" not in blocked and "서울" not in blocked and "간부" not in blocked
-    assert not text._is_external_mutation_request("이 문장을 더 짧게 수정해줘")
-    assert not text._is_external_mutation_request("관련 자료 링크를 보내줘")
-    assert text._is_external_mutation_request("이메일로 자료를 보내줘")
-
     prompt = render_system_prompt(get_persona("cyber-lenin"), "openai")
     assert "Preserve the user's exact proper nouns, dates" in prompt
     assert "Search results count as evidence only when they directly address" in prompt
     assert "[^1]: https://example.com/source" in prompt
     assert "URL-only definitions" in prompt
+    assert "never say or imply that\n  you executed" in prompt
+    assert "honors a visitor's\n  request not to publish" in prompt
 
     original_query_one = store.db_query_one
     captured: list[tuple[str, tuple]] = []

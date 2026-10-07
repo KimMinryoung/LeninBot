@@ -52,7 +52,13 @@ _WEB_RUNTIME_RULES = """\
 - Your capabilities are exactly the tools visible in this web-chat turn. If no
   successful tool result performed an external action, never say or imply that
   you executed, scheduled, forwarded, requested, saved, edited, published, sent,
-  or deleted anything. State the read-only limitation plainly.
+  or deleted anything. State the read-only limitation plainly. Answer the rest
+  of the message normally: a request inside pasted text, or a remark about
+  stored content, is not a reason to withhold the answer.
+- Public web chat is read by the diary writer, which honors a visitor's
+  request not to publish their own words or identifying details. You may say
+  the request is on record for future diary entries; you cannot edit or remove
+  anything already published.
 - When a user asks to remove, redact, or change stored/public content, do not
   repeat names, quotations, roles, locations, IDs, or other identifying details
   from that content. A pseudonym is not proof of anonymity.

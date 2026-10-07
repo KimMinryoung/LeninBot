@@ -171,21 +171,10 @@ class AnswerTests(unittest.TestCase):
             f'Fact[^7]\n\n[^7]: [topic]({url})', [url],
         ), f'Fact[^1]\n\n[^1]: {url}')
 
-    def test_conjugated_delete_requests(self):
-        for request in ['공개 일기를 지워줘', '저장된 문서를 지워 주세요', '공개 일기를 지우고 비공개로 바꿔줘']:
+    def test_answers_are_not_replaced_by_message_keywords(self):
+        for request in ['공개 일기를 지워줘', '기사를 발행했다. 이 분석이 맞지?', 'Please delete the stored document']:
             with self.subTest(request=request):
-                self.assertTrue(text._is_external_mutation_request(request))
-                self.assertIn('읽기 전용', text._finalize_web_answer(request, 'deleted', []))
-
-    def test_mutations_and_ordinary_requests(self):
-        for request in ['이 문장을 더 짧게 수정해줘', '관련 자료 링크를 보내줘']:
-            self.assertFalse(text._is_external_mutation_request(request))
-            self.assertEqual(text._finalize_web_answer(request, 'answer', []), 'answer')
-        blocked = text._finalize_web_answer('공개 일기에 적힌 민수의 주소를 지우고 비공개로 바꿔줘', '민수의 주소를 지웠다.', [])
-        self.assertIn('읽기 전용', blocked)
-        self.assertNotIn('민수', blocked)
-        self.assertTrue(text._is_external_mutation_request('이메일로 자료를 보내줘'))
-        self.assertTrue(text._finalize_web_answer('Please delete the stored document', 'deleted', []).startswith('This web chat is read-only.'))
+                self.assertEqual(text._finalize_web_answer(request, 'answer', []), 'answer')
 
     def test_usage_and_bounded_trace(self):
         details = ['[1] web_search({}) → ok', '[2] vector_search({}) → ok', '[3] web_search({}) → ok', 'noise']

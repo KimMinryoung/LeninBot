@@ -156,25 +156,6 @@ _CITATION_RE = re.compile(
     re.IGNORECASE,
 )
 
-_STORED_TARGET_RE = re.compile(
-    r"(일기|게시물|공개\s*글|저장(?:된)?\s*(?:글|기록|문서|데이터)|"
-    r"계정|메시지|페이지|파일|이메일|메일|diary|post|account|"
-    r"stored\s+(?:content|record|document|data)|message|page|file|email)",
-    re.IGNORECASE,
-)
-_MUTATION_ACTION_RE = re.compile(
-    r"(삭제|지우|지워|비공개|수정|변경|업로드|게시|발행|전송|보내|연락|"
-    r"신고|결제|송금|delete|remove|redact|unpublish|edit|change|"
-    r"upload|publish|send|forward|contact|report|pay|transfer)",
-    re.IGNORECASE,
-)
-_REQUEST_CUE_RE = re.compile(
-    r"(줘|주세요|해\s*주|해라|하라|해야|맞지|않을까|"
-    r"원한다|바란다|can\s+you|please|would\s+you|should\s+(?:you|we)|\?)",
-    re.IGNORECASE,
-)
-
-
 def _normalize_source_url(value: str) -> str | None:
     candidate = str(value or "").strip().strip("<>")
     candidate = candidate.rstrip(".,;!?")
@@ -297,39 +278,18 @@ def _format_verified_url_footnotes(answer: str, source_urls: list[str]) -> str:
     return f"{body}\n\n{definitions_text}".strip()
 
 
-def _is_external_mutation_request(message: str) -> bool:
-    compact = " ".join(str(message or "").split())
-    if not _REQUEST_CUE_RE.search(compact):
-        return False
-    if re.search(
-        r"(업로드|게시|발행|연락|신고|결제|송금|"
-        r"upload|publish|contact|report|pay|transfer)",
-        compact,
-        re.IGNORECASE,
-    ):
-        return True
-    return bool(_STORED_TARGET_RE.search(compact) and _MUTATION_ACTION_RE.search(compact))
-
-
 def _finalize_web_answer(
     original_message: str,
     answer: str,
     tool_work_details: list[str],
 ) -> str:
-    """Fail closed on impossible mutations, then enforce verified URL footnotes."""
-    if _is_external_mutation_request(original_message):
-        if re.search(r"[가-힣]", original_message):
-            return (
-                "이 웹 채팅은 읽기 전용이라 저장되거나 공개된 내용을 삭제·수정하거나 "
-                "운영자에게 요청을 전달할 수 없다. 개인정보가 관련된 내용은 여기서 "
-                "재인용하지 않으며, 권한이 있는 운영 경로에서 직접 처리해야 한다."
-            )
-        return (
-            "This web chat is read-only. It cannot delete or edit stored/public "
-            "content or forward a request to an operator. I will not repeat any "
-            "personal details here; the change must be made through an authorized "
-            "operator path."
-        )
+    """Enforce verified URL footnotes on the final answer.
+
+    Read-only honesty is the persona's job (`_WEB_RUNTIME_RULES`). A keyword
+    check on the visitor's message used to replace the whole answer with a
+    read-only notice; pasted articles and stories tripped it, so finished
+    answers vanished after streaming (60 of 2,373 turns, 2026-09-07..10-07).
+    """
     source_urls = _extract_web_source_urls(tool_work_details)
     return _format_verified_url_footnotes(answer, source_urls)
 

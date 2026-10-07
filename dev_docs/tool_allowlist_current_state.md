@@ -117,8 +117,12 @@ Every public persona also receives the common web runtime rules from
 first verification query, forbid treating an irrelevant or empty search result
 as evidence, and forbid claiming an external mutation unless a successful
 action-capable tool actually performed it. Because this surface is read-only,
-stored/public-content mutation requests are finalized fail-closed without
-repeating identifying details or claiming that an operator was contacted.
+the persona states that limit itself, does not repeat identifying details from
+content the visitor wants removed, and may say that a non-publication request
+is on record for the diary writer. No keyword check on the visitor's message
+replaces the answer: the former one fired on pasted articles and stories and
+discarded finished answers (60 of 2,373 turns over 30 days, removed
+2026-10-07).
 
 After successful `web_search` or `fetch_url` use, the final response may cite
 only URLs extracted from those successful tool results. The response format is
