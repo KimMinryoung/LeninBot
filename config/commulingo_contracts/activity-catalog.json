@@ -1,5 +1,5 @@
 {
-  "version": 26,
+  "version": 27,
   "functions": [
     {
       "id": "political-leadership",
@@ -1884,6 +1884,27 @@
         [
           1863,
           null
+        ]
+      ]
+    },
+    {
+      "id": "party-german-sdap",
+      "kind": "party",
+      "label": {
+        "ko": "독일 사회민주노동자당",
+        "en": "Social Democratic Workers' Party of Germany (SDAP)"
+      },
+      "termIds": [
+        "social-democratic-workers-party-of-germany"
+      ],
+      "countryCode": "germany",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Social Democratic Workers' Party of Germany (SDAP). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1869,
+          1875
         ]
       ]
     },
