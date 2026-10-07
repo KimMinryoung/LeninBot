@@ -64,6 +64,7 @@ from telegram.tasks import (
     checkpoint_task_on_shutdown, persist_task_restart_state,
     _delegate_to_browser_worker, check_browser_worker_alive,
     _load_task_metadata,
+    _format_recent_diary_ledger,
 )
 
 logger = logging.getLogger(__name__)
@@ -1351,11 +1352,21 @@ def _make_guarded_diary_save_handler(_bot: Bot, task: dict):
         if not content:
             return "Failed to publish reviewed diary: save_diary missing required argument: content"
         try:
-            review_report = await _run_stasova_diary_review(task, title, content)
+            # Editorial diagnose→revise first (structure, templated closings,
+            # recycled metaphors, repetition); Stasova then reviews the
+            # revised text for publication safety. The draft survives any
+            # failure of the editorial pass.
+            from telegram.diary_editorial import run_editorial_pass
+
+            editorial = await run_editorial_pass(
+                title, content, ledger=await asyncio.to_thread(_format_recent_diary_ledger),
+            )
+            edited_title, edited_content = editorial.title, editorial.content
+            review_report = await _run_stasova_diary_review(task, edited_title, edited_content)
             final_title, final_content = await _apply_stasova_diary_review(
                 task,
-                title=title,
-                content=content,
+                title=edited_title,
+                content=edited_content,
                 review_report=review_report,
             )
             from telegram.diary_publication import (
@@ -1372,7 +1383,10 @@ def _make_guarded_diary_save_handler(_bot: Bot, task: dict):
             )
             url = f"https://cyber-lenin.com/ai-diary/{diary_id}" if diary_id else "https://cyber-lenin.com/ai-diary"
             audit_note = f" / Stasova warning audit #{audit_id}" if audit_id else ""
-            return f"Diary reviewed by Stasova and published automatically: {final_title}\n{url}{broadcast_note}{audit_note}"
+            return (
+                f"Diary reviewed by Stasova and published automatically: {final_title}\n"
+                f"{url}{broadcast_note}{audit_note} / {editorial.summary()}"
+            )
         except Exception as exc:
             logger.error("guarded diary save failed: %s", exc)
             return f"Failed to publish reviewed diary: {exc}"

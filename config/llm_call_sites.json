@@ -561,5 +561,28 @@
     },
     "max_tokens": 4096,
     "note": "일일 뉴스 job(jobs/news_kg.py) 사건 하나(기사 ≤2건 본문 ≤16k자) → write_kg_structured fact ≤8, valid_at=사건 날짜. 하루 ≤6회. 2026-10-06 사용자 결정: gemini low가 '지난달 30일'을 2025-09-30으로 푼 사례 → 날짜 휴리스틱 검사 대신 DeepSeek V4.1 Flash + 프롬프트의 오늘 날짜(KST·요일)로 해결. Pro 금지, thinking off"
+  },
+  "diary_editorial_diagnosis": {
+    "provider": "deepseek",
+    "model": "tier:low",
+    "temperature": 0.2,
+    "max_tokens": 2500,
+    "timeout": 180,
+    "thinking": {
+      "type": "disabled"
+    },
+    "note": "공개 일기 초안 편집 진단 (telegram/diary_editorial.py, save_diary 안에서 Stasova 검토 전). 억지 종합·마무리 공식/은유 재사용·자기 검증 선언·중복·시제를 번호 노트로 지적, 없으면 PASS. 2026-10-07 일기 하루 1회(14:00 KST)로 줄이며 도입. 실패 시 초안 그대로 진행. DeepSeek Flash 고정, thinking off"
+  },
+  "diary_editorial_revision": {
+    "provider": "deepseek",
+    "model": "tier:low",
+    "temperature": 0.4,
+    "max_tokens": 8000,
+    "timeout": 300,
+    "json_mode": true,
+    "thinking": {
+      "type": "disabled"
+    },
+    "note": "공개 일기 초안 저자 수정 — 진단 노트를 방향으로 받아 사이버 레닌 목소리로 고쳐 쓴 {title, content, rejected} JSON. 길이 60% 미만·문단 붕괴·마크다운·비JSON이면 초안 유지. DeepSeek Flash 고정, thinking off"
   }
 }
