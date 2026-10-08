@@ -789,14 +789,45 @@ class TestLatestTierRouting(unittest.TestCase):
             with self.subTest(provider=provider, old=old):
                 self.assertEqual(current_text_model(provider, old), expected)
 
+    def test_claude_thinking_off_follows_each_model(self):
+        from tool_gateway.inference import AgentInferencePolicy, resolve_inference_extra
+
+        policy = AgentInferencePolicy(max_input_tokens=1000, max_output_tokens=2000,
+                                      max_rounds=1, budget_usd=0.1, thinking_policy="disabled")
+        cases = {
+            "claude-sonnet-5-5": {"thinking": {"type": "between_tools"}},
+            "claude-haiku-5-5": {"thinking": {"type": "disabled"}},
+            "claude-opus-5-5": {},
+            "claude-fable-5-1": {},
+        }
+        for model, expected in cases.items():
+            with self.subTest(model=model):
+                self.assertEqual(resolve_inference_extra(policy, "claude", model), expected)
+        thinking = AgentInferencePolicy(max_input_tokens=1000, max_output_tokens=2000,
+                                        max_rounds=1, budget_usd=0.1, thinking_policy="thinking")
+        self.assertEqual(resolve_inference_extra(thinking, "claude", "claude-sonnet-5-5"),
+                         {"thinking": {"type": "adaptive"}})
+
     def test_proxy_refuses_requests_the_new_models_reject(self):
         from llm_proxy.app import normalize_text_model_request
 
-        body = json.dumps({"model": "claude-sonnet-5", "max_tokens": 10,
-                           "thinking": {"type": "disabled"},
-                           "messages": [{"role": "user", "content": "hi"}]}).encode()
-        *_, error = normalize_text_model_request("anthropic", "v1/messages", body)
-        self.assertIn("adaptive thinking", error)
+        def claude(model, **extra):
+            return json.dumps({"model": model, "max_tokens": 10,
+                               "thinking": {"type": "disabled"}, **extra,
+                               "messages": [{"role": "user", "content": "hi"}]}).encode()
+
+        _, rewritten, _, error = normalize_text_model_request(
+            "anthropic", "v1/messages", claude("claude-sonnet-5"))
+        self.assertIsNone(error)
+        self.assertEqual(json.loads(rewritten)["model"], "claude-sonnet-5-5")
+        self.assertEqual(json.loads(rewritten)["thinking"], {"type": "between_tools"})
+        *_, error = normalize_text_model_request(
+            "anthropic", "v1/messages",
+            claude("claude-sonnet-5", output_config={"effort": "max"}))
+        self.assertIn("high or below", error)
+        *_, error = normalize_text_model_request(
+            "anthropic", "v1/messages", claude("claude-opus-5"))
+        self.assertIn("cannot disable thinking", error)
 
         tools = [{"type": "function", "function": {"name": "f", "parameters": {}}}]
         for model, effort, refused in (

@@ -252,7 +252,17 @@ def normalize_text_model_request(
     if provider == "anthropic" and current in {"claude-opus-5-5", "claude-fable-5-1", "claude-sonnet-5-5"}:
         thinking = payload.get("thinking")
         if isinstance(thinking, dict) and thinking.get("type") == "disabled":
-            return path, body, original, "current Claude model requires adaptive thinking"
+            effort = (payload.get("output_config") or {}).get("effort")
+            if current != "claude-sonnet-5-5":
+                return path, body, original, (
+                    "current Claude model cannot disable thinking; omit it and lower effort")
+            if effort in {"xhigh", "max"}:
+                return path, body, original, (
+                    "Sonnet 5.5 turns thinking off only at effort high or below")
+            # Sonnet 5.5's off switch, per its migration guide.
+            payload["thinking"] = {"type": "between_tools"}
+            payload["model"] = current
+            return path, json.dumps(payload, ensure_ascii=False).encode("utf-8"), original, None
     if current == original:
         return path, body, original, None
     payload["model"] = current

@@ -67,7 +67,9 @@ def is_replay_safe_tool(tool_name: str | None) -> bool:
     return bool(tool_name and tool_name in REPLAY_SAFE_TOOLS)
 
 
-def resolve_inference_extra(policy: AgentInferencePolicy, provider: str) -> dict:
+def resolve_inference_extra(
+    policy: AgentInferencePolicy, provider: str, model: str | None = None,
+) -> dict:
     """Resolve provider-specific reasoning controls from the central policy."""
     mode = policy.thinking_policy
     if provider == "deepseek":
@@ -82,12 +84,14 @@ def resolve_inference_extra(policy: AgentInferencePolicy, provider: str) -> dict
         return {}
 
     if provider == "claude":
+        # Current Claude models (Fable 5.1, Opus/Sonnet/Haiku 5.5) reject
+        # budget_tokens and think adaptively when the field is omitted.
         if mode == "thinking":
-            budget = min(policy.thinking_budget_tokens, policy.max_output_tokens - 1)
-            if budget < 1024:
-                raise ValueError("Claude thinking requires at least 1024 budget tokens")
-            return {"thinking": {"type": "enabled", "budget_tokens": budget}}
-        # Omitting the field is Claude non-thinking/model-default behavior.
+            return {"thinking": {"type": "adaptive"}}
+        if mode in {"tool_loop", "disabled"} and model:
+            from llm.provider_registry import claude_thinking_off
+            off = claude_thinking_off(model)
+            return {"thinking": off} if off else {}
         return {}
 
     if provider == "openai":

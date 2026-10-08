@@ -396,10 +396,11 @@ def _assert_inference_reasoning_policy() -> None:
     thinking = AgentInferencePolicy(**base, thinking_policy="thinking")
     disabled = AgentInferencePolicy(**base, thinking_policy="disabled")
     model_default = AgentInferencePolicy(**base, thinking_policy="model_default")
-    assert resolve_inference_extra(thinking, "claude")["thinking"] == {
-        "type": "enabled", "budget_tokens": 8192,
-    }
+    assert resolve_inference_extra(thinking, "claude")["thinking"] == {"type": "adaptive"}
     assert resolve_inference_extra(disabled, "claude") == {}
+    assert resolve_inference_extra(disabled, "claude", "claude-sonnet-5-5") == {
+        "thinking": {"type": "between_tools"}}
+    assert resolve_inference_extra(disabled, "claude", "claude-opus-5-5") == {}
     assert resolve_inference_extra(thinking, "openai")["extra_body"] == {
         "reasoning_effort": "high",
     }

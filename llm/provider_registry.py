@@ -151,6 +151,21 @@ def openai_reasoning_effort(model: str, effort: str) -> str:
     return effort
 
 
+def claude_thinking_off(model: str) -> dict | None:
+    """The `thinking` value that skips up-front thinking on a Claude model.
+
+    Sonnet 5.5 rejects "disabled" and takes "between_tools" (effort high or
+    below); Opus 5.5 and Fable 5.1 cannot turn thinking off, so None means
+    omit the field and steer with effort. Earlier models accept "disabled".
+    """
+    value = str(model or "")
+    if value.startswith("claude-sonnet-5-5"):
+        return {"type": "between_tools"}
+    if value.startswith(("claude-opus-5-5", "claude-fable-5")):
+        return None
+    return {"type": "disabled"}
+
+
 def resolve_deepseek_model(model: str | None = None) -> str:
     """Resolve application tiers and old IDs to the current DeepSeek model."""
     value = str(model or "").strip() or "deepseek_flash"
