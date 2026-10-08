@@ -80,8 +80,15 @@ def _calculate_cost(usage, model: str | None = None) -> float:
     cost = 0.0
     cost += getattr(usage, "input_tokens", 0) * p["input"]
     cost += getattr(usage, "output_tokens", 0) * p["output"]
-    # Cache tokens (may not always be present)
-    cost += getattr(usage, "cache_creation_input_tokens", 0) * p["cache_creation"]
+    # Cache writes bill by TTL. usage.cache_creation splits them; without the
+    # split every write is priced at the 1-hour rate this loop requests.
+    written = int(getattr(usage, "cache_creation_input_tokens", 0) or 0)
+    split = getattr(usage, "cache_creation", None)
+    five_min = int((split.get("ephemeral_5m_input_tokens") if isinstance(split, dict)
+                    else getattr(split, "ephemeral_5m_input_tokens", 0)) or 0)
+    five_min = min(five_min, written)
+    cost += five_min * p.get("cache_creation_5m", p["cache_creation"])
+    cost += (written - five_min) * p["cache_creation"]
     cost += getattr(usage, "cache_read_input_tokens", 0) * p["cache_read"]
     return cost
 

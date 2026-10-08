@@ -49,6 +49,7 @@ import json
 import logging
 import os
 import queue
+import sys
 import threading
 import time
 from pathlib import Path
@@ -496,7 +497,10 @@ def _emit(row: dict, *, warn: bool = False) -> None:
                 ensure_ascii=False, default=str,
             ),
         )
-        if os.getenv("LENINBOT_LLM_AUDIT_DB", "1") == "0":
+        audit_db = os.getenv("LENINBOT_LLM_AUDIT_DB")
+        # Test fixtures never reach the production ledger unless a test opts
+        # in explicitly: 2026-09-09 fixture rows billed a phantom $495.
+        if audit_db == "0" or (audit_db is None and "pytest" in sys.modules):
             return
         from ops import audit_sink
         if not audit_sink.is_service_process():

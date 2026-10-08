@@ -389,12 +389,14 @@ def _anthropic_row(
     input_price: float,
     output_price: float,
     cache_read: float,
-    cache_creation: float | None = None,
 ) -> dict[str, float]:
+    # Anthropic cache writes: 2x input for the 1-hour TTL the Claude loop
+    # writes ("cache_creation"), 1.25x for the default 5-minute TTL.
     return {
         "input": input_price / 1_000_000,
         "output": output_price / 1_000_000,
-        "cache_creation": (input_price * 2.0 if cache_creation is None else cache_creation) / 1_000_000,
+        "cache_creation": input_price * 2.0 / 1_000_000,
+        "cache_creation_5m": input_price * 1.25 / 1_000_000,
         "cache_read": cache_read / 1_000_000,
     }
 
@@ -433,9 +435,9 @@ def anthropic_pricing_table(
         }
 
     return {
-        "claude-fable-5-1": _anthropic_row(10.00, 50.00, 0.25, 20.00),
+        "claude-fable-5-1": _anthropic_row(10.00, 50.00, 0.25),
         "claude-fable-5": _anthropic_row(10.00, 50.00, 1.00),
-        "claude-opus-5-5": _anthropic_row(4.00, 20.00, 0.20, 5.00),
+        "claude-opus-5-5": _anthropic_row(4.00, 20.00, 0.20),
         "claude-opus-5": _anthropic_row(5.00, 25.00, 0.50),
         "claude-sonnet-5-5": _anthropic_row(2.00, 10.00, 0.20),
         "claude-sonnet-5": sonnet,

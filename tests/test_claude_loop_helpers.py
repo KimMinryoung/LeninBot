@@ -99,6 +99,19 @@ class TestPricing(unittest.TestCase):
         )
         self.assertAlmostEqual(_calculate_cost(usage, "claude-sonnet-5"), expected)
 
+    def test_cache_writes_priced_by_ttl(self):
+        # Opus 5.5 at $4 input: 1-hour writes 2x ($8), 5-minute writes 1.25x ($5).
+        usage = SimpleNamespace(
+            input_tokens=0, output_tokens=0, cache_read_input_tokens=0,
+            cache_creation_input_tokens=1_000_000,
+            cache_creation=SimpleNamespace(ephemeral_5m_input_tokens=400_000,
+                                           ephemeral_1h_input_tokens=600_000),
+        )
+        self.assertAlmostEqual(_calculate_cost(usage, "claude-opus-5-5"),
+                               0.4 * 5.0 + 0.6 * 8.0)
+        del usage.cache_creation
+        self.assertAlmostEqual(_calculate_cost(usage, "claude-opus-5-5"), 8.0)
+
     def test_usage_to_dict(self):
         usage = SimpleNamespace(input_tokens=5, output_tokens=7,
                                 cache_creation_input_tokens=0, cache_read_input_tokens=None)

@@ -111,8 +111,9 @@ class GPT6ResponsesLoopTest(unittest.TestCase):
         self.assertEqual(openai_compatible_pricing("gpt-6-sol", input_tokens=272_001)["output"],
                          15 / 1_000_000)
         self.assertEqual(openai_compatible_pricing("gpt-6-luna")["output"], 0.5 / 1_000_000)
+        # Claude loop writes 1-hour cache entries: 2x input.
         self.assertEqual(anthropic_pricing_table()["claude-opus-5-5"]["cache_creation"],
-                         5 / 1_000_000)
+                         8 / 1_000_000)
 
     def test_gpt61_sol_routes_to_responses_with_low_floor_effort(self):
         # gpt-6.1-sol has no "none" effort and no Chat Completions tools; the
