@@ -219,6 +219,7 @@ def estimate_cost_usd(
     from llm.provider_registry import (
         GEMINI_PRICING,
         OPENAI_COMPATIBLE_PRICING,
+        anthropic_pricing_row,
         anthropic_pricing_table,
         deepseek_price_triple,
         openai_compatible_pricing,
@@ -258,6 +259,7 @@ def estimate_cost_usd(
         return openai_compatible_pricing(model, input_tokens=tokens_in)
 
     def _anthropic_cost(p: dict) -> float:
+        p = anthropic_pricing_row(p, model, tokens_in + cache_create + cache_read)
         return (
             tokens_in * p["input"]
             + tokens_out * p["output"]

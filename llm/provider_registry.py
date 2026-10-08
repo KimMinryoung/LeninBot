@@ -7,7 +7,7 @@ from datetime import date, datetime, timezone
 
 
 CLAUDE_MODEL_ALIASES = {
-    "haiku": ("claude-haiku-4-5", "claude-haiku-4-5-20251001"),
+    "haiku": ("claude-haiku-5-5", "claude-haiku-5-5"),
     "sonnet": ("claude-sonnet-5", "claude-sonnet-5"),
     "opus": ("claude-opus-5-5", "claude-opus-5-5"),
 }
@@ -39,7 +39,7 @@ CHAT_PROVIDERS = ("claude", "openai", "deepseek", "kimi", "local")
 CURRENT_TEXT_MODELS = {
     "claude": {
         "frontier": "claude-fable-5-1", "high": "claude-opus-5-5",
-        "medium": "claude-sonnet-5", "low": "claude-haiku-4-5",
+        "medium": "claude-sonnet-5", "low": "claude-haiku-5-5",
     },
     "openai": {
         "frontier": "gpt-6-astra", "high": "gpt-6-sol",
@@ -58,7 +58,7 @@ CURRENT_TEXT_MODELS = {
 _PREVIOUS_TEXT_MODEL_TIERS = {
     "claude": {
         "claude-fable-5": "frontier", "claude-opus-5": "high",
-        "claude-haiku-4-5-20251001": "low",
+        "claude-haiku-4-5": "low", "claude-haiku-4-5-20251001": "low",
         "claude-haiku-3-5-20241022": "low", "claude-3-5-haiku-20241022": "low",
     },
     "openai": {
@@ -146,6 +146,7 @@ MODEL_DISPLAY_NAMES = {
     "gpt-6-luna": "GPT-6 Luna",
     "claude-opus-5": "Claude Opus 5",
     "claude-sonnet-5": "Claude Sonnet 5",
+    "claude-haiku-5-5": "Claude Haiku 5.5",
     "claude-haiku-4-5": "Claude Haiku 4.5",
     "gpt-5.6-sol": "GPT-5.6 Sol",
     "gpt-5.6-terra": "GPT-5.6 Terra",
@@ -394,6 +395,7 @@ def anthropic_pricing_table(
         "claude-opus-5-5": _anthropic_row(4.00, 20.00, 0.20, 5.00),
         "claude-opus-5": _anthropic_row(5.00, 25.00, 0.50),
         "claude-sonnet-5": sonnet,
+        "claude-haiku-5-5": _anthropic_row(0.10, 0.50, 0.01),
         "claude-haiku-4-5": _anthropic_row(1.00, 5.00, 0.10),
         "deepseek-flash": _deepseek("deepseek-flash"),
         "deepseek-v4-flash": _deepseek("deepseek-v4-flash"),
@@ -405,6 +407,26 @@ def anthropic_pricing_table(
             "cache_read": 0.30 / 1_000_000,
         },
     }
+
+
+# Claude Haiku 5.5 bills the whole request at a second rate card once the
+# prompt (uncached + cache write + cache read) exceeds 100K tokens.
+ANTHROPIC_LONG_CONTEXT_THRESHOLD = 100_000
+_ANTHROPIC_LONG_CONTEXT_PRICING = {
+    "claude-haiku-5-5": _anthropic_row(0.50, 2.50, 0.05),
+}
+
+
+def anthropic_pricing_row(
+    row: dict[str, float], model: str, prompt_tokens: int,
+) -> dict[str, float]:
+    """Swap in the long-context rate card when the prompt crosses it."""
+    if prompt_tokens <= ANTHROPIC_LONG_CONTEXT_THRESHOLD:
+        return row
+    for base, long_row in _ANTHROPIC_LONG_CONTEXT_PRICING.items():
+        if model == base or model.startswith(base + "-") or model.startswith(base + "."):
+            return long_row
+    return row
 
 
 def kimi_openai_tool_options() -> dict:

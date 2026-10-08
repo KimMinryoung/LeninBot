@@ -96,6 +96,19 @@ class TestEstimateCost(unittest.TestCase):
         self.assertIsNotNone(exact)
         self.assertEqual(exact, dated)
 
+    def test_haiku_55_long_context_rate_card(self):
+        # $0.10/$0.50 up to a 100K-token prompt, $0.50/$2.50 above it; the
+        # threshold counts cache reads and writes as prompt tokens.
+        short = estimate_cost_usd(
+            "claude-haiku-5-5", tokens_in=100_000, tokens_out=1_000_000,
+        )
+        self.assertAlmostEqual(short, 0.01 + 0.50, places=6)
+        long = estimate_cost_usd(
+            "claude-haiku-5-5", tokens_in=1_000, tokens_out=1_000_000,
+            cache_read=100_000,
+        )
+        self.assertAlmostEqual(long, 0.0005 + 2.50 + 0.005, places=6)
+
     def test_openai_semantics_input_includes_cache(self):
         # gpt-5.6-luna: in 0.20, cached 0.02, out 1.20 per M; prompt_tokens
         # includes the cached share, which must be re-priced, not double-billed.
@@ -762,7 +775,9 @@ class TestLatestTierRouting(unittest.TestCase):
             ("anthropic", "claude-opus-5", "claude-opus-5-5"),
             ("anthropic", "claude-opus-4-8", "claude-opus-5-5"),
             ("anthropic", "claude-fable-5", "claude-fable-5-1"),
-            ("anthropic", "claude-haiku-4-5-20251001", "claude-haiku-4-5"),
+            ("anthropic", "claude-haiku-4-5-20251001", "claude-haiku-5-5"),
+            ("anthropic", "claude-haiku-4-5", "claude-haiku-5-5"),
+            ("anthropic", "tier:low", "claude-haiku-5-5"),
             ("gemini", "gemini-3.7-flash", "gemini-3.8-flash"),
             ("deepseek", "deepseek-v4-pro", "deepseek-flash"),
         ]

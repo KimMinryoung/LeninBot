@@ -28,7 +28,7 @@ from llm.tool_loop_common import (
     provider_status_code as _provider_status_code,
 )
 from tool_gateway.dispatcher import execute_tool, execute_tools_batch
-from llm.provider_registry import anthropic_pricing_table
+from llm.provider_registry import anthropic_pricing_row, anthropic_pricing_table
 from llm.instrumented_clients import with_audit_owner
 
 logger = logging.getLogger(__name__)
@@ -71,7 +71,12 @@ def _pricing_for(model: str) -> dict:
 
 def _calculate_cost(usage, model: str | None = None) -> float:
     """Calculate USD cost from a response.usage object for the given model."""
-    p = _pricing_for(model or "")
+    p = anthropic_pricing_row(
+        _pricing_for(model or ""), model or "",
+        sum(int(getattr(usage, key, 0) or 0) for key in (
+            "input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens",
+        )),
+    )
     cost = 0.0
     cost += getattr(usage, "input_tokens", 0) * p["input"]
     cost += getattr(usage, "output_tokens", 0) * p["output"]
