@@ -8,16 +8,16 @@ from datetime import date, datetime, timezone
 
 CLAUDE_MODEL_ALIASES = {
     "haiku": ("claude-haiku-5-5", "claude-haiku-5-5"),
-    "sonnet": ("claude-sonnet-5", "claude-sonnet-5"),
+    "sonnet": ("claude-sonnet-5-5", "claude-sonnet-5-5"),
     "opus": ("claude-opus-5-5", "claude-opus-5-5"),
 }
 
 OPENAI_MODEL_MAP = {
-    "gpt6": "gpt-6-sol",
+    "gpt6": "gpt-6.1-sol",
     "gpt6luna": "gpt-6-luna",
     # Persisted selector names remain accepted, but never pin an old model.
-    "gpt56": "gpt-6-sol",
-    "gpt56terra": "gpt-6-sol",
+    "gpt56": "gpt-6.1-sol",
+    "gpt56terra": "gpt-6.1-sol",
     "gpt56luna": "gpt-6-luna",
 }
 
@@ -39,11 +39,11 @@ CHAT_PROVIDERS = ("claude", "openai", "deepseek", "kimi", "local")
 CURRENT_TEXT_MODELS = {
     "claude": {
         "frontier": "claude-fable-5-1", "high": "claude-opus-5-5",
-        "medium": "claude-sonnet-5", "low": "claude-haiku-5-5",
+        "medium": "claude-sonnet-5-5", "low": "claude-haiku-5-5",
     },
     "openai": {
-        "frontier": "gpt-6-astra", "high": "gpt-6-sol",
-        "medium": "gpt-6-sol", "low": "gpt-6-luna",
+        "frontier": "gpt-6-astra", "high": "gpt-6.1-sol",
+        "medium": "gpt-6.1-sol", "low": "gpt-6-luna",
     },
     "gemini": {
         "high": "gemini-3.1-pro-preview", "medium": "gemini-3.8-flash",
@@ -58,10 +58,12 @@ CURRENT_TEXT_MODELS = {
 _PREVIOUS_TEXT_MODEL_TIERS = {
     "claude": {
         "claude-fable-5": "frontier", "claude-opus-5": "high",
+        "claude-sonnet-5": "medium",
         "claude-haiku-4-5": "low", "claude-haiku-4-5-20251001": "low",
         "claude-haiku-3-5-20241022": "low", "claude-3-5-haiku-20241022": "low",
     },
     "openai": {
+        "gpt-6-sol": "high",
         "gpt-5.6-sol": "high", "gpt-5.6-terra": "medium",
         "gpt-5.6-luna": "low",
     },
@@ -128,6 +130,27 @@ TIER_MODEL_KEYS = {
 }
 
 
+def is_gpt6_model(model: str) -> bool:
+    """GPT-6 family IDs (gpt-6-luna, gpt-6.1-sol, ...) use the Responses loop."""
+    return bool(re.match(r"gpt-6(?:\.\d+)?-", str(model or "")))
+
+
+# GPT-6 models whose reasoning has no "none"/"minimal" level, and which take
+# function calls only through the Responses API (Chat Completions 400s).
+_OPENAI_NO_NONE_EFFORT = {"gpt-6.1-sol", "gpt-6-astra"}
+
+
+def openai_supports_none_effort(model: str) -> bool:
+    return str(model or "") not in _OPENAI_NO_NONE_EFFORT
+
+
+def openai_reasoning_effort(model: str, effort: str) -> str:
+    """Lift "none"/"minimal" to "low" on models that reject them."""
+    if effort in {"none", "minimal"} and not openai_supports_none_effort(model):
+        return "low"
+    return effort
+
+
 def resolve_deepseek_model(model: str | None = None) -> str:
     """Resolve application tiers and old IDs to the current DeepSeek model."""
     value = str(model or "").strip() or "deepseek_flash"
@@ -142,9 +165,11 @@ MODEL_DISPLAY_NAMES = {
     "claude-fable-5-1": "Claude Fable 5.1",
     "gemini-3.8-flash": "Gemini 3.8 Flash",
     "claude-opus-5-5": "Claude Opus 5.5",
+    "gpt-6.1-sol": "GPT-6.1 Sol",
     "gpt-6-sol": "GPT-6 Sol",
     "gpt-6-luna": "GPT-6 Luna",
     "claude-opus-5": "Claude Opus 5",
+    "claude-sonnet-5-5": "Claude Sonnet 5.5",
     "claude-sonnet-5": "Claude Sonnet 5",
     "claude-haiku-5-5": "Claude Haiku 5.5",
     "claude-haiku-4-5": "Claude Haiku 4.5",
@@ -244,7 +269,9 @@ def deepseek_price_triple(
 
 OPENAI_COMPATIBLE_PRICING = {
     # https://developers.openai.com/api/docs/models/gpt-6-sol and /gpt-6-luna
-    # (2026-09-23); cache writes cost 1.25x ordinary input.
+    # (2026-09-23); cache writes cost 1.25x ordinary input. GPT-6.1 Sol
+    # (/gpt-6.1-sol, 2026-10-08) halves Sol's cached-input rate.
+    "gpt-6.1-sol": _per_token(2.00, 10.00, 0.10, 2.50),
     "gpt-6-sol": _per_token(2.00, 10.00, 0.20, 2.50),
     "gpt-6-luna": _per_token(0.10, 0.50, 0.01, 0.125),
     # OpenAI standard short-context rates, audited 2026-08-29. GPT-5.6 cache
@@ -260,6 +287,7 @@ OPENAI_COMPATIBLE_PRICING = {
 
 GPT56_LONG_CONTEXT_THRESHOLD = 272_000
 _OPENAI_GPT56_LONG_CONTEXT_PRICING = {
+    "gpt-6.1-sol": _per_token(4.00, 15.00, 0.20, 5.00),
     "gpt-6-sol": _per_token(4.00, 15.00, 0.40, 5.00),
     "gpt-6-luna": _per_token(0.20, 0.75, 0.02, 0.25),
     "gpt-5.6-sol": _per_token(8.00, 30.00, 0.80, 10.00),
@@ -394,6 +422,7 @@ def anthropic_pricing_table(
         "claude-fable-5": _anthropic_row(10.00, 50.00, 1.00),
         "claude-opus-5-5": _anthropic_row(4.00, 20.00, 0.20, 5.00),
         "claude-opus-5": _anthropic_row(5.00, 25.00, 0.50),
+        "claude-sonnet-5-5": _anthropic_row(2.00, 10.00, 0.20),
         "claude-sonnet-5": sonnet,
         "claude-haiku-5-5": _anthropic_row(0.10, 0.50, 0.01),
         "claude-haiku-4-5": _anthropic_row(1.00, 5.00, 0.10),

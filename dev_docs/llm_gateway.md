@@ -1,6 +1,6 @@
 # LLM 게이트웨이 (llm/gateway.py + llm_proxy/)
 
-최종 확인: 2026-09-23 (GPT-6 Sol/Luna 가격·Responses 경로와 Opus 5.5 가격 확인).
+최종 확인: 2026-10-08 (GPT-6.1 Sol·Sonnet 5.5·Haiku 5.5로 티어 교체, 가격 확인).
 
 모든 LLM API 호출이 지나는 단일 seam. 툴 보안 게이트웨이(`security_gateway/`)의
 LLM 버전으로, 같은 패턴을 따른다: 단일 관문 + 이중 싱크 감사 + shadow→enforce 롤아웃.
@@ -25,7 +25,7 @@ LLM 버전으로, 같은 패턴을 따른다: 단일 관문 + 이중 싱크 감�
 | `browser.use_agent._AuditedBrowserChatMixin`, `browser.computer_use`, `telegram.commands.handle_photo` | browser-use 매 step, native OpenAI computer-use Responses 호출, Telegram vision 직접 호출 |
 
 새 호출부를 만들 때: 루프면 `chat_with_tools`를, 원샷이면 registry `generate()`를
-쓰고 모델은 ID 대신 `tier:low`처럼 지정한다. 레지스트리는 실행 전에 티어를 현행 ID로 해석한다. 직접 SDK 스크립트도 프록시 URL에 `model="tier:low"`를 보낼 수 있다. 기존 구형 ID는 동일 티어의 현재 ID로 정규화하며, GPT-6 Chat Completions 도구 호출이 추론을 켠 경우에는 Responses API로 옮기도록 400을 반환한다. 그 밖의 직접 SDK 호출은 만들지 말 것.
+쓰고 모델은 ID 대신 `tier:low`처럼 지정한다. 레지스트리는 실행 전에 티어를 현행 ID로 해석한다. 직접 SDK 스크립트도 프록시 URL에 `model="tier:low"`를 보낼 수 있다. 기존 구형 ID는 동일 티어의 현재 ID로 정규화하며, GPT-6 Chat Completions 도구 호출은 Luna에서 `reasoning_effort=none`일 때만 통과시키고, 추론을 켰거나 Sol·Astra(Chat Completions 도구 미지원)이면 Responses API로 옮기도록 400을 반환한다. 그 밖의 직접 SDK 호출은 만들지 말 것.
 `bot_config`의 SDK 객체는 애드혹 직접 사용도 놓치지 않도록 `AuditedAsyncAnthropic`/
 `AuditedAsyncOpenAI`로 감싸지만, 툴 루프 요청은 `with_audit_owner(..., "loop")`로 소유자를
 표시한다(2026-09-19부터 프록시는 `x-llm-caller`를 감사 행에만 쓰고 상류 제공자에게는 전달하지 않는다). 래퍼는 caller 헤더·DeepSeek thinking 기본값은 그대로 주입하면서 자체
@@ -121,7 +121,7 @@ GPT-5.6과 GPT-6은 OpenAI 호환 의미론에서도 입력을 ordinary/cache-re
 나눈다. `usage.prompt_tokens_details.cache_write_tokens`를 `cache_create`에 보존하고,
 ordinary input에서는 cache read와 write를 모두 뺀 뒤 각각 공식 단가로 다시 계산한다.
 272K 입력 토큰을 초과하면 전체 요청에 long-context 단가(입력 2배·출력 1.5배)를
-적용한다. GPT-6 Responses 응답의 `input_tokens_details.cached_tokens`도 같은 비용 계산에 대응한다. 공식 단가: [GPT-6 Sol](https://developers.openai.com/api/docs/models/gpt-6-sol), [GPT-6 Luna](https://developers.openai.com/api/docs/models/gpt-6-luna), [Claude Opus 5.5](https://www.anthropic.com/claude-opus-5-5).
+적용한다. GPT-6 Responses 응답의 `input_tokens_details.cached_tokens`도 같은 비용 계산에 대응한다. 공식 단가: [GPT-6.1 Sol](https://developers.openai.com/api/docs/models/gpt-6.1-sol), [GPT-6 Luna](https://developers.openai.com/api/docs/models/gpt-6-luna), [Claude Opus 5.5](https://www.anthropic.com/claude-opus-5-5).
 
 DeepSeek V4는 **시간대별 요금**이다: 2026-08-16 16:00 UTC(베이징 08-17 00:00)부터
 평면 단가를 버리고 피크(UTC 01–04·06–10시)/오프피크(그 외, 피크의 절반) 티어로

@@ -86,7 +86,7 @@ BROWSE_WEB_TOOL = {
             },
             "model": {
                 "type": "string", "enum": ["tier:low", "tier:high"],
-                "description": "computer mode only: tier:low uses GPT-6 Luna (default); tier:high uses GPT-6 Sol.",
+                "description": "computer mode only: tier:low uses GPT-6 Luna (default); tier:high uses GPT-6.1 Sol.",
             },
         },
         "required": ["task"],

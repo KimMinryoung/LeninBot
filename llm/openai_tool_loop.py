@@ -42,7 +42,9 @@ from tool_gateway.dispatcher import (
 from tool_gateway.validation import malformed_arguments_hint
 from llm.provider_registry import (
     OPENAI_COMPATIBLE_PRICING as OPENAI_PRICING,
+    is_gpt6_model,
     openai_compatible_pricing,
+    openai_reasoning_effort,
 )
 from llm.instrumented_clients import with_audit_owner
 
@@ -709,7 +711,9 @@ async def _call_gpt6_responses(client, model, messages, tools, max_tokens,
                                parallel_tool_calls, on_progress, extra_body,
                                idle_timeout_sec):
     """Adapt Responses output to the shared ChatCompletion-shaped loop."""
-    effort = (extra_body or {}).get("reasoning_effort") or "medium"
+    effort = openai_reasoning_effort(
+        model, (extra_body or {}).get("reasoning_effort") or "medium",
+    )
     kwargs = {
         "model": model,
         "input": _responses_input(messages),
@@ -794,7 +798,7 @@ async def _call_sdk(
     chunk). Falls back to non-streaming create() for non-strict tool schemas.
     Returns an accumulated ChatCompletion either way.
     """
-    if model.startswith("gpt-6-"):
+    if is_gpt6_model(model):
         return await _call_gpt6_responses(
             client, model, messages, tools, max_tokens, parallel_tool_calls,
             on_progress, extra_body, idle_timeout_sec,

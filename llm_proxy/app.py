@@ -45,7 +45,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from ops import audit_sink
 from llm.gateway import evaluate_policy, record_llm_call
-from llm.provider_registry import current_text_model
+from llm.provider_registry import current_text_model, openai_supports_none_effort
 
 logger = logging.getLogger("llm_proxy")
 
@@ -244,12 +244,12 @@ def normalize_text_model_request(
             if effort is None:
                 reasoning = payload.get("reasoning")
                 effort = reasoning.get("effort") if isinstance(reasoning, dict) else None
-            if current == "gpt-6-astra" or effort != "none":
+            if not openai_supports_none_effort(current) or effort != "none":
                 return path, body, original, (
                     "GPT-6 Chat Completions function calls require reasoning_effort=none "
-                    "(Sol/Luna); use Responses API for reasoning with tools"
+                    "(Luna only); use Responses API for Sol/Astra or reasoning with tools"
                 )
-    if provider == "anthropic" and current in {"claude-opus-5-5", "claude-fable-5-1"}:
+    if provider == "anthropic" and current in {"claude-opus-5-5", "claude-fable-5-1", "claude-sonnet-5-5"}:
         thinking = payload.get("thinking")
         if isinstance(thinking, dict) and thinking.get("type") == "disabled":
             return path, body, original, "current Claude model requires adaptive thinking"

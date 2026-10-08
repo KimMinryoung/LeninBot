@@ -114,6 +114,23 @@ class GPT6ResponsesLoopTest(unittest.TestCase):
         self.assertEqual(anthropic_pricing_table()["claude-opus-5-5"]["cache_creation"],
                          5 / 1_000_000)
 
+    def test_gpt61_sol_routes_to_responses_with_low_floor_effort(self):
+        # gpt-6.1-sol has no "none" effort and no Chat Completions tools; the
+        # tool-loop policy's "none" must reach Responses as "low".
+        sol = openai_compatible_pricing("gpt-6.1-sol")
+        self.assertEqual(sol["cached_input"], 0.1 / 1_000_000)
+        self.assertEqual(openai_compatible_pricing("gpt-6.1-sol", input_tokens=272_001)["output"],
+                         15 / 1_000_000)
+        endpoint = ResponsesEndpoint()
+        client = SimpleNamespace(responses=endpoint)
+        asyncio.run(_call_sdk(
+            client, "gpt-6.1-sol", [{"role": "user", "content": "go"}],
+            [{"type": "function", "function": {"name": "echo", "parameters": {
+                "type": "object", "properties": {}}}}],
+            1000, extra_body={"reasoning_effort": "none"},
+        ))
+        self.assertEqual(endpoint.calls[0]["reasoning"], {"effort": "low"})
+
     def test_reasoning_and_tool_call_replayed_with_result(self):
         endpoint = ResponsesEndpoint()
         client = SimpleNamespace(responses=endpoint)

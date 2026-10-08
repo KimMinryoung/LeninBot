@@ -17,7 +17,7 @@ from urllib.parse import urlparse
 
 from playwright.async_api import Page, async_playwright
 
-from llm.provider_registry import current_text_model
+from llm.provider_registry import CURRENT_TEXT_MODELS, current_text_model
 
 logger = logging.getLogger(__name__)
 
@@ -157,7 +157,7 @@ async def browse_with_computer(
     """Run one native computer-use task in a fresh, headless Chromium context."""
     started = time.monotonic()
     selected = current_text_model("openai", model)
-    if selected not in {"gpt-6-luna", "gpt-6-sol"}:
+    if selected not in {CURRENT_TEXT_MODELS["openai"]["low"], CURRENT_TEXT_MODELS["openai"]["high"]}:
         raise ValueError("computer mode supports OpenAI tier:low (Luna) or tier:high (Sol)")
     url = _start_url(task, start_url)
     calls = 0

@@ -58,7 +58,7 @@ def _pricing_for(model: str) -> dict:
     """Pick the pricing row for a Claude model id. Matches by prefix so
     pinned-date variants (``claude-haiku-4-5-20251001``) reuse the family."""
     pricing_table = anthropic_pricing_table()
-    fallback = pricing_table["claude-sonnet-5"]
+    fallback = pricing_table["claude-sonnet-5-5"]
     if not model:
         return fallback
     if model in pricing_table:

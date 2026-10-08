@@ -84,8 +84,8 @@ class TestPricing(unittest.TestCase):
         self.assertEqual(base, pinned)
 
     def test_unknown_falls_back_to_sonnet(self):
-        self.assertEqual(_pricing_for("totally-unknown"), _pricing_for("claude-sonnet-5"))
-        self.assertEqual(_pricing_for(""), _pricing_for("claude-sonnet-5"))
+        self.assertEqual(_pricing_for("totally-unknown"), _pricing_for("claude-sonnet-5-5"))
+        self.assertEqual(_pricing_for(""), _pricing_for("claude-sonnet-5-5"))
 
     def test_calculate_cost_uses_all_token_kinds(self):
         p = _pricing_for("claude-sonnet-5")

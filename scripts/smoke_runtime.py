@@ -254,10 +254,10 @@ def _assert_provider_registry_and_recovery_policy() -> None:
 
     assert bot_config._MODEL_ALIAS_MAP["opus"] == ("claude-opus-5-5", "claude-opus-5-5")
     assert bot_config._OPENAI_MODEL_MAP == {
-        "gpt6": "gpt-6-sol",
+        "gpt6": "gpt-6.1-sol",
         "gpt6luna": "gpt-6-luna",
-        "gpt56": "gpt-6-sol",
-        "gpt56terra": "gpt-6-sol",
+        "gpt56": "gpt-6.1-sol",
+        "gpt56terra": "gpt-6.1-sol",
         "gpt56luna": "gpt-6-luna",
     }
     assert bot_config._TIER_MAP["openai"] == {
@@ -269,17 +269,17 @@ def _assert_provider_registry_and_recovery_policy() -> None:
     from browser.worker import _normalize_browser_model
 
     expected_browser_tiers = {
-        "high": "gpt-6-sol",
-        "medium": "gpt-6-sol",
+        "high": "gpt-6.1-sol",
+        "medium": "gpt-6.1-sol",
         "low": "gpt-6-luna",
     }
     for tier, expected in expected_browser_tiers.items():
         assert normalize_browser_use_model(tier, "openai") == expected
         assert _normalize_browser_model(tier, "openai") == expected
-    assert OPENAI_COMPATIBLE_PRICING["gpt-6-sol"] == {
+    assert OPENAI_COMPATIBLE_PRICING["gpt-6.1-sol"] == {
         "input": 2.0 / 1_000_000,
         "output": 10.0 / 1_000_000,
-        "cached_input": 0.2 / 1_000_000,
+        "cached_input": 0.1 / 1_000_000,
         "cache_write": 2.5 / 1_000_000,
     }
     assert anthropic_pricing_table(date(2026, 8, 31))["claude-sonnet-5"]["input"] == 2 / 1_000_000

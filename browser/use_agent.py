@@ -16,8 +16,9 @@ import time
 from browser_use import Agent, Browser
 from browser_use.llm.anthropic.chat import ChatAnthropic
 from llm.provider_registry import (
-    DEEPSEEK_FLASH_MODEL, OPENAI_MODEL_MAP, TIER_MODEL_KEYS,
-    current_text_model, resolve_deepseek_model,
+    CURRENT_TEXT_MODELS, DEEPSEEK_FLASH_MODEL, OPENAI_MODEL_MAP, TIER_MODEL_KEYS,
+    current_text_model, is_gpt6_model, openai_supports_none_effort,
+    resolve_deepseek_model,
 )
 
 logger = logging.getLogger(__name__)
@@ -224,6 +225,13 @@ def _build_llm(model: str | None = None, provider: str | None = None):
         logger.info("browser-use LLM: Google %s", model)
         return llm
 
+    if provider == "openai" and not openai_supports_none_effort(model):
+        # browser-use drives tools through Chat Completions, which these
+        # models do not serve; tier:high computer mode is the Sol path.
+        logger.warning("browser-use cannot drive %s via Chat Completions; using %s",
+                       model, CURRENT_TEXT_MODELS["openai"]["low"])
+        model = CURRENT_TEXT_MODELS["openai"]["low"]
+
     if provider == "openai":
         from browser_use.llm.openai.chat import ChatOpenAI
         from bot_config import OPENAI_BASE_URL_EFFECTIVE, OPENAI_CLIENT_KEY
@@ -235,7 +243,7 @@ def _build_llm(model: str | None = None, provider: str | None = None):
         llm = _AuditedOpenAIBrowserChat(
             model=model,
             **({"reasoning_models": [model], "reasoning_effort": "none"}
-               if model.startswith("gpt-6-") else {}),
+               if is_gpt6_model(model) else {}),
             api_key=OPENAI_CLIENT_KEY,
             base_url=OPENAI_BASE_URL_EFFECTIVE,
             timeout=120,

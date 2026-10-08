@@ -43,7 +43,7 @@ BROWSER = AgentSpec(
    - Perform multi-step workflows (login → navigate → extract)
    - Extract structured data from complex layouts
    By default, it uses screenshot-based mouse/keyboard operation with GPT-6 Luna
-   (`tier:low`); `tier:high` selects GPT-6 Sol. Pass `start_url` when known.
+   (`tier:low`); `tier:high` selects GPT-6.1 Sol. Pass `start_url` when known.
    Use `mode=agent` to select browser-use with DeepSeek.
 
 2. **web_search** — Quick web search for finding URLs or context before browsing.

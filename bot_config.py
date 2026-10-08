@@ -394,7 +394,7 @@ async def _get_model_by_alias(alias: str) -> str:
     """Resolve a model short name (haiku/sonnet/opus) to its full ID, with caching."""
     if alias in _resolved_models:
         return _resolved_models[alias]
-    model_alias, fallback = _MODEL_ALIAS_MAP.get(alias, ("claude-sonnet-5", "claude-sonnet-5"))
+    model_alias, fallback = _MODEL_ALIAS_MAP.get(alias, ("claude-sonnet-5-5", "claude-sonnet-5-5"))
     resolved = await _resolve_model(model_alias, fallback)
     _resolved_models[alias] = resolved
     return resolved

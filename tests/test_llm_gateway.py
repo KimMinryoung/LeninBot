@@ -771,19 +771,45 @@ class TestLatestTierRouting(unittest.TestCase):
 
         cases = [
             ("openai", "tier:low", "gpt-6-luna"),
-            ("openai", "gpt-5.6-terra", "gpt-6-sol"),
+            ("openai", "gpt-5.6-terra", "gpt-6.1-sol"),
+            ("openai", "gpt-6-sol", "gpt-6.1-sol"),
+            ("openai", "tier:high", "gpt-6.1-sol"),
             ("anthropic", "claude-opus-5", "claude-opus-5-5"),
             ("anthropic", "claude-opus-4-8", "claude-opus-5-5"),
             ("anthropic", "claude-fable-5", "claude-fable-5-1"),
             ("anthropic", "claude-haiku-4-5-20251001", "claude-haiku-5-5"),
             ("anthropic", "claude-haiku-4-5", "claude-haiku-5-5"),
             ("anthropic", "tier:low", "claude-haiku-5-5"),
+            ("anthropic", "claude-sonnet-5", "claude-sonnet-5-5"),
+            ("anthropic", "tier:medium", "claude-sonnet-5-5"),
             ("gemini", "gemini-3.7-flash", "gemini-3.8-flash"),
             ("deepseek", "deepseek-v4-pro", "deepseek-flash"),
         ]
         for provider, old, expected in cases:
             with self.subTest(provider=provider, old=old):
                 self.assertEqual(current_text_model(provider, old), expected)
+
+    def test_proxy_refuses_requests_the_new_models_reject(self):
+        from llm_proxy.app import normalize_text_model_request
+
+        body = json.dumps({"model": "claude-sonnet-5", "max_tokens": 10,
+                           "thinking": {"type": "disabled"},
+                           "messages": [{"role": "user", "content": "hi"}]}).encode()
+        *_, error = normalize_text_model_request("anthropic", "v1/messages", body)
+        self.assertIn("adaptive thinking", error)
+
+        tools = [{"type": "function", "function": {"name": "f", "parameters": {}}}]
+        for model, effort, refused in (
+            ("gpt-6-sol", "none", True), ("tier:low", "none", False),
+            ("tier:low", "low", True),
+        ):
+            with self.subTest(model=model, effort=effort):
+                body = json.dumps({"model": model, "tools": tools,
+                                   "reasoning_effort": effort,
+                                   "messages": [{"role": "user", "content": "hi"}]}).encode()
+                *_, error = normalize_text_model_request(
+                    "openai", "v1/chat/completions", body)
+                self.assertEqual(error is not None, refused)
 
     def test_proxy_rewrites_body_before_policy_and_upstream(self):
         from llm_proxy.app import normalize_text_model_request, model_from_request
