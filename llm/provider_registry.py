@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from datetime import date, datetime, timezone
 
 
@@ -130,18 +131,70 @@ TIER_MODEL_KEYS = {
 }
 
 
+@dataclass(frozen=True)
+class ModelCaps:
+    """Request-shape rules that differ by model. One row per text model.
+
+    thinking_off: the Claude `thinking` value that skips up-front thinking,
+      or None when the model cannot turn it off (omit and lower effort).
+    thinking_off_max_effort: highest effort that thinking_off accepts.
+    responses_loop: the GPT-6 tool loop goes through the Responses API.
+    reasoning_none: OpenAI reasoning accepts "none"/"minimal".
+    chat_tools: OpenAI Chat Completions accepts function calls.
+    """
+    thinking_off: dict | None = None
+    thinking_off_max_effort: str | None = None
+    responses_loop: bool = False
+    reasoning_none: bool = True
+    chat_tools: bool = True
+
+
+_DISABLED = {"type": "disabled"}
+
+# Add a row with each new model; tests/test_llm_gateway.py checks that every
+# CURRENT_TEXT_MODELS entry has a row, a price, and a display name.
+MODEL_CAPABILITIES: dict[str, ModelCaps] = {
+    "claude-fable-5-1": ModelCaps(),
+    "claude-opus-5-5": ModelCaps(),
+    "claude-sonnet-5-5": ModelCaps(
+        thinking_off={"type": "between_tools"}, thinking_off_max_effort="high"),
+    "claude-haiku-5-5": ModelCaps(thinking_off=_DISABLED, thinking_off_max_effort="high"),
+    "claude-fable-5": ModelCaps(),
+    "claude-opus-5": ModelCaps(thinking_off=_DISABLED, thinking_off_max_effort="high"),
+    "claude-sonnet-5": ModelCaps(thinking_off=_DISABLED),
+    "claude-haiku-4-5": ModelCaps(thinking_off=_DISABLED),
+    "gpt-6-astra": ModelCaps(responses_loop=True, reasoning_none=False, chat_tools=False),
+    "gpt-6.1-sol": ModelCaps(responses_loop=True, reasoning_none=False, chat_tools=False),
+    "gpt-6-sol": ModelCaps(responses_loop=True),
+    "gpt-6-luna": ModelCaps(responses_loop=True),
+}
+_UNKNOWN_CAPS = ModelCaps(thinking_off=_DISABLED)
+_EFFORT_ORDER = ("low", "medium", "high", "xhigh", "max")
+
+
+def model_caps(model: str | None) -> ModelCaps:
+    """Row for a model ID; dated/pinned variants use their base row."""
+    value = str(model or "")
+    if value in MODEL_CAPABILITIES:
+        return MODEL_CAPABILITIES[value]
+    base = max(
+        (key for key in MODEL_CAPABILITIES
+         if value.startswith(key + "-") or value.startswith(key + ".")),
+        key=len, default=None,
+    )
+    return MODEL_CAPABILITIES[base] if base else _UNKNOWN_CAPS
+
+
 def is_gpt6_model(model: str) -> bool:
     """GPT-6 family IDs (gpt-6-luna, gpt-6.1-sol, ...) use the Responses loop."""
+    if model_caps(model).responses_loop:
+        return True
+    # A GPT-6 point release not yet in the table still belongs on Responses.
     return bool(re.match(r"gpt-6(?:\.\d+)?-", str(model or "")))
 
 
-# GPT-6 models whose reasoning has no "none"/"minimal" level, and which take
-# function calls only through the Responses API (Chat Completions 400s).
-_OPENAI_NO_NONE_EFFORT = {"gpt-6.1-sol", "gpt-6-astra"}
-
-
 def openai_supports_none_effort(model: str) -> bool:
-    return str(model or "") not in _OPENAI_NO_NONE_EFFORT
+    return model_caps(model).reasoning_none
 
 
 def openai_reasoning_effort(model: str, effort: str) -> str:
@@ -152,18 +205,17 @@ def openai_reasoning_effort(model: str, effort: str) -> str:
 
 
 def claude_thinking_off(model: str) -> dict | None:
-    """The `thinking` value that skips up-front thinking on a Claude model.
+    """The `thinking` value that skips up-front thinking, or None to omit it."""
+    off = model_caps(model).thinking_off
+    return dict(off) if off else None
 
-    Sonnet 5.5 rejects "disabled" and takes "between_tools" (effort high or
-    below); Opus 5.5 and Fable 5.1 cannot turn thinking off, so None means
-    omit the field and steer with effort. Earlier models accept "disabled".
-    """
-    value = str(model or "")
-    if value.startswith("claude-sonnet-5-5"):
-        return {"type": "between_tools"}
-    if value.startswith(("claude-opus-5-5", "claude-fable-5")):
-        return None
-    return {"type": "disabled"}
+
+def claude_thinking_off_allowed(model: str, effort: str | None) -> bool:
+    """Whether thinking_off is accepted at this effort level."""
+    limit = model_caps(model).thinking_off_max_effort
+    if not limit or effort not in _EFFORT_ORDER:
+        return True
+    return _EFFORT_ORDER.index(effort) <= _EFFORT_ORDER.index(limit)
 
 
 def resolve_deepseek_model(model: str | None = None) -> str:
@@ -180,6 +232,7 @@ MODEL_DISPLAY_NAMES = {
     "claude-fable-5-1": "Claude Fable 5.1",
     "gemini-3.8-flash": "Gemini 3.8 Flash",
     "claude-opus-5-5": "Claude Opus 5.5",
+    "gpt-6-astra": "GPT-6 Astra",
     "gpt-6.1-sol": "GPT-6.1 Sol",
     "gpt-6-sol": "GPT-6 Sol",
     "gpt-6-luna": "GPT-6 Luna",
@@ -286,6 +339,7 @@ OPENAI_COMPATIBLE_PRICING = {
     # https://developers.openai.com/api/docs/models/gpt-6-sol and /gpt-6-luna
     # (2026-09-23); cache writes cost 1.25x ordinary input. GPT-6.1 Sol
     # (/gpt-6.1-sol, 2026-10-08) halves Sol's cached-input rate.
+    "gpt-6-astra": _per_token(10.00, 50.00, 1.00, 12.50),
     "gpt-6.1-sol": _per_token(2.00, 10.00, 0.10, 2.50),
     "gpt-6-sol": _per_token(2.00, 10.00, 0.20, 2.50),
     "gpt-6-luna": _per_token(0.10, 0.50, 0.01, 0.125),
@@ -302,6 +356,7 @@ OPENAI_COMPATIBLE_PRICING = {
 
 GPT56_LONG_CONTEXT_THRESHOLD = 272_000
 _OPENAI_GPT56_LONG_CONTEXT_PRICING = {
+    "gpt-6-astra": _per_token(20.00, 75.00, 2.00, 25.00),
     "gpt-6.1-sol": _per_token(4.00, 15.00, 0.20, 5.00),
     "gpt-6-sol": _per_token(4.00, 15.00, 0.40, 5.00),
     "gpt-6-luna": _per_token(0.20, 0.75, 0.02, 0.25),

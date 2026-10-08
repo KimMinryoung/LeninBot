@@ -17,7 +17,7 @@ from browser_use import Agent, Browser
 from browser_use.llm.anthropic.chat import ChatAnthropic
 from llm.provider_registry import (
     CURRENT_TEXT_MODELS, DEEPSEEK_FLASH_MODEL, OPENAI_MODEL_MAP, TIER_MODEL_KEYS,
-    current_text_model, is_gpt6_model, openai_supports_none_effort,
+    current_text_model, is_gpt6_model, model_caps,
     resolve_deepseek_model,
 )
 
@@ -225,7 +225,7 @@ def _build_llm(model: str | None = None, provider: str | None = None):
         logger.info("browser-use LLM: Google %s", model)
         return llm
 
-    if provider == "openai" and not openai_supports_none_effort(model):
+    if provider == "openai" and not model_caps(model).chat_tools:
         # browser-use drives tools through Chat Completions, which these
         # models do not serve; tier:high computer mode is the Sol path.
         logger.warning("browser-use cannot drive %s via Chat Completions; using %s",

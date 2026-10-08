@@ -45,7 +45,10 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from ops import audit_sink
 from llm.gateway import evaluate_policy, record_llm_call
-from llm.provider_registry import current_text_model, openai_supports_none_effort
+from llm.provider_registry import (
+    claude_thinking_off, claude_thinking_off_allowed, current_text_model, model_caps,
+    openai_reasoning_effort,
+)
 
 logger = logging.getLogger("llm_proxy")
 
@@ -238,31 +241,45 @@ def normalize_text_model_request(
     current = current_text_model(provider, original)
     if current is None:
         return path, body, original, "unregistered text model; use tier:frontier|high|medium|low"
+    caps = model_caps(current)
+    rewritten = False
     if provider == "openai" and path.endswith("chat/completions"):
         if payload.get("tools") or payload.get("functions"):
             effort = payload.get("reasoning_effort")
             if effort is None:
                 reasoning = payload.get("reasoning")
                 effort = reasoning.get("effort") if isinstance(reasoning, dict) else None
-            if not openai_supports_none_effort(current) or effort != "none":
+            if not caps.chat_tools or effort != "none":
                 return path, body, original, (
                     "GPT-6 Chat Completions function calls require reasoning_effort=none "
-                    "(Luna only); use Responses API for Sol/Astra or reasoning with tools"
+                    "on a model that serves them (Luna); use Responses API otherwise"
                 )
-    if provider == "anthropic" and current in {"claude-opus-5-5", "claude-fable-5-1", "claude-sonnet-5-5"}:
+    if provider == "openai" and path.endswith("responses"):
+        reasoning = payload.get("reasoning")
+        if isinstance(reasoning, dict):
+            lifted = openai_reasoning_effort(current, reasoning.get("effort"))
+            if lifted != reasoning.get("effort"):
+                payload["reasoning"] = {**reasoning, "effort": lifted}
+                rewritten = True
+    if provider == "anthropic":
         thinking = payload.get("thinking")
         if isinstance(thinking, dict) and thinking.get("type") == "disabled":
+            off = claude_thinking_off(current)
             effort = (payload.get("output_config") or {}).get("effort")
-            if current != "claude-sonnet-5-5":
+            if off is None:
                 return path, body, original, (
-                    "current Claude model cannot disable thinking; omit it and lower effort")
-            if effort in {"xhigh", "max"}:
+                    f"{current} cannot disable thinking; omit it and lower effort")
+            if not claude_thinking_off_allowed(current, effort):
                 return path, body, original, (
-                    "Sonnet 5.5 turns thinking off only at effort high or below")
-            # Sonnet 5.5's off switch, per its migration guide.
-            payload["thinking"] = {"type": "between_tools"}
-            payload["model"] = current
-            return path, json.dumps(payload, ensure_ascii=False).encode("utf-8"), original, None
+                    f"{current} turns thinking off only at effort "
+                    f"{caps.thinking_off_max_effort} or below")
+            if off != thinking:
+                # e.g. Sonnet 5.5's off switch is between_tools.
+                payload["thinking"] = off
+                rewritten = True
+    if rewritten:
+        payload["model"] = current
+        return path, json.dumps(payload, ensure_ascii=False).encode("utf-8"), original, None
     if current == original:
         return path, body, original, None
     payload["model"] = current

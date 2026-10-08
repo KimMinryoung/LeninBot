@@ -789,6 +789,33 @@ class TestLatestTierRouting(unittest.TestCase):
             with self.subTest(provider=provider, old=old):
                 self.assertEqual(current_text_model(provider, old), expected)
 
+    def test_every_current_model_is_fully_registered(self):
+        # Adding a model to CURRENT_TEXT_MODELS needs a capability row, a
+        # price, and a display name; this lists whichever is missing.
+        from llm.provider_registry import (
+            CURRENT_TEXT_MODELS, MODEL_CAPABILITIES, MODEL_DISPLAY_NAMES,
+            OPENAI_COMPATIBLE_PRICING, anthropic_pricing_table,
+        )
+        prices = {"claude": anthropic_pricing_table(), "openai": OPENAI_COMPATIBLE_PRICING}
+        for provider, table in prices.items():
+            for model in set(CURRENT_TEXT_MODELS[provider].values()):
+                with self.subTest(model=model):
+                    self.assertIn(model, MODEL_CAPABILITIES)
+                    self.assertIn(model, table)
+                    self.assertIn(model, MODEL_DISPLAY_NAMES)
+
+    def test_proxy_lifts_unsupported_responses_effort(self):
+        from llm_proxy.app import normalize_text_model_request
+
+        for model, expected in (("gpt-6-sol", "low"), ("tier:low", "none")):
+            with self.subTest(model=model):
+                body = json.dumps({"model": model, "input": "hi",
+                                   "reasoning": {"effort": "none"}}).encode()
+                _, rewritten, _, error = normalize_text_model_request(
+                    "openai", "v1/responses", body)
+                self.assertIsNone(error)
+                self.assertEqual(json.loads(rewritten)["reasoning"]["effort"], expected)
+
     def test_claude_thinking_off_follows_each_model(self):
         from tool_gateway.inference import AgentInferencePolicy, resolve_inference_extra
 
