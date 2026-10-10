@@ -40,6 +40,7 @@ writer/frontend 역할 복구에는 기존 credential 또는 암호만 담은 06
 
 기존 운영 기록상 `leninbot-standby` (`100.124.58.85`, Hetzner hel1)는 `/root/pgstandby/`의 `leninbot-pg-standby`로 물리 복제한다. 자동 failover는 없다. 승격·재시드·복제 진단은 [standby_operations.md](standby_operations.md), 알림은 [monitoring.md](monitoring.md)가 소유한다.
 
+- primary와 standby 모두 `jit=off`(ALTER SYSTEM, `postgresql.auto.conf`, 2026-10-10)다. JIT가 걸리던 쿼리는 사실상 CommuLingo planner뿐이었고, 상관 서브쿼리로 비용 추정이 부풀어 실행 약 0.1초에 컴파일 약 0.5초를 매번 더했다(8일간 pipeline 쿼리 DB 시간의 41%). `postgresql.auto.conf`는 복제되지 않으므로 재시드·새 primary 구축 때 다시 설정한다.
 - primary/standby는 동일 Postgres 이미지 digest를 사용한다. 별도 VM이지만 같은 DC이므로 R2 오프사이트 백업을 유지한다.
 - `max_slot_wal_keep_size=8GB`로 primary의 WAL 무한 증가를 제한한다. 슬롯 무효화 시 재시드가 필요하다.
 - 복제 인증은 `replicator` 역할, standby IP `/32`, 데이터 디렉터리 밖의 0600 passfile을 사용한다. Tailscale SNAT로 출발지 IP가 바뀌면 인증이 실패할 수 있다.
