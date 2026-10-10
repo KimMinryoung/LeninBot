@@ -49,6 +49,30 @@
         ],
         "description": "Optional commulingo_offices id (Soviet institution line) this activity was carried out in. Only with the state-soviet, soviet-party or comintern affiliation."
       },
+      "title": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "additionalProperties": false,
+        "required": [
+          "ko",
+          "en"
+        ],
+        "properties": {
+          "ko": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "en": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          }
+        },
+        "description": "Optional name of the post held, in both languages (e.g. {\"ko\":\"바이에른 총리 겸 외무장관\",\"en\":\"Minister-President and Foreign Minister of Bavaria\"}). Only with relation service or employment. Use officeId instead when the post is a commulingo_offices line."
+      },
       "startYear": {
         "type": [
           "integer",

@@ -1,5 +1,5 @@
 {
-  "version": 27,
+  "version": 29,
   "functions": [
     {
       "id": "political-leadership",
@@ -44,7 +44,7 @@
         "en": "Military command"
       },
       "icon": "star",
-      "criteria": "Military command, operations and organization. Intelligence and counterintelligence chiefs belong to security."
+      "criteria": "Military command, operations and organization: officers, commanders, war ministers and military organizers. Rank-and-file service (a conscript, volunteer or interpreter in the ranks) is not an activity; it belongs in the career timeline. Intelligence and counterintelligence chiefs belong to security."
     },
     {
       "id": "security",
@@ -2859,7 +2859,7 @@
       ],
       "countryCode": "poland",
       "icon": "flag",
-      "parentId": null,
+      "parentId": "labor-union",
       "criteria": "Only documented service, membership or organizational activity in Solidarity (Solidarność). Never infer affiliation from nationality, residence or ideology.",
       "periods": [
         [
@@ -2898,7 +2898,7 @@
       },
       "countryCode": "poland",
       "icon": "flag",
-      "parentId": null,
+      "parentId": "labor-union",
       "criteria": "Only documented service, membership or organizational activity in Free Trade Unions of the Coast (WZZ). Never infer affiliation from nationality, residence or ideology.",
       "periods": [
         [
@@ -2916,7 +2916,7 @@
       },
       "countryCode": "france",
       "icon": "flag",
-      "parentId": null,
+      "parentId": "labor-union",
       "criteria": "Only documented service, membership or organizational activity in General Confederation of Labour (CGT, France). Never infer affiliation from nationality, residence or ideology.",
       "periods": [
         [
@@ -6935,7 +6935,7 @@
       },
       "countryCode": "uk",
       "icon": "flag",
-      "parentId": null,
+      "parentId": "labor-union",
       "criteria": "Only documented service, membership or organizational activity in Transport and General Workers' Union (TGWU). Never infer affiliation from nationality, residence or ideology.",
       "periods": [
         [
@@ -6992,7 +6992,7 @@
       },
       "countryCode": "usa",
       "icon": "flag",
-      "parentId": null,
+      "parentId": "labor-union",
       "criteria": "Only documented service, membership or organizational activity in American Railway Union (ARU). Never infer affiliation from nationality, residence or ideology.",
       "periods": [
         [
@@ -7652,7 +7652,7 @@
       },
       "countryCode": "russia",
       "icon": "flag",
-      "parentId": null,
+      "parentId": "labor-union",
       "criteria": "Only documented service, membership or organizational activity in All-Russian Metalworkers' Union. Never infer affiliation from nationality, residence or ideology.",
       "periods": [
         [
@@ -7793,7 +7793,7 @@
       },
       "countryCode": "soviet",
       "icon": "flag",
-      "parentId": null,
+      "parentId": "labor-union",
       "criteria": "Only documented service, membership or organizational activity in All-Russian / All-Union Central Council of Trade Unions (VTsSPS). Never infer affiliation from nationality, residence or ideology.",
       "periods": [
         [
@@ -8918,6 +8918,265 @@
         [
           1989,
           null
+        ]
+      ]
+    },
+    {
+      "id": "labor-union",
+      "kind": "force",
+      "label": {
+        "ko": "노동조합",
+        "en": "Trade unions"
+      },
+      "countryCode": null,
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Documented office, staff work or membership in a trade union or trade-union federation of any country (metalworkers, national federations, union internationals). A union is its own organisation: never record union work as state service or company employment, and never infer it from being a worker."
+    },
+    {
+      "id": "international-fourth-international",
+      "kind": "international",
+      "label": {
+        "ko": "제4인터내셔널",
+        "en": "Fourth International"
+      },
+      "termIds": [
+        "fourth-international"
+      ],
+      "countryCode": null,
+      "icon": "globe",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Fourth International. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1938,
+          null
+        ]
+      ]
+    },
+    {
+      "id": "austrian-heimwehr",
+      "kind": "military",
+      "label": {
+        "ko": "하임베어",
+        "en": "Heimwehr (Austria)"
+      },
+      "countryCode": "austria",
+      "icon": "swords",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Heimwehr (Austria). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1919,
+          1936
+        ]
+      ]
+    },
+    {
+      "id": "german-freikorps",
+      "kind": "military",
+      "label": {
+        "ko": "자유군단",
+        "en": "Freikorps (Germany, 1918–1923)"
+      },
+      "countryCode": "germany",
+      "icon": "swords",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Freikorps (Germany, 1918–1923). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1918,
+          1923
+        ]
+      ]
+    },
+    {
+      "id": "party-french-pci-trotskyist",
+      "kind": "party",
+      "label": {
+        "ko": "국제주의공산당 (프랑스)",
+        "en": "Internationalist Communist Party (PCI, France)"
+      },
+      "termIds": [
+        "internationalist-communist-party-france"
+      ],
+      "countryCode": "france",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Internationalist Communist Party (PCI, France). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1944,
+          1969
+        ],
+        [
+          1981,
+          1991
+        ]
+      ]
+    },
+    {
+      "id": "party-french-oci",
+      "kind": "party",
+      "label": {
+        "ko": "국제주의공산주의조직",
+        "en": "Internationalist Communist Organisation (OCI)"
+      },
+      "termIds": [
+        "internationalist-communist-organisation"
+      ],
+      "countryCode": "france",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Internationalist Communist Organisation (OCI). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1967,
+          1981
+        ]
+      ]
+    },
+    {
+      "id": "german-red-aid",
+      "kind": "force",
+      "label": {
+        "ko": "독일 적색구원회",
+        "en": "Red Aid of Germany (Rote Hilfe Deutschlands)"
+      },
+      "countryCode": "germany",
+      "icon": "flag",
+      "parentId": "international-red-aid",
+      "criteria": "Only documented service, membership or organizational activity in Red Aid of Germany (Rote Hilfe Deutschlands). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1924,
+          1936
+        ]
+      ]
+    },
+    {
+      "id": "international-workers-relief",
+      "kind": "international",
+      "label": {
+        "ko": "국제노동자구호",
+        "en": "Workers International Relief (IAH / Mezhrabpom)"
+      },
+      "countryCode": null,
+      "icon": "globe",
+      "parentId": "comintern",
+      "criteria": "Only documented service, membership or organizational activity in Workers International Relief (IAH / Mezhrabpom). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1921,
+          1935
+        ]
+      ]
+    },
+    {
+      "id": "german-nkfd",
+      "kind": "force",
+      "label": {
+        "ko": "자유독일 국민위원회",
+        "en": "National Committee for a Free Germany (NKFD)"
+      },
+      "countryCode": "germany",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in National Committee for a Free Germany (NKFD). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1943,
+          1945
+        ]
+      ]
+    },
+    {
+      "id": "german-kag",
+      "kind": "force",
+      "label": {
+        "ko": "공산주의 노동공동체",
+        "en": "Communist Working Group (KAG)"
+      },
+      "countryCode": "germany",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Communist Working Group (KAG). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1921,
+          1922
+        ]
+      ]
+    },
+    {
+      "id": "german-leninbund",
+      "kind": "force",
+      "label": {
+        "ko": "레닌분트",
+        "en": "Lenin League (Leninbund)"
+      },
+      "countryCode": "germany",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Lenin League (Leninbund). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1928,
+          1933
+        ]
+      ]
+    },
+    {
+      "id": "international-socialist-youth",
+      "kind": "international",
+      "label": {
+        "ko": "사회주의 청년 인터내셔널",
+        "en": "Socialist Youth International"
+      },
+      "countryCode": null,
+      "icon": "globe",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Socialist Youth International. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1907,
+          1923
+        ]
+      ]
+    },
+    {
+      "id": "bavarian-soviet-republic",
+      "kind": "state",
+      "label": {
+        "ko": "바이에른 평의회 공화국",
+        "en": "Bavarian Soviet Republic (1919)"
+      },
+      "countryCode": "germany",
+      "icon": "landmark",
+      "parentId": null,
+      "criteria": "Office in the Bavarian Soviet Republic of April-May 1919 (its central council, people's commissars, executive council or Red Army). Not the Bavarian or German state before or after it.",
+      "periods": [
+        [
+          1919,
+          1919
+        ]
+      ]
+    },
+    {
+      "id": "german-workers-soldiers-councils",
+      "kind": "force",
+      "label": {
+        "ko": "독일 노동자·병사 평의회",
+        "en": "Workers' and Soldiers' Councils (Germany, 1918-1919)"
+      },
+      "countryCode": "germany",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Seats and offices in the revolutionary workers' and soldiers' councils of 1918-1919 (the Berlin Executive Council, the Reich Congress of Councils, local councils). Not the Council of the People's Deputies, which governed the Reich as its government.",
+      "periods": [
+        [
+          1918,
+          1919
         ]
       ]
     }
