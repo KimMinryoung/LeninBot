@@ -1,7 +1,9 @@
-# Installed on leninbot-standby. Restores the newest R2 dumps into a throwaway
-# container and validates them; production is never touched.
+# Installed on leninbot-standby. Restores the newest R2 dumps (PostgreSQL, then
+# the Neo4j KG) into throwaway containers and validates them; production is
+# never touched. The one restore-drill ping covers both: a failure in either
+# skips it.
 [Unit]
-Description=LeninBot weekly backup restore drill from R2
+Description=LeninBot weekly backup restore drill from R2 (PostgreSQL + KG)
 Wants=network-online.target
 After=network-online.target docker.service
 
@@ -15,6 +17,9 @@ LoadCredentialEncrypted=r2_s3_secret_access_key:/etc/credstore.encrypted/r2_s3_s
 # restore serially with a small maintenance_work_mem; speed does not matter.
 # --max-age-days 2 fails the drill when the daily backups have stopped.
 ExecStart=/opt/leninbot/venv/bin/python /opt/leninbot/scripts/restore_db.py drill --from-r2 --max-age-days 2 --jobs 1 --maintenance-work-mem 128MB
+# KG second: ~40 s and ~450 MB peak on 2026-10-10 (14k entities); the Neo4j
+# container is capped at 1600m so it cannot starve the PG standby.
+ExecStart=/opt/leninbot/venv/bin/python /opt/leninbot/scripts/restore_kg_drill.py --from-r2 --max-age-days 2
 TimeoutStartSec=3600
 Nice=10
 ExecStartPost=-/usr/bin/curl -fsS -m 10 --retry 3 ${WATCHDOG_PING_BASE}/restore-drill

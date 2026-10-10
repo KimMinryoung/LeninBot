@@ -41,7 +41,7 @@
 | `main-backup` | 24시간 | 3시간 | 2026-09-23부터 standby에서 핑 |
 | `writer-backup` | 24시간 | 3시간 | standby에서 핑 |
 | `kg-backup` | 24시간 | 3시간 | main VM (Neo4j가 main에만 있음) |
-| `restore-drill` | 7일 | 6시간 | standby 주간 R2 복원 드릴 |
+| `restore-drill` | 7일 | 6시간 | standby 주간 R2 복원 드릴 (PG, 이어서 KG — 둘 다 통과해야 핑) |
 
 설계상 알아둘 것:
 

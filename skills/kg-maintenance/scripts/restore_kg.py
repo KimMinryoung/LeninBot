@@ -138,6 +138,14 @@ def _restore_mentions(tx, mentions: list[dict]) -> int:
     return total
 
 
+def expected_counts(entities: list[dict], edges: list[dict], mentions: list[dict]) -> dict:
+    return {
+        "entities": len({e["uuid"] for e in entities}),
+        "relates_to": len({r["uuid"] for r in edges}),
+        "mentions": len({(m["episode_uuid"], m["entity_uuid"]) for m in mentions}),
+    }
+
+
 def _final_counts(session) -> dict:
     return {
         "entities": session.run("MATCH (n:Entity) RETURN count(n) AS c").single()["c"],
@@ -147,6 +155,20 @@ def _final_counts(session) -> dict:
             "MATCH (ep:Episodic) WHERE ep.restored_stub = true RETURN count(ep) AS c"
         ).single()["c"],
     }
+
+
+def _ensure_uuid_indexes(session) -> None:
+    """Every restore query looks nodes up by uuid. On an empty target there is
+    no index yet, so each row is a label scan: the 2026-10 KG (14k entities,
+    39k edges) ran over 10 minutes at 100% CPU without finishing. Names match
+    graphiti's own so a later build_indices_and_constraints is a no-op."""
+    for stmt in (
+        "CREATE INDEX entity_uuid IF NOT EXISTS FOR (n:Entity) ON (n.uuid)",
+        "CREATE INDEX episode_uuid IF NOT EXISTS FOR (n:Episodic) ON (n.uuid)",
+        "CREATE INDEX relation_uuid IF NOT EXISTS FOR ()-[e:RELATES_TO]-() ON (e.uuid)",
+    ):
+        session.run(stmt).consume()
+    session.run("CALL db.awaitIndexes(300)").consume()
 
 
 def _clear(session) -> None:
@@ -195,6 +217,8 @@ def main(argv: list[str] | None = None) -> int:
                 print("Clearing target DB...")
                 _clear(session)
 
+            _ensure_uuid_indexes(session)
+
             print("Restoring entities...")
             n_ent = session.execute_write(_restore_entities, entities)
             print(f"  done: {n_ent:,} merged")
@@ -216,16 +240,15 @@ def main(argv: list[str] | None = None) -> int:
             for k, v in counts.items():
                 print(f"  {k}: {v:,}")
 
-            print("\n── Expected (from backup JSON) ──")
-            print(f"  entities:   {len(entities):,}")
-            print(f"  relates_to: {len(edges):,}")
-            print(f"  mentions:   {len(mentions):,}")
+            # MERGE collapses rows with the same key: production has carried a
+            # few parallel MENTIONS edges (24 in 2026-04, 23 in 2026-10), so the
+            # raw row counts never match. Compare against distinct keys.
+            expected = expected_counts(entities, edges, mentions)
+            print("\n── Expected (distinct keys in backup JSON) ──")
+            for k, v in expected.items():
+                print(f"  {k}: {v:,}")
 
-            ok = (
-                counts["entities"] == len(entities)
-                and counts["relates_to"] == len(edges)
-                and counts["mentions"] == len(mentions)
-            )
+            ok = all(counts[k] == v for k, v in expected.items())
             print(f"\nResult: {'PASS' if ok else 'MISMATCH'}")
             return 0 if ok else 1
     finally:
