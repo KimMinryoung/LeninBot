@@ -737,7 +737,8 @@ class _ClaudeProtocolAdapter:
         return False
 
     async def append_length_continuation(self, msgs, turn, partial_text, next_index, max_count):
-        if partial_text:
+        # Keep the cutoff's whitespace, but Anthropic rejects blank text blocks.
+        if partial_text.strip():
             msgs.append({
                 "role": "assistant",
                 "content": [{"type": "text", "text": partial_text}],

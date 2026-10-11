@@ -1549,7 +1549,7 @@ class _OpenAIProtocolAdapter:
         return True
 
     async def append_length_continuation(self, msgs, turn, partial_text, next_index, max_count):
-        if not partial_text:
+        if not partial_text.strip():
             return False
         await emit_progress(
             self.on_progress,

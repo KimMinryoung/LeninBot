@@ -385,6 +385,26 @@ class TestClaudeLengthContinuation(unittest.TestCase):
         self.assertIn("Continue exactly from where the previous answer stopped", joined)
 
 
+    def test_blank_partial_is_never_replayed_as_assistant_text(self):
+        # Anthropic rejects whitespace-only text blocks with a 400.
+        client = FakeAnthropicClient([
+            _response([_text_block("\n\n")], stop_reason="max_tokens"),
+            _response([_text_block("답")]),
+        ])
+        asyncio.run(claude_loop.chat_with_tools(
+            [{"role": "user", "content": "q"}],
+            client=client, model="claude-sonnet-5",
+            tools=[], tool_handlers={}, system_prompt="s",
+            budget_usd=5.0, continue_on_length=True, max_length_continuations=1,
+        ))
+        replayed = [m for m in client.calls[1]["messages"] if m["role"] == "assistant"]
+        self.assertFalse(any(
+            isinstance(m["content"], list) and any(
+                b.get("type") == "text" and not b.get("text", "").strip() for b in m["content"])
+            for m in replayed
+        ))
+
+
 class TestClaudePauseTurn(unittest.TestCase):
     def test_pause_turn_continues_with_user_nudge(self):
         client = FakeAnthropicClient([

@@ -134,7 +134,8 @@ Web 답변은 생성 즉시 저장·전달한다. 별도 LLM 품질 검토는 �
 시작되면 `chunk_reset`을 보내 클라이언트가 이전 조각을 지우게 하므로 끊긴 초안과
 재생성 답변이 겹치지 않는다. 길이 이어받기는 같은 답변이라 초기화하지 않는다.
 `thinking` 이벤트는 보내지 않는다. provider 길이 제한은 도구 루프가 끊긴 지점부터
-최대 두 번 이어받고, 그래도 잘린 답변은 `truncated`와 경고를 붙여 전달한다.
+최대 두 번 이어받고, 그래도 잘린 답변은 `answer.truncated=true`로 전달한다(경고 문구는
+프론트엔드가 이 값으로 한 번만 표시한다). 최종 텍스트가 비면 루프의 대체 문구가 답변이 된다.
 사전 KG/Gramsci 검색도 모델 호출과 같은 request/chat ID의 webchat caller로 실행한다.
 
 Public `fetch_url` calls validate HTTP(S) scheme, a narrow safe-port set, every

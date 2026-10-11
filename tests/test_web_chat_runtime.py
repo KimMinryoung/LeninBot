@@ -26,6 +26,13 @@ class ResultTests(unittest.TestCase):
         self.assertTrue(result['truncated'])
         self.assertNotIn('private_field', result)
 
+    def test_loop_fallback_text_survives_an_empty_tracked_final(self):
+        result = _normalize_web_result(
+            {'text': '응답을 생성하지 못했습니다.', 'complete': True},
+            {'final_response': ''},
+        )
+        self.assertEqual(result['text'], '응답을 생성하지 못했습니다.')
+
 
 class RuntimeTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):

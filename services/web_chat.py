@@ -1295,11 +1295,6 @@ async def handle_web_chat(
                 metadata["text"],
                 tool_work_details,
             )
-            if metadata.get("truncated"):
-                await run.publish(_format_sse({
-                    "type": "warning",
-                    "content": "답변이 모델 출력 한도에서 멈춰 마지막 부분이 미완성일 수 있습니다.",
-                }))
             chat_log_id = await asyncio.to_thread(
                 _persist_web_answer, turn, answer, tool_work_details,
                 session_id=session_id, fingerprint=fingerprint, user_agent=user_agent,
