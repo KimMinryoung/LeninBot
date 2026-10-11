@@ -1,5 +1,5 @@
 {
-  "version": 29,
+  "version": 38,
   "functions": [
     {
       "id": "political-leadership",
@@ -8988,6 +8988,9 @@
           1918,
           1923
         ]
+      ],
+      "termIds": [
+        "freikorps"
       ]
     },
     {
@@ -9177,6 +9180,738 @@
         [
           1918,
           1919
+        ]
+      ]
+    },
+    {
+      "parentId": null,
+      "id": "state-china-roc",
+      "kind": "state",
+      "label": {
+        "ko": "중화민국 국가기관",
+        "en": "Republic of China state institutions"
+      },
+      "countryCode": "china",
+      "icon": "landmark",
+      "criteria": "Documented service for the Republic of China state: the Nanjing provisional government (1912), the Nationalist Government in Canton and Nanjing (1925–1948), its ministries, central bank, diplomatic service and army, and the ROC government on Taiwan after 1949. Use china-beiyang for the Beiyang government and warlord armies (1912–1928) and china-kmt for party posts and membership. Do NOT infer from citizenship, residence or KMT membership.",
+      "periods": [
+        [
+          1912,
+          null
+        ]
+      ]
+    },
+    {
+      "parentId": null,
+      "id": "kazakh-alash-orda",
+      "kind": "state",
+      "label": {
+        "ko": "알라시 오르다 국가기관",
+        "en": "Alash Orda state institutions"
+      },
+      "termIds": [
+        "alash-orda"
+      ],
+      "countryCode": "kazakhstan",
+      "icon": "landmark",
+      "criteria": "Documented service for the Alash Orda autonomous government (1917–1920), its council and militia. Party membership and leadership belong to party-kazakh-alash. Do NOT infer from ethnicity or nationalist sympathy.",
+      "periods": [
+        [
+          1917,
+          1920
+        ]
+      ]
+    },
+    {
+      "parentId": null,
+      "id": "donetsk-krivoy-rog-republic",
+      "kind": "state",
+      "label": {
+        "ko": "도네츠크-크리보이로크 소비에트 공화국 국가기관",
+        "en": "Donetsk–Krivoy Rog Soviet Republic state institutions"
+      },
+      "countryCode": "ukraine",
+      "icon": "landmark",
+      "criteria": "Office in the Donetsk–Krivoy Rog Soviet Republic of 1918 (its Sovnarkom, commissariats or Red Guard). Not Soviet Ukraine (soviet-ukraine) or the Soviet state.",
+      "periods": [
+        [
+          1918,
+          1918
+        ]
+      ]
+    },
+    {
+      "parentId": null,
+      "id": "viet-minh",
+      "kind": "force",
+      "label": {
+        "ko": "베트민",
+        "en": "Viet Minh"
+      },
+      "countryCode": "vietnam",
+      "icon": "flag",
+      "criteria": "Only documented service, membership or organizational activity in the Viet Minh (League for the Independence of Vietnam) and its armed propaganda units before the Democratic Republic of Vietnam state took over (1941–1945, the front until 1951). State and People’s Army service from 1945 belongs to state-vietnam; party posts to party-vietnamese-communist. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1941,
+          1951
+        ]
+      ]
+    },
+    {
+      "parentId": null,
+      "id": "yugoslav-partisans",
+      "kind": "military",
+      "label": {
+        "ko": "유고슬라비아 파르티잔",
+        "en": "Yugoslav Partisans (NOVJ)"
+      },
+      "countryCode": "yugoslavia",
+      "icon": "swords",
+      "criteria": "Only documented service in the Yugoslav Partisans / National Liberation Army of Yugoslavia (1941–1945), its Supreme Headquarters and units. Party posts belong to party-yugoslav-communist; the Yugoslav army after 1945 to state-yugoslavia. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1941,
+          1945
+        ]
+      ]
+    },
+    {
+      "parentId": null,
+      "id": "french-armee-secrete",
+      "kind": "military",
+      "label": {
+        "ko": "비밀군",
+        "en": "Armée secrète (French Resistance)"
+      },
+      "countryCode": "france",
+      "icon": "swords",
+      "criteria": "Only documented service in the Armée secrète, the unified military arm of the French Resistance movements (1942–1944). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1942,
+          1944
+        ]
+      ]
+    },
+    {
+      "id": "german-nazi-sa",
+      "kind": "force",
+      "label": {
+        "ko": "돌격대 (SA)",
+        "en": "Sturmabteilung (SA)"
+      },
+      "countryCode": "germany",
+      "icon": "swords",
+      "parentId": "german-nazi",
+      "criteria": "Only documented service, membership or organizational activity in Sturmabteilung (SA). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1921,
+          1945
+        ]
+      ],
+      "termIds": [
+        "sturmabteilung"
+      ]
+    },
+    {
+      "id": "german-nazi-ss",
+      "kind": "force",
+      "label": {
+        "ko": "친위대 (SS)",
+        "en": "Schutzstaffel (SS)"
+      },
+      "countryCode": "germany",
+      "icon": "swords",
+      "parentId": "german-nazi",
+      "criteria": "Documented service or membership in the SS and its branches (SD, RSHA, Death's Head units, Waffen-SS, Higher SS and Police Leaders). A Wehrmacht, police or ministry post outside the SS is not enough; never infer from Nazi party membership.",
+      "periods": [
+        [
+          1925,
+          1945
+        ]
+      ],
+      "termIds": [
+        "schutzstaffel"
+      ]
+    },
+    {
+      "id": "german-hitler-youth",
+      "kind": "force",
+      "label": {
+        "ko": "히틀러 청소년단",
+        "en": "Hitler Youth"
+      },
+      "countryCode": "germany",
+      "icon": "flag",
+      "parentId": "german-nazi",
+      "criteria": "Only documented service, membership or organizational activity in Hitler Youth. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1926,
+          1945
+        ]
+      ],
+      "termIds": [
+        "hitler-youth"
+      ]
+    },
+    {
+      "id": "german-labour-front",
+      "kind": "force",
+      "label": {
+        "ko": "독일노동전선",
+        "en": "German Labour Front (DAF)"
+      },
+      "countryCode": "germany",
+      "icon": "flag",
+      "parentId": "german-nazi",
+      "criteria": "Only documented service, membership or organizational activity in German Labour Front (DAF). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1933,
+          1945
+        ]
+      ],
+      "termIds": [
+        "german-labour-front"
+      ]
+    },
+    {
+      "id": "german-stahlhelm",
+      "kind": "force",
+      "label": {
+        "ko": "철모단",
+        "en": "Der Stahlhelm"
+      },
+      "countryCode": "germany",
+      "icon": "swords",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Der Stahlhelm. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1918,
+          1935
+        ]
+      ],
+      "termIds": [
+        "der-stahlhelm"
+      ]
+    },
+    {
+      "id": "german-organisation-consul",
+      "kind": "force",
+      "label": {
+        "ko": "콘술 기관",
+        "en": "Organisation Consul"
+      },
+      "countryCode": "germany",
+      "icon": "swords",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Organisation Consul. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1920,
+          1922
+        ]
+      ],
+      "termIds": [
+        "organisation-consul"
+      ]
+    },
+    {
+      "id": "german-bund-wiking",
+      "kind": "force",
+      "label": {
+        "ko": "바이킹 동맹",
+        "en": "Bund Wiking"
+      },
+      "countryCode": "germany",
+      "icon": "swords",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Bund Wiking. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1923,
+          1928
+        ]
+      ],
+      "termIds": [
+        "bund-wiking"
+      ]
+    },
+    {
+      "id": "german-bund-oberland",
+      "kind": "force",
+      "label": {
+        "ko": "오버란트 동맹",
+        "en": "Bund Oberland"
+      },
+      "countryCode": "germany",
+      "icon": "swords",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Bund Oberland. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1921,
+          1930
+        ]
+      ],
+      "termIds": [
+        "freikorps-oberland"
+      ]
+    },
+    {
+      "id": "german-red-front-fighters",
+      "kind": "force",
+      "label": {
+        "ko": "적색전선투사동맹",
+        "en": "Red Front Fighters' League (RFB)"
+      },
+      "countryCode": "germany",
+      "icon": "swords",
+      "parentId": "party-german-communist",
+      "criteria": "Only documented service, membership or organizational activity in Red Front Fighters' League (RFB). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1924,
+          1933
+        ]
+      ],
+      "termIds": [
+        "red-front-fighters-league"
+      ]
+    },
+    {
+      "id": "german-reichsbanner",
+      "kind": "force",
+      "label": {
+        "ko": "국기단 흑적금",
+        "en": "Reichsbanner Schwarz-Rot-Gold"
+      },
+      "countryCode": "germany",
+      "icon": "swords",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Reichsbanner Schwarz-Rot-Gold. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1924,
+          1933
+        ]
+      ],
+      "termIds": [
+        "reichsbanner"
+      ]
+    },
+    {
+      "id": "italian-mvsn",
+      "kind": "force",
+      "label": {
+        "ko": "검은셔츠단 (MVSN)",
+        "en": "Blackshirts (MVSN)"
+      },
+      "countryCode": "italy",
+      "icon": "swords",
+      "parentId": "party-italian-fascist",
+      "criteria": "Only documented service, membership or organizational activity in Voluntary Militia for National Security (Blackshirts). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1923,
+          1943
+        ]
+      ],
+      "termIds": [
+        "blackshirts"
+      ]
+    },
+    {
+      "id": "italian-squadristi",
+      "kind": "force",
+      "label": {
+        "ko": "파시스트 행동대",
+        "en": "Fascist squads (squadristi)"
+      },
+      "countryCode": "italy",
+      "icon": "swords",
+      "parentId": "party-italian-fascist",
+      "criteria": "Only documented service, membership or organizational activity in Fascist squads (squadristi). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1919,
+          1923
+        ]
+      ],
+      "termIds": [
+        "squadrismo"
+      ]
+    },
+    {
+      "id": "romanian-iron-guard",
+      "kind": "party",
+      "label": {
+        "ko": "철위단",
+        "en": "Iron Guard (Legion of the Archangel Michael)"
+      },
+      "countryCode": "romania",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Iron Guard (Legion of the Archangel Michael). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1927,
+          1941
+        ]
+      ],
+      "termIds": [
+        "iron-guard"
+      ]
+    },
+    {
+      "id": "croatian-ustase",
+      "kind": "party",
+      "label": {
+        "ko": "우스타샤",
+        "en": "Ustaše"
+      },
+      "countryCode": "croatia",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Ustaše. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1929,
+          1945
+        ]
+      ],
+      "termIds": [
+        "ustase"
+      ]
+    },
+    {
+      "id": "norwegian-nasjonal-samling",
+      "kind": "party",
+      "label": {
+        "ko": "국민연합 (노르웨이)",
+        "en": "Nasjonal Samling"
+      },
+      "countryCode": "norway",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Nasjonal Samling. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1933,
+          1945
+        ]
+      ],
+      "termIds": [
+        "nasjonal-samling"
+      ]
+    },
+    {
+      "id": "british-union-of-fascists",
+      "kind": "party",
+      "label": {
+        "ko": "영국 파시스트 연합",
+        "en": "British Union of Fascists"
+      },
+      "countryCode": "uk",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in British Union of Fascists. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1932,
+          1940
+        ]
+      ],
+      "termIds": [
+        "british-union-of-fascists"
+      ]
+    },
+    {
+      "id": "belgian-rexist-party",
+      "kind": "party",
+      "label": {
+        "ko": "렉스당",
+        "en": "Rexist Party"
+      },
+      "countryCode": "belgium",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Rexist Party. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1935,
+          1945
+        ]
+      ],
+      "termIds": [
+        "rexist-party"
+      ]
+    },
+    {
+      "id": "slovak-hlinka-party",
+      "kind": "party",
+      "label": {
+        "ko": "흘린카 슬로바키아 인민당",
+        "en": "Hlinka's Slovak People's Party"
+      },
+      "countryCode": "slovakia",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Hlinka's Slovak People's Party. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1913,
+          1945
+        ]
+      ],
+      "termIds": [
+        "hlinka-slovak-peoples-party"
+      ]
+    },
+    {
+      "id": "spanish-falange",
+      "kind": "party",
+      "label": {
+        "ko": "팔랑헤 에스파뇰라",
+        "en": "Falange Española (1933–1937)"
+      },
+      "countryCode": "spain",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Falange Española (1933–1937). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1933,
+          1937
+        ]
+      ],
+      "termIds": [
+        "falange-espanola"
+      ]
+    },
+    {
+      "id": "austrian-fatherland-front",
+      "kind": "party",
+      "label": {
+        "ko": "조국전선 (오스트리아)",
+        "en": "Fatherland Front (Austria)"
+      },
+      "countryCode": "austria",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Fatherland Front (Austria). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1933,
+          1938
+        ]
+      ],
+      "termIds": [
+        "fatherland-front-austria"
+      ]
+    },
+    {
+      "id": "party-italian-psu",
+      "kind": "party",
+      "label": {
+        "ko": "통일사회당 (이탈리아)",
+        "en": "Unitary Socialist Party (Italy, 1922–1930)"
+      },
+      "countryCode": "italy",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Unitary Socialist Party (Italy, 1922–1930). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1922,
+          1930
+        ]
+      ],
+      "termIds": [
+        "unitary-socialist-party-italy"
+      ]
+    },
+    {
+      "id": "state-italian-social-republic",
+      "kind": "state",
+      "label": {
+        "ko": "이탈리아 사회공화국",
+        "en": "Italian Social Republic (Salò)"
+      },
+      "countryCode": "italy",
+      "icon": "landmark",
+      "parentId": null,
+      "criteria": "Documented service for the Italian Social Republic (1943–1945), its government or armed forces. Not the Kingdom of Italy before or the Republic after.",
+      "periods": [
+        [
+          1943,
+          1945
+        ]
+      ]
+    },
+    {
+      "id": "party-italian-republican-fascist",
+      "kind": "party",
+      "label": {
+        "ko": "공화파시스트당",
+        "en": "Republican Fascist Party (PFR)"
+      },
+      "countryCode": "italy",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Republican Fascist Party (PFR). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1943,
+          1945
+        ]
+      ]
+    },
+    {
+      "id": "state-norway",
+      "kind": "state",
+      "label": {
+        "ko": "노르웨이 국가기관",
+        "en": "Norway state institutions"
+      },
+      "countryCode": "norway",
+      "icon": "landmark",
+      "parentId": null,
+      "criteria": "Actual service for the Norwegian state, its government or armed forces, including the occupation-era Quisling government (1942–1945). Citizenship, ethnicity, residence or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-croatia-ndh",
+      "kind": "state",
+      "label": {
+        "ko": "크로아티아 독립국",
+        "en": "Independent State of Croatia (NDH)"
+      },
+      "countryCode": "croatia",
+      "icon": "landmark",
+      "parentId": null,
+      "criteria": "Documented service for the Independent State of Croatia (1941–1945), its government or armed forces. Not Yugoslavia or post-1991 Croatia.",
+      "periods": [
+        [
+          1941,
+          1945
+        ]
+      ]
+    },
+    {
+      "id": "state-slovak-republic-1939",
+      "kind": "state",
+      "label": {
+        "ko": "슬로바키아 공화국 (1939–1945)",
+        "en": "Slovak Republic (1939–1945)"
+      },
+      "countryCode": "slovakia",
+      "icon": "landmark",
+      "parentId": null,
+      "criteria": "Documented service for the wartime Slovak Republic (1939–1945), its government or armed forces. Not Czechoslovakia or post-1993 Slovakia.",
+      "periods": [
+        [
+          1939,
+          1945
+        ]
+      ]
+    },
+    {
+      "id": "party-chinese-tongmenghui",
+      "kind": "party",
+      "label": {
+        "ko": "중국동맹회",
+        "en": "Tongmenghui (Chinese United League)"
+      },
+      "countryCode": "china",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in the Tongmenghui (Chinese United League). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1905,
+          1912
+        ]
+      ]
+    },
+    {
+      "id": "party-italian-ppi",
+      "kind": "party",
+      "label": {
+        "ko": "이탈리아 인민당 (1919–1926)",
+        "en": "Italian People's Party (1919–1926)"
+      },
+      "countryCode": "italy",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in the Italian People's Party (PPI, 1919–1926). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1919,
+          1926
+        ]
+      ],
+      "termIds": [
+        "italian-peoples-party-1919"
+      ]
+    },
+    {
+      "id": "state-italian-regency-carnaro",
+      "kind": "state",
+      "label": {
+        "ko": "카르나로 이탈리아 섭정국",
+        "en": "Italian Regency of Carnaro"
+      },
+      "countryCode": "italy",
+      "icon": "landmark",
+      "parentId": null,
+      "criteria": "Office in D'Annunzio's Italian Regency of Carnaro at Fiume (1919–1920). Not the Kingdom of Italy.",
+      "periods": [
+        [
+          1919,
+          1920
+        ]
+      ],
+      "termIds": [
+        "italian-regency-of-carnaro"
+      ]
+    },
+    {
+      "id": "party-german-centre",
+      "kind": "party",
+      "label": {
+        "ko": "독일 중앙당",
+        "en": "Centre Party (Germany)"
+      },
+      "countryCode": "germany",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Centre Party (Germany). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1870,
+          1933
+        ]
+      ]
+    },
+    {
+      "id": "party-dutch-communist",
+      "kind": "party",
+      "label": {
+        "ko": "네덜란드 공산당",
+        "en": "Communist Party of the Netherlands (CPN)"
+      },
+      "countryCode": "netherlands",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Communist Party of the Netherlands (CPN). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1909,
+          1991
         ]
       ]
     }
