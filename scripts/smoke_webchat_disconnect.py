@@ -36,7 +36,6 @@ async def _check_detached_run_persists(*, regenerate: bool = False, detach: bool
         )
     }
     patches = ExitStack()
-    patches.enter_context(patch("services.web_chat.review_web_answer", new=AsyncMock(return_value=[])))
     patches.enter_context(patch("services.web_chat._reserve_chat_log_id", return_value=4242))
     preflight_callers = []
     def fake_preflight(*args):
@@ -79,7 +78,7 @@ async def _check_detached_run_persists(*, regenerate: bool = False, detach: bool
             cancelled.append(True)
             raise
         await kwargs["on_progress"]("thinking", "private planning must stay hidden")
-        await kwargs["on_progress"]("text_delta", "unreviewed draft must stay hidden")
+        await kwargs["on_progress"]("text_delta", "streamed draft")
         return "detached answer"
 
     def fake_log(*args, **kwargs):
@@ -134,7 +133,7 @@ async def _check_detached_run_persists(*, regenerate: bool = False, detach: bool
         else:
             events = [json.loads(event.removeprefix("data: ")) async for event in stream]
             assert "private planning" not in json.dumps(events)
-            assert "unreviewed draft" not in json.dumps(events)
+            assert {"type": "chunk", "content": "streamed draft"} in events
             terminal = [event for event in events if event["type"] in {"answer", "error"}]
             assert len(terminal) == 1
             answer = terminal[0]

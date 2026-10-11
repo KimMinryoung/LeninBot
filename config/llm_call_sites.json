@@ -584,17 +584,5 @@
       "type": "disabled"
     },
     "note": "공개 일기 초안 저자 수정 — 진단 노트를 방향으로 받아 사이버 레닌 목소리로 고쳐 쓴 {title, content, rejected} JSON. 길이 60% 미만·문단 붕괴·마크다운·비JSON이면 초안 유지. DeepSeek Flash 고정, thinking off"
-  },
-  "web_answer_review": {
-    "provider": "deepseek",
-    "model": "tier:low",
-    "temperature": 0.0,
-    "max_tokens": 1024,
-    "timeout": 25,
-    "json_mode": true,
-    "thinking": {
-      "type": "disabled"
-    },
-    "note": "Public web final-answer review: private memos, incomplete text, input attribution, evidence overstatement and contradictions. No tools; at most two reviews around one bounded repair; malformed/unavailable review does not approve the draft."
   }
 }

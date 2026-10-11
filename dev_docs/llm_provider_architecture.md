@@ -210,9 +210,12 @@ association even when they occur beyond the first three retrieval results.
 
 ## Error Recovery and Tool Conversion
 
-OpenAI 호환 Chat Completions 스트림은 명시적 `finish_reason`을 받아야 완료다.
-EOF를 기본 `stop`으로 간주하지 않는다. 종료 사유 없이 끝난 스트림은 전송 오류로
-처리해 같은 모델 요청을 제한적으로 재시도하며, 미완성 tool delta는 실행하지 않는다.
+OpenAI 호환 응답은 `stop`/`length`/`tool_calls`/`function_call` 종료 사유를 받아야
+완료다. 스트림 EOF를 기본 `stop`으로 간주하지 않는다. 종료 사유가 없거나 그 밖의
+값(DeepSeek `insufficient_system_resource`, `content_filter` 등)이면 `_api_call`이
+`IncompleteProviderResponseError`(전송 오류 계열)를 올려 같은 모델 요청을 제한적으로
+재시도하고, 소진되면 provider failover로 넘어간다. 미완성 tool delta는 실행하지 않는다.
+provider가 `stop`을 보내고도 문장 중간에서 멈춘 경우는 감지하지 않는다.
 스트림 연결은 정상·오류 종료 모두 닫는다. 모델 응답별 request ID, 종료 사유,
 출력 한도, 실제 출력 토큰 수를 로그에 기록하여 전송 중단과 `length`를 구분한다.
 `length`/`max_tokens` 이어받기는 원래 공백을 보존하고 응답 조각 사이에 임의의

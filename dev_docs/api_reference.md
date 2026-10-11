@@ -128,18 +128,11 @@ preflight 검색은 각각 `WEBCHAT_VECTOR_SEARCH_TIMEOUT_SECONDS`(기본 45초)
 상한을 적용하고, timeout 시 다른 근거로 답하거나 검색 한계를 밝히도록 모델에
 결과를 돌려준다.
 
-Web 답변은 `services.web_answer_review`의 `web_answer_review` 원샷 호출로
-내부 작업 메모, 미완성 문장, 입력의 행위자 오독, 관찰 근거를 넘는 검증 주장,
-앞선 정정과의 모순을 확인한 뒤 저장·전달한다. 검색 스니펫과 본문 읽기를 구분하며
-외부 사실의 진위를 독립적으로 보증하지 않는다. 결함이 발견되면 기존 생성 예산의
-잔액 안에서 한 번 재작성하고 다시 검사한다. 다만 provider의 길이 제한은 검토 전에
-도구 루프가 기존 답변의 끊긴 지점부터 최대 두 번 이어받는다. 그 횟수를 소진한
-미완성 응답은 전체 재작성을 시도하지 않고 `error`로 끝낸다. 정상 종료 사유를
-받았지만 문장이 미완성인 경우에만 품질 검토의 재작성 경로를 쓴다.
-검토 장애·잘린/잘못된 JSON·재검사
-실패는 `error`이며 초안을 저장하거나 전달하지 않는다. 검토 호출의 비용은 별도
-LLM 감사 행에 기록되며 생성 루프 예산과 별개다. 검토 때문에 응답 지연이 추가된다.
-SSE에는 도구·상태 진행만 보내고 `thinking`/미검토 `text_delta`는 보내지 않는다.
+Web 답변은 생성 즉시 저장·전달한다. 별도 LLM 품질 검토는 없다. SSE는 도구·상태
+진행과 함께 `text_delta`를 `chunk`로 실시간 전송하고, 최종 `answer` 이벤트의
+본문이 스트리밍된 내용을 대체한다(재시도로 중복된 조각도 이때 정리된다).
+`thinking` 이벤트는 보내지 않는다. provider 길이 제한은 도구 루프가 끊긴 지점부터
+최대 두 번 이어받고, 그래도 잘린 답변은 `truncated`와 경고를 붙여 전달한다.
 사전 KG/Gramsci 검색도 모델 호출과 같은 request/chat ID의 webchat caller로 실행한다.
 
 Public `fetch_url` calls validate HTTP(S) scheme, a narrow safe-port set, every

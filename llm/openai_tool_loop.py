@@ -662,16 +662,6 @@ async def _call_sdk_raw_stream(kwargs: dict, on_progress, idle_timeout_sec: floa
         if close is not None:
             await close()
 
-    if finish_reason is None:
-        from tool_gateway.security import get_caller
-        logger.warning(
-            "Provider stream ended without finish_reason request_id=%s model=%s max_tokens=%s text_chars=%s",
-            get_caller().request_id, model,
-            request.get("max_tokens", request.get("max_completion_tokens")),
-            sum(map(len, content_parts)),
-        )
-        raise httpx.RemoteProtocolError("Provider stream ended without finish_reason")
-
     tool_calls = [
         _to_tool_call_namespace(tc)
         for _, tc in sorted(tool_parts.items())
@@ -863,15 +853,48 @@ async def _api_call(sdk_mode, client, base_url, model, messages, tools, max_toke
                     idle_timeout_sec: float | None = None):
     """Dispatch to SDK or httpx using the requested canonical model."""
     if sdk_mode:
-        return await _call_sdk(client, model, messages, tools, max_tokens,
-                               parallel_tool_calls=parallel_tool_calls,
-                               include_parallel_tool_calls=include_parallel_tool_calls,
-                               on_progress=on_progress,
-                               extra_body=extra_body,
-                               max_token_param=sdk_max_token_param,
-                               idle_timeout_sec=idle_timeout_sec)
-    return await _call_api(base_url, model, messages, tools, max_tokens,
-                           enable_thinking=enable_thinking)
+        response = await _call_sdk(client, model, messages, tools, max_tokens,
+                                   parallel_tool_calls=parallel_tool_calls,
+                                   include_parallel_tool_calls=include_parallel_tool_calls,
+                                   on_progress=on_progress,
+                                   extra_body=extra_body,
+                                   max_token_param=sdk_max_token_param,
+                                   idle_timeout_sec=idle_timeout_sec)
+    else:
+        response = await _call_api(base_url, model, messages, tools, max_tokens,
+                                   enable_thinking=enable_thinking)
+    _reject_abnormal_finish(response, model)
+    return response
+
+
+# Finish reasons that mean the provider ended the turn on purpose. A missing
+# reason (stream cut off) or any other value (DeepSeek
+# insufficient_system_resource, content_filter, ...) stopped generation
+# mid-answer and must not be delivered as a complete reply.
+_NORMAL_FINISH_REASONS = {"stop", "length", "tool_calls", "function_call"}
+
+
+class IncompleteProviderResponseError(httpx.RemoteProtocolError):
+    """Provider closed the turn without a normal finish reason; retryable."""
+
+
+def _reject_abnormal_finish(response, model: str) -> None:
+    choices = _obj_get(response, "choices", None) or []
+    if not choices:
+        return
+    finish_reason = _obj_get(choices[0], "finish_reason", None)
+    if finish_reason in _NORMAL_FINISH_REASONS:
+        return
+    from tool_gateway.security import get_caller
+    usage = _obj_get(response, "usage", None)
+    logger.warning(
+        "Provider ended turn abnormally request_id=%s model=%s finish_reason=%s tokens_out=%s",
+        get_caller().request_id, _response_model(response, model), finish_reason,
+        _obj_get(usage, "completion_tokens", None),
+    )
+    raise IncompleteProviderResponseError(
+        f"Provider ended turn with finish_reason={finish_reason}"
+    )
 
 
 # <think>...</think> emitted by Qwen/Deepseek reasoning models. llama-server
@@ -1405,8 +1428,6 @@ class _OpenAIProtocolAdapter:
             )
 
         if finish_reason != "tool_calls" or not tool_calls:
-            if finish_reason == "content_filter":
-                logger.warning("Response blocked by content filter at round %d", round_num)
             return Turn(
                 is_tool_round=False,
                 text_parts=[content_text],

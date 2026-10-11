@@ -377,14 +377,12 @@ class TestStreamIdleGuard(unittest.TestCase):
 
                 self.chat = SimpleNamespace(completions=_Completions())
 
-        async def _run():
-            return await openai_tool_loop._call_sdk_raw_stream(
-                {"_client": _EmptyStreamClient(), "model": "m", "messages": []},
-                on_progress=None,
-            )
+        async def _noop(*_args):
+            pass
 
-        with self.assertRaisesRegex(httpx.RemoteProtocolError, "without finish_reason"):
-            asyncio.run(_run())
+        with self.assertRaisesRegex(httpx.RemoteProtocolError, "finish_reason=None"):
+            asyncio.run(openai_tool_loop._api_call(
+                True, _EmptyStreamClient(), None, "m", [], None, 4096, on_progress=_noop))
 
 
 class TestStreamCompletion(unittest.TestCase):
@@ -422,12 +420,25 @@ class TestStreamCompletion(unittest.TestCase):
         chunks.append({"choices": [], "usage": _usage(completion=5)})
         return chunks
 
+    def call(self, client):
+        async def _noop(*_args):
+            pass
+        return asyncio.run(openai_tool_loop._api_call(
+            True, client, None, "m", [], None, 4096, on_progress=_noop))
+
     def test_usage_and_partial_text_without_finish_reason_do_not_complete(self):
         client = self.Client([self.chunks("접속할 수 있", None)])
-        with self.assertRaisesRegex(httpx.RemoteProtocolError, "without finish_reason"):
-            asyncio.run(openai_tool_loop._call_sdk_raw_stream(
-                {"_client": client, "model": "m", "messages": [], "max_tokens": 4096}, None))
+        with self.assertRaisesRegex(httpx.RemoteProtocolError, "finish_reason=None"):
+            self.call(client)
         self.assertTrue(client.streams[0].closed)
+
+    def test_abnormal_finish_reasons_are_retryable_failures(self):
+        for finish in ("insufficient_system_resource", "content_filter"):
+            client = self.Client([self.chunks("읽을 수 있", finish)])
+            with self.subTest(finish=finish), self.assertRaisesRegex(
+                    httpx.RemoteProtocolError, f"finish_reason={finish}") as ctx:
+                self.call(client)
+            self.assertTrue(openai_tool_loop._is_transient_transport_error(ctx.exception))
 
     def test_explicit_short_stop_is_distinct_from_transport_eof(self):
         client = self.Client([self.chunks("예", "stop")])
