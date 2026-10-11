@@ -71,6 +71,12 @@ TypeSafe Jev는 텍스트를 생성하지 않고 typed 판정을 돌려주는 �
 
 ## 운영 CLI
 
+`web_answer_review`는 공개 웹 답변 전달 전의 제한된 품질 검사다. DeepSeek low,
+thinking disabled, JSON, temperature 0, max_tokens 1024, timeout 25초이며 현재 유효값은
+레지스트리·환경 오버라이드를 따른다. 정상 답변에 한 번, 재작성한 답변에는 한 번 더
+호출한다. 검토 실패는 승인으로 간주하지 않는다. 비용은 원샷 LLM 감사에 별도로
+남고, 원문 사실의 독립 검증을 대신하지 않는다. 자세한 전달 계약은 `api_reference.md`.
+
 ```bash
 python scripts/llm_registry_cli.py list              # 원샷 + 에이전트 루프 통합 조회
 python scripts/llm_registry_cli.py show <feature>    # 원본 + env 오버라이드 반영 유효값

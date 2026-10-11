@@ -278,12 +278,27 @@ class TestExtractResponse(unittest.TestCase):
         self.assertEqual(finish, "stop")
         self.assertIn("answer", content)
         self.assertNotIn("<think>", content)
-        self.assertIn("💭 secret", content)  # reasoning surfaced on final reply
+        self.assertEqual(content, "answer")
 
     def test_reasoning_not_surfaced_when_disabled(self):
         _, content, *_ = _extract_response(
             False, self._raw("answer", reasoning="r"), surface_reasoning=False)
         self.assertEqual(content, "answer")
+
+    def test_reasoning_is_private_by_default_and_retained_for_replay(self):
+        _, content, _, message, _ = _extract_response(
+            False, self._raw("answer", reasoning="private plan"))
+        self.assertEqual(content, "answer")
+        self.assertEqual(message["reasoning_content"], "private plan")
+
+    def test_unfinished_private_prefix_is_hidden_but_quoted_tags_survive(self):
+        for tag in ("think", "thinking", "analysis"):
+            with self.subTest(tag=tag):
+                _, content, *_ = _extract_response(False, self._raw(f"<{tag}>private plan"))
+                self.assertEqual(content, "")
+        quoted = "예시 코드: `<analysis>value</analysis>`"
+        _, content, *_ = _extract_response(False, self._raw(quoted))
+        self.assertEqual(content, quoted)
 
     def test_inline_tool_call_rescued_flips_finish_reason(self):
         raw = self._raw('<tool_call>{"name": "f", "arguments": {}}</tool_call>')

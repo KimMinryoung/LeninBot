@@ -369,9 +369,10 @@ def _normalize_web_result(result: str | dict, budget_tracker: dict) -> dict:
     """Give string and metadata providers the same public completion fields."""
     metadata = result if isinstance(result, dict) else {}
     return {
-        "text": str(metadata.get("text") or "") if isinstance(result, dict) else str(result),
-        "complete": bool(metadata.get("complete", True)),
-        "truncated": bool(metadata.get("truncated", False)),
+        "text": str(budget_tracker.get("final_response", metadata.get("text") or ""))
+                if isinstance(result, dict) else str(budget_tracker.get("final_response", result)),
+        "complete": bool(metadata.get("complete", not budget_tracker.get("final_response_truncated", False))),
+        "truncated": bool(metadata.get("truncated", budget_tracker.get("final_response_truncated", False))),
         "finish_reason": metadata.get("finish_reason"),
         "continuations_used": metadata.get("continuations_used", 0),
         "rounds": metadata.get("rounds", budget_tracker.get("rounds_used")),

@@ -36,7 +36,7 @@ Registered in `agents/__init__.py`:
 | `scout` | external platform reconnaissance and web patrol | uses web/fetch/social/platform tools |
 | `browser` | browser automation | talks to `browser/worker.py`; `browse_web` defaults to GPT-6 Luna native computer use, with browser-use available via `mode=agent` |
 | `visualizer` | image prompt/design specialist | image/media and publication support |
-| `diary` | scheduled diary writer and published diary maintenance owner | terminal `save_diary` is allowed only for the configured scheduled prompt `[diary] Write a periodic diary entry`, and that run is terminal-required: a prose-only ending gets one reminder, then a forced-final call that exposes only `save_diary`; a run that still ends without it publishes nothing and logs a warning (prose is never saved as a fallback entry); `save_diary` runs an editorial diagnose→revise pass (`telegram/diary_editorial.py`) before Stasova review; other diary tasks run autonomously with maintenance tools such as `edit_content`, including diary edit/delete/unpublish actions |
+| `diary` | scheduled diary writer and published diary maintenance owner | terminal `save_diary` is allowed only for the configured scheduled prompt `[diary] Write a periodic diary entry`, and that run is terminal-required: a prose-only ending gets one reminder, then a forced-final call that exposes only `save_diary`; a run without an observed persisted publication fails with an unverified goal (prose is never saved as a fallback entry); `save_diary` runs an editorial diagnose→revise pass (`telegram/diary_editorial.py`) before Stasova review; other diary tasks run autonomously with maintenance tools such as `edit_content`, including diary edit/delete/unpublish actions |
 | `stasova` | publication OpSec reviewer | small read/fetch/write tool set and low budget |
 | `diplomat` | A2A and email communications | external communications tools |
 | `autonomous_project` | scheduled long-term project agent | T0 research and cyber-lenin.com publication tools |
@@ -284,7 +284,7 @@ check below still verifies task completion and publication reachability separate
 
 Every completed task passes through `_run_verification()` (`telegram/tasks.py`), an independent LLM critic that re-checks the executor's report with its own tools before the orchestrator relays it. Rollout follows the standard shadow→enforce pattern via the `task_verification_mode` config key (`off | shadow | enforce`, default `shadow`, flips live without restart):
 
-- **Policy.** A delegation may carry an explicit `verification` object (`checks`/`urls`/`log_service`/`log_grep`/`retry_limit`/`required`) on `delegate`/`multi_delegate`; without one, a per-agent default applies — programmer gets `task_report` + `server_logs`, analyst/scout/diplomat get `task_report`, all other agents skip (`_DEFAULT_VERIFICATION_POLICIES`). `verification: {required: false}` opts a task out. Skipped tasks are marked `passed` so `verification_status` never rots at `pending`.
+- **Policy.** A delegation may carry an explicit `verification` object (`checks`/`urls`/`log_service`/`log_grep`/`retry_limit`/`required`) on `delegate`/`multi_delegate`; without one, a per-agent default applies — programmer gets `task_report` + `server_logs`, analyst/scout/diplomat get `task_report`, all other agents skip (`_DEFAULT_VERIFICATION_POLICIES`). `verification: {required: false}` opts a task out. Skipped tasks are marked `skipped`, with `goal=unverified`, so absent verification is never recorded as passed.
 - **Verifier runtime.** The critic runs on the **low tier** of the executor's provider (codex/moon executors are verified by the task provider — an independent judge), budget-capped at $0.15, with a read-only tool surface (`read_self`, `read_file`, `search_files`, `list_directory`, `fetch_url`). `restart_service` is added only in enforce mode.
 - **Verdict flow.** The verdict + details persist to `telegram_tasks.verification_status`/`verification_details`; a FAIL is surfaced in the orchestrator report callback (in shadow mode as an advisory caveat for the user) and in the system alert. A FAIL attributed to an execution error also writes a deduped `mistake` lesson to `experiential_memory` (`source_type=task_verification`) so similar future tasks recall it via their `<past-experiences>` block.
 - **Enforce mode** additionally feeds a FAIL into `_maybe_redelegate_after_verification_failure()`: bounded auto-retry (`retry_limit` counts additional executions across the task chain) that re-delegates with a "take a DIFFERENT approach" instruction, or the restart-handoff path when the verifier determines a telegram restart is required.
@@ -298,9 +298,18 @@ goal. A reasonable attempt blocked by an external service is not completion.
 Malformed/ambiguous output, provider errors and unavailable verification are
 recorded as unverified, never implicitly passed. An `outcome:` JSON line in
 `verification_details` persists the three axes and restart action without a schema migration.
-The existing `verification_status` values remain; explicit opt-outs/no-policy
-paths retain legacy `passed` but their details explicitly say skipped/unverified.
-Consumers must read the details before treating a passed status as evidence.
+Verification uses explicit `skipped` for opt-outs/no-policy; these
+paths store `skipped` and an unverified goal. Disabled verification does the same.
+`metadata.outcome` and task callbacks carry separate execution/goal values;
+`done` means execution ended, and partial/unverified goals remain explicit.
+
+Scheduled diary tasks use a deterministic persisted-artifact check even when general
+verification is off: `diary_publication_audits.task_id` must join an actual `ai_diary`
+row. Every reviewed publication records this receipt, including reviews without
+warnings; if the audit insert fails, the guarded handler's returned diary ID is
+checked against storage. A prose summary or `save_diary` in a log cannot pass.
+No observed receipt prevents successful completion; retry is disabled to avoid
+blind duplicate publication. The final report names the actual diary title/URL.
 
 Enforce retries (including worker-managed restart verification) require all of
 `Execution: error`, `Goal: partial`, and `Retry: yes`. Blocked/unverified outcomes
@@ -399,6 +408,8 @@ requires checking factual corrections, and does not treat anonymous text as
 authorization for unrelated edits/deletions or changes to operator priorities.
 
 The diary schedule lives in `telegram_schedules` (`/schedule`), not in code; since 2026-10-07 it fires once a day at 14:00 KST (`0 14 * * *`, previously 02:00 and 14:00), so one entry covers a full day and the preflight limits in `telegram/tasks.py` (`_DIARY_ACTIVITY_*`, `_DIARY_WEB_CONTEXT_LIMIT`) are sized for roughly 24 hours of material.
+
+일기와 자율 출판의 내부 Stasova 검토에는 초안 전문을 인라인으로 제공하고 `fetch_url`만 노출한다. 신규 보고서/디렉터리를 먼저 읽거나 모델이 파일을 쓰게 하지 않는다. 최종 보고서를 런타임이 `publishing.review_artifacts`로 `temp_dev/stasova_reviews/` 아래에 원자 저장한다. 일반 Stasova 위임 작업의 도구 목록은 별도로 유지한다.
 
 Inside the guarded `save_diary` handler the draft goes through `telegram.diary_editorial.run_editorial_pass` before Stasova: stage 1 (`diary_editorial_diagnosis`, one-shot registry call) reads the draft against the agent's own `diary-rules` section and the recent-diary ledger and returns numbered notes with quoted anchors, or `PASS`; stage 2 (`diary_editorial_revision`, JSON) rewrites as the author, treating notes as directions it may reject. The rewrite is discarded and the draft kept when it is missing or non-JSON, shorter than 60% of the draft, collapses to one paragraph, contains markdown, or is unchanged; both stages failing keeps the draft too. Stasova then reviews the edited text for publication safety as before, and the publication audit keeps the agent's original draft as the draft column. The tool result reports the pass outcome (`editorial pass: N note(s), applied` / `kept draft (...)` / `PASS`). Regression: `tests/test_diary_editorial_pass.py`. Dry run 2026-10-07 on published entries #536–#538 as drafts (no publishing, ledger limited to earlier entries): the pass removed the forced three-topic synthesis, both self-verification sentences, the `남은 것은 ~하는 일이다` closings, the recycled 장부/청구서 closing image, a duplicated sentence and a content-less "어제 한 동지와 나눴다" reference, kept the first-person voice, and cost about $0.006 per entry. The critic initially padded to the note cap with weak notes and the reviser left dangling antecedents after deletions; the prompts now say PASS is normal, anchors must be verbatim, summarized conversations are normal diary material, and deleted sentences must not strand what referred to them.
 

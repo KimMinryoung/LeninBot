@@ -36,8 +36,14 @@ async def _check_detached_run_persists(*, regenerate: bool = False, detach: bool
         )
     }
     patches = ExitStack()
+    patches.enter_context(patch("services.web_chat.review_web_answer", new=AsyncMock(return_value=[])))
     patches.enter_context(patch("services.web_chat._reserve_chat_log_id", return_value=4242))
-    patches.enter_context(patch("kg_runtime.recall.entity_gated_kg_block", return_value=""))
+    preflight_callers = []
+    def fake_preflight(*args):
+        from tool_gateway.security import get_caller
+        preflight_callers.append(get_caller())
+        return ""
+    patches.enter_context(patch("kg_runtime.recall.entity_gated_kg_block", side_effect=fake_preflight))
     patches.enter_context(patch("llm.provider_failover.resolve_deepseek_failover_model", new=AsyncMock(return_value=None)))
     history_loader = patches.enter_context(patch("services.web_chat._load_web_history", return_value=[]))
     lookup = patches.enter_context(patch("services.web_chat.get_web_chat_log_for_feedback", return_value={
@@ -72,6 +78,8 @@ async def _check_detached_run_persists(*, regenerate: bool = False, detach: bool
         except asyncio.CancelledError:
             cancelled.append(True)
             raise
+        await kwargs["on_progress"]("thinking", "private planning must stay hidden")
+        await kwargs["on_progress"]("text_delta", "unreviewed draft must stay hidden")
         return "detached answer"
 
     def fake_log(*args, **kwargs):
@@ -125,6 +133,8 @@ async def _check_detached_run_persists(*, regenerate: bool = False, detach: bool
             await asyncio.wait_for(asyncio.gather(*web_chat._web_chat_background_tasks), timeout=2)
         else:
             events = [json.loads(event.removeprefix("data: ")) async for event in stream]
+            assert "private planning" not in json.dumps(events)
+            assert "unreviewed draft" not in json.dumps(events)
             terminal = [event for event in events if event["type"] in {"answer", "error"}]
             assert len(terminal) == 1
             answer = terminal[0]
@@ -135,6 +145,10 @@ async def _check_detached_run_persists(*, regenerate: bool = False, detach: bool
             assert answer["request_id"] == json.loads(first.removeprefix("data: "))["request_id"]
 
         assert cancelled == []
+        assert len(preflight_callers) == 1
+        assert preflight_callers[0].interface == "webchat"
+        assert preflight_callers[0].chat_log_id == 4242
+        assert preflight_callers[0].request_id == json.loads(first.removeprefix("data: "))["request_id"]
         if regenerate:
             assert persisted == []
             lookup.assert_called_once_with(4242, ["smoke-fingerprint"], "smoke-detached-session", "cyber-lenin", account_user_id=None)

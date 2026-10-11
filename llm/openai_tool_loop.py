@@ -863,7 +863,7 @@ async def _api_call(sdk_mode, client, base_url, model, messages, tools, max_toke
 # with --reasoning-format deepseek splits these into a separate
 # reasoning_content field, but with older server versions or when the flag
 # isn't set the tags leak into the main content and end up shown to the user.
-_THINK_TAG_RE = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
+_THINK_TAG_RE = re.compile(r"\A\s*<(think|thinking|analysis)>.*?</\1>\s*", re.DOTALL | re.IGNORECASE)
 
 # Qwen's tool_call marker when the server fails to parse it natively. The
 # model emits `<tool_call>{"name": ..., "arguments": {...}}</tool_call>` in
@@ -920,7 +920,7 @@ def _message_reasoning_content(message) -> str:
     return value if isinstance(value, str) else ""
 
 
-def _extract_response(sdk_mode, response_or_data, *, surface_reasoning: bool = True):
+def _extract_response(sdk_mode, response_or_data, *, surface_reasoning: bool = False):
     """Extract (finish_reason, content_text, tool_calls, message, usage) from response.
 
     Post-processing applied before returning:
@@ -932,9 +932,8 @@ def _extract_response(sdk_mode, response_or_data, *, surface_reasoning: bool = T
          rescue happens we also flip finish_reason to "tool_calls" so the
          surrounding loop dispatches the call instead of treating the turn
          as a plain text reply.
-      4. On final replies (no tool calls), prepend the reasoning so the user
-         can transparently follow Qwopus's <think> trace. Skipped on
-         tool-call rounds to avoid polluting conversation history.
+      4. Reasoning is private by default. The explicit diagnostic-only
+         surface_reasoning option is independent of protocol replay storage.
     """
     if sdk_mode:
         choice = response_or_data.choices[0]
@@ -960,7 +959,7 @@ def _extract_response(sdk_mode, response_or_data, *, surface_reasoning: bool = T
 
     # Strip inline <think> tags; promote their contents to reasoning when the
     # server didn't populate reasoning_content itself.
-    if content and "<think>" in content:
+    if content and re.match(r"\s*<(think|thinking|analysis)>", content, re.IGNORECASE):
         if not reasoning:
             inline = re.search(r"<think>(.*?)</think>", content, re.DOTALL)
             if inline:
@@ -970,6 +969,10 @@ def _extract_response(sdk_mode, response_or_data, *, surface_reasoning: bool = T
             logger.info("Stripped <think> tags from content (original %d → %d chars)",
                         len(content), len(stripped))
             content = stripped
+        # An output ceiling can stop before the closing reasoning tag. Never
+        # expose that unfinished private block as a final answer.
+        content = re.sub(r"\A\s*<(?:think|thinking|analysis)>.*\Z", "", content,
+                         flags=re.DOTALL | re.IGNORECASE).strip()
 
     # Rescue inline <tool_call> blocks only when the server didn't already
     # surface structured tool_calls — otherwise we'd double-dispatch.
@@ -1364,7 +1367,7 @@ class _OpenAIProtocolAdapter:
 
     def parse_turn(self, response, round_num):
         finish_reason, content_text, tool_calls, message_obj, _usage = _extract_response(
-            self.sdk_mode, response, surface_reasoning=not self.preserve_reasoning_content,
+            self.sdk_mode, response, surface_reasoning=False,
         )
 
         # ── Handle refusal (OpenAI safety filter) ──
@@ -1539,7 +1542,7 @@ class _OpenAIProtocolAdapter:
 
     def was_still_working(self, response):
         return _extract_response(
-            self.sdk_mode, response, surface_reasoning=not self.preserve_reasoning_content,
+            self.sdk_mode, response, surface_reasoning=False,
         )[0] == "tool_calls"
 
     def build_finalization_tools(self, finalization_tools):
@@ -1580,7 +1583,7 @@ class _OpenAIProtocolAdapter:
     def parse_final(self, final_response, final_tool_names):
         _, text, final_tool_calls, final_message, _usage = _extract_response(
             self.sdk_mode, final_response,
-            surface_reasoning=not self.preserve_reasoning_content,
+            surface_reasoning=False,
         )
         if final_tool_calls and final_tool_names:
             final_tc_list = _build_tc_list(self.sdk_mode, final_tool_calls)
@@ -1662,7 +1665,7 @@ class _OpenAIProtocolAdapter:
 
     def extract_text_parts(self, response):
         _, text, _tc, _msg, _usage = _extract_response(
-            self.sdk_mode, response, surface_reasoning=not self.preserve_reasoning_content,
+            self.sdk_mode, response, surface_reasoning=False,
         )
         return [text] if text else []
 
@@ -1694,7 +1697,7 @@ class _OpenAIProtocolAdapter:
             )
         _, text, _tc, _msg, _usage = _extract_response(
             self.sdk_mode, last_response,
-            surface_reasoning=not self.preserve_reasoning_content,
+            surface_reasoning=False,
         )
         self.track_cost(last_response, "Forced-final stripped")
         return [text]

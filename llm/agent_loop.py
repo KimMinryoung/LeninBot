@@ -239,15 +239,15 @@ async def run_tool_loop(
             response=response_obj,
         )
         if budget_tracker is not None:
-            # Preserve the legacy combined return for chat consumers while
-            # giving task/report reviewers the actual final answer separately.
             budget_tracker["final_response"] = "\n".join(
                 p for p in (parts if final_parts is None else final_parts) if p
             ).strip()
             budget_tracker["progress_text"] = "\n".join(progress_text_parts)
             budget_tracker["final_response_truncated"] = truncated
+        # Tool-round commentary is execution progress, never a deliverable.
+        # Keep it in progress_text, including for callers without a tracker.
         return adapter.make_result(
-            parts,
+            parts if final_parts is None else final_parts,
             finish_reason=finish_reason,
             truncated=truncated,
             limit_reason=limit_reason,

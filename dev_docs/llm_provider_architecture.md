@@ -86,6 +86,12 @@ Roleplay output recovery (2026-09-11): `ROLEPLAY_MAX_TOKENS` defaults to 32768 b
 
 ## Runtime Config Keys
 
+공용 tool-loop 반환값에는 최종 답변과 그 continuation만 포함한다. 도구 호출 전
+코멘터리는 `budget_tracker.progress_text`에 별도로 남고 `final_response`와 사용자
+답변에 합쳐지지 않는다. OpenAI 호환 provider의 reasoning 전용 필드는 공개하지
+않으며 프로토콜 replay는 유지한다. content 맨 앞의 think/thinking/analysis 블록과
+닫히지 않은 추론 prefix도 답변에서 제외한다. 일반 답변 안의 인용된 태그는 유지한다.
+
 | Key | Values | Applies to |
 |---|---|---|
 | `provider` | `claude`, `openai`, `deepseek`, `kimi`, `local` | Telegram chat |

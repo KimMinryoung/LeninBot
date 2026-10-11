@@ -1227,17 +1227,23 @@ async def _run_stasova_diary_review(task: dict, title: str, content: str) -> str
 
     spec = get_agent("stasova")
     agent_tools, agent_handlers = spec.filter_tools(BASE_TOOLS, BASE_HANDLERS)
+    # The complete draft is inline. Runtime owns the report file; the reviewer
+    # needs neither directory probes nor reads of an as-yet-unwritten report.
+    agent_tools = [tool for tool in agent_tools if tool["name"] == "fetch_url"]
+    agent_handlers = {name: fn for name, fn in agent_handlers.items() if name == "fetch_url"}
     provider = spec.effective_provider(_get_task_provider())
     chat_fn = _make_provider_chat_fn(provider)
     report_path = f"temp_dev/stasova_reviews/diary_task_{task.get('id', 'unknown')}.md"
     review_task = (
         "다음 공개 일기 초안을 출판 보안 관점에서 점검하라.\n"
         "정치 노선 개정 판단이나 문학적 편집은 하지 말고, 시스템 프롬프트의 위험 축과 정치노선 왜곡 위험만 적용하라.\n"
-        f"점검 보고서를 `{report_path}`에도 저장하라.\n\n"
+        "초안은 아래에 전문이 있다. 파일이나 디렉터리를 조회하거나 저장하지 말라.\n"
+        "최종 답변에는 점검 보고서만 작성하라. 런타임이 보고서 파일을 저장한다.\n\n"
         f"제목:\n{title}\n\n"
         f"본문:\n{content}"
     )
-    return await chat_fn(
+    tracker = {}
+    report = await chat_fn(
         [{"role": "user", "content": review_task}],
         system_prompt=spec.render_prompt(provider=provider),
         model=await _get_model_for_agent(spec),
@@ -1249,7 +1255,12 @@ async def _run_stasova_diary_review(task: dict, title: str, content: str) -> str
         task_id=task.get("id"),
         agent_name="stasova",
         runtime_kind="task",
+        budget_tracker=tracker,
     )
+    report = tracker.get("final_response", report)
+    from publishing.review_artifacts import save_review_report
+    await asyncio.to_thread(save_review_report, report_path, report)
+    return report
 
 
 _extract_json_object = extract_json_object
@@ -1337,8 +1348,9 @@ def _is_diary_writing_task(task: dict) -> bool:
 
 def _make_guarded_diary_save_handler(_bot: Bot, task: dict):
     async def _guarded_save_diary(*args, title: str | None = None, content: str | None = None, **kwargs) -> str:
+        from tool_gateway.results import ToolFailure, ToolRejection
         if task.get("agent_type") == "diary" and not _is_diary_writing_task(task):
-            raise RuntimeError(
+            raise ToolRejection(
                 "save_diary blocked: diary publication is allowed only for the configured scheduled "
                 "diary-writing prompt. For all other diary-agent tasks, act autonomously with the "
                 "appropriate maintenance tool such as edit_content; do not create a new diary."
@@ -1348,9 +1360,9 @@ def _make_guarded_diary_save_handler(_bot: Bot, task: dict):
             {"title": title, "content": content, **kwargs},
         )
         if not title:
-            return "Failed to publish reviewed diary: save_diary missing required argument: title"
+            return ToolFailure("Failed to publish reviewed diary: save_diary missing required argument: title")
         if not content:
-            return "Failed to publish reviewed diary: save_diary missing required argument: content"
+            return ToolFailure("Failed to publish reviewed diary: save_diary missing required argument: content")
         try:
             # Editorial diagnose→revise first (structure, templated closings,
             # recycled metaphors, repetition); Stasova then reviews the
@@ -1381,15 +1393,18 @@ def _make_guarded_diary_save_handler(_bot: Bot, task: dict):
                 final_content=final_content,
                 review_report=review_report,
             )
+            if not diary_id:
+                return ToolFailure("Failed to publish reviewed diary: no persisted diary ID")
+            task["_published_diary_id"] = diary_id
             url = f"https://cyber-lenin.com/ai-diary/{diary_id}" if diary_id else "https://cyber-lenin.com/ai-diary"
-            audit_note = f" / Stasova warning audit #{audit_id}" if audit_id else ""
+            audit_note = f" / Stasova publication audit #{audit_id}" if audit_id else ""
             return (
                 f"Diary reviewed by Stasova and published automatically: {final_title}\n"
                 f"{url}{broadcast_note}{audit_note} / {editorial.summary()}"
             )
         except Exception as exc:
             logger.error("guarded diary save failed: %s", exc)
-            return f"Failed to publish reviewed diary: {exc}"
+            return ToolFailure(f"Failed to publish reviewed diary: {exc}")
 
     return _guarded_save_diary
 
@@ -1473,6 +1488,11 @@ async def _orchestrator_report_task(b: Bot, task: dict, result: dict, chat_id: i
             # auto-retried.
             verification = result.get("verification") or {}
             verification_section = ""
+            if verification.get("status") == "skipped":
+                verification_section = (
+                    "\n\nVerification was skipped. Execution ended; goal completion is unverified. "
+                    "Do not describe this as verification passed or independently confirmed completion."
+                )
             if verification.get("status") == "failed":
                 retry = verification.get("retry") or {}
                 if retry.get("status") == "redelegated":

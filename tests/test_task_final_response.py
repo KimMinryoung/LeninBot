@@ -2,6 +2,8 @@
 import asyncio
 from unittest.mock import patch
 
+import pytest
+
 import llm.claude_loop as claude_loop
 from test_agent_loop_engine import (
     FakeAnthropicClient, _response, _text_block, _tool_use_block,
@@ -27,7 +29,8 @@ def test_final_response_excludes_tool_commentary():
         _response([_text_block(progress), _tool_use_block("t1", "echo")], stop_reason="tool_use"),
         _response([_text_block("완료: 보고서를 저장했다.")]),
     ])
-    assert progress in text  # Legacy chat behavior is preserved.
+    assert progress not in text
+    assert text == "완료: 보고서를 저장했다."
     assert tracker["final_response"] == "완료: 보고서를 저장했다."
     assert tracker["progress_text"] == progress
 

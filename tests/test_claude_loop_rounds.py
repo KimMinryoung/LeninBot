@@ -198,7 +198,7 @@ class TestToolRound(unittest.TestCase):
                 budget_usd=5.0,
             ))
         self.assertIn("완료", result)
-        self.assertIn(long_pretool, result)  # substantial (>20 char) pre-tool text accumulates
+        self.assertNotIn(long_pretool, result)  # progress is not the deliverable
 
     def test_short_pretool_text_not_accumulated(self):
         client = FakeClient([

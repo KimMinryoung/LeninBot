@@ -36,6 +36,7 @@ For non-scheduled diary tasks:
 - After the maintenance tool finishes, report the concrete result. Do not write a reflective entry about the maintenance work.
 
 For the scheduled diary-writing prompt, use recent context, then publish a clean public entry.
+Use only the tool names supplied for this run. For current news use `web_search`, then `fetch_url` to read the relevant source body; there is no `news_search` tool. A successful search is not a completed factual verification.
 
 1. Before drafting, inspect the automatically injected "Diary Activity Preflight" and "Diary Web Chat Preflight" contexts. These preflight blocks are injected only for the scheduled diary-writing prompt. The activity preflight is anchored to the latest diary and summarizes recent Telegram context, completed tasks/reports, public or staged research documents, and autonomous project state. The web preflight contains recent public web-chat turns.
 2. Treat the injected preflight blocks as the default chat/activity context. Do not call `read_self(content_type="chat_logs", ...)` merely to duplicate them. Call `read_self` for chat logs only when you need a specific missing timestamp, omitted instruction, or deeper detail that the preflight clearly does not contain.

@@ -425,6 +425,8 @@ async def run_stasova_publication_review(
 
     spec = get_agent("stasova")
     agent_tools, agent_handlers = spec.filter_tools(BASE_TOOLS, BASE_HANDLERS)
+    agent_tools = [tool for tool in agent_tools if tool["name"] == "fetch_url"]
+    agent_handlers = {name: fn for name, fn in agent_handlers.items() if name == "fetch_url"}
     provider = spec.effective_provider(_get_task_provider())
     chat_fn = _make_provider_chat_fn(provider)
     project_id = _project_id()
@@ -452,14 +454,16 @@ async def run_stasova_publication_review(
         "그 사실 자체를 외부 플랫폼 리스크로 취급하지 말라.\n"
         "정치 노선 개정 판단이나 문학적 편집은 하지 말고, 시스템 프롬프트의 "
         "위험 축과 정치노선 왜곡 위험만 적용하라.\n"
-        f"점검 보고서를 `{report_path}`에도 저장하라."
+        "초안은 아래에 전문이 있다. 파일이나 디렉터리를 조회하거나 저장하지 말라. "
+        "최종 답변에는 점검 보고서만 작성하라. 런타임이 파일로 저장한다."
         f"{spelling_section}\n\n"
         f"발행 종류: {publication_kind}\n"
         f"공개 URL: {public_url or '(not known yet)'}\n\n"
         f"제목:\n{title}\n\n"
         f"본문:\n{content}"
     )
-    return await chat_fn(
+    tracker = {}
+    report = await chat_fn(
         [{"role": "user", "content": review_task}],
         system_prompt=spec.render_prompt(provider=provider),
         model=await _get_model_for_agent(spec),
@@ -471,7 +475,12 @@ async def run_stasova_publication_review(
         task_id=None,
         agent_name="stasova",
         runtime_kind="autonomous",
+        budget_tracker=tracker,
     )
+    report = tracker.get("final_response", report)
+    from publishing.review_artifacts import save_review_report
+    await asyncio.to_thread(save_review_report, report_path, report)
+    return report
 
 
 async def review_autonomous_publication(

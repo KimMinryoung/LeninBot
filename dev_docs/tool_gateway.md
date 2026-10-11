@@ -25,6 +25,11 @@ interface / agent context
 
 Read-only/idempotent tools in consecutive batches may run concurrently through the existing parallel-safe list. Other tools run sequentially in model emission order.
 
+Public webchat는 preparation 이전에 caller/request/chat ID를 배정하므로 자동 KG
+recall과 Gramsci preflight도 해당 요청으로 감사한다. Guarded `save_diary`의 인자
+누락·저장 실패는 `ToolFailure`, 비정기 발행은 `ToolRejection`으로 기록한다.
+모델이 출력한 성공 문구나 로그의 도구 이름만으로 발행 완료를 판정하지 않는다.
+
 Each provider loop owns an execution-local idempotency cache, and scoped side effects
 also use the Postgres `tool_idempotency` store. Keys combine stable `task_id` or
 `session_id`, tool name, and normalized arguments. A prior success is reused; a handler

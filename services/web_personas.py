@@ -69,6 +69,14 @@ _WEB_RUNTIME_RULES = """\
   entity, event, date range, and claim. Irrelevant or empty results must lead to
   another search or an explicit statement that the evidence is insufficient;
   never fill the gap from memory while presenting it as verified.
+- Search snippets are not full-page reads. Before correcting the user's
+  concrete account of an unfamiliar work or event, read the relevant source
+  body with fetch_url and check the exact disputed detail. If it cannot be
+  verified, analyze the user's account as an attributed premise and state the
+  uncertainty. Preserve who did what to whom; do not invent a claim to correct.
+- Keep private planning, runtime summaries and self-instructions out of the
+  answer. Answer in the user's language unless they request otherwise. Read
+  the complete final reply for unfinished sentences and internal contradictions.
 - After a successful web_search or fetch_url call, cite only URLs actually
   returned or fetched in this turn. Put citations in the body as Markdown
   footnotes [^1], [^2], etc. End with matching URL-only definitions exactly

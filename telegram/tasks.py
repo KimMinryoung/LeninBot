@@ -492,21 +492,36 @@ def _format_diary_web_chat_context(provider: str | None) -> str:
     )
 
 
-def _warn_if_diary_unsaved(task: dict, session_tool_log: str) -> None:
-    """Log a scheduled diary run that ended without save_diary.
+def _diary_publication_receipt(task: dict) -> dict | None:
+    """Observe the persisted diary, not the presence of a tool name in prose."""
+    row = _query_one(
+        """SELECT d.id AS diary_id, d.title FROM diary_publication_audits a
+             JOIN ai_diary d ON d.id = a.diary_id
+            WHERE a.task_id = %s ORDER BY a.id DESC LIMIT 1""",
+        (task["id"],),
+    )
+    if row:
+        return row
+    # A publication can succeed while its audit insert fails. The guarded
+    # handler retains the actual returned ID; verify that row instead.
+    if task.get("_published_diary_id"):
+        return _query_one(
+            "SELECT id AS diary_id, title FROM ai_diary WHERE id = %s",
+            (task["_published_diary_id"],),
+        )
+    return None
 
-    The run's prose is never published as a fallback: it can be anything (a
-    conversation summary once came back instead of an entry) and would skip
-    Stasova review. The loop's terminal reminder and forced-final save_diary
-    are the recovery path; this only makes a lost run visible in the logs.
-    """
+
+def _warn_if_diary_unsaved(task: dict, session_tool_log: str = "") -> dict | None:
+    """Log missing publication evidence; tool logs are not completion receipts."""
     from telegram.diary_mode import is_diary_writing_task
 
     if not is_diary_writing_task(task):
         return
-    if "save_diary(" in session_tool_log:
-        return
-    logger.warning("Diary task %d ended without save_diary; no entry was published", task["id"])
+    receipt = _diary_publication_receipt(task)
+    if not receipt:
+        logger.warning("Diary task %d has no persisted publication receipt", task["id"])
+    return receipt
 
 
 # Agents whose reports get verified by default when the delegation carries no
@@ -656,10 +671,25 @@ async def _run_verification(
 ) -> dict:
     policy = _normalize_verification_policy(task)
     task_id = task["id"]
+    from telegram.diary_mode import is_diary_writing_task
+    if is_diary_writing_task(task):
+        try:
+            receipt = await asyncio.to_thread(_diary_publication_receipt, task)
+        except Exception:
+            receipt = None
+        outcome = {"execution": "appropriate" if receipt else "unknown",
+                   "goal": "complete" if receipt else "unverified", "retry": "no"}
+        status = "passed" if receipt else "failed"
+        details = "outcome: " + json.dumps(outcome) + "\n" + (
+            f"diary_publication: persisted diary #{receipt['diary_id']} for task #{task_id}"
+            if receipt else "diary_publication: no persisted receipt could be observed; do not republish blindly"
+        )
+        await _record_verification(task_id, status, details)
+        return {"status": status, "details": details, "policy": policy, "retry_limit": 0, **outcome}
     if not policy or not policy.get("required", True):
-        details = "No verification policy set; verification skipped, goal unverified. Legacy passed status is not evidence of completion."
-        await _record_verification(task_id, "passed", details, count_attempt=False)
-        return {"status": "passed", "details": details, "policy": policy, "retry_limit": 0, "goal": "unverified", "execution": "unknown", "retry": "no"}
+        details = "No verification policy set; verification skipped, goal unverified."
+        await _record_verification(task_id, "skipped", details, count_attempt=False)
+        return {"status": "skipped", "details": details, "policy": policy, "retry_limit": 0, "goal": "unverified", "execution": "unknown", "retry": "no"}
 
     # Mail-reading tasks are verified by the mail ledger, not by a model round.
     # The staged summaries are the deliverable and the callback sends them only
@@ -1505,6 +1535,16 @@ async def _persist_task_success(
         except Exception as e:
             logger.debug("Failed to save tool_log for task %d: %s", task_id, e)
 
+    from telegram.diary_mode import is_diary_writing_task
+    if is_diary_writing_task(task):
+        receipt = await asyncio.to_thread(_warn_if_diary_unsaved, task)
+        if not receipt:
+            raise RuntimeError("Scheduled diary execution ended without an observed persisted publication; goal unverified")
+        # A model can return a summary even after publishing. The durable
+        # artifact, rather than that free-form text, is the scheduled result.
+        report = (f"Reviewed diary saved: {receipt['title']}\n"
+                  f"https://cyber-lenin.com/ai-diary/{receipt['diary_id']}")
+
     # Save task summary to Redis for chain context (7-day TTL)
     try:
         from memory_store.redis_state import save_task_summary
@@ -1558,12 +1598,6 @@ async def _persist_task_success(
         except Exception as e:
             # Non-fatal: log but don't fail the task
             logger.warning("[SCOUT→KG] Task #%d KG processing failed: %s", task_id, e)
-
-    if task.get("agent_type") == "diary":
-        try:
-            _warn_if_diary_unsaved(task, tool_log_text)
-        except Exception as e:
-            logger.error("Diary save check failed for task %d: %s", task_id, e)
 
     restart_report_prefix = ""
     if restart_ctx["initiated"]:
@@ -1655,7 +1689,7 @@ async def _verify_task_report(
 ) -> tuple[dict | None, dict | None]:
     """Run post-hoc verification for a persisted report.
 
-    Returns (verification, verification_retry); both None when mode is off.
+    Returns explicit verification and goal outcomes, including skipped checks.
     """
     task_id = task["id"]
     # Post-hoc independent verification (Critic). Shadow records the
@@ -1663,7 +1697,8 @@ async def _verify_task_report(
     # verifier error break an already-persisted successful task.
     verification = None
     verification_retry = None
-    if verification_mode in ("shadow", "enforce"):
+    from telegram.diary_mode import is_diary_writing_task
+    if verification_mode in ("shadow", "enforce") or is_diary_writing_task(task):
         try:
             v_tools, v_handlers = _build_verifier_toolset(verification_mode)
             verification = await _run_verification(
@@ -1697,6 +1732,22 @@ async def _verify_task_report(
                 "Verification for task %d errored (mode=%s): %s",
                 task_id, verification_mode, e,
             )
+            verification = {"status": "failed", "goal": "unverified", "execution": "unknown",
+                            "retry": "no", "details": "Verification unavailable; goal remains unverified."}
+            await _record_verification(task_id, "failed", verification["details"], count_attempt=False)
+    else:
+        verification = {"status": "skipped", "goal": "unverified", "execution": "unknown",
+                        "retry": "no", "details": "Verification disabled; goal remains unverified."}
+        await _record_verification(task_id, "skipped", verification["details"], count_attempt=False)
+    if verification:
+        outcome = {key: verification.get(key, "unknown" if key == "execution" else "unverified")
+                   for key in ("execution", "goal")}
+        await asyncio.to_thread(
+            _execute,
+            "UPDATE telegram_tasks SET metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), "
+            "'{outcome}', %s::jsonb, true) WHERE id = %s",
+            (json.dumps(outcome), task_id),
+        )
     return verification, verification_retry
 
 
@@ -1739,6 +1790,9 @@ async def _notify_task_done(
     task_id = task["id"]
     try:
         agent_label = f" [{task.get('agent_type', 'analyst')}]" if task.get("agent_type") else ""
+        goal = (verification or {}).get("goal", "unverified")
+        if goal != "complete":
+            summary = f"[goal: {goal}; execution ended] {summary}"
         cb_result = on_complete(
             task_id, "done", f"{agent_label} {summary}",
             verification_status=(verification or {}).get("status"),
@@ -1954,11 +2008,15 @@ async def process_task(
                 "report": final_report,
                 "is_subtask": is_subtask,
                 "was_interrupted": was_interrupted,
+                "goal": (verification or {}).get("goal", "unverified"),
+                "execution": (verification or {}).get("execution", "unknown"),
                 "verification": (
                     {
                         "mode": verification_mode,
                         "status": verification.get("status"),
                         "details": str(verification.get("details") or "")[:1000],
+                        "goal": verification.get("goal", "unverified"),
+                        "execution": verification.get("execution", "unknown"),
                         "retry": verification_retry,
                     }
                     if verification

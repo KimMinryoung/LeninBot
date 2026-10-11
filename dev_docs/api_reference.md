@@ -128,6 +128,16 @@ preflight 검색은 각각 `WEBCHAT_VECTOR_SEARCH_TIMEOUT_SECONDS`(기본 45초)
 상한을 적용하고, timeout 시 다른 근거로 답하거나 검색 한계를 밝히도록 모델에
 결과를 돌려준다.
 
+Web 답변은 `services.web_answer_review`의 `web_answer_review` 원샷 호출로
+내부 작업 메모, 미완성 문장, 입력의 행위자 오독, 관찰 근거를 넘는 검증 주장,
+앞선 정정과의 모순을 확인한 뒤 저장·전달한다. 검색 스니펫과 본문 읽기를 구분하며
+외부 사실의 진위를 독립적으로 보증하지 않는다. 결함이 발견되면 기존 생성 예산의
+잔액 안에서 한 번 재작성하고 다시 검사한다. 검토 장애·잘린/잘못된 JSON·재검사
+실패는 `error`이며 초안을 저장하거나 전달하지 않는다. 검토 호출의 비용은 별도
+LLM 감사 행에 기록되며 생성 루프 예산과 별개다. 검토 때문에 응답 지연이 추가된다.
+SSE에는 도구·상태 진행만 보내고 `thinking`/미검토 `text_delta`는 보내지 않는다.
+사전 KG/Gramsci 검색도 모델 호출과 같은 request/chat ID의 webchat caller로 실행한다.
+
 Public `fetch_url` calls validate HTTP(S) scheme, a narrow safe-port set, every
 resolved destination address, redirects, Playwright subrequests, and diagnostic
 probes. Loopback, private, link-local, reserved, and mixed public/private DNS

@@ -165,7 +165,7 @@ async def main():
     print(f"  result: {v}")
     check("empty report -> failed without LLM", v["status"] == "failed" and "llm_verification" not in v["details"])
 
-    # 3d. opt-out short-circuits to passed-by-default
+    # 3d. opt-out explicitly remains unverified
     CAPTURED_SQL.clear()
     v = await tasks._run_verification(
         None, make_task(999904, "programmer", metadata={"verification": {"required": False}}), GOOD_REPORT,
@@ -173,7 +173,7 @@ async def main():
         get_model_fn=stub_model,
     )
     print(f"  result: {v}")
-    check("opt-out -> passed by default", v["status"] == "passed" and "No verification policy" in v["details"])
+    check("opt-out -> skipped/unverified", v["status"] == "skipped" and v["goal"] == "unverified" and "No verification policy" in v["details"])
 
     # 3e. agent without default policy short-circuits too
     CAPTURED_SQL.clear()
@@ -183,7 +183,7 @@ async def main():
         get_model_fn=stub_model,
     )
     print(f"  result: {v}")
-    check("visualizer (no policy) -> passed by default", v["status"] == "passed")
+    check("visualizer (no policy) -> skipped/unverified", v["status"] == "skipped" and v["goal"] == "unverified")
 
     # 3f. verifier LLM exception records unverified outcome, not a crash or PASS
     async def broken_chat(messages, **kwargs):

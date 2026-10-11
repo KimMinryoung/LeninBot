@@ -44,6 +44,8 @@ def is_diary_writing_task(task: dict | None, content: str | None = None) -> bool
     if task.get("agent_type") != "diary":
         return False
     task_content = normalize_diary_prompt(content if content is not None else task.get("content"))
+    if task_content == normalize_diary_prompt(DEFAULT_DIARY_WRITING_PROMPT):
+        return True
     return task_content in scheduled_diary_prompts()
 
 

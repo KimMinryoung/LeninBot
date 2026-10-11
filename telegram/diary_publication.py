@@ -142,20 +142,20 @@ async def publish_reviewed_diary_entry(
     diary_id, broadcast_note = await publish_diary_entry(final_title, final_content)
     warning_detected = stasova_report_has_warning(review_report)
     audit_id = None
-    if warning_detected:
-        try:
-            ensure_diary_publication_audit_table()
-            audit_id = await record_diary_publication_audit(
-                task_id=task_id,
-                diary_id=diary_id,
-                title=title,
-                content=content,
-                final_title=final_title,
-                final_content=final_content,
-                review_report=review_report,
-                warning_detected=warning_detected,
-            )
-        except Exception as exc:
-            logger.error("failed to record Stasova diary audit: %s", exc)
-            broadcast_note += f" / Stasova audit failed: {exc}"
+    # Every reviewed publication needs a durable task→diary receipt, including
+    # reviews without warnings. Schema is installed by migrations, never here.
+    try:
+        audit_id = await record_diary_publication_audit(
+            task_id=task_id,
+            diary_id=diary_id,
+            title=title,
+            content=content,
+            final_title=final_title,
+            final_content=final_content,
+            review_report=review_report,
+            warning_detected=warning_detected,
+        )
+    except Exception as exc:
+        logger.error("failed to record Stasova diary audit: %s", exc)
+        broadcast_note += f" / Stasova audit failed: {exc}"
     return diary_id, broadcast_note, audit_id
