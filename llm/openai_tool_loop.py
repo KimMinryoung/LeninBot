@@ -1322,6 +1322,10 @@ class _OpenAIProtocolAdapter:
                     "Transient API transport error at round %d — retrying the unchanged request once",
                     round_num,
                 )
+                await emit_progress(
+                    self.on_progress, "provider_retry",
+                    "Provider connection failed; retrying the request once.",
+                )
                 try:
                     response = await self._guarded(
                         msgs, self.openai_tools, self.max_tokens,

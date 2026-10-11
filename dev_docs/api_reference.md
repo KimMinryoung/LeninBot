@@ -130,7 +130,9 @@ preflight 검색은 각각 `WEBCHAT_VECTOR_SEARCH_TIMEOUT_SECONDS`(기본 45초)
 
 Web 답변은 생성 즉시 저장·전달한다. 별도 LLM 품질 검토는 없다. SSE는 도구·상태
 진행과 함께 `text_delta`를 `chunk`로 실시간 전송하고, 최종 `answer` 이벤트의
-본문이 스트리밍된 내용을 대체한다(재시도로 중복된 조각도 이때 정리된다).
+본문이 스트리밍된 내용을 대체한다. 도구 호출·provider 재시도·failover로 새 생성이
+시작되면 `chunk_reset`을 보내 클라이언트가 이전 조각을 지우게 하므로 끊긴 초안과
+재생성 답변이 겹치지 않는다. 길이 이어받기는 같은 답변이라 초기화하지 않는다.
 `thinking` 이벤트는 보내지 않는다. provider 길이 제한은 도구 루프가 끊긴 지점부터
 최대 두 번 이어받고, 그래도 잘린 답변은 `truncated`와 경고를 붙여 전달한다.
 사전 KG/Gramsci 검색도 모델 호출과 같은 request/chat ID의 webchat caller로 실행한다.

@@ -1240,6 +1240,12 @@ async def handle_web_chat(
     run = _WebChatRun(request_id=web_request_id, session_id=session_id)
 
     async def on_progress(event: str, detail: str):
+        if event in {"tool_call", "provider_retry", "provider_failover"}:
+            # Streamed text before a tool call is commentary, and a retried or
+            # failed-over call regenerates from scratch. Either way the client
+            # discards what it has shown so text never stacks; length
+            # continuations extend the same answer and keep it.
+            await run.publish(_format_sse({"type": "chunk_reset"}))
         if event == "tool_call":
             await run.publish(_format_sse(_tool_progress_payload(detail)))
             await run.publish(_format_sse({"type": "log", "node": "tool", "content": detail}))

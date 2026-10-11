@@ -78,6 +78,8 @@ async def _check_detached_run_persists(*, regenerate: bool = False, detach: bool
             cancelled.append(True)
             raise
         await kwargs["on_progress"]("thinking", "private planning must stay hidden")
+        await kwargs["on_progress"]("text_delta", "cut draft")
+        await kwargs["on_progress"]("provider_retry", "retrying")
         await kwargs["on_progress"]("text_delta", "streamed draft")
         return "detached answer"
 
@@ -133,7 +135,12 @@ async def _check_detached_run_persists(*, regenerate: bool = False, detach: bool
         else:
             events = [json.loads(event.removeprefix("data: ")) async for event in stream]
             assert "private planning" not in json.dumps(events)
-            assert {"type": "chunk", "content": "streamed draft"} in events
+            stream_events = [event for event in events if event["type"] in {"chunk", "chunk_reset"}]
+            assert stream_events == [
+                {"type": "chunk", "content": "cut draft"},
+                {"type": "chunk_reset"},
+                {"type": "chunk", "content": "streamed draft"},
+            ]
             terminal = [event for event in events if event["type"] in {"answer", "error"}]
             assert len(terminal) == 1
             answer = terminal[0]
