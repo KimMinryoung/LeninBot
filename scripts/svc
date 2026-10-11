@@ -7,7 +7,7 @@
 #       Called by Telegram /deploy command. Default: --all, which checks the
 #       api/telegram restart guards first and then restarts every enabled
 #       long-running unit (llm-proxy, web-gateway, api, a2a-api, email-api,
-#       novel-writer, roleplay, browser, telegram last) and the frontend.
+#       novel-writer, roleplay, worker, browser, telegram last) and the frontend.
 #
 #   svc boot
 #       Start all services in dependency order with health checks. For server reboot.
@@ -176,7 +176,7 @@ do_graceful_restart() {
 # old code: after a module move, a stale process fails at its next
 # function-level import of the old path.
 DEPLOY_EXTRA_BEFORE=(llm-proxy web-gateway)          # others call through these
-DEPLOY_EXTRA_AFTER_API=(a2a-api email-api novel-writer roleplay)
+DEPLOY_EXTRA_AFTER_API=(a2a-api email-api novel-writer roleplay worker)
 
 _restart_if_enabled() {
     local name="$1" unit
