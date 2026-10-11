@@ -579,7 +579,7 @@ async def _call_sdk_raw_stream(kwargs: dict, on_progress, idle_timeout_sec: floa
     reasoning_parts: list[str] = []
     refusal_parts: list[str] = []
     tool_parts: dict[int, dict] = {}
-    finish_reason = "stop"
+    finish_reason = None
     usage = None
     response_id = None
     created = None
@@ -594,68 +594,83 @@ async def _call_sdk_raw_stream(kwargs: dict, on_progress, idle_timeout_sec: floa
         request.pop("stream_options", None)
         stream = await client.chat.completions.create(**request)
 
-    chunk_iter = stream.__aiter__()
-    while True:
-        try:
-            if idle_timeout_sec:
-                chunk = await asyncio.wait_for(chunk_iter.__anext__(), timeout=idle_timeout_sec)
-            else:
-                chunk = await chunk_iter.__anext__()
-        except StopAsyncIteration:
-            break
-        except TimeoutError as exc:
-            raise TimeoutError(
-                f"Provider stream produced no chunks for {int(idle_timeout_sec)}s"
-            ) from exc
-        response_id = response_id or _obj_get(chunk, "id")
-        created = created or _obj_get(chunk, "created")
-        model = _obj_get(chunk, "model", model)
-        usage = _obj_get(chunk, "usage", usage) or usage
-        choices = _obj_get(chunk, "choices", []) or []
-        if not choices:
-            continue
-        choice = choices[0]
-        finish_reason = _obj_get(choice, "finish_reason", None) or finish_reason
-        delta = _obj_get(choice, "delta", None) or {}
+    try:
+        chunk_iter = stream.__aiter__()
+        while True:
+            try:
+                if idle_timeout_sec:
+                    chunk = await asyncio.wait_for(chunk_iter.__anext__(), timeout=idle_timeout_sec)
+                else:
+                    chunk = await chunk_iter.__anext__()
+            except StopAsyncIteration:
+                break
+            except TimeoutError as exc:
+                raise TimeoutError(
+                    f"Provider stream produced no chunks for {int(idle_timeout_sec)}s"
+                ) from exc
+            response_id = response_id or _obj_get(chunk, "id")
+            created = created or _obj_get(chunk, "created")
+            model = _obj_get(chunk, "model", model)
+            usage = _obj_get(chunk, "usage", usage) or usage
+            choices = _obj_get(chunk, "choices", []) or []
+            if not choices:
+                continue
+            choice = choices[0]
+            finish_reason = _obj_get(choice, "finish_reason", None) or finish_reason
+            delta = _obj_get(choice, "delta", None) or {}
 
-        text_delta = _obj_get(delta, "content", None) or ""
-        if text_delta:
-            content_parts.append(text_delta)
-            await emit_progress(on_progress, "text_delta", text_delta)
+            text_delta = _obj_get(delta, "content", None) or ""
+            if text_delta:
+                content_parts.append(text_delta)
+                await emit_progress(on_progress, "text_delta", text_delta)
 
-        reasoning_delta = (
-            _obj_get(delta, "reasoning_content", None)
-            or _obj_get(delta, "reasoning", None)
-            or ""
-        )
-        if reasoning_delta:
-            reasoning_parts.append(reasoning_delta)
-
-        refusal_delta = _obj_get(delta, "refusal", None) or ""
-        if refusal_delta:
-            refusal_parts.append(refusal_delta)
-
-        for tc_delta in _obj_get(delta, "tool_calls", None) or []:
-            index = _obj_get(tc_delta, "index", None)
-            if index is None:
-                index = len(tool_parts)
-            tc = tool_parts.setdefault(
-                int(index),
-                {"id": "", "type": "function", "function": {"name": "", "arguments": ""}},
+            reasoning_delta = (
+                _obj_get(delta, "reasoning_content", None)
+                or _obj_get(delta, "reasoning", None)
+                or ""
             )
-            tc_id = _obj_get(tc_delta, "id", None)
-            if tc_id:
-                tc["id"] = tc_id
-            tc_type = _obj_get(tc_delta, "type", None)
-            if tc_type:
-                tc["type"] = tc_type
-            fn_delta = _obj_get(tc_delta, "function", None) or {}
-            fn_name = _obj_get(fn_delta, "name", None)
-            if fn_name:
-                tc["function"]["name"] += fn_name
-            fn_args = _obj_get(fn_delta, "arguments", None)
-            if fn_args:
-                tc["function"]["arguments"] += fn_args
+            if reasoning_delta:
+                reasoning_parts.append(reasoning_delta)
+
+            refusal_delta = _obj_get(delta, "refusal", None) or ""
+            if refusal_delta:
+                refusal_parts.append(refusal_delta)
+
+            for tc_delta in _obj_get(delta, "tool_calls", None) or []:
+                index = _obj_get(tc_delta, "index", None)
+                if index is None:
+                    index = len(tool_parts)
+                tc = tool_parts.setdefault(
+                    int(index),
+                    {"id": "", "type": "function", "function": {"name": "", "arguments": ""}},
+                )
+                tc_id = _obj_get(tc_delta, "id", None)
+                if tc_id:
+                    tc["id"] = tc_id
+                tc_type = _obj_get(tc_delta, "type", None)
+                if tc_type:
+                    tc["type"] = tc_type
+                fn_delta = _obj_get(tc_delta, "function", None) or {}
+                fn_name = _obj_get(fn_delta, "name", None)
+                if fn_name:
+                    tc["function"]["name"] += fn_name
+                fn_args = _obj_get(fn_delta, "arguments", None)
+                if fn_args:
+                    tc["function"]["arguments"] += fn_args
+    finally:
+        close = getattr(stream, "close", None)
+        if close is not None:
+            await close()
+
+    if finish_reason is None:
+        from tool_gateway.security import get_caller
+        logger.warning(
+            "Provider stream ended without finish_reason request_id=%s model=%s max_tokens=%s text_chars=%s",
+            get_caller().request_id, model,
+            request.get("max_tokens", request.get("max_completion_tokens")),
+            sum(map(len, content_parts)),
+        )
+        raise httpx.RemoteProtocolError("Provider stream ended without finish_reason")
 
     tool_calls = [
         _to_tool_call_namespace(tc)
@@ -1368,6 +1383,12 @@ class _OpenAIProtocolAdapter:
     def parse_turn(self, response, round_num):
         finish_reason, content_text, tool_calls, message_obj, _usage = _extract_response(
             self.sdk_mode, response, surface_reasoning=False,
+        )
+        from tool_gateway.security import get_caller
+        logger.info(
+            "Provider completion request_id=%s round=%s model=%s finish_reason=%s max_tokens=%s tokens_out=%s",
+            get_caller().request_id, round_num, _response_model(response, self.model),
+            finish_reason, self.max_tokens, _obj_get(_usage, "completion_tokens", None),
         )
 
         # ── Handle refusal (OpenAI safety filter) ──

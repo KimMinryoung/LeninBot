@@ -1159,6 +1159,11 @@ async def _invoke_web_model(
 async def _review_and_repair_web_answer(turn, metadata, *, tools, tool_handlers,
                                       on_progress, budget_tracker):
     """Review before delivery; one read-only repair, within the original loop budget."""
+    if metadata.get("truncated") or metadata.get("complete") is False:
+        # Length recovery belongs to the provider loop, which has already
+        # resumed from the cutoff. Rewriting the whole draft repeats the same
+        # ceiling and disguises exhaustion of that bounded continuation.
+        raise WebAnswerReviewError("Answer remained incomplete after bounded provider continuation")
     evidence = list(budget_tracker.get("tool_work_details", []))
     issues = await review_web_answer(
         message=turn.original_message, answer=metadata["text"], history=turn.history,

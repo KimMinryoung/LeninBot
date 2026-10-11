@@ -39,7 +39,7 @@ def test_continuation_is_part_of_final_not_progress():
     progress = "First I will retrieve evidence for the report and compare sources."
     _, tracker = run([
         _response([_text_block(progress), _tool_use_block("t1", "echo")], stop_reason="tool_use"),
-        _response([_text_block("보고서 전반부")], stop_reason="max_tokens"),
+        _response([_text_block("보고서 전반부\n")], stop_reason="max_tokens"),
         _response([_text_block("보고서 후반부")]),
     ], continue_on_length=True, max_length_continuations=1)
     assert tracker["final_response"] == "보고서 전반부\n보고서 후반부"

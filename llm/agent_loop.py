@@ -228,6 +228,13 @@ async def run_tool_loop(
     max_total_round_limit = max_rounds + continuation_rounds
     total_round_limit = max_rounds
 
+    def _final_parts(parts):
+        if final_continuation_parts:
+            # These are pieces of one response, possibly cut mid-word. Keep
+            # provider whitespace and never inject a separator at the cutoff.
+            return ["".join(final_continuation_parts) + "\n".join(p for p in parts if p)]
+        return parts
+
     def _tracked(parts, *, finish_reason="stop", truncated=False,
                  limit_reason=None, was_still_working=False, interrupted=False,
                  response_obj=None, final_parts=None):
@@ -289,9 +296,7 @@ async def run_tool_loop(
                             f"at round {round_num}/{max_rounds}",
                         )
                     if continue_on_length and length_continuations < continuation_limit:
-                        partial_text = "\n".join(
-                            t.strip() for t in turn.text_parts if t.strip()
-                        ).strip()
+                        partial_text = "\n".join(t for t in turn.text_parts if t)
                         if await adapter.append_length_continuation(
                             working_msgs, turn, partial_text,
                             length_continuations + 1, continuation_limit,
@@ -340,7 +345,7 @@ async def run_tool_loop(
                     finish_reason=turn.finish_reason,
                     truncated=turn.truncated_by_length,
                     response_obj=response,
-                    final_parts=final_continuation_parts + turn.text_parts,
+                    final_parts=_final_parts(turn.text_parts),
                 )
 
             # ── Tool round ──
@@ -582,7 +587,7 @@ async def run_tool_loop(
             was_still_working=was_still_working,
             interrupted=was_still_working,
             response_obj=tracker_response,
-            final_parts=final_continuation_parts + text_parts,
+            final_parts=_final_parts(text_parts),
         )
     except LoopEarlyReturn as early:
         return _tracked(

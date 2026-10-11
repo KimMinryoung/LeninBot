@@ -16,6 +16,7 @@ Run from repo root:  venv/bin/python -m unittest discover tests -v
 import asyncio
 import os
 import unittest
+import httpx
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -360,7 +361,7 @@ class TestStreamIdleGuard(unittest.TestCase):
             asyncio.run(_run())
         self.assertIn("no chunks", str(ctx.exception))
 
-    def test_no_guard_by_default_still_completes(self):
+    def test_empty_stream_is_not_normal_completion(self):
         class _EmptyStreamClient:
             def __init__(self):
                 class _Completions:
@@ -382,8 +383,100 @@ class TestStreamIdleGuard(unittest.TestCase):
                 on_progress=None,
             )
 
-        result = asyncio.run(_run())
-        self.assertEqual(result.choices[0].message.content, "")
+        with self.assertRaisesRegex(httpx.RemoteProtocolError, "without finish_reason"):
+            asyncio.run(_run())
+
+
+class TestStreamCompletion(unittest.TestCase):
+    class Client:
+        def __init__(self, responses):
+            self.responses = list(responses)
+            self.calls = []
+            self.streams = []
+            self.chat = SimpleNamespace(completions=SimpleNamespace(create=self.create))
+
+        async def create(self, **kwargs):
+            import copy
+            self.calls.append(copy.deepcopy(kwargs))
+            chunks = iter(self.responses.pop(0))
+            class Stream:
+                closed = False
+                def __aiter__(self):
+                    return self
+                async def __anext__(self):
+                    try:
+                        return next(chunks)
+                    except StopIteration:
+                        raise StopAsyncIteration
+                async def close(self):
+                    self.closed = True
+            stream = Stream()
+            self.streams.append(stream)
+            return stream
+
+    @staticmethod
+    def chunks(text, finish):
+        chunks = [{"choices": [{"delta": {"content": text}, "finish_reason": None}]}]
+        if finish is not None:
+            chunks.append({"choices": [{"delta": {}, "finish_reason": finish}]})
+        chunks.append({"choices": [], "usage": _usage(completion=5)})
+        return chunks
+
+    def test_usage_and_partial_text_without_finish_reason_do_not_complete(self):
+        client = self.Client([self.chunks("접속할 수 있", None)])
+        with self.assertRaisesRegex(httpx.RemoteProtocolError, "without finish_reason"):
+            asyncio.run(openai_tool_loop._call_sdk_raw_stream(
+                {"_client": client, "model": "m", "messages": [], "max_tokens": 4096}, None))
+        self.assertTrue(client.streams[0].closed)
+
+    def test_explicit_short_stop_is_distinct_from_transport_eof(self):
+        client = self.Client([self.chunks("예", "stop")])
+        response = asyncio.run(openai_tool_loop._call_sdk_raw_stream(
+            {"_client": client, "model": "m", "messages": []}, None))
+        self.assertEqual(response.choices[0].finish_reason, "stop")
+        self.assertEqual(response.choices[0].message.content, "예")
+        self.assertEqual(response.usage.completion_tokens, 5)
+        self.assertTrue(client.streams[0].closed)
+
+    def test_interrupted_stream_retries_the_same_request_without_publishing_partial_answer(self):
+        client = self.Client([self.chunks("접속할 수 있", None), self.chunks("접속할 수 있다.", "stop")])
+        tracker = {}
+        with patch.object(tool_loop_common.asyncio, "sleep", new=AsyncMock()):
+            result = asyncio.run(chat_with_tools(
+                [{"role": "user", "content": "테스트 질문"}], client=client, model="deepseek-chat",
+                tools=[], tool_handlers={}, system_prompt="s", on_progress=AsyncMock(),
+                budget_tracker=tracker, return_metadata=True))
+        self.assertEqual(result["text"], "접속할 수 있다.")
+        self.assertTrue(result["complete"])
+        self.assertEqual(client.calls[0]["messages"], client.calls[1]["messages"])
+        self.assertTrue(all(s.closed for s in client.streams))
+
+    def test_length_continues_from_exact_cutoff_within_the_same_answer(self):
+        client = self.Client([self.chunks("접속할 수 있", "length"), self.chunks("다. 다음 ", "length"),
+                              self.chunks("단계다.", "stop")])
+        tracker = {}
+        result = asyncio.run(chat_with_tools(
+            [{"role": "user", "content": "테스트 질문"}], client=client, model="deepseek-chat",
+            tools=[], tool_handlers={}, system_prompt="s", on_progress=AsyncMock(),
+            continue_on_length=True, max_length_continuations=2, max_rounds=1,
+            budget_tracker=tracker, return_metadata=True))
+        self.assertEqual(result["text"], "접속할 수 있다. 다음 단계다.")
+        self.assertEqual(tracker["final_response"], result["text"])
+        self.assertEqual(result["continuations_used"], 2)
+        self.assertTrue(result["complete"])
+        self.assertEqual(client.calls[1]["messages"][-2]["content"], "접속할 수 있")
+        self.assertEqual(client.calls[2]["messages"][-2]["content"], "다. 다음 ")
+        self.assertIn("Continue exactly", client.calls[1]["messages"][-1]["content"])
+
+    def test_exhausted_continuations_remain_incomplete(self):
+        client = self.Client([self.chunks("하나 ", "length"), self.chunks("둘 ", "length")])
+        result = asyncio.run(chat_with_tools(
+            [{"role": "user", "content": "테스트 질문"}], client=client, model="deepseek-chat",
+            tools=[], tool_handlers={}, system_prompt="s", on_progress=AsyncMock(),
+            continue_on_length=True, max_length_continuations=1, return_metadata=True))
+        self.assertTrue(result["truncated"])
+        self.assertFalse(result["complete"])
+        self.assertEqual(len(client.calls), 2)
 
 
 class TestRefusal(unittest.TestCase):

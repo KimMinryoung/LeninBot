@@ -210,6 +210,14 @@ association even when they occur beyond the first three retrieval results.
 
 ## Error Recovery and Tool Conversion
 
+OpenAI 호환 Chat Completions 스트림은 명시적 `finish_reason`을 받아야 완료다.
+EOF를 기본 `stop`으로 간주하지 않는다. 종료 사유 없이 끝난 스트림은 전송 오류로
+처리해 같은 모델 요청을 제한적으로 재시도하며, 미완성 tool delta는 실행하지 않는다.
+스트림 연결은 정상·오류 종료 모두 닫는다. 모델 응답별 request ID, 종료 사유,
+출력 한도, 실제 출력 토큰 수를 로그에 기록하여 전송 중단과 `length`를 구분한다.
+`length`/`max_tokens` 이어받기는 원래 공백을 보존하고 응답 조각 사이에 임의의
+개행을 넣지 않는다. 따라서 단어 중간에 끊긴 응답도 같은 답변으로 연결된다.
+
 For delegated agents, both Anthropic and OpenAI-compatible loops enforce the gateway input ceiling. When tool output growth crosses it, large prior results from explicitly replay-safe read-only tools are replaced in the request by explicit replay checkpoints while their preceding tool calls retain the exact tool name and arguments. This allows complete source material to be retrieved again instead of silently truncating it. Write, publish, send, execute, and other side-effecting results are never checkpointed with a replay instruction. Output-length stops continue from the exact cutoff up to the configured bounded continuation count.
 
 Provider-facing tool definitions are compacted before API calls: long human-readable `description` strings in tool definitions and nested schemas are shortened, while tool names, schema keys, types, enums, defaults, and required fields are preserved. This reduces prompt overhead without changing execution capabilities.

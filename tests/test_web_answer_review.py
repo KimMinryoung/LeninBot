@@ -104,6 +104,15 @@ class RepairTests(unittest.IsolatedAsyncioTestCase):
                 await self.run_repair()
             invoke.assert_awaited_once()
 
+    async def test_exhausted_length_continuation_never_restarts_the_whole_answer(self):
+        self.metadata.update(complete=False, truncated=True)
+        with patch.object(self.web, "review_web_answer", new=AsyncMock()) as check, \
+                patch.object(self.web, "_invoke_web_model", new=AsyncMock()) as invoke:
+            with self.assertRaisesRegex(review.WebAnswerReviewError, "bounded provider continuation"):
+                await self.run_repair()
+            check.assert_not_awaited()
+            invoke.assert_not_awaited()
+
     async def test_reviewer_outage_and_exhausted_budget_do_not_publish_or_retry(self):
         with patch.object(self.web, "review_web_answer", new=AsyncMock(side_effect=review.WebAnswerReviewError("offline"))), \
                 patch.object(self.web, "_invoke_web_model", new=AsyncMock()) as invoke:
