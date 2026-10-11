@@ -121,6 +121,18 @@ class WeakAliasTests(unittest.TestCase):
         self.assertEqual(strong, ["피델 카스트로", "fidel castro"])
         self.assertEqual(weak, ["카스트로", "castro"])
 
+    def test_qualified_name_bare_form_is_weak(self):
+        # Two cards share 오토 브라운; only the qualified label may resolve strongly.
+        strong, weak = identity.split_alias_keys(
+            "오토 브라운 (프로이센 총리)", ["오토 브라운", "Otto Braun", "Otto Braun (Prussian premier)"],
+            "오토 브라운 (프로이센 총리)", "Otto Braun (Prussian premier)")
+        self.assertEqual(strong, ["오토 브라운 프로이센 총리", "otto braun prussian premier"])
+        self.assertEqual(weak, ["오토 브라운", "otto braun"])
+        params = identity._upsert_params("u1", [], ["오토 브라운", "Otto Braun"], "오토 브라운 (프로이센 총리)",
+                                         "Otto Braun (Prussian premier)", None, "오토 브라운 (프로이센 총리)")
+        self.assertEqual(params["demote_keys"], ["오토 브라운", "otto braun"])
+        self.assertEqual(identity._upsert_params("u2", [], ["카스트로"], None, None, None, "피델 카스트로")["demote_keys"], [])
+
     def test_lookup_ignores_incoming_weak_aliases(self):
         names, keys = identity._lookup_params("라울 카스트로", ["Raúl Castro", "카스트로", "Castro"])
         self.assertIn("Raúl Castro", names)

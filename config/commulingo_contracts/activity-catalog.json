@@ -1,5 +1,5 @@
 {
-  "version": 38,
+  "version": 39,
   "functions": [
     {
       "id": "political-leadership",
@@ -9913,6 +9913,153 @@
           1909,
           1991
         ]
+      ]
+    },
+    {
+      "id": "party-german-fatherland",
+      "kind": "party",
+      "label": {
+        "ko": "독일조국당",
+        "en": "German Fatherland Party (DVLP)"
+      },
+      "countryCode": "germany",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in German Fatherland Party (DVLP). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1917,
+          1918
+        ]
+      ],
+      "termIds": [
+        "german-fatherland-party"
+      ]
+    },
+    {
+      "id": "party-german-dvfp",
+      "kind": "party",
+      "label": {
+        "ko": "독일민족자유당",
+        "en": "German Völkisch Freedom Party (DVFP)"
+      },
+      "countryCode": "germany",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in German Völkisch Freedom Party (DVFP). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1922,
+          1933
+        ]
+      ],
+      "termIds": [
+        "german-volkisch-freedom-party"
+      ]
+    },
+    {
+      "id": "party-german-volkisch-social-bloc",
+      "kind": "party",
+      "label": {
+        "ko": "민족사회 블록",
+        "en": "Völkisch-Social Bloc (Völkischer Block)"
+      },
+      "countryCode": "germany",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Völkisch-Social Bloc (Völkischer Block). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1924,
+          1925
+        ]
+      ],
+      "termIds": [
+        "volkisch-social-bloc"
+      ]
+    },
+    {
+      "id": "german-volkssturm",
+      "kind": "force",
+      "label": {
+        "ko": "국민돌격대",
+        "en": "Volkssturm"
+      },
+      "countryCode": "germany",
+      "icon": "swords",
+      "parentId": "german-nazi",
+      "criteria": "Only documented service, membership or organizational activity in Volkssturm. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1944,
+          1945
+        ]
+      ],
+      "termIds": [
+        "volkssturm"
+      ]
+    },
+    {
+      "id": "german-selbstschutz-oberschlesien",
+      "kind": "force",
+      "label": {
+        "ko": "오버슐레지엔 자위대",
+        "en": "Upper Silesian Self-Defence (SSOS)"
+      },
+      "countryCode": "germany",
+      "icon": "swords",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Upper Silesian Self-Defence (SSOS). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1921,
+          1921
+        ]
+      ],
+      "termIds": [
+        "selbstschutz-oberschlesien"
+      ]
+    },
+    {
+      "id": "italian-usi",
+      "kind": "force",
+      "label": {
+        "ko": "이탈리아 생디칼리스트 연합",
+        "en": "Italian Syndicalist Union (USI)"
+      },
+      "countryCode": "italy",
+      "icon": "flag",
+      "parentId": "labor-union",
+      "criteria": "Only documented service, membership or organizational activity in Italian Syndicalist Union (USI). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1912,
+          1925
+        ]
+      ],
+      "termIds": [
+        "italian-syndicalist-union"
+      ]
+    },
+    {
+      "id": "party-romanian-lanc",
+      "kind": "party",
+      "label": {
+        "ko": "국민기독교방위연맹",
+        "en": "National-Christian Defense League (LANC)"
+      },
+      "countryCode": "romania",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in National-Christian Defense League (LANC). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1923,
+          1935
+        ]
+      ],
+      "termIds": [
+        "national-christian-defense-league"
       ]
     }
   ],

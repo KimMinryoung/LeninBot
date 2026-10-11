@@ -70,6 +70,17 @@ class SideTests(unittest.TestCase):
         self.assertIn("최후: 실각", ps["summary"])
         self.assertEqual(ps["name_en"], "Nikita Khrushchev")
 
+    def test_person_side_qualifier(self):
+        p = {"id": "otto-braun-prussia", "name_ko": "오토 브라운", "name_en": "Otto Braun",
+             "name_qualifier_ko": "프로이센 총리", "name_qualifier_en": "Prussian premier",
+             "given_name_ko": "오토", "family_name_ko": "브라운", "cyrillic": "Otto Braun", "years_label": "1872–1955"}
+        ps = sync.person_side(p, [], [])
+        self.assertEqual(ps["name"], "오토 브라운 (프로이센 총리)")
+        self.assertEqual(ps["name_en"], "Otto Braun (Prussian premier)")
+        for alias in ("Otto Braun (Prussian premier)", "오토 브라운", "Otto Braun"):
+            self.assertIn(alias, ps["aliases"])
+        self.assertEqual(len(ps["aliases"]), len(set(ps["aliases"])))
+
     def test_location_side_slug(self):
         ls = sync.location_side({"label": {"en": "Panjshir Valley", "ko": "판지시르 계곡"}})
         self.assertEqual(ls["name"], "판지시르 계곡")

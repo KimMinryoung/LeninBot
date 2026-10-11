@@ -84,7 +84,7 @@ _FATE_KINDS = (
 
 _PERSON_PATCH_KEYS = frozenset({
     "id", "group", "groupId", "sortOrder", "cyrillic", "years",
-    "name", "givenName", "familyName",
+    "name", "givenName", "familyName", "nameQualifier",
     "epithet", "bio", "moment", "fate", "patronymic", "cyrillicPatronymic",
     "aliases", "scenes", "career", "activities", "citizenship", "origin", "nationalOrigin",
     "expectedRevision", "evidence", "reviewFlags", "aliasEdits", "careerEdits", "sceneEdits",
@@ -304,7 +304,7 @@ def _family_first_joiner(lang: str, codes) -> str | None:
 # person patch fields that must be {ko, en} objects. Plain strings are
 # rejected outright: _localized() would store them as Korean-only and
 # silently blank the English side (this happened in production).
-_LOCALIZED_PERSON_KEYS = ("name", "givenName", "familyName", "epithet", "bio", "moment", "patronymic")
+_LOCALIZED_PERSON_KEYS = ("name", "givenName", "familyName", "nameQualifier", "epithet", "bio", "moment", "patronymic")
 _LOCALIZED_OFFICE_ROW_KEYS = ("body", "name", "note")
 
 _OFFICE_ROW_PATCH_KEYS = frozenset({
@@ -642,7 +642,8 @@ def _search_people(q: str, group_id: str, limit: int, function_id: str = "", aff
         params = activity_search_params(function_id, affiliation_id)
         affiliations = params["descendants"] if affiliation_id else ()
     rows = _reads.people_search(q, group_id, limit, function_id, affiliations)
-    keys = ("id", "group_id", "name_ko", "name_en", "cyrillic", "years_label", "epithet_ko", "fate_kind")
+    keys = ("id", "group_id", "name_ko", "name_en", "name_qualifier_ko", "name_qualifier_en", "cyrillic", "years_label",
+            "epithet_ko", "fate_kind")
     return [{k: row.get(k) for k in keys} for row in rows]
 
 
@@ -1310,8 +1311,14 @@ def _existing_person_match(cur, target_id: str, patch: dict) -> dict | None:
     segments = set(target_id.split("-"))
 
     rows = _reads.dataset("people")
+    # A namesake that already carries a different qualifier is a known distinct
+    # person (the second 오토 브라운); the frontend store applies the same rule.
+    qualifier = _collapse_spaces(_localized(patch.get("nameQualifier"), "ko"))
+    known_other = lambda row: bool(qualifier and row.get("name_qualifier_ko") and row["name_qualifier_ko"] != qualifier)
 
     for row in rows:
+        if known_other(row):
+            continue
         if key_en and _dedup_key(row["name_en"]) == key_en:
             return {**row, "why": f"registered under the same English name '{row['name_en']}'"}
         if key_ko and _dedup_key(row["name_ko"]) == key_ko:
@@ -1630,8 +1637,10 @@ def _check_person_create(cur, target_id: str, patch: dict) -> str | None:
             f"slug. Call {_write_tool_call('person', 'update')}(person_id="
             f"'{duplicate['id']}', ...) on that id, putting any alternate "
             "spelling in the 'aliases' field of the same patch. If they are "
-            "genuinely two different people, give the new card an English name "
-            "and slug that do not collide with the existing one."
+            "genuinely two different people with the same name, give the new card "
+            "a distinct slug and a 'nameQualifier' {ko, en} (shown as 「이름 (구분어)」 "
+            "in lists), and give the existing card its own nameQualifier with an "
+            "update — never put brackets into the name itself."
         )
     group = patch.get("groupId") or patch.get("group") or ""
     if not _reads.exists("group", group):
@@ -2712,6 +2721,10 @@ _COMMULINGO_FIELD_SCHEMA = {
         "bio": _BIO_SCHEMA,
         "moment": _MOMENT_SCHEMA,
         "patronymic": _BILINGUAL_TEXT_SCHEMA,
+        "nameQualifier": {**_BILINGUAL_TEXT_SCHEMA, "description": (
+            "Only when another card already has this exact name: a short disambiguator shown in lists as "
+            "「오토 브라운 (프로이센 총리)」 — {\"ko\": \"프로이센 총리\", \"en\": \"Prussian premier\"}, without brackets. "
+            "Give the existing namesake one too. Never put brackets in name parts; other names go to aliases.")},
         "citizenship": _NATIONALITY_SCHEMA,
         "origin": _NATIONAL_ORIGIN_SCHEMA,
         "nationalOrigin": _NATIONAL_ORIGIN_SCHEMA,
@@ -2982,6 +2995,7 @@ def normalize_commulingo_write(
             "name": ("nameKo", "nameEn"),
             "givenName": ("givenNameKo", "givenNameEn"),
             "familyName": ("familyNameKo", "familyNameEn"),
+            "nameQualifier": ("nameQualifierKo", "nameQualifierEn"),
             "bio": ("bioKo", "bioEn"),
             "epithet": ("epithetKo", "epithetEn"),
             "moment": ("momentKo", "momentEn"),
@@ -3156,7 +3170,7 @@ def _narrow_fields_schema(keys: tuple[str, ...], *, required: tuple[str, ...] = 
 
 _PERSON_NARROW_KEYS = (
     "groupId", "sortOrder", "cyrillic", "cyrillicPatronymic", "years",
-    "givenName", "familyName", "epithet", "bio", "moment", "patronymic",
+    "givenName", "familyName", "nameQualifier", "epithet", "bio", "moment", "patronymic",
     "citizenship", "nationalOrigin", "aliases", "career", "activities", "fate", "scenes",
     "expectedRevision", "evidence", "reviewFlags", "aliasEdits", "careerEdits", "sceneEdits",
 )

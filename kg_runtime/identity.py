@@ -171,10 +171,30 @@ def is_weak_alias(alias, name) -> bool:
     return False
 
 
+# 「오토 브라운 (프로이센 총리)」: a name whose trailing brackets tell two
+# namesakes apart (CommuLingo name_qualifier, 2026-10-11).
+_QUALIFIED_NAME_RE = re.compile(r"^(.*\S)\s*\([^()]+\)\s*$")
+
+
+def qualified_base_keys(*names) -> list[str]:
+    """Keys of the bare forms of qualified names (오토 브라운 for 오토 브라운
+    (프로이센 총리)). The bare form is shared by every namesake, so it may only
+    resolve weakly — when exactly one node carries it — never as a strong key."""
+    keys: list[str] = []
+    for name in names:
+        m = _QUALIFIED_NAME_RE.match(str(name or "").strip())
+        k = normalize_alias_key(m.group(1)) if m else ""
+        if k and k not in keys:
+            keys.append(k)
+    return keys
+
+
 def split_alias_keys(name: str, aliases, *extra_names) -> tuple[list[str], list[str]]:
     """(strong_keys, weak_keys) for a node: the name and any full-form alias
-    (and name_ko/name_en) are strong; surname-like aliases are weak."""
+    (and name_ko/name_en) are strong; surname-like aliases and the bare form of
+    a qualified name are weak."""
     strong = alias_keys_for(name, *[x for x in extra_names if x])
+    bases = qualified_base_keys(name, *extra_names)
     weak: list[str] = []
     for a in aliases or ():
         if not a:
@@ -182,7 +202,7 @@ def split_alias_keys(name: str, aliases, *extra_names) -> tuple[list[str], list[
         k = normalize_alias_key(a)
         if not k or k in strong or k in weak:
             continue
-        if is_weak_alias(a, name):
+        if k in bases or is_weak_alias(a, name):
             weak.append(k)
         else:
             strong.append(k)
@@ -281,7 +301,7 @@ WITH n,
 WITH n,
      reduce(acc = [], x IN ids_raw | CASE WHEN x IS NULL OR x = '' OR x IN acc THEN acc ELSE acc + x END) AS ids,
      reduce(acc = [], x IN aliases_raw | CASE WHEN x IS NULL OR x = '' OR x = n.name OR x IN acc THEN acc ELSE acc + x END) AS als,
-     reduce(acc = [], x IN keys_raw | CASE WHEN x IS NULL OR x = '' OR x IN acc THEN acc ELSE acc + x END) AS keys,
+     reduce(acc = [], x IN keys_raw | CASE WHEN x IS NULL OR x = '' OR x IN acc OR x IN $demote_keys THEN acc ELSE acc + x END) AS keys,
      reduce(acc = [], x IN weak_raw | CASE WHEN x IS NULL OR x = '' OR x IN acc THEN acc ELSE acc + x END) AS weak
 SET n.external_ids = ids,
     n.aliases = als,
@@ -634,6 +654,9 @@ def _upsert_params(uuid, external_ids, aliases, name_ko, name_en, summary, name=
         if extra and extra not in alias_list:
             alias_list.append(extra)
     strong, weak = split_alias_keys(name or "", alias_list, name_ko, name_en)
+    # A bare namesake form stored as strong by an earlier sync (before the
+    # name carried its qualifier) is demoted, not just left beside the weak key.
+    demote = [k for k in qualified_base_keys(name, name_ko, name_en) if k in weak]
     if not name:
         # unknown canonical name: nothing can be judged weak against it, but a
         # single short token is still too ambiguous to resolve on
@@ -645,6 +668,7 @@ def _upsert_params(uuid, external_ids, aliases, name_ko, name_en, summary, name=
         "aliases": alias_list,
         "alias_keys": strong,
         "weak_keys": weak,
+        "demote_keys": demote,
         "name_ko": name_ko,
         "name_en": name_en,
         "summary": summary,

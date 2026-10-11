@@ -103,17 +103,28 @@ def _year_date(year, month=None, day=None, *, end: bool = False) -> str | None:
 
 # ── Side (entity) hints ───────────────────────────────────────────────────────
 
+def person_label(p: dict, lang: str) -> str:
+    """The frontend's personLabel (data/commulingo/person-label.js): the name plus
+    the card's qualifier when it shares that name, 「오토 브라운 (프로이센 총리)」.
+    name_ko/name_en carry the bare name only (migration 360)."""
+    name, qualifier = _clean(p.get(f"name_{lang}")), _clean(p.get(f"name_qualifier_{lang}"))
+    return f"{name} ({qualifier})" if name and qualifier else name
+
+
 def person_side(p: dict, aliases: list[str], career: list[dict]) -> dict:
-    name = _clean(p.get("name_ko")) or _clean(p.get("name_en")) or p["id"]
+    label_ko, label_en = person_label(p, "ko"), person_label(p, "en")
+    name = label_ko or label_en or p["id"]
+    # The bare names stay aliases; identity keeps them weak for a qualified name,
+    # so a mention of 오토 브라운 resolves only while one node carries it.
     alias_list = [a for a in [
-        _clean(p.get("name_en")), _clean(p.get("cyrillic")),
+        label_en, _clean(p.get("name_ko")), _clean(p.get("name_en")), _clean(p.get("cyrillic")),
         _clean(p.get("given_name_ko")) + " " + _clean(p.get("family_name_ko")) if p.get("family_name_ko") else "",
         *aliases,
     ] if a and a != name]
     return {
         "name": name, "type": "Person", "external_id": ext_id("person", p["id"]),
-        "aliases": alias_list, "summary": person_summary(p, career),
-        "name_ko": _clean(p.get("name_ko")) or None, "name_en": _clean(p.get("name_en")) or None,
+        "aliases": list(dict.fromkeys(alias_list)), "summary": person_summary(p, career),
+        "name_ko": label_ko or None, "name_en": label_en or None,
     }
 
 
