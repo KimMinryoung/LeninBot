@@ -388,7 +388,7 @@ class EditorTests(EditorCase):
                 'fields': {'term': {'ko': '검증 용어', 'en': 'Fixture term'},
                            'definition': {'ko': '검증한 개념이다.', 'en': 'A documented concept.'},
                            'aliases': {'ko': [], 'en': []},
-                           'period': {'ko': '개념', 'en': 'Concept'}},
+                           'period': {'start': [1921, 3]}},
                 'claims': [{'field': field, 'claim': 'This field is documented.', 'passages': ['P1']}
                            for field in ('definition', 'period')],
                 'issue_results': [{'id': 'register', 'status': 'resolved', 'reason': 'Supported bilingual entry.'}],
@@ -446,7 +446,7 @@ class EditorTests(EditorCase):
             'nationalOrigin':{'code':'france','label':{'ko':'프랑스','en':'France'}}}
         term_fields = {'term':{'ko':'검증 용어','en':'Fixture term'},
             'definition':{'ko':'자료로 확인한 개념이다.','en':'A documented concept.'},
-            'aliases':{'ko':[],'en':[]},'period':{'ko':'역사','en':'History'},
+            'aliases':{'ko':[],'en':[]},'period':{'start':[1917],'end':[1921]},
             'category':_COMMULINGO_FIELD_SCHEMA['properties']['category']['enum'][0]}
         for kind, fields, facts in [('person',person_fields,['bio','citizenship','nationalOrigin']),
                                     ('term',term_fields,['definition','period'])]:
@@ -581,14 +581,14 @@ class EditorTests(EditorCase):
     async def test_unchanged_year_and_its_claim_are_removed_together(self):
         async def model(**kwargs):
             await kwargs['read_wrap']('fetch_url',AsyncMock(return_value=f'<external source="web">\n{BODY}\n</external>'))(url=URL)
-            value = candidate(); value['fields']['startYear'] = 1923
-            value['claims'].append({'field':'startYear','claim':'The year is 1923.','passages':['P1']})
+            value = candidate(); value['fields']['period'] = {'start':[1923]}
+            value['claims'].append({'field':'period','claim':'The year is 1923.','passages':['P1']})
             value['issue_results'].append({'id':'requested', 'status':'resolved', 'reason':'Checked the historical context and dates.'})
             await kwargs['handler'](submission(value))
-        with patch('commulingo.pipeline.service.call',return_value={**CURRENT,'startYear':1923}), patch('commulingo.pipeline.stages.model_call',side_effect=model):
+        with patch('commulingo.pipeline.service.call',return_value={**CURRENT,'period':{'start':[1923],'end':None}}), patch('commulingo.pipeline.stages.model_call',side_effect=model):
             result = await Editor(store_mock())({**JOB, 'reason':'Verify historical context and dates'},[],Usage(),.2)
         self.assertEqual(result.next_stage,'review')
-        self.assertNotIn('startYear',result.value['draft']['fields'])
+        self.assertNotIn('period',result.value['draft']['fields'])
         self.assertEqual([c['field'] for c in result.value['research']['claims']],['body'])
 
     async def test_crash_after_rejection_resumes_saved_patch_and_passage_ids(self):
@@ -709,12 +709,13 @@ class EditorContractTests(EditorCase):
             result = await Editor(store_mock())(JOB,[],Usage(),.2)
         self.assertEqual(result.next_stage,'review')
 
-    async def test_echoed_term_years_never_reach_validation(self):
-        current = {**CURRENT,'startYear':2023,'endYear':None}
+    async def test_echoed_term_period_never_reaches_validation(self):
+        # term_get returns the stored period with end: null; the draft echoes it without.
+        current = {**CURRENT,'period':{'start':[2023],'end':None,'ongoing':True}}
         async def model(**kwargs):
             await fetch_fixture(kwargs)
             value = candidate()
-            value['fields'].update(startYear=2023,endYear=None)
+            value['fields'].update(period={'start':[2023],'ongoing':True})
             value['issue_results'].append({'id':'requested','status':'resolved','reason':'Checked the historical context and dates.'})
             await kwargs['handler'](submission(value))
         with patch('commulingo.pipeline.service.call',return_value=current) as rpc, \

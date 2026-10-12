@@ -21,8 +21,7 @@ class WriteContractTests(unittest.TestCase):
             'original': 'Военный коммунизм',
             'definition': {'ko': '전시 경제정책이다.', 'en': 'A wartime economic policy.'},
             'aliases': {'ko': [], 'en': []},
-            'period': {'ko': '1918–1921', 'en': '1918–1921'},
-            'startYear': 1918, 'endYear': 1921, 'category': 'economy',
+            'period': {'start': [1918], 'end': [1921]}, 'category': 'economy',
         }
 
     def test_term_author_omits_category_but_storage_requires_classification(self):
@@ -48,15 +47,30 @@ class WriteContractTests(unittest.TestCase):
             patch = {**self.term, 'original': original}
             self.assertIn('patch.original is required', people._validate(self.cursor, 'term', 'create', 'fixture', patch))
 
-    def test_dated_terms_require_ordered_years_and_bilingual_period(self):
-        for update, message in (({'period': None}, 'period is required'),
-                                ({'period': '1918–1921'}, 'must be an object'),
-                                ({'startYear': None}, 'startYear is required'),
-                                ({'endYear': 1900}, 'before startYear')):
+    def test_term_period_is_the_structured_career_shape(self):
+        tool = people.COMMULINGO_TERM_CREATE_TOOL['input_schema']['properties']['fields']
+        self.assertTrue({'startYear', 'endYear'}.isdisjoint(tool['properties']))
+        self.assertIn('periodNote', tool['properties'])
+        self.assertEqual(tool['properties']['period']['type'], ['object', 'null'])
+        missing = {k: v for k, v in self.term.items() if k != 'period'}
+        self.assertIn('period is required', people._validate(self.cursor, 'term', 'create', 'fixture', missing))
+        for update, message in (({'period': '1918–1921'}, 'period is a string'),
+                                ({'period': {'ko': '1918–1921', 'en': '1918–1921'}}, 'unknown keys en, ko'),
+                                ({'period': {'start': [1921], 'end': [1918]}}, 'end precedes start'),
+                                ({'startYear': 1918}, 'unknown patch key(s): startYear'),
+                                ({'periodNote': {'ko': '전성기', 'en': ''}}, 'both languages or neither'),
+                                ({'periodNote': '전성기'}, 'must be an object')):
             with self.subTest(update=update):
-                self.assertIn(message, people._validate(self.cursor, 'term', 'create', 'fixture', {**self.term, **update}))
-        undated = {**self.term, 'period': {'ko': '개념', 'en': 'Concept'}, 'startYear': None, 'endYear': None}
-        self.assertIsNone(people._validate(self.cursor, 'term', 'create', 'fixture', undated))
+                error = people._validate(self.cursor, 'term', 'create', 'fixture', {**self.term, **update})
+                self.assertIn(message, error)
+        for period, note in ((None, None),
+                             ({'label': {'ko': '개념', 'en': 'Concept'}}, None),
+                             ({'start': [1800], 'label': {'ko': '19세기 말–현재', 'en': 'late 19th century–present'}}, None),
+                             ({'start': [1980], 'startQual': 'decade', 'ongoing': True}, {'ko': '전성기', 'en': 'heyday'})):
+            with self.subTest(period=period):
+                fields = {**self.term, 'period': period, **({'periodNote': note} if note else {})}
+                self.assertIsNone(people._validate(self.cursor, 'term', 'create', 'fixture', fields))
+        self.assertIsNone(people._check_term_period('update', {'periodNote': {'ko': '', 'en': ''}}))
 
     def test_person_author_provides_labels_and_runner_assigns_codes(self):
         fields = people.COMMULINGO_PERSON_CREATE_TOOL['input_schema']['properties']['fields']

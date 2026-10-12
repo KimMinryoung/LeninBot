@@ -280,19 +280,21 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
         # End to end through the editor: test_commulingo_editor
         # EditorContractTests.test_echoed_term_years_never_reach_validation.
         from commulingo.pipeline.stages import drop_unchanged_term_facts
-        current = {'startYear':2023,'endYear':None,'period':{'ko':'2023년–현재','en':'2023–present'}}
-        fields = {'definition':{'ko':'정의','en':'Definition'},'startYear':2023,'endYear':None,
-                  'period':{'ko':'2023년–현재','en':'2023–present'}}
+        current = {'period':{'start':[2023],'end':None,'ongoing':True},'periodNote':{'ko':'','en':''}}
+        fields = {'definition':{'ko':'정의','en':'Definition'},'period':{'start':[2023],'ongoing':True}}
         drop_unchanged_term_facts(fields,current,'update')
         self.assertEqual(set(fields),{'definition'})
-        changed = {'startYear':2018,'endYear':None,'period':{'ko':'개념','en':'Concept'}}
+        changed = {'period':{'start':[2018],'ongoing':True}}
         drop_unchanged_term_facts(changed,current,'update')
-        self.assertEqual(set(changed),{'startYear','period'})
-        cleared = {'startYear':None}
+        self.assertEqual(set(changed),{'period'})
+        cleared = {'period':None}
         drop_unchanged_term_facts(cleared,current,'update')
-        self.assertEqual(set(cleared),{'startYear'})
-        created = {'term':{'ko':'용어','en':'Term'},'startYear':None,'endYear':None,'period':{'ko':'개념','en':'Concept'}}
+        self.assertEqual(set(cleared),{'period'})
+        unchanged_null = {'period':None}
+        drop_unchanged_term_facts(unchanged_null,{'period':None},'update')
+        self.assertEqual(unchanged_null,{})
+        created = {'term':{'ko':'용어','en':'Term'},'period':None}
         drop_unchanged_term_facts(created,{},'create')
-        self.assertEqual(set(created),{'term','period'})
+        self.assertEqual(set(created),{'term'})
 
 

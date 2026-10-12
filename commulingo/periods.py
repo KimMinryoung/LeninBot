@@ -150,6 +150,16 @@ def format_period(row: dict, lang: str = "ko") -> str:
     return f"{s}–{e}" if e else s
 
 
+def period_text(period, lang: str = "ko") -> str:
+    """Display text of a period object ({start, end, ...}); '' when null or invalid."""
+    if not period:
+        return ""
+    try:
+        return format_period(period_columns(period), lang)
+    except ValueError:
+        return ""
+
+
 def career_period_text(entry: dict, lang: str = "ko") -> str:
     """Display text of a career entry from the person store ({y: {ko,en}}) or a patch ({period})."""
     y = (entry or {}).get("y")
@@ -157,7 +167,4 @@ def career_period_text(entry: dict, lang: str = "ko") -> str:
         return y.get(lang) or y.get("ko") or y.get("en") or ""
     if isinstance(y, str):
         return y
-    try:
-        return format_period(period_columns((entry or {}).get("period")), lang)
-    except ValueError:
-        return ""
+    return period_text((entry or {}).get("period"), lang)

@@ -1,5 +1,5 @@
 {
-  "version": 39,
+  "version": 41,
   "functions": [
     {
       "id": "political-leadership",
@@ -10060,6 +10060,292 @@
       ],
       "termIds": [
         "national-christian-defense-league"
+      ]
+    },
+    {
+      "id": "french-montagne-1848",
+      "kind": "party",
+      "label": {
+        "ko": "산악파 (1848–1851)",
+        "en": "The Mountain (Democratic Socialists, 1848–1851)"
+      },
+      "termIds": [
+        "the-mountain-1848-1851"
+      ],
+      "countryCode": "france",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented membership or leadership in the Mountain (La Montagne, the démocrates-socialistes) of the Second Republic's Constituent and Legislative Assemblies, 1848–1851, led by Ledru-Rollin. NOT the Montagnards of the National Convention (1792–1795), which have their own entry. Never infer affiliation from radical republican opinion, a vote for Ledru-Rollin or the clandestine New Mountain societies alone.",
+      "periods": [
+        [
+          1848,
+          1851
+        ]
+      ]
+    },
+    {
+      "id": "french-society-of-rights-of-man",
+      "kind": "force",
+      "label": {
+        "ko": "인권협회 (프랑스, 1830년대)",
+        "en": "Society of the Rights of Man (France, 1830s)"
+      },
+      "termIds": [],
+      "countryCode": "france",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented membership or leadership in the republican Société des Droits de l'Homme et du Citoyen of the July Monarchy, outlawed by the association law of 10 April 1834. NOT the Cordeliers Club of 1790–1795 (its own entry) nor a later human-rights league. Never infer affiliation from republican opinion or the 1834 risings alone.",
+      "periods": [
+        [
+          1830,
+          1835
+        ]
+      ]
+    },
+    {
+      "id": "frankfurt-national-assembly",
+      "kind": "institution",
+      "label": {
+        "ko": "프랑크푸르트 국민의회",
+        "en": "Frankfurt National Assembly (1848–1849)"
+      },
+      "termIds": [
+        "frankfurt-national-assembly"
+      ],
+      "countryCode": "germany",
+      "icon": "landmark",
+      "parentId": null,
+      "criteria": "Only documented seats or offices in the German National Assembly of 1848–1849 (the Frankfurt Pre-Parliament and its Committee of Fifty, the Assembly at St Paul's Church, the Stuttgart rump parliament) and in its Provisional Central Power (Regent and Reich ministry). Never infer it from participation in the revolution, from a seat in a state parliament or from support for the Frankfurt Constitution.",
+      "periods": [
+        [
+          1848,
+          1849
+        ]
+      ]
+    },
+    {
+      "id": "neue-rheinische-zeitung",
+      "kind": "institution",
+      "label": {
+        "ko": "「신라인 신문」",
+        "en": "Neue Rheinische Zeitung"
+      },
+      "termIds": [
+        "neue-rheinische-zeitung"
+      ],
+      "countryCode": "germany",
+      "icon": "landmark",
+      "parentId": null,
+      "criteria": "Only documented editorial or publishing work for the Cologne daily Neue Rheinische Zeitung (1 June 1848 – 19 May 1849) or its London Revue of 1850. Never infer it from Communist League membership, from being quoted in the paper or from a single article by a non-member of the staff.",
+      "periods": [
+        [
+          1848,
+          1850
+        ]
+      ]
+    },
+    {
+      "id": "cologne-workers-association",
+      "kind": "force",
+      "label": {
+        "ko": "쾰른 노동자협회",
+        "en": "Cologne Workers' Association"
+      },
+      "termIds": [
+        "cologne-workers-association"
+      ],
+      "countryCode": "germany",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented membership, office or organizational activity in the Cologne Workers' Association (Kölner Arbeiterverein, 1848–1850). Never infer affiliation from residence in Cologne, Communist League membership or ideology.",
+      "periods": [
+        [
+          1848,
+          1850
+        ]
+      ]
+    },
+    {
+      "id": "german-workers-brotherhood",
+      "kind": "force",
+      "label": {
+        "ko": "노동자 형제회",
+        "en": "General German Workers' Brotherhood"
+      },
+      "termIds": [
+        "workers-brotherhood-1848"
+      ],
+      "countryCode": "germany",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented office, membership or organizational activity in the General German Workers' Brotherhood (Allgemeine Deutsche Arbeiterverbrüderung, 1848–1854), its central or district committees or its affiliated workers' associations. Never infer it from trade-union or socialist activity in general, and do not use it for the General German Workers' Association (ADAV) of 1863.",
+      "periods": [
+        [
+          1848,
+          1854
+        ]
+      ]
+    },
+    {
+      "id": "baden-revolution-1848-1849",
+      "kind": "force",
+      "label": {
+        "ko": "바덴·팔츠 혁명 세력 (1848–1849)",
+        "en": "Baden and Palatinate revolutionaries (1848–1849)"
+      },
+      "termIds": [
+        "baden-revolution-1848-1849"
+      ],
+      "countryCode": "germany",
+      "icon": "swords",
+      "parentId": null,
+      "criteria": "Only documented leadership, office or armed service in the republican risings of Baden in 1848 (the Hecker uprising, Struve's Lörrach rising) or in the 1849 revolutionary governments, armies and volunteer corps of Baden and the Palatinate. Never infer it from residence in Baden, from service in the grand-ducal state or army against the revolution, or from support for the Frankfurt Constitution alone.",
+      "periods": [
+        [
+          1848,
+          1849
+        ]
+      ]
+    },
+    {
+      "id": "party-hungarian-opposition",
+      "kind": "party",
+      "label": {
+        "ko": "헝가리 야당 (1847–1849)",
+        "en": "Opposition Party (Hungary, 1847–1849)"
+      },
+      "termIds": [
+        "opposition-party-hungary-1847"
+      ],
+      "countryCode": "hungary",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in the Opposition Party (Ellenzéki Párt) of the Hungarian reform era, founded in Pest on 15 March 1847. Never infer affiliation from nationality, residence, ideology or support for the reform movement, and never from membership of the later Party of Independence and '48.",
+      "periods": [
+        [
+          1847,
+          1849
+        ]
+      ]
+    },
+    {
+      "id": "state-sardinia",
+      "kind": "state",
+      "label": {
+        "ko": "사르데냐 왕국 국가기관",
+        "en": "Kingdom of Sardinia state institutions"
+      },
+      "termIds": [],
+      "countryCode": "italy",
+      "icon": "landmark",
+      "parentId": null,
+      "criteria": "Actual service for the Kingdom of Sardinia (Piedmont-Sardinia, the Savoyard state) or its armed forces before the proclamation of the Kingdom of Italy on 17 March 1861: the crown, ministries, the Subalpine Parliament under the Albertine Statute, the royal army and navy. Service after 17 March 1861 is state-italy. Never infer it from birth in Piedmont, Liguria, Savoy, Nice or Sardinia, from volunteer service under another government, or from support for unification.",
+      "periods": [
+        [
+          1720,
+          1861
+        ]
+      ]
+    },
+    {
+      "id": "state-papal-states",
+      "kind": "state",
+      "label": {
+        "ko": "교황령 국가기관",
+        "en": "Papal States state institutions"
+      },
+      "termIds": [],
+      "countryCode": "vatican-city",
+      "icon": "landmark",
+      "parentId": null,
+      "criteria": "Only documented service in the temporal government of the Papal States until the capture of Rome in 1870: the pope as sovereign, the secretariat of state and papal ministries, the legations and the papal army. Purely ecclesiastical office is catholic-church; the Vatican City state from 1929 is state-vatican; the Roman Republic of 1849 has its own entry. Never infer it from residence, priesthood or Catholic faith alone.",
+      "periods": [
+        [
+          1815,
+          1870
+        ]
+      ]
+    },
+    {
+      "id": "state-two-sicilies",
+      "kind": "state",
+      "label": {
+        "ko": "양시칠리아 왕국 국가기관",
+        "en": "Kingdom of the Two Sicilies state institutions"
+      },
+      "termIds": [],
+      "countryCode": "italy",
+      "icon": "landmark",
+      "parentId": null,
+      "criteria": "Actual service for the Bourbon Kingdom of the Two Sicilies (Naples and Sicily, 1816–1861) or its armed forces: the crown, ministries, the Naples parliament of 1848–1849 and the royal army and navy. The revolutionary Kingdom of Sicily of 1848–1849 is not this entry. Never infer it from birth or residence in southern Italy or from service in a Neapolitan volunteer unit that defied the king.",
+      "periods": [
+        [
+          1816,
+          1861
+        ]
+      ]
+    },
+    {
+      "id": "roman-republic-1849",
+      "kind": "state",
+      "label": {
+        "ko": "로마 공화국 (1849)",
+        "en": "Roman Republic (1849)"
+      },
+      "termIds": [
+        "roman-republic-1849"
+      ],
+      "countryCode": "italy",
+      "icon": "landmark",
+      "parentId": null,
+      "criteria": "Only documented office or service in the Roman Republic of 1849 (proclaimed 9 February, French entry 3–4 July): its Constituent Assembly, the triumvirates and ministries, and its army and volunteer legions in the defence of Rome. NOT the Roman Republic of 1798–1799 nor ancient Rome. Never infer it from residence in Rome, from Mazzinian sympathies or from service in the Papal army before February 1849.",
+      "periods": [
+        [
+          1849,
+          1849
+        ]
+      ]
+    },
+    {
+      "id": "republic-of-san-marco",
+      "kind": "state",
+      "label": {
+        "ko": "산마르코 공화국",
+        "en": "Republic of San Marco"
+      },
+      "termIds": [
+        "republic-of-san-marco"
+      ],
+      "countryCode": "italy",
+      "icon": "landmark",
+      "parentId": null,
+      "criteria": "Only documented office or service in the revolutionary Republic of San Marco at Venice, March 1848 – August 1849: its presidency, triumvirate, assembly, ministries and forces, including the Neapolitan officers who defended Venice under Pepe. NOT the historic Republic of Venice (697–1797). Never infer it from Venetian birth or residence.",
+      "periods": [
+        [
+          1848,
+          1849
+        ]
+      ]
+    },
+    {
+      "id": "young-italy",
+      "kind": "force",
+      "label": {
+        "ko": "청년 이탈리아",
+        "en": "Young Italy"
+      },
+      "termIds": [
+        "young-italy"
+      ],
+      "countryCode": "italy",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented membership, leadership or organizational activity in Mazzini's Young Italy (La Giovine Italia), founded at Marseille in 1831, and its conspiracies and risings. NOT the Carbonari nor the later Action Party or Italian National Society. Never infer affiliation from republican or nationalist opinion, from admiration for Mazzini or from Italian exile alone.",
+      "periods": [
+        [
+          1831,
+          1848
+        ]
       ]
     }
   ],

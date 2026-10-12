@@ -5,7 +5,7 @@ PERSON = {'basics': ('years', 'epithet', 'activities', 'career'), 'bio': ('bio',
           'nationality': ('citizenship', 'nationalOrigin'), 'moment': ('moment',)}
 TERM = {'definition': ('definition',), 'history': ('body',)}
 FACTS = {'person': {'bio','years','moment','citizenship','nationalOrigin'},
-         'term': {'definition','body','period','startYear','endYear'}}
+         'term': {'definition','body','period'}}
 
 
 def commission(job, current):

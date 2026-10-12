@@ -345,7 +345,7 @@ class Editor:
 
         focused_current = {k:v for k,v in (current or {}).items()
                            if k in needed | {'id','revision','name','term','evidence','notes','sections'}}
-        background_fields = ({'definition','original','aliases','period','startYear','endYear'}
+        background_fields = ({'definition','original','aliases','period','periodNote'}
                              if job['kind']=='term' else
                              {'givenName','familyName','cyrillic','years','epithet','bio','activities'})
         surrounding_context = {k:v for k,v in (current or {}).items()

@@ -156,7 +156,7 @@ TERM_REGIONS = [{'id': 'russia-ussr', 'label_ko': '러시아·소련', 'label_en
                 {'id': 'world', 'label_ko': '세계', 'label_en': 'World'}]
 TERM_PROFILE = CallSiteProfile(feature=cc.TERM_FEATURE, provider='openrouter', model='typesafe/jev-1.13',
                                extra={'thresholds': {'accept': 0.7}})
-TERM = {'term': {'ko': '전시 공산주의', 'en': 'War communism'}, 'period': {'ko': '1918–1921', 'en': '1918–1921'},
+TERM = {'term': {'ko': '전시 공산주의', 'en': 'War communism'}, 'period': {'start': [1918], 'end': [1921]},
         'definition': {'ko': ['내전기 경제 체제.'], 'en': ['Civil-war economic system.']}, 'body': {'ko': '본문', 'en': 'Body'}}
 
 
@@ -177,6 +177,9 @@ class ClassifyTermTests(unittest.TestCase):
         self.assertEqual(state['aliases'], ['군사공산주의', 'military communism'])
         self.assertEqual(state['parent_term'], 'nep')
         self.assertEqual(state['period'], '1918–1921')
+        noted = cc.term_state({**TERM, 'periodNote': {'ko': '내전기', 'en': 'civil war'}})
+        self.assertEqual(noted['period'], '1918–1921 (내전기)')
+        self.assertEqual(cc.term_state({**TERM, 'period': None})['period'], '')
         questions = cc.term_questions(TERM_CATS, TERM_REGIONS)
         self.assertIn('Soviet planning', questions['category']['criteria']['economy'])
         self.assertIn('USSR', questions['region']['criteria']['russia-ussr'])

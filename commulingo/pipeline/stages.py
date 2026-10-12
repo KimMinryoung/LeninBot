@@ -51,15 +51,27 @@ def write_request(job, draft):
             'fields':draft['fields'],'sources':draft['sources'],'changedBy':'commulingo-pipeline'}
 
 
-TERM_FACT_FIELDS = ('startYear','endYear','period')
+TERM_FACT_FIELDS = ('period',)
+
+
+def _same_period(a, b):
+    """Two period values that store the same columns (``end: null`` vs no end)."""
+    if a is None or b is None:
+        return a is None and b is None
+    from commulingo.periods import period_columns
+    try:
+        return period_columns(a) == period_columns(b)
+    except ValueError:
+        return a == b
+
 
 def drop_unchanged_term_facts(fields, current, action):
-    """Remove year/period keys the draft merely echoed.
+    """Remove period keys the draft merely echoed.
 
     The term service demands evidence for every fact key present in the edit,
-    including ``endYear: null``. Drafts copy the current years back (or fill
-    the nullable keys with null), research cannot ground "no end year", and
-    the job cycles validate→research→draft until it escalates (#1470, #1707,
+    including ``period: null``. Drafts copy the current period back (or fill
+    the nullable key with null), research cannot ground "undated", and the
+    job cycles validate→research→draft until it escalates (#1470, #1707,
     #2049, #16869). A value equal to the current record is no edit; a null on
     create is the column default. A real change still needs its claim.
     """
@@ -67,7 +79,7 @@ def drop_unchanged_term_facts(fields, current, action):
         if field not in fields:
             continue
         value = fields[field]
-        if action=='update' and field in current and value==current[field]:
+        if action=='update' and field in current and _same_period(value, current[field]):
             del fields[field]
         elif action=='create' and value is None:
             del fields[field]

@@ -18,7 +18,7 @@ The group criteria carry the editorial rules the operator confirmed on
 imports the same rules so the two never drift.
 """
 from __future__ import annotations
-from commulingo.periods import career_period_text
+from commulingo.periods import career_period_text, period_text
 
 import logging
 import re
@@ -186,6 +186,13 @@ def term_questions(categories: list[dict], regions: list[dict] | None = None) ->
     return questions
 
 
+def _term_period_label(period, note) -> str:
+    """Korean display text of a term period plus its note: '1917–1921 (전성기)'."""
+    base = period_text(period, "ko") if isinstance(period, dict) else ""
+    remark = _text(note, "ko") if isinstance(note, dict) else ""
+    return f"{base} ({remark})" if base and remark else (base or remark)
+
+
 def term_state(fields: dict) -> dict:
     def joined(value, lang):
         text = (value or {}).get(lang) if isinstance(value, dict) else value
@@ -196,7 +203,7 @@ def term_state(fields: dict) -> dict:
             "aliases": (aliases.get("ko") or []) + (aliases.get("en") or []) if isinstance(aliases, dict) else aliases,
             "parent_term": fields.get("parentId"),
             "definition": {"ko": joined(fields.get("definition"), "ko"), "en": joined(fields.get("definition"), "en")},
-            "period": _text(period, "ko") if isinstance(period, dict) else period,
+            "period": _term_period_label(period, fields.get("periodNote")),
             "body_ko": joined(fields.get("body"), "ko")[:1500], "body_en": joined(fields.get("body"), "en")[:800]}
 
 

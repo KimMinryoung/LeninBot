@@ -340,17 +340,19 @@ _HISTORY_EVENT_SECTION_PATCH_KEYS = frozenset({"heading", "body", "after"})
 # 061). `aliases` are the exact strings prose uses and feed the auto-linking
 # pipeline; `people`/`events` are lists of related ids.
 #
-# `period` is bilingual and `category`/`startYear`/`endYear` exist because of
-# frontend migration 071: the single free-text period_label leaked Korean onto
-# the English page and back, and nothing could sort chronologically. A term
-# written without a category shows up on the glossary as 'Uncategorized', so
-# both are required on create rather than backfilled later by hand.
+# `period` is the career-period shape ({start, end, startQual, endQual,
+# ongoing, label}) stored as columns (frontend migration 364), or null for an
+# undated term; the years come from it, so there are no startYear/endYear
+# fields. `periodNote` is an optional bilingual remark that qualifies the
+# period ("1917–1921 (전성기)"). A term written without a category shows up on
+# the glossary as 'Uncategorized', so it is required on create rather than
+# backfilled later by hand.
 _TERM_PATCH_KEYS = frozenset({
-    "id", "sortOrder", "term", "original", "period", "startYear", "endYear",
+    "id", "sortOrder", "term", "original", "period", "periodNote",
     "category", "region", "definition", "body", "aliases", "people", "events", "sources",
     "parentId", "expectedRevision", "evidence",
 })
-_LOCALIZED_TERM_KEYS = ("term", "definition", "body", "period")
+_LOCALIZED_TERM_KEYS = ("term", "definition", "body", "periodNote")
 
 # The one allow-list every write path reads. It used to be spelled out twice —
 # once in normalize_commulingo_write and once in _validate — which is one copy
@@ -407,7 +409,6 @@ def _load_term_categories() -> tuple[tuple[str, ...], str]:
 
 
 _TERM_CATEGORIES, _TERM_CATEGORY_HINT = _load_term_categories()
-_YEAR_RE = re.compile(r"\b(1[5-9]\d{2}|20\d{2})\b")
 
 # ── Mode switch (config/commulingo_people.json, mtime-cached) ─────────
 
@@ -2024,35 +2025,39 @@ def _check_term_shapes(action: str, patch: dict) -> str | None:
             )
     elif action == "create":
         return f"Error: category is required on create. One of {_TERM_CATEGORY_HINT}."
-    if action == "create" and not patch.get("period"):
-        return (
-            "Error: period is required on create, as "
-            "{\"ko\": \"1930–1960\", \"en\": \"1930–1960\"} or "
-            "{\"ko\": \"개념\", \"en\": \"Concept\"} when undated."
-        )
-    for key in ("startYear", "endYear"):
-        value = patch.get(key)
-        if key in patch and value is not None and not isinstance(value, int):
-            return f"Error: {key} must be an integer year or null."
-    start, end = patch.get("startYear"), patch.get("endYear")
-    if isinstance(start, int) and isinstance(end, int) and end < start:
-        return f"Error: endYear ({end}) is before startYear ({start})."
+    return _check_term_period(action, patch)
+
+
+_TERM_PERIOD_HINT = (
+    "{\"start\": [year, month?, day?], \"end\": [year, month?, day?], \"startQual\"?, "
+    "\"endQual\"?, \"ongoing\"?, \"label\"?: {\"ko\", \"en\"}} — e.g. "
+    "{\"start\": [1930], \"end\": [1960]}, {\"start\": [1980], \"startQual\": \"decade\", "
+    "\"ongoing\": true}, or null for an undated term ({\"label\": {\"ko\": \"개념\", "
+    "\"en\": \"Concept\"}} only when it must still show a label)"
+)
+
+
+def _check_term_period(action: str, patch: dict) -> str | None:
+    if action == "create" and "period" not in patch:
+        return f"Error: period is required on create (null when undated): {_TERM_PERIOD_HINT}."
+    period = patch.get("period")
+    if period is not None:
+        try:
+            period_columns(period)
+        except ValueError as exc:
+            return f"Error: {exc}. A term period is {_TERM_PERIOD_HINT}."
+    note = patch.get("periodNote")
+    if note is not None:
+        filled = [bool(str(note.get(lang) or "").strip()) for lang in ("ko", "en")]
+        if filled[0] != filled[1]:
+            return (
+                "Error: periodNote needs both languages or neither, as "
+                "{\"ko\": \"전성기\", \"en\": \"heyday\"}."
+            )
     return None
 
 
-def _check_term_period_and_text(action: str, patch: dict) -> str | None:
-    start = patch.get("startYear")
-    # A dated label with no startYear sorts to the end of the chronological
-    # view, which is why the years are asked for alongside the label.
-    period = patch.get("period")
-    if action == "create" and isinstance(period, dict) and start is None:
-        labels = f"{period.get('ko') or ''} {period.get('en') or ''}"
-        if _YEAR_RE.search(labels):
-            return (
-                f"Error: period '{labels.strip()}' names a year, so startYear is "
-                "required for chronological sorting. Use the decade or century start "
-                "for a label like 1980년대 (1980) or 19세기 (1800)."
-            )
+def _check_term_text(patch: dict) -> str | None:
     definition = patch.get("definition")
     if isinstance(definition, dict):
         df_ko, df_en = FIELD_LIMITS["definition"]
@@ -2181,7 +2186,7 @@ def _validate_term(cur, action: str, target_id: str, patch: dict) -> str | None:
     error = _check_term_shapes(action, patch)
     if error is not None:
         return error
-    error = _check_term_period_and_text(action, patch)
+    error = _check_term_text(patch)
     if error is not None:
         return error
     error = _check_term_parent(cur, target_id, patch)
@@ -2264,6 +2269,8 @@ def _validate(cur, target_type: str, action: str, target_id: str, patch: dict) -
         return (
             f"Error: unknown patch key(s): {', '.join(sorted(unknown))}. "
             f"Allowed: {', '.join(sorted(allowed))}."
+            + (f" Term years come from period: {_TERM_PERIOD_HINT}."
+               if target_type == "term" and unknown & {"startYear", "endYear"} else "")
         )
     # Every target type in _PATCH_KEYS_BY_TARGET has a validator; the lookup
     # above already raised KeyError for anything else.
@@ -2731,26 +2738,24 @@ _COMMULINGO_FIELD_SCHEMA = {
         "term": _BILINGUAL_TEXT_SCHEMA,
         "original": {"type": "string", "description": "term: native-script/original-language form (ГУЛАГ, нэпман)."},
         "period": {
-            "type": "object", "additionalProperties": False,
-            "properties": {"ko": {"type": "string"}, "en": {"type": "string"}},
+            **PERIOD_SCHEMA,
+            "type": ["object", "null"],
             "description": (
-                "term: bilingual period label, e.g. {\"ko\": \"1930–1960\", \"en\": "
-                "\"1930–1960\"} or {\"ko\": \"1980년대–현재\", \"en\": \"1980s–present\"}; "
-                "{\"ko\": \"개념\", \"en\": \"Concept\"} for an undated concept. "
-                "Never one string for both languages."
+                "term: when it applies, as numbers in the career-period shape: "
+                "{\"start\": [1930], \"end\": [1960]}; {\"start\": [1980], \"startQual\": \"decade\", "
+                "\"ongoing\": true} for 1980년대–현재; {\"start\": [1921, 3]} for a single date. "
+                "null for an undated concept. label {ko, en} only for what the numbers cannot say "
+                "(still give start when there is one): {\"start\": [1800], \"label\": {\"ko\": "
+                "\"19세기 말–현재\", \"en\": \"late 19th century–present\"}}. "
+                + PERIOD_SCHEMA["description"]
             ),
         },
-        "startYear": {
-            "type": ["integer", "null"],
+        "periodNote": {
+            **_BILINGUAL_TEXT_SCHEMA,
             "description": (
-                "term: first year of the period, for sorting. Required whenever the "
-                "label names a year; null only for undated concepts. Decades and "
-                "centuries resolve to their start (1980년대 -> 1980, 19세기 -> 1800)."
+                "term: optional remark that qualifies the period, shown as 1917–1921 (전성기): "
+                "{\"ko\": \"전성기\", \"en\": \"heyday\"}. Both languages or neither."
             ),
-        },
-        "endYear": {
-            "type": ["integer", "null"],
-            "description": "term: last year of the period; null if still current or undated.",
         },
         "category": {
             "type": "string", "enum": list(_TERM_CATEGORIES),
@@ -3175,7 +3180,7 @@ _PERSON_NARROW_KEYS = (
     "expectedRevision", "evidence", "reviewFlags", "aliasEdits", "careerEdits", "sceneEdits",
 )
 _TERM_NARROW_KEYS = (
-    "sortOrder", "term", "original", "period", "startYear", "endYear",
+    "sortOrder", "term", "original", "period", "periodNote",
     "category", "definition", "body", "aliases", "people", "events", "parentId", "evidence", "expectedRevision",
 )
 # Create fills the card's source list from the top-level citations. An update

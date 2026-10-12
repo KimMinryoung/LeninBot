@@ -72,8 +72,8 @@ fact, contradiction or plausible change, not paraphrases of answered questions. 
 translation and save errors must be repaired from saved research, not a new investigation.
 If the paid budget is exhausted, use saved/free sources and defer unsupported claims explicitly.
 Collect claims keyed to the fields a later author should change: bio/years/citizenship/
-nationalOrigin/moment for a person, body for a person section, definition/body/period/
-startYear/endYear for a term. Other supported fields may carry their own claims.
+nationalOrigin/moment for a person, body for a person section, definition/body/period
+for a term (the period's years are its claim). Other supported fields may carry their own claims.
 Claim field names must be actual writable fields, never commissioned topic names. For terms,
 history, distinctions and examples belong to body claims; definition claims cannot substitute
 for body evidence. For people, use bio rather than a topic such as basics.
@@ -88,7 +88,7 @@ useful writing is supported; otherwise explain complete/not_applicable/sources_u
 Missing evidence does not justify assigning a guessed value or citing a passage that does not state it.
 For a new person, separately support bio, years, moment, citizenship and nationalOrigin
 whenever they will be populated. A nationalOrigin claim cannot stand in for citizenship.
-For a new term, separately support definition, body, period and startYear/endYear as needed.
+For a new term, separately support definition, body and period (when it is dated) as needed.
 When validation_to_resolve requests missing evidence, retain valid earlier claims and retrieve
 the missing support; do not return the same incomplete collection as ready.''',
     'draft': '''Produce the smallest useful supported patch from the supplied research.
