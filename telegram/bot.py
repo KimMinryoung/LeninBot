@@ -1221,7 +1221,28 @@ def _make_codex_chat_fn(spec):
     return _codex_chat_fn
 
 
-async def _run_stasova_diary_review(task: dict, title: str, content: str) -> str:
+def _privacy_review_section(privacy_checklist: str, instruction: str) -> str:
+    if not privacy_checklist:
+        return ""
+    return (
+        "방문자 비공개 요청 (반드시 지킬 것):\n"
+        f"{instruction}\n{privacy_checklist}\n\n"
+    )
+
+
+def _diary_privacy_checklist(task: dict) -> str:
+    """Visitor non-publication requests found for this diary run, as a review checklist."""
+    try:
+        from telegram.diary_privacy import checklist, scan_for_task
+        from telegram.tasks import _diary_web_context_hours_back
+
+        return checklist(scan_for_task(task.get("id"), _diary_web_context_hours_back()))
+    except Exception as exc:
+        logger.warning("diary privacy checklist unavailable: %s", exc)
+        return ""
+
+
+async def _run_stasova_diary_review(task: dict, title: str, content: str, privacy_checklist: str = "") -> str:
     from agents import get_agent
     from runtime_tools.registry import TOOLS as BASE_TOOLS, TOOL_HANDLERS as BASE_HANDLERS
 
@@ -1239,7 +1260,9 @@ async def _run_stasova_diary_review(task: dict, title: str, content: str) -> str
         "정치 노선 개정 판단이나 문학적 편집은 하지 말고, 시스템 프롬프트의 위험 축과 정치노선 왜곡 위험만 적용하라.\n"
         "초안은 아래에 전문이 있다. 파일이나 디렉터리를 조회하거나 저장하지 말라.\n"
         "최종 답변에는 점검 보고서만 작성하라. 런타임이 보고서 파일을 저장한다.\n\n"
-        f"제목:\n{title}\n\n"
+        + _privacy_review_section(privacy_checklist,
+                                  "초안이 아래 항목을 직접 쓰거나 독자가 되짚을 수 있게 드러내면 경고로 보고하고 해당 문장을 짚어라.")
+        + f"제목:\n{title}\n\n"
         f"본문:\n{content}"
     )
     tracker = {}
@@ -1272,6 +1295,7 @@ async def _apply_stasova_diary_review(
     title: str,
     content: str,
     review_report: str,
+    privacy_checklist: str = "",
 ) -> tuple[str, str]:
     provider = _get_task_provider()
     chat_fn = _make_provider_chat_fn(provider)
@@ -1283,7 +1307,9 @@ async def _apply_stasova_diary_review(
         "경고 여부와 무관하게 명백한 오탈자와 비문(예: 중복된 지시어)은 고친다.\n"
         "정치적 핵심과 1인칭 일기 문체는 보존한다.\n"
         "반드시 JSON 객체 하나만 출력하라. 스키마: {\"title\": \"...\", \"content\": \"...\"}\n\n"
-        f"초안 제목:\n{title}\n\n"
+        + _privacy_review_section(privacy_checklist,
+                                  "경고 여부와 무관하게 아래 항목과 그것을 되짚게 하는 서술은 최종본에 남기지 않는다.")
+        + f"초안 제목:\n{title}\n\n"
         f"초안 본문:\n{content}\n\n"
         f"스타소바 보고서:\n{review_report}"
     )
@@ -1374,12 +1400,16 @@ def _make_guarded_diary_save_handler(_bot: Bot, task: dict):
                 title, content, ledger=await asyncio.to_thread(_format_recent_diary_ledger),
             )
             edited_title, edited_content = editorial.title, editorial.content
-            review_report = await _run_stasova_diary_review(task, edited_title, edited_content)
+            privacy_checklist = await asyncio.to_thread(_diary_privacy_checklist, task)
+            review_report = await _run_stasova_diary_review(
+                task, edited_title, edited_content, privacy_checklist,
+            )
             final_title, final_content = await _apply_stasova_diary_review(
                 task,
                 title=edited_title,
                 content=edited_content,
                 review_report=review_report,
+                privacy_checklist=privacy_checklist,
             )
             from telegram.diary_publication import (
                 publish_reviewed_diary_entry,

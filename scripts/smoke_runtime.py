@@ -2035,7 +2035,11 @@ def _assert_diary_web_context_injection() -> None:
 
     original_web_formatter = tasks._format_diary_web_chat_context
     original_activity_formatter = tasks._format_diary_activity_context
+    original_privacy_formatter = tasks._format_diary_privacy_context
     try:
+        tasks._format_diary_privacy_context = (
+            lambda task_id, provider: "### Diary Visitor Non-publication Requests\n\n1. 방문자의 노동 조건"
+        )
         tasks._format_diary_web_chat_context = (
             lambda provider: "### Diary Web Chat Preflight\n\nWeb user: 일기에서 이 수정 지시를 반영해"
         )
@@ -2050,6 +2054,7 @@ def _assert_diary_web_context_injection() -> None:
         assert "### Diary Activity Preflight" in content
         assert "### Diary Web Chat Preflight" in content
         assert "Web user: 일기에서 이 수정 지시를 반영해" in content
+        assert "### Diary Visitor Non-publication Requests" in content
         assert content.index("### Diary Web Chat Preflight") < content.index("### Task")
 
         maintenance = tasks._build_task_context_content(
@@ -2059,6 +2064,7 @@ def _assert_diary_web_context_injection() -> None:
         )
         assert "Diary Activity Preflight" not in maintenance
         assert "Diary Web Chat Preflight" not in maintenance
+        assert "Non-publication Requests" not in maintenance
 
         non_diary = tasks._build_task_context_content(
             {"id": 902, "user_id": 0, "agent_type": "analyst", "content": "analyze"},
@@ -2069,6 +2075,7 @@ def _assert_diary_web_context_injection() -> None:
     finally:
         tasks._format_diary_web_chat_context = original_web_formatter
         tasks._format_diary_activity_context = original_activity_formatter
+        tasks._format_diary_privacy_context = original_privacy_formatter
 
 
 async def _assert_diary_runtime_route_fallbacks() -> None:

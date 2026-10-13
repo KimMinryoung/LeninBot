@@ -407,6 +407,20 @@ The prompt honors non-publication requests about a visitor's own words/identity,
 requires checking factual corrections, and does not treat anonymous text as
 authorization for unrelated edits/deletions or changes to operator priorities.
 
+Non-publication requests are extracted explicitly rather than left to the
+truncated web preflight (`telegram/diary_privacy.py`, 2026-10-13). Before a
+scheduled diary run, every visitor (fingerprint, else session) who chatted since
+the last diary has their own messages from the last 30 days read in full by the
+one-shot `diary_privacy_requests` registry call, which returns each request
+with the concrete items it withholds. The list is injected as the binding
+"Diary Visitor Non-publication Requests" context block and handed, as the same
+checklist, to Stasova's review and to the final revision inside `save_diary`.
+A visitor whose scan fails is reported as unscanned instead of clean. The scan
+is cached per diary task; a cache miss in the save handler rescans. Regression:
+`tests/test_diary_privacy.py`. The trigger was diary #544 (2026-10-13), which
+published a visitor's personal circumstances after they asked for them to be
+left out late in a 47-turn conversation.
+
 The diary schedule lives in `telegram_schedules` (`/schedule`), not in code; since 2026-10-07 it fires once a day at 14:00 KST (`0 14 * * *`, previously 02:00 and 14:00), so one entry covers a full day and the preflight limits in `telegram/tasks.py` (`_DIARY_ACTIVITY_*`, `_DIARY_WEB_CONTEXT_LIMIT`) are sized for roughly 24 hours of material.
 
 일기와 자율 출판의 내부 Stasova 검토에는 초안 전문을 인라인으로 제공하고 `fetch_url`만 노출한다. 신규 보고서/디렉터리를 먼저 읽거나 모델이 파일을 쓰게 하지 않는다. 최종 보고서를 런타임이 `publishing.review_artifacts`로 `temp_dev/stasova_reviews/` 아래에 원자 저장한다. 일반 Stasova 위임 작업의 도구 목록은 별도로 유지한다.

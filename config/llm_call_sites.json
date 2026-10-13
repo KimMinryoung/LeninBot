@@ -584,5 +584,17 @@
       "type": "disabled"
     },
     "note": "공개 일기 초안 저자 수정 — 진단 노트를 방향으로 받아 사이버 레닌 목소리로 고쳐 쓴 {title, content, rejected} JSON. 길이 60% 미만·문단 붕괴·마크다운·비JSON이면 초안 유지. DeepSeek Flash 고정, thinking off"
+  },
+  "diary_privacy_requests": {
+    "provider": "deepseek",
+    "model": "tier:low",
+    "temperature": 0.1,
+    "max_tokens": 2000,
+    "timeout": 180,
+    "json_mode": true,
+    "thinking": {
+      "type": "disabled"
+    },
+    "note": "공개 일기 작성 전 방문자 비공개 요청 추출 (telegram/diary_privacy.py). 지난 일기 이후 채팅한 방문자마다 최근 30일 메시지 전부를 읽어 {requests:[{message_id, quote, withheld[]}]} JSON. 결과는 일기 작업 맥락·Stasova 검토·최종 수정에 체크리스트로 들어간다. 실패한 방문자는 미검토로 표시. 2026-10-13 도입. DeepSeek Flash 고정, thinking off"
   }
 }

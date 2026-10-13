@@ -492,6 +492,22 @@ def _format_diary_web_chat_context(provider: str | None) -> str:
     )
 
 
+def _format_diary_privacy_context(task_id: int | None, provider: str | None) -> str:
+    """Bind visitor non-publication requests found across their full chats."""
+    from telegram.diary_privacy import format_diary_block, scan_for_task
+
+    body = format_diary_block(scan_for_task(task_id, _diary_web_context_hours_back()))
+    if not body:
+        return ""
+    return wrap_context_block(
+        "diary-privacy-requests",
+        body,
+        provider,
+        heading="Diary Visitor Non-publication Requests",
+        attrs={"source": "web"},
+    )
+
+
 def _diary_publication_receipt(task: dict) -> dict | None:
     """Observe the persisted diary, not the presence of a tool name in prose."""
     row = _query_one(
@@ -1417,18 +1433,21 @@ def _build_task_context_content(
 
     diary_web_ctx = ""
     diary_activity_ctx = ""
+    diary_privacy_ctx = ""
     if agent_type == "diary":
         from telegram.diary_mode import is_diary_writing_task
 
         if is_diary_writing_task(task, content):
             diary_activity_ctx = _format_diary_activity_context(context_provider)
             diary_web_ctx = _format_diary_web_chat_context(context_provider)
+            diary_privacy_ctx = _format_diary_privacy_context(task_id, context_provider)
 
     from llm.execution_context import context_record, render_context_records
     context_parts = [(kind, part) for kind, part in (
         ("task_state", state_ctx), ("derived_memory", experiences_ctx),
         ("stored_knowledge", kg_recall_ctx), ("diary_activity", diary_activity_ctx),
-        ("visitor_dialogue", diary_web_ctx), ("mission_events", mission_ctx),
+        ("visitor_dialogue", diary_web_ctx), ("visitor_privacy_requests", diary_privacy_ctx),
+        ("mission_events", mission_ctx),
         ("previous_agent_report", history_ctx), ("agent_board", board_ctx),
         *(("dependency_outcome", part) for part in result_contexts),
     ) if part]
