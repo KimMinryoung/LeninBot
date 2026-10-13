@@ -3,25 +3,33 @@
 Web visitors sometimes ask that their own words, circumstances, affiliations
 or plans stay out of the public diary. The diary agent sees recent web chats
 only through a truncated preflight (a few turns per session, each cut short),
-so a request made in a long conversation, or in an earlier conversation, can
-fall outside what the agent reads. Stasova's publication review never saw the
-chats at all.
+so a request made late in a long conversation, or in an earlier one, can fall
+outside what it reads. Stasova's publication review never saw the chats.
 
-This module makes the requests explicit. Before a scheduled diary run, every
-visitor who chatted since the last diary has their own messages from the last
-``LOOKBACK_DAYS`` read in full by a one-shot registry call
-(``diary_privacy_requests``), which returns each request with the concrete
-items it withholds. The list is injected into the diary task as a binding
-block and handed to Stasova's review and the final revision as a checklist.
+This module makes the requests explicit and durable. Each visitor's messages
+are read whole, once: a scan reads only what arrived after the visitor's
+watermark in ``web_privacy_scans``, in chunks that never split a message, with
+the visitor's standing requests in view so a later message can withdraw one.
+Requests land in ``web_privacy_requests`` and stay in force until withdrawn.
+The one-shot ``diary_privacy_requests`` registry call does the reading.
 
-A visitor whose scan fails is reported as unscanned rather than silently
-treated as having no request, so the agent and the reviewer know to look.
+Before a scheduled diary run, visitors who chatted since the last diary are
+scanned and every standing request is injected into the diary task as a
+binding block; the save handler scans again (cheap, only new messages) and
+hands the same checklist to Stasova's review and the final revision. A visitor
+whose scan fails keeps its watermark, is retried next time, and is reported as
+unscanned rather than clean.
+
+Schema: ``telegram/diary_privacy.sql`` (``scripts/schema_migrations.py --only
+diary-privacy``).
 """
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from llm import call_registry
 from llm.json_utils import extract_json_object
@@ -29,19 +37,16 @@ from llm.json_utils import extract_json_object
 logger = logging.getLogger(__name__)
 
 FEATURE = "diary_privacy_requests"
-# Requests are standing ("앞으로 쓰지 마라"), so look back past the diary gap.
-LOOKBACK_DAYS = 30
-# Newest messages are kept when a visitor's history exceeds this.
-MAX_CHARS_PER_VISITOR = 120_000
+SCHEMA_SQL = Path(__file__).with_name("diary_privacy.sql")
+# Messages are batched up to this size per call; one message is never split.
+CHUNK_CHARS = 60_000
 MAX_VISITORS = 40
-
-# One scan per diary task: the context builder runs it, the save handler
-# reuses it for Stasova. A miss (another process, restart) scans again.
-_SCANS: dict[int, "PrivacyScan"] = {}
+VISITOR_SQL = "COALESCE(NULLIF(fingerprint, ''), session_id)"
 
 
 @dataclass
 class PrivacyRequest:
+    id: int
     visitor: str
     chat_log_id: int
     requested_at: str
@@ -58,53 +63,27 @@ class PrivacyScan:
 
 SYSTEM = (
     "너는 공개 일기를 쓰기 전에 웹 채팅 방문자의 비공개 요청을 찾는 검토자다. "
-    "아래는 한 방문자가 보낸 메시지 전부다. 방문자가 자기 말, 신원, 개인 사정, 소속 조직, 활동, 일정 같은 "
-    "정보를 일기나 공개 글에 쓰지 말라고(남기지 말라고, 빼 달라고) 요청한 경우만 찾는다. "
-    "로그가 남는지 묻는 질문처럼 요청이 아닌 우려는 제외한다. 나중 메시지에서 철회한 요청도 제외한다.\n"
-    "각 요청마다 그 요청이 막는 정보를 이 방문자의 메시지에서 구체적으로 풀어 적는다. "
-    "\"내 이야기\"처럼 포괄적인 요청이면 이 방문자가 드러낸 개인·조직 정보를 항목별로 적는다. "
+    "한 방문자의 새 메시지와, 이 방문자가 전에 한 비공개 요청 목록을 받는다. "
+    "새 메시지에서 방문자가 자기 말, 신원, 개인 사정, 소속 조직, 활동, 일정 같은 정보를 일기나 공개 글에 "
+    "쓰지 말라고(남기지 말라고, 빼 달라고) 요청한 경우를 찾는다. 로그가 남는지 묻는 질문처럼 요청이 아닌 우려는 제외한다.\n"
+    "각 요청마다 그 요청이 막는 정보를 방문자의 메시지에서 구체적으로 풀어 적는다. "
+    "\"내 이야기\"처럼 포괄적인 요청이면 방문자가 드러낸 개인·조직 정보를 항목별로 적는다. "
     "항목은 일기 작성자가 그대로 지킬 수 있게 짧고 구체적으로 쓴다(예: \"방문자의 직업과 시간 사정\", "
     "\"조직명 ○○\", \"○월 ○일 집회 일정\").\n"
+    "새 메시지에서 방문자가 전에 한 요청을 거두면(이제 써도 된다 등) 그 요청 id를 revoked에 넣는다.\n"
     "반드시 JSON 객체 하나만 출력한다. 스키마: "
-    "{\"requests\": [{\"message_id\": 정수, \"quote\": \"요청 원문 일부\", \"withheld\": [\"항목\", ...]}]}. "
-    "요청이 없으면 {\"requests\": []}."
+    "{\"requests\": [{\"message_id\": 정수, \"quote\": \"요청 원문 일부\", \"withheld\": [\"항목\", ...]}], "
+    "\"revoked\": [{\"request_id\": 정수, \"message_id\": 정수}]}. "
+    "해당 사항이 없으면 {\"requests\": [], \"revoked\": []}."
 )
 
 
-def _visitor_key_sql() -> str:
-    return "COALESCE(NULLIF(fingerprint, ''), session_id)"
+def ensure_tables() -> None:
+    from db import get_conn
 
-
-def _active_visitors(hours_back: int) -> list[str]:
-    from db import query as db_query
-
-    rows = db_query(
-        f"SELECT {_visitor_key_sql()} AS visitor, MAX(created_at) AS last_at FROM chat_logs "
-        "WHERE created_at > now() - make_interval(hours => %s) AND user_query_active "
-        f"GROUP BY 1 ORDER BY last_at DESC LIMIT %s",
-        (int(hours_back), MAX_VISITORS),
-    )
-    return [r["visitor"] for r in rows if r.get("visitor")]
-
-
-def _visitor_messages(visitor: str) -> list[dict]:
-    from db import query as db_query
-
-    rows = db_query(
-        f"SELECT id, created_at, user_query FROM chat_logs WHERE {_visitor_key_sql()} = %s "
-        "AND created_at > now() - make_interval(days => %s) AND user_query_active "
-        "ORDER BY id DESC",
-        (visitor, LOOKBACK_DAYS),
-    )
-    kept, total = [], 0
-    for row in rows:
-        text = str(row.get("user_query") or "")
-        if kept and total + len(text) > MAX_CHARS_PER_VISITOR:
-            break
-        kept.append(row)
-        total += len(text)
-    kept.reverse()
-    return kept
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("SET LOCAL lock_timeout = '5s'")
+        cur.execute(SCHEMA_SQL.read_text())
 
 
 def _format_ts(ts) -> str:
@@ -116,16 +95,87 @@ def _format_ts(ts) -> str:
         return str(ts or "?")[:19]
 
 
-def build_prompt(messages: list[dict]) -> str:
+def _active_visitors(hours_back: int) -> list[str]:
+    from db import query as db_query
+
+    rows = db_query(
+        f"SELECT {VISITOR_SQL} AS visitor, MAX(created_at) AS last_at FROM chat_logs "
+        "WHERE created_at > now() - make_interval(hours => %s) AND user_query_active "
+        "GROUP BY 1 ORDER BY last_at DESC LIMIT %s",
+        (int(hours_back), MAX_VISITORS),
+    )
+    return [r["visitor"] for r in rows if r.get("visitor")]
+
+
+def _new_messages(visitor: str) -> list[dict]:
+    from db import query as db_query
+
+    return db_query(
+        f"SELECT c.id, c.created_at, c.user_query FROM chat_logs c "
+        f"WHERE {VISITOR_SQL} = %s AND c.user_query_active AND c.id > COALESCE("
+        "(SELECT last_chat_log_id FROM web_privacy_scans WHERE visitor = %s), 0) "
+        "ORDER BY c.id",
+        (visitor, visitor),
+    )
+
+
+def _standing_requests(visitor: str | None = None) -> list[PrivacyRequest]:
+    from db import query as db_query
+
+    where, params = "WHERE revoked_at IS NULL", ()
+    if visitor is not None:
+        where, params = where + " AND visitor = %s", (visitor,)
+    rows = db_query(
+        "SELECT id, visitor, chat_log_id, requested_at, quote, withheld FROM web_privacy_requests "
+        f"{where} ORDER BY requested_at, id",
+        params,
+    )
+    return [
+        PrivacyRequest(
+            id=r["id"], visitor=r["visitor"], chat_log_id=r["chat_log_id"],
+            requested_at=_format_ts(r["requested_at"]), quote=r.get("quote") or "",
+            withheld=list(r.get("withheld") or []),
+        )
+        for r in rows
+    ]
+
+
+def chunk_messages(messages: list[dict], limit: int) -> list[list[dict]]:
+    chunks, current, size = [], [], 0
+    for message in messages:
+        length = len(str(message.get("user_query") or ""))
+        if current and size + length > limit:
+            chunks.append(current)
+            current, size = [], 0
+        current.append(message)
+        size += length
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def build_prompt(messages: list[dict], standing: list[PrivacyRequest]) -> str:
+    if standing:
+        prior = "\n".join(
+            f"[request_id={r.id}] {r.requested_at} \"{r.quote}\" — " + "; ".join(r.withheld)
+            for r in standing
+        )
+    else:
+        prior = "(없음)"
     parts = [
         f"[message_id={m['id']}] {_format_ts(m.get('created_at'))}\n{str(m.get('user_query') or '').strip()}"
         for m in messages
     ]
-    return "방문자 메시지 (오래된 것부터):\n\n" + "\n\n".join(parts)
+    return (
+        f"이 방문자가 전에 한 비공개 요청:\n{prior}\n\n"
+        "새 메시지 (오래된 것부터):\n\n" + "\n\n".join(parts)
+    )
 
 
-def parse_requests(reply: str | None, visitor: str, messages: list[dict]) -> list[PrivacyRequest] | None:
-    """Requests from the model reply; None when the reply is unusable."""
+def parse_reply(
+    reply: str | None, messages: list[dict], standing: list[PrivacyRequest],
+) -> tuple[list[dict], list[tuple[int, int]]] | None:
+    """(new requests, (request_id, message_id) revocations); None when unusable."""
     parsed = extract_json_object(reply or "")
     if not isinstance(parsed, dict) or not isinstance(parsed.get("requests"), list):
         return None
@@ -135,60 +185,101 @@ def parse_requests(reply: str | None, visitor: str, messages: list[dict]) -> lis
         if not isinstance(item, dict):
             continue
         try:
-            message_id = int(item.get("message_id"))
+            source = by_id.get(int(item.get("message_id")))
         except (TypeError, ValueError):
             continue
-        source = by_id.get(message_id)
         withheld = [str(w).strip() for w in item.get("withheld") or [] if str(w).strip()]
         if source is None or not withheld:
             continue
-        found.append(PrivacyRequest(
-            visitor=visitor,
-            chat_log_id=message_id,
-            requested_at=_format_ts(source.get("created_at")),
-            quote=str(item.get("quote") or "").strip()[:300],
-            withheld=withheld[:20],
-        ))
-    return found
+        found.append({
+            "chat_log_id": int(source["id"]),
+            "requested_at": source.get("created_at"),
+            "quote": str(item.get("quote") or "").strip()[:300],
+            "withheld": withheld[:20],
+        })
+    standing_ids = {r.id for r in standing}
+    revoked = []
+    for item in parsed.get("revoked") or []:
+        if not isinstance(item, dict):
+            continue
+        try:
+            request_id, message_id = int(item.get("request_id")), int(item.get("message_id"))
+        except (TypeError, ValueError):
+            continue
+        if request_id in standing_ids and message_id in by_id:
+            revoked.append((request_id, message_id))
+    return found, revoked
+
+
+def _store(visitor: str, found: list[dict], revoked: list[tuple[int, int]], last_id: int) -> None:
+    from db import get_conn
+
+    with get_conn() as conn, conn.cursor() as cur:
+        for req in found:
+            cur.execute(
+                "INSERT INTO web_privacy_requests (visitor, chat_log_id, requested_at, quote, withheld) "
+                "VALUES (%s, %s, %s, %s, %s)",
+                (visitor, req["chat_log_id"], req["requested_at"], req["quote"],
+                 json.dumps(req["withheld"], ensure_ascii=False)),
+            )
+        for request_id, message_id in revoked:
+            cur.execute(
+                "UPDATE web_privacy_requests SET revoked_at = now(), revoked_by_chat_log_id = %s "
+                "WHERE id = %s AND visitor = %s AND revoked_at IS NULL",
+                (message_id, request_id, visitor),
+            )
+        cur.execute(
+            "INSERT INTO web_privacy_scans (visitor, last_chat_log_id, scanned_at) VALUES (%s, %s, now()) "
+            "ON CONFLICT (visitor) DO UPDATE SET last_chat_log_id = EXCLUDED.last_chat_log_id, scanned_at = now()",
+            (visitor, last_id),
+        )
+
+
+def scan_visitor(visitor: str) -> bool:
+    """Read the visitor's unread messages; False when a chunk failed (retried next time)."""
+    for chunk in chunk_messages(_new_messages(visitor), CHUNK_CHARS):
+        standing = _standing_requests(visitor)
+        try:
+            reply = call_registry.generate_sync(FEATURE, build_prompt(chunk, standing), system=SYSTEM)
+        except Exception as exc:
+            logger.warning("diary privacy scan failed for visitor %s: %s", visitor[:8], exc)
+            return False
+        parsed = parse_reply(reply, chunk, standing)
+        if parsed is None:
+            logger.warning("diary privacy scan: unusable reply for visitor %s", visitor[:8])
+            return False
+        found, revoked = parsed
+        _store(visitor, found, revoked, int(chunk[-1]["id"]))
+    return True
 
 
 def scan(hours_back: int) -> PrivacyScan:
+    """Scan visitors active in the window, then return every standing request."""
     result = PrivacyScan()
     try:
         visitors = _active_visitors(hours_back)
     except Exception as exc:
         logger.warning("diary privacy scan: visitor lookup failed: %s", exc)
+        visitors = []
         result.failed_visitors.append("(visitor lookup failed)")
-        return result
     result.visitors = len(visitors)
     for visitor in visitors:
         try:
-            messages = _visitor_messages(visitor)
-            if not messages:
-                continue
-            reply = call_registry.generate_sync(FEATURE, build_prompt(messages), system=SYSTEM)
-            requests = parse_requests(reply, visitor, messages)
+            ok = scan_visitor(visitor)
         except Exception as exc:
             logger.warning("diary privacy scan failed for visitor %s: %s", visitor[:8], exc)
-            requests = None
-        if requests is None:
+            ok = False
+        if not ok:
             result.failed_visitors.append(visitor)
-        else:
-            result.requests.extend(requests)
+    try:
+        result.requests = _standing_requests()
+    except Exception as exc:
+        logger.warning("diary privacy scan: standing requests unavailable: %s", exc)
+        result.failed_visitors.append("(standing requests unavailable)")
     logger.info(
-        "diary privacy scan: %d visitor(s), %d request(s), %d unscanned",
+        "diary privacy scan: %d visitor(s), %d standing request(s), %d unscanned",
         result.visitors, len(result.requests), len(result.failed_visitors),
     )
-    return result
-
-
-def scan_for_task(task_id: int | None, hours_back: int) -> PrivacyScan:
-    if task_id is not None and task_id in _SCANS:
-        return _SCANS[task_id]
-    result = scan(hours_back)
-    if task_id is not None:
-        _SCANS.clear()  # only the running diary task matters
-        _SCANS[task_id] = result
     return result
 
 
@@ -213,6 +304,6 @@ def format_diary_block(result: PrivacyScan) -> str:
     return (
         "Visitor non-publication requests: binding. Visitors asked that the following stay out of public "
         "writing. Omit every listed item and any detail that would let a reader reconstruct it, even when "
-        "the web-chat preflight or chat logs show it. These requests apply to this entry and every later one.\n"
+        "the web-chat preflight or chat logs show it. These requests stand until the visitor withdraws them.\n"
         + items
     )

@@ -595,6 +595,6 @@
     "thinking": {
       "type": "disabled"
     },
-    "note": "공개 일기 작성 전 방문자 비공개 요청 추출 (telegram/diary_privacy.py). 지난 일기 이후 채팅한 방문자마다 최근 30일 메시지 전부를 읽어 {requests:[{message_id, quote, withheld[]}]} JSON. 결과는 일기 작업 맥락·Stasova 검토·최종 수정에 체크리스트로 들어간다. 실패한 방문자는 미검토로 표시. 2026-10-13 도입. DeepSeek Flash 고정, thinking off"
+    "note": "공개 일기 작성 전 방문자 비공개 요청 추출 (telegram/diary_privacy.py). 방문자별로 아직 읽지 않은 메시지만(web_privacy_scans 워터마크) 6만 자 단위로 메시지를 자르지 않고 읽어, 기존 요청을 함께 보고 {requests:[{message_id, quote, withheld[]}], revoked:[{request_id, message_id}]} JSON. 요청은 web_privacy_requests에 철회 전까지 유지되고 일기 작업 맥락·Stasova 검토·최종 수정에 체크리스트로 들어간다. 실패한 방문자는 워터마크 유지·미검토 표시. 2026-10-13 도입. DeepSeek Flash 고정, thinking off"
   }
 }

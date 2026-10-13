@@ -2038,7 +2038,7 @@ def _assert_diary_web_context_injection() -> None:
     original_privacy_formatter = tasks._format_diary_privacy_context
     try:
         tasks._format_diary_privacy_context = (
-            lambda task_id, provider: "### Diary Visitor Non-publication Requests\n\n1. 방문자의 노동 조건"
+            lambda provider: "### Diary Visitor Non-publication Requests\n\n1. 방문자의 노동 조건"
         )
         tasks._format_diary_web_chat_context = (
             lambda provider: "### Diary Web Chat Preflight\n\nWeb user: 일기에서 이 수정 지시를 반영해"

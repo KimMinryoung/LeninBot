@@ -1233,10 +1233,11 @@ def _privacy_review_section(privacy_checklist: str, instruction: str) -> str:
 def _diary_privacy_checklist(task: dict) -> str:
     """Visitor non-publication requests found for this diary run, as a review checklist."""
     try:
-        from telegram.diary_privacy import checklist, scan_for_task
+        from telegram.diary_privacy import checklist, scan
         from telegram.tasks import _diary_web_context_hours_back
 
-        return checklist(scan_for_task(task.get("id"), _diary_web_context_hours_back()))
+        # Only messages since the preflight scan are read; the rest is stored.
+        return checklist(scan(_diary_web_context_hours_back()))
     except Exception as exc:
         logger.warning("diary privacy checklist unavailable: %s", exc)
         return ""

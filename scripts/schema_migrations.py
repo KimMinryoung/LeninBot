@@ -122,6 +122,12 @@ def _web_chat_feedback() -> None:
     ensure_web_chat_feedback_table()
 
 
+def _diary_privacy() -> None:
+    from telegram.diary_privacy import ensure_tables
+
+    ensure_tables()
+
+
 def _writer_tables() -> None:
     from writer import ensure_writer_tables
 
@@ -183,6 +189,7 @@ MIGRATIONS: list[tuple[str, Callable[[], None]]] = [
     ("web-chat-audit-correlation", _web_chat_audit_correlation),
     ("tool-audit-run-correlation", _tool_audit_run_correlation),
     ("web-chat-feedback", _web_chat_feedback),
+    ("diary-privacy", _diary_privacy),
     ("writer-tables", _writer_tables),
     ("llm-audit-log", _llm_audit_log),
     ("audit-sink-role", _audit_sink_role),

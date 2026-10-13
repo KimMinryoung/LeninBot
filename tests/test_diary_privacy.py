@@ -1,4 +1,4 @@
-"""Visitor non-publication requests are extracted, kept per task and rendered as a checklist.
+"""Visitor non-publication requests: parsed, read once per message, retried on failure.
 
 Run from repo root:  venv/bin/python -m unittest tests.test_diary_privacy -v
 """
@@ -15,33 +15,42 @@ MESSAGES = [
     {"id": 11, "created_at": datetime(2026, 10, 13, 7, 35, tzinfo=timezone.utc),
      "user_query": "조직명도 개인조건도 일기에 넣지 말길"},
 ]
+STANDING = [dp.PrivacyRequest(id=5, visitor="v", chat_log_id=3, requested_at="2026-10-01 10:00 KST",
+                              quote="이름 빼라", withheld=["방문자 이름"])]
 
 
-class ParseRequestsTests(unittest.TestCase):
-    def test_keeps_requests_tied_to_the_visitors_messages(self):
-        reply = json.dumps({"requests": [
-            {"message_id": 11, "quote": "개인조건도 일기에 넣지 말길", "withheld": ["방문자의 노동 조건", " "]},
-            {"message_id": 99, "quote": "invented", "withheld": ["x"]},
-            {"message_id": 10, "quote": "no items", "withheld": []},
-        ]}, ensure_ascii=False)
-        found = dp.parse_requests(reply, "fab6ba6e", MESSAGES)
-        self.assertEqual(len(found), 1)
-        self.assertEqual(found[0].chat_log_id, 11)
-        self.assertEqual(found[0].withheld, ["방문자의 노동 조건"])
-        self.assertIn("KST", found[0].requested_at)
+class ParseReplyTests(unittest.TestCase):
+    def test_keeps_requests_and_revocations_tied_to_this_chunk(self):
+        reply = json.dumps({
+            "requests": [
+                {"message_id": 11, "quote": "개인조건도 일기에 넣지 말길", "withheld": ["방문자의 노동 조건", " "]},
+                {"message_id": 99, "quote": "invented", "withheld": ["x"]},
+                {"message_id": 10, "quote": "no items", "withheld": []},
+            ],
+            "revoked": [{"request_id": 5, "message_id": 10}, {"request_id": 6, "message_id": 10},
+                        {"request_id": 5, "message_id": 99}],
+        }, ensure_ascii=False)
+        found, revoked = dp.parse_reply(reply, MESSAGES, STANDING)
+        self.assertEqual([r["chat_log_id"] for r in found], [11])
+        self.assertEqual(found[0]["withheld"], ["방문자의 노동 조건"])
+        self.assertEqual(revoked, [(5, 10)])
 
-    def test_empty_list_is_a_clean_scan_and_garbage_is_a_failure(self):
-        self.assertEqual(dp.parse_requests('{"requests": []}', "v", MESSAGES), [])
-        self.assertIsNone(dp.parse_requests("not json", "v", MESSAGES))
-        self.assertIsNone(dp.parse_requests('{"other": 1}', "v", MESSAGES))
+    def test_empty_is_clean_and_garbage_is_a_failure(self):
+        self.assertEqual(dp.parse_reply('{"requests": []}', MESSAGES, []), ([], []))
+        self.assertIsNone(dp.parse_reply("not json", MESSAGES, []))
+        self.assertIsNone(dp.parse_reply('{"other": 1}', MESSAGES, []))
 
 
-class ScanTests(unittest.TestCase):
-    def setUp(self):
-        dp._SCANS.clear()
+class ChunkTests(unittest.TestCase):
+    def test_chunks_never_split_a_message(self):
+        messages = [{"id": i, "user_query": "x" * n} for i, n in enumerate([40, 40, 100, 10])]
+        chunks = dp.chunk_messages(messages, limit=90)
+        self.assertEqual([[m["id"] for m in c] for c in chunks], [[0, 1], [2], [3]])
 
-    def _scan(self, replies):
-        calls = []
+
+class ScanVisitorTests(unittest.TestCase):
+    def _run(self, replies, messages):
+        calls, stored = [], []
 
         def fake_generate(feature, prompt, *, system=None, **kw):
             calls.append((feature, prompt))
@@ -50,31 +59,50 @@ class ScanTests(unittest.TestCase):
                 raise reply
             return reply
 
-        with patch.object(dp, "_active_visitors", return_value=["visitor-a", "visitor-b"]), \
-                patch.object(dp, "_visitor_messages", return_value=MESSAGES), \
-                patch.object(dp.call_registry, "generate_sync", side_effect=fake_generate):
-            result = dp.scan_for_task(7, 72)
-            again = dp.scan_for_task(7, 72)
-        return result, again, calls
+        with patch.object(dp, "_new_messages", return_value=messages), \
+                patch.object(dp, "_standing_requests", return_value=STANDING), \
+                patch.object(dp, "_store", side_effect=lambda *a: stored.append(a)), \
+                patch.object(dp.call_registry, "generate_sync", side_effect=fake_generate), \
+                patch.object(dp, "CHUNK_CHARS", 20):
+            ok = dp.scan_visitor("v")
+        return ok, calls, stored
 
-    def test_failed_visitor_is_reported_not_treated_as_clean(self):
-        ok = json.dumps({"requests": [{"message_id": 11, "quote": "넣지 말길", "withheld": ["조직명"]}]},
-                        ensure_ascii=False)
-        result, again, calls = self._scan([ok, RuntimeError("timeout")])
-        self.assertIs(result, again)  # cached for the save handler
-        self.assertEqual(len(calls), 2)
+    def test_watermark_advances_per_successful_chunk_and_stops_at_failure(self):
+        ok_reply = json.dumps({"requests": [{"message_id": 10, "quote": "q", "withheld": ["조직명"]}]},
+                              ensure_ascii=False)
+        ok, calls, stored = self._run([ok_reply, RuntimeError("timeout")], MESSAGES)
+        self.assertFalse(ok)
         self.assertEqual(calls[0][0], dp.FEATURE)
-        self.assertIn("[message_id=11]", calls[0][1])
-        self.assertEqual([r.visitor for r in result.requests], ["visitor-a"])
-        self.assertEqual(result.failed_visitors, ["visitor-b"])
+        self.assertIn("[request_id=5]", calls[0][1])
+        self.assertIn("[message_id=10]", calls[0][1])
+        self.assertEqual(len(stored), 1)  # chunk 2 failed: watermark stays at 10
+        visitor, found, revoked, last_id = stored[0]
+        self.assertEqual((visitor, last_id, revoked), ("v", 10, []))
+        self.assertEqual(found[0]["withheld"], ["조직명"])
+
+    def test_nothing_new_makes_no_call(self):
+        ok, calls, stored = self._run([], [])
+        self.assertTrue(ok)
+        self.assertEqual((calls, stored), ([], []))
+
+
+class ScanTests(unittest.TestCase):
+    def test_failed_visitor_is_reported_and_standing_requests_rendered(self):
+        with patch.object(dp, "_active_visitors", return_value=["a", "b"]), \
+                patch.object(dp, "scan_visitor", side_effect=[True, False]), \
+                patch.object(dp, "_standing_requests", return_value=STANDING):
+            result = dp.scan(72)
+        self.assertEqual(result.failed_visitors, ["b"])
         text = dp.checklist(result)
-        self.assertIn("- 조직명", text)
+        self.assertIn("- 방문자 이름", text)
         self.assertIn("자동 검토에 실패", text)
         self.assertIn("binding", dp.format_diary_block(result))
 
-    def test_no_requests_renders_nothing(self):
-        result, _, _ = self._scan(['{"requests": []}', '{"requests": []}'])
-        self.assertEqual(dp.checklist(result), "")
+    def test_clean_scan_renders_nothing(self):
+        with patch.object(dp, "_active_visitors", return_value=["a"]), \
+                patch.object(dp, "scan_visitor", return_value=True), \
+                patch.object(dp, "_standing_requests", return_value=[]):
+            result = dp.scan(72)
         self.assertEqual(dp.format_diary_block(result), "")
 
 
