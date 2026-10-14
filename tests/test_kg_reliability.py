@@ -138,6 +138,18 @@ class SyncTests(unittest.TestCase):
         self.assertEqual((stats['failed'], stats['written']), (0, 5))
         self.assertTrue(stats['complete'])
 
+    def test_prompt_pair_rules_follow_the_validator_table(self):
+        from graph_memory.config import EDGE_TYPE_MAP
+        rules = dx.FACT_SCHEMA_RULES
+        self.assertIn("PolicyEffect: Policy→Organization/Person/Asset/Location/Industry", rules)
+        self.assertNotIn("Policy→any", rules)
+        self.assertNotIn("any→Location", rules)
+        lines = {line.split(":", 1)[0].strip(): line for line in rules.splitlines() if ":" in line}
+        wildcards = set(EDGE_TYPE_MAP[("Entity", "Entity")])
+        for (subject, obj), predicates in EDGE_TYPE_MAP.items():
+            for predicate in set(predicates) - wildcards:
+                self.assertRegex(lines[predicate], rf"{subject}→[\w/]*\b{obj}\b")
+
     def test_extraction_requests_structured_output_schema(self):
         from llm.call_registry import GenerationResult
         rec = dx.research_record({'slug': 's', 'title': 'T', 'markdown': 'x'})

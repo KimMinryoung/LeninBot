@@ -315,6 +315,20 @@ def _fact_response_schema() -> dict:
             "required": ["facts"]}
 
 
+def _predicate_rules() -> str:
+    """Pair rules rendered from EDGE_TYPE_MAP, the table validate_fact enforces, so the prompt cannot drift."""
+    from graph_memory.config import EDGE_TYPE_MAP
+
+    wildcards = set(EDGE_TYPE_MAP.get(("Entity", "Entity"), []))
+    targets: dict[str, dict[str, list[str]]] = {}
+    for (subject, obj), predicates in EDGE_TYPE_MAP.items():
+        for predicate in predicates:
+            if predicate not in wildcards:
+                targets.setdefault(predicate, {}).setdefault(subject, []).append(obj)
+    return "\n".join(f"  {predicate}: " + ", ".join(f"{subject}→{'/'.join(objs)}" for subject, objs in by_subject.items())
+                     for predicate, by_subject in targets.items())
+
+
 # Shared with jobs/news_kg.py: output shape, schema and entity rules.
 FACT_SCHEMA_RULES = """Return ONLY a JSON object: {"facts": [ ... ]}. Each fact:
 {"subject_name": str, "subject_type": T, "predicate": P, "object_name": str, "object_type": T,
@@ -322,14 +336,12 @@ FACT_SCHEMA_RULES = """Return ONLY a JSON object: {"facts": [ ... ]}. Each fact:
 
 T ∈ {%s}
 P ∈ {%s}
-Predicate rules by (subject_type → object_type):
-  Affiliation: Person→Organization, Person→Role, Role→Organization, Organization→Industry
-  PersonalRelation: Person→Person | OrgRelation: Organization→Organization ONLY
-  Involvement: subject→Incident or subject→Campaign ONLY | Participation: Person/Organization→Campaign
-  Presence: any→Location | PolicyEffect: Policy→any, Organization→Policy, Campaign→Policy
-  ThreatAction: Person→Organization, Organization→Organization/Person, Campaign→Organization/Asset/Industry
+Predicate rules by (subject_type → object_type), the ONLY pairs each predicate allows:
+%s
   Funding, AssetTransfer, Statement, Causation: any→any (wildcards). Use Statement for "X said/argued/published Y".
-""" % (_ENTITY_TYPES, _PREDICATES)
+  Any other pair (e.g. Policy→Incident, Location→Location, anything→Concept) takes only a wildcard:
+  use Causation for "X led to / caused / launched Y", or drop the fact.
+""" % (_ENTITY_TYPES, _PREDICATES, _predicate_rules())
 
 ENTITY_GUIDELINES = """- Entity names: Korean canonical form for Korean people/organizations (e.g. 민주노총, 김문수); well-known
   international entities in English (e.g. United States, Anthropic, Nikita Khrushchev). Put the other
