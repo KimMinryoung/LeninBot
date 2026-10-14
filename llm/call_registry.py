@@ -307,7 +307,8 @@ def _generate_gemini(p: CallSiteProfile, prompt: str, system: str | None) -> tup
         temperature=p.temperature,
         max_output_tokens=p.max_tokens,
         system_instruction=system or None,
-        response_mime_type="application/json" if p.json_mode else None,
+        response_mime_type="application/json" if p.json_mode or p.extra.get("response_schema") else None,
+        **({"response_json_schema": p.extra["response_schema"]} if p.extra.get("response_schema") else {}),
         **({"thinking_config": {"thinking_level": p.extra["thinking_level"]}}
            if p.extra.get("thinking_level") else {}),
     )
@@ -560,10 +561,11 @@ def _error_kind(exc: Exception) -> str:
 
 def generate_detailed(feature: str, prompt: str, *, system: str | None = None,
                       profile: CallSiteProfile | None = None, label: str | None = None,
-                      **defaults) -> GenerationResult:
+                      response_schema: dict | None = None, **defaults) -> GenerationResult:
     """Audited one-shot result. Profile overrides are for explicit comparison runs.
     ``label`` lands in llm_audit_log.label so a batch (e.g. an archival spec id)
-    can be costed separately from its feature.
+    can be costed separately from its feature. ``response_schema`` (JSON Schema)
+    constrains the output on Gemini (structured output); other providers ignore it.
 
     Unlike generate_sync, consumers can reject truncation and classify retries.
     Every internal output-budget attempt is audited, including discarded output.
@@ -571,6 +573,8 @@ def generate_detailed(feature: str, prompt: str, *, system: str | None = None,
     from llm.gateway import LLMGatewayDenied, check_llm_call, record_llm_call
 
     profile = profile or resolve(feature, **defaults)
+    if response_schema is not None:
+        profile = replace(profile, extra={**profile.extra, "response_schema": response_schema})
     executor = _EXECUTORS.get(profile.provider)
     if executor is None or not profile.model:
         return GenerationResult(error_kind="configuration", error="unknown provider or missing model")

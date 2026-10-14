@@ -297,6 +297,24 @@ _ENTITY_TYPES = "Person, Organization, Location, Asset, Incident, Policy, Campai
 _PREDICATES = ("Affiliation, PersonalRelation, OrgRelation, Funding, AssetTransfer, ThreatAction, "
                "Involvement, Presence, PolicyEffect, Participation, Statement, Causation")
 
+
+def _fact_response_schema() -> dict:
+    """Structured-output schema: valid JSON with known types/predicates. Pair rules stay in validate_fact."""
+    types = {"type": "string", "enum": [t.strip() for t in _ENTITY_TYPES.split(",")]}
+    names = {"type": "array", "items": {"type": "string"}}
+    nullable_date = {"type": ["string", "null"], "description": "YYYY-MM-DD"}
+    fact = {"type": "object", "properties": {
+        "subject_name": {"type": "string"}, "subject_type": types,
+        "predicate": {"type": "string", "enum": [p.strip() for p in _PREDICATES.split(",")]},
+        "object_name": {"type": "string"}, "object_type": types, "fact": {"type": "string"},
+        "valid_at": nullable_date, "invalid_at": nullable_date,
+        "subject_aliases": names, "object_aliases": names,
+    }, "required": ["subject_name", "subject_type", "predicate", "object_name", "object_type", "fact"]}
+    # No maxItems: Gemini rejects it (400 INVALID_ARGUMENT); llm_facts caps at MAX_LLM_FACTS.
+    return {"type": "object", "properties": {"facts": {"type": "array", "items": fact}},
+            "required": ["facts"]}
+
+
 # Shared with jobs/news_kg.py: output shape, schema and entity rules.
 FACT_SCHEMA_RULES = """Return ONLY a JSON object: {"facts": [ ... ]}. Each fact:
 {"subject_name": str, "subject_type": T, "predicate": P, "object_name": str, "object_type": T,
@@ -425,11 +443,12 @@ def run_llm_extraction(rec: DocRecord) -> list[dict]:
     from llm.call_registry import generate_detailed
 
     prompt = build_llm_prompt(rec)
-    result = generate_detailed(LLM_FEATURE, prompt, system=EXTRACTION_SYSTEM)
+    schema = _fact_response_schema()
+    result = generate_detailed(LLM_FEATURE, prompt, system=EXTRACTION_SYSTEM, response_schema=schema)
     if result.retryable:
         # One retry for transient 429/503/transport errors; the nightly run covers the rest.
         time.sleep(min(result.retry_after or LLM_RETRY_PAUSE_S, 60))
-        result = generate_detailed(LLM_FEATURE, prompt, system=EXTRACTION_SYSTEM)
+        result = generate_detailed(LLM_FEATURE, prompt, system=EXTRACTION_SYSTEM, response_schema=schema)
     raw = result.text
     if not raw:
         raise RuntimeError(f"Document extraction returned no response: {rec.ref}"

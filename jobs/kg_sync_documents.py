@@ -10,6 +10,7 @@ Document node) are skipped and do not count against the limit.
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime
 
 from db import query as db_query
@@ -18,6 +19,7 @@ from kg_runtime import doc_extract as dx
 logger = logging.getLogger(__name__)
 
 ORDER = ("research", "archival", "autonote")  # research first: closes the webchat content gap
+FAILED_RETRY_PAUSE_S = 60
 
 
 def _commulingo_names() -> dict[str, dict[str, str]]:
@@ -78,6 +80,26 @@ def load_records(kinds=ORDER, *, since: datetime | None = None) -> list[dx.DocRe
 
 
 
+def _record_result(stats: dict, res: dict, idx) -> None:
+    if res['status'] == 'pending':
+        stats['remaining'] += 1
+        return
+    if res['status'] == 'unchanged':
+        stats['unchanged'] += 1
+    else:
+        stats['processed'] += 1
+    stats['written'] += res.get('written', 0)
+    stats['rejected'] += res.get('rejected', 0)
+    stats['expired'] += res.get('expired', 0)
+    if res['status'] == 'metadata':
+        stats['links_repaired'] += res.get('written', 0)
+    if res['status'] == 'error':
+        stats['errors'].append(f"{res.get('ref')}: {res.get('message')}")
+    stats['items'].append(res)
+    if res['status'] == 'ok':
+        idx.refresh_from_neo4j()
+
+
 def run(*, since: datetime | None = None, full: bool = False, limit: int | None = None,
         dry_run: bool = False, kinds=ORDER, use_llm: bool | None = None, force: bool = False) -> dict:
     use_llm = dx.llm_enabled() if use_llm is None else use_llm
@@ -116,6 +138,7 @@ def run(*, since: datetime | None = None, full: bool = False, limit: int | None 
 
     stats["links_repaired"] = 0
     attempted = 0
+    retry = []
     for rec in recs:
         needs_extraction = force or existing.get(rec.ref) != rec['sha']
         allow_extract = limit is None or attempted < limit
@@ -127,27 +150,24 @@ def run(*, since: datetime | None = None, full: bool = False, limit: int | None 
         try:
             res = dx.reconcile_document(rec, names=names, alias_index=idx, use_llm=use_llm,
                                         force=force, allow_extract=allow_extract if needs_extraction else False)
+        except Exception:
+            logger.exception("[kg-sync documents] %s failed; retrying after the pass", rec.ref)
+            retry.append((rec, allow_extract if needs_extraction else False))
+            continue
+        _record_result(stats, res, idx)
+    if retry:
+        # Transient provider failures usually clear within minutes; without this pass
+        # a failed document waits a full day and the hourly healthcheck alerts meanwhile.
+        time.sleep(FAILED_RETRY_PAUSE_S)
+    for rec, allow in retry:
+        try:
+            res = dx.reconcile_document(rec, names=names, alias_index=idx, use_llm=use_llm,
+                                        force=force, allow_extract=allow)
         except Exception as exc:
-            logger.exception("[kg-sync documents] %s failed", rec.ref)
+            logger.exception("[kg-sync documents] %s failed again", rec.ref)
             stats['errors'].append(f"{rec.ref}: {exc}")
             continue
-        if res['status'] == 'pending':
-            stats['remaining'] += 1
-            continue
-        if res['status'] == 'unchanged':
-            stats['unchanged'] += 1
-        else:
-            stats['processed'] += 1
-        stats['written'] += res.get('written', 0)
-        stats['rejected'] += res.get('rejected', 0)
-        stats['expired'] += res.get('expired', 0)
-        if res['status'] == 'metadata':
-            stats['links_repaired'] += res.get('written', 0)
-        if res['status'] == 'error':
-            stats['errors'].append(f"{rec.ref}: {res.get('message')}")
-        stats['items'].append(res)
-        if res['status'] == 'ok':
-            idx.refresh_from_neo4j()
+        _record_result(stats, res, idx)
     stats['reconciliation'] = {'unresolved': len(stats['errors']), 'differences': stats['errors'][:100]}
     stats["failed"] = len(stats["errors"])
     stats["remaining"] += stats["failed"]

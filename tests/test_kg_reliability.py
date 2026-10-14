@@ -114,12 +114,39 @@ class SyncTests(unittest.TestCase):
         with patch.object(docs, 'load_records', return_value=recs), patch.object(docs, '_commulingo_names', return_value={}), \
              patch.object(dx, 'existing_document_states', return_value={r: {'sha': sha} for r, sha in existing.items()}), \
              patch.object(identity, 'get_alias_index', return_value=Mock()), \
-             patch.object(dx, 'reconcile_document', side_effect=[{'status': 'unchanged'}, RuntimeError('offline')]) as extract:
+             patch.object(dx, 'reconcile_document',
+                          side_effect=[{'status': 'unchanged'}, RuntimeError('offline'), RuntimeError('offline')]) as extract, \
+             patch.object(docs.time, 'sleep'):
             stats = docs.run(limit=1)
-        self.assertEqual(extract.call_count, 2)
+        self.assertEqual(extract.call_count, 3)
         self.assertEqual(stats['remaining'], 3)
         self.assertEqual(stats['failed'], 1)
         self.assertFalse(stats['complete'])
+
+    def test_failed_document_is_retried_once_after_the_pass(self):
+        recs = [dx.research_record({'slug': f's{i}', 'title': 'T', 'markdown': str(i)}) for i in range(2)]
+        replies = [RuntimeError('503'), {'ref': recs[1].ref, 'status': 'ok', 'written': 2},
+                   {'ref': recs[0].ref, 'status': 'ok', 'written': 3}]
+        with patch.object(docs, 'load_records', return_value=recs), patch.object(docs, '_commulingo_names', return_value={}), \
+             patch.object(dx, 'existing_document_states', return_value={}), \
+             patch.object(identity, 'get_alias_index', return_value=Mock()), \
+             patch.object(dx, 'reconcile_document', side_effect=replies) as extract, \
+             patch.object(docs.time, 'sleep') as pause:
+            stats = docs.run()
+        self.assertEqual([c.args[0].ref for c in extract.call_args_list], [recs[0].ref, recs[1].ref, recs[0].ref])
+        pause.assert_called_once()
+        self.assertEqual((stats['failed'], stats['written']), (0, 5))
+        self.assertTrue(stats['complete'])
+
+    def test_extraction_requests_structured_output_schema(self):
+        from llm.call_registry import GenerationResult
+        rec = dx.research_record({'slug': 's', 'title': 'T', 'markdown': 'x'})
+        with patch('llm.call_registry.generate_detailed', return_value=GenerationResult(text='{"facts": []}')) as gen:
+            dx.run_llm_extraction(rec)
+        schema = gen.call_args.kwargs['response_schema']
+        item = schema['properties']['facts']['items']
+        self.assertIn('Statement', item['properties']['predicate']['enum'])
+        self.assertIn('Concept', item['properties']['subject_type']['enum'])
 
     def test_document_write_failure_never_stamps_or_expires(self):
         rec = dx.research_record({'slug': 's', 'title': 'T', 'markdown': 'changed'})

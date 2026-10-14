@@ -17,7 +17,7 @@
 선택값은 `tier:high|medium|low`(Claude/OpenAI의 `frontier` 포함)를 권장한다. 우선순위 적용 뒤 `provider_registry.current_text_model()`이 실제 ID로 해석하므로 예전 ID를 담은 env도 해당 티어의 현재 모델로 바뀐다. 특수 모델(임베딩·Jev 등)은 ID를 그대로 둔다.
 
 `managed` 값:
-- `executor` — `generate()/generate_sync()`가 직접 실행 (gemini/deepseek/openai/claude/kimi 지원, system·json_mode·timeout 옵션). provider가 `openrouter`/`typesafe`인 항목은 `decide()`가 실행한다(아래)
+- `executor` — `generate()/generate_sync()`가 직접 실행 (gemini/deepseek/openai/claude/kimi 지원, system·json_mode·timeout 옵션). `generate_detailed(..., response_schema=<JSON Schema>)`는 Gemini에서 structured output(`response_json_schema`)으로 출력 형식을 강제하고 다른 provider는 무시한다. Gemini는 `maxItems`가 있으면 400 INVALID_ARGUMENT를 낸다(2026-10-14 실측). provider가 `openrouter`/`typesafe`인 항목은 `decide()`가 실행한다(아래)
 - `model-only` — 모델명만 여기서 조회, 실행은 자체 클라이언트 (KG graphiti, razvedchik, writer 경량 별칭)
 - `external` — 정보 등재만 (vision 폴백처럼 실행 구조가 특수한 곳)
 
@@ -104,7 +104,7 @@ registry 항목의 max_tokens는 여전히 첫 시도 예산이다. 추론 호�
 - **Kimi K3 제약**: temperature=1만 허용(그 외 400) — executor가 kimi provider에서는 temperature를 자동 생략한다. 추론 모델이라 max_tokens에 추론분 여유 필요. Kimi 경로 등재: `kimi_chat_model`(텔레그램/웹챗 티어, bot_config), `writer_main_kimi`(writer 메인 선택지) — 둘 다 model-only, 임포트 시점 해석.
 - `writer/models.py`의 critic/research 별칭은 **임포트 시점**에 해석된다 — 바꾸면 writer 서비스 재시작 필요 (다른 executor 사이트는 핫리로드).
 - KG graphiti 모델(kg_extraction_*, kg_embedding)도 KG 서비스 초기화 시점 해석 — 반영은 재시작 또는 KG unhealthy→재초기화 시.
-- `kg_document_extraction` (2026-09-03): 발행 문서 → fact 추출 (gemini-3.5-flash-lite, json_mode). `KG_DOC_EXTRACT_LLM=1`일 때만 `jobs/kg_sync_documents`·리서치 발행 훅이 호출한다. 백필 ≈$1 일회, 이후 월 <$0.05.
+- `kg_document_extraction` (2026-09-03): 발행 문서 → fact 추출 (gemini-3.5-flash-lite, `_fact_response_schema()` structured output — 2026-10-14부터). `KG_DOC_EXTRACT_LLM=1`일 때만 `jobs/kg_sync_documents`·리서치 발행 훅이 호출한다. 백필 ≈$1 일회, 이후 월 <$0.05.
 - `news_kg_select`·`news_kg_extraction` (2026-10-06): 일일 뉴스 job(`jobs/news_kg.py`)의 사건 선별(하루 1회)과 사건별 fact 추출(하루 ≤6회). 둘 다 DeepSeek V4.1 Flash(`tier:high`, thinking off), json_mode — 사용자 결정으로 Pro 계열은 쓰지 않는다. 추출 프롬프트는 `kg_runtime/doc_extract.py`의 `FACT_SCHEMA_RULES`·`ENTITY_GUIDELINES`를 공유한다.
 - `vision_fallback`은 조회용 등재만 — 실제 모델은 bot_config 티어 시스템이 결정.
 
