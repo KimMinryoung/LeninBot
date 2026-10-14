@@ -272,16 +272,16 @@
     "note": "KG 임베딩 모델 (graph_memory/service.py에서 조회, KG_EMBED_MAX_RPS 페이싱)"
   },
   "kg_document_extraction": {
-    "provider": "gemini",
+    "provider": "openai",
     "model": "tier:low",
-    "temperature": 0.0,
-    "max_tokens": 4096,
+    "max_tokens": 8000,
+    "reasoning_effort": "low",
     "timeout": 120,
     "json_mode": true,
     "env": [
       "KG_DOC_EXTRACT_MODEL"
     ],
-    "note": "발행 문서(리서치·사료·자율 노트) → write_kg_structured 형식 fact ≤15 추출 (kg_runtime/doc_extract.py). KG_DOC_EXTRACT_LLM=1일 때만 호출. 문서당 ~10k in/1k out, 백필 ≈$1 일회, 이후 월 <$0.05"
+    "note": "발행 문서(리서치·사료·자율 노트) → write_kg_structured 형식 fact ≤15 추출 (kg_runtime/doc_extract.py, _fact_response_schema structured output). KG_DOC_EXTRACT_LLM=1일 때만 호출. 2026-10-14 gemini-3.5-flash-lite→luna: 5문서×2회 비교에서 Gemini는 10회 중 2회 한국어가 깨졌고(1977 헌법 출력이 자모 범벅) fact 33개, Haiku 5.5는 75개지만 모르는 날짜를 01일로 지어내고 짧은 이름을 썼다, Luna는 72개·전체 이름·모르는 날짜 null. 문서당 ~$0.0015, 평균 13초. max_completion_tokens는 추론 토큰 포함이라 8000"
   },
   "research_spelling_proofread": {
     "provider": "openai",
