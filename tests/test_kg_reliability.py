@@ -94,6 +94,20 @@ class SyncTests(unittest.TestCase):
             dx.parse_llm_facts('broken JSON', strict=True)
         self.assertEqual(dx.parse_llm_facts('{"facts": []}', strict=True), [])
 
+    def test_extraction_json_tolerates_raw_control_characters_in_strings(self):
+        raw = '{"facts": [{"fact": "line one\nline two\tend"}]}'  # raw newline and tab
+        self.assertEqual(dx.parse_llm_facts(raw, strict=True), [{"fact": "line one\nline two\tend"}])
+
+    def test_extraction_retries_one_transient_provider_error(self):
+        from llm.call_registry import GenerationResult
+        rec = dx.research_record({'slug': 's', 'title': 'T', 'markdown': 'x'})
+        replies = [GenerationResult(error_kind='server', error='503 UNAVAILABLE'),
+                   GenerationResult(text='{"facts": []}')]
+        with patch('llm.call_registry.generate_detailed', side_effect=replies) as gen, \
+             patch.object(dx.time, 'sleep'):
+            self.assertEqual(dx.run_llm_extraction(rec), [])
+        self.assertEqual(gen.call_count, 2)
+
     def test_document_cap_counts_failed_attempts_and_skips_unchanged(self):
         recs = [dx.research_record({'slug': f's{i}', 'title': 'T', 'markdown': str(i)}) for i in range(4)]
         existing = {recs[0].ref: recs[0]['sha']}

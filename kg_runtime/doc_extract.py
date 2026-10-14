@@ -33,6 +33,7 @@ import logging
 import os
 import re
 import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -55,6 +56,7 @@ def josa(word: str, pair: str) -> str:
 GROUP_ID = "documents"
 AGENT = "kg_sync_documents"
 LLM_FEATURE = "kg_document_extraction"
+LLM_RETRY_PAUSE_S = 15
 MAX_LLM_CHARS = 12000
 MAX_LLM_FACTS = 15
 MAX_MENTIONS = 15
@@ -355,8 +357,9 @@ def parse_llm_facts(raw: str, *, strict: bool = False) -> list[dict]:
     if text.startswith("```"):
         text = re.sub(r"^```[a-zA-Z]*\n?", "", text)
         text = re.sub(r"\n?```$", "", text).strip()
+    # strict=False: models sometimes emit raw newlines/tabs inside strings.
     try:
-        data = json.loads(text)
+        data = json.loads(text, strict=False)
     except ValueError:
         m = re.search(r"\{.*\}", text, flags=re.S)
         if not m:
@@ -364,7 +367,7 @@ def parse_llm_facts(raw: str, *, strict: bool = False) -> list[dict]:
                 raise ValueError("Document extraction returned invalid JSON")
             return []
         try:
-            data = json.loads(m.group(0))
+            data = json.loads(m.group(0), strict=False)
         except ValueError:
             if strict:
                 raise ValueError("Document extraction returned invalid JSON")
@@ -419,11 +422,18 @@ def llm_facts(rec: DocRecord, raw_facts: list[dict]) -> list[dict]:
 
 
 def run_llm_extraction(rec: DocRecord) -> list[dict]:
-    from llm.call_registry import generate_sync
+    from llm.call_registry import generate_detailed
 
-    raw = generate_sync(LLM_FEATURE, build_llm_prompt(rec), system=EXTRACTION_SYSTEM)
+    prompt = build_llm_prompt(rec)
+    result = generate_detailed(LLM_FEATURE, prompt, system=EXTRACTION_SYSTEM)
+    if result.retryable:
+        # One retry for transient 429/503/transport errors; the nightly run covers the rest.
+        time.sleep(min(result.retry_after or LLM_RETRY_PAUSE_S, 60))
+        result = generate_detailed(LLM_FEATURE, prompt, system=EXTRACTION_SYSTEM)
+    raw = result.text
     if not raw:
-        raise RuntimeError(f"Document extraction returned no response: {rec.ref}")
+        raise RuntimeError(f"Document extraction returned no response: {rec.ref}"
+                           + (f" ({result.error_kind}: {result.error[:200]})" if result.error else ""))
     return llm_facts(rec, parse_llm_facts(raw, strict=True))
 
 
