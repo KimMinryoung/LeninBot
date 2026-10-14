@@ -17,7 +17,7 @@
 선택값은 `tier:high|medium|low`(Claude/OpenAI의 `frontier` 포함)를 권장한다. 우선순위 적용 뒤 `provider_registry.current_text_model()`이 실제 ID로 해석하므로 예전 ID를 담은 env도 해당 티어의 현재 모델로 바뀐다. 특수 모델(임베딩·Jev 등)은 ID를 그대로 둔다.
 
 `managed` 값:
-- `executor` — `generate()/generate_sync()`가 직접 실행 (gemini/deepseek/openai/claude/kimi 지원, system·json_mode·timeout 옵션). `generate_detailed(..., response_schema=<JSON Schema>)`는 Gemini에서 structured output(`response_json_schema`)으로 출력 형식을 강제하고 다른 provider는 무시한다. Gemini는 `maxItems`가 있으면 400 INVALID_ARGUMENT를 낸다(2026-10-14 실측). provider가 `openrouter`/`typesafe`인 항목은 `decide()`가 실행한다(아래)
+- `executor` — `generate()/generate_sync()`가 직접 실행 (gemini/deepseek/openai/claude/kimi 지원, system·json_mode·timeout 옵션). `generate_detailed(..., response_schema=<JSON Schema>)`는 Gemini에서 structured output(`response_json_schema`)으로 출력 형식을 강제하고 다른 provider는 무시한다. Gemini는 `maxItems`가 있으면 400 INVALID_ARGUMENT를 낸다(2026-10-14 실측). Claude는 `output_config.format`(json_schema), OpenAI(`provider="openai"`)는 `response_format` json_schema strict로 보내며, 둘 다 `_closed_schema()`가 객체를 `additionalProperties: false`로 닫는다(OpenAI는 모든 필드를 required로, 선택 필드는 nullable로). DeepSeek·Kimi 등 다른 OpenAI 호환 provider는 json_object로 남는다. Claude 실행부는 `thinking`·`output_config` extra 키를 `_generate_deepseek_anthropic`와 같은 형식으로 받는다(없으면 모델 기본값). provider가 `openrouter`/`typesafe`인 항목은 `decide()`가 실행한다(아래)
 - `model-only` — 모델명만 여기서 조회, 실행은 자체 클라이언트 (KG graphiti, razvedchik, writer 경량 별칭)
 - `external` — 정보 등재만 (vision 폴백처럼 실행 구조가 특수한 곳)
 

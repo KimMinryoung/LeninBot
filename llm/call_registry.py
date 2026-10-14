@@ -387,6 +387,28 @@ def _with_output_budget(p: CallSiteProfile, call) -> tuple[str, dict]:
         f"완결된 응답을 받지 못했다 (본문 {len(text)}자, tokens_out {usage.get('tokens_out')})")
 
 
+def _closed_schema(schema: dict, *, all_required: bool = False) -> dict:
+    """Structured-output schema for Claude/OpenAI: objects closed with
+    additionalProperties=false. OpenAI strict mode also requires every property;
+    an optional one becomes required-but-nullable there."""
+    if not isinstance(schema, dict):
+        return schema
+    out = {k: _closed_schema(v, all_required=all_required) if isinstance(v, dict) else v
+           for k, v in schema.items() if k != "properties"}
+    if schema.get("type") == "object":
+        props = {k: _closed_schema(v, all_required=all_required)
+                 for k, v in (schema.get("properties") or {}).items()}
+        required = set(schema.get("required") or [])
+        if all_required:
+            for name, prop in props.items():
+                kind = prop.get("type")
+                if name not in required and kind and "null" not in (kind if isinstance(kind, list) else [kind]):
+                    prop["type"] = (kind if isinstance(kind, list) else [kind]) + ["null"]
+            required = set(props)
+        out.update(properties=props, required=[k for k in props if k in required], additionalProperties=False)
+    return out
+
+
 def _generate_openai_compat(p: CallSiteProfile, prompt: str, system: str | None) -> tuple[str, dict]:
     from openai import OpenAI
 
@@ -400,7 +422,11 @@ def _generate_openai_compat(p: CallSiteProfile, prompt: str, system: str | None)
         {"role": "user", "content": prompt}
     ]
     kwargs: dict = {}
-    if p.json_mode:
+    if p.extra.get("response_schema") and p.provider == "openai":
+        kwargs["response_format"] = {"type": "json_schema", "json_schema": {
+            "name": "response", "strict": True,
+            "schema": _closed_schema(p.extra["response_schema"], all_required=True)}}
+    elif p.json_mode:
         kwargs["response_format"] = {"type": "json_object"}
     if p.provider == "openai":
         # GPT-5.6/GPT-6은 추론 모델 — max_tokens가 아니라 max_completion_tokens를 받고,
@@ -447,6 +473,15 @@ def _generate_claude(p: CallSiteProfile, prompt: str, system: str | None) -> tup
         **({"base_url": connection.base_url} if connection.base_url else {}),
     )
     kwargs: dict = {"system": system} if system else {}
+    # Same extra keys as _generate_deepseek_anthropic; omitted means the model default.
+    if isinstance(p.extra.get("thinking"), dict):
+        kwargs["thinking"] = p.extra["thinking"]
+    output_config = dict(p.extra.get("output_config") or {})
+    if p.extra.get("response_schema"):
+        output_config["format"] = {"type": "json_schema",
+                                   "schema": _closed_schema(p.extra["response_schema"])}
+    if output_config:
+        kwargs["output_config"] = output_config
     started = time.monotonic()
     response = client.messages.create(
         model=p.model,
@@ -565,7 +600,8 @@ def generate_detailed(feature: str, prompt: str, *, system: str | None = None,
     """Audited one-shot result. Profile overrides are for explicit comparison runs.
     ``label`` lands in llm_audit_log.label so a batch (e.g. an archival spec id)
     can be costed separately from its feature. ``response_schema`` (JSON Schema)
-    constrains the output on Gemini (structured output); other providers ignore it.
+    constrains the output as structured output on Gemini, Claude and OpenAI; other
+    providers fall back to their json_mode.
 
     Unlike generate_sync, consumers can reject truncation and classify retries.
     Every internal output-budget attempt is audited, including discarded output.
