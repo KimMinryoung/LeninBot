@@ -51,6 +51,8 @@ Use the official Korean transcription for Russian names, including ш before con
 while preserving established conventional forms. Follow the runtime schema's exact limits.
 Do not use an em dash outside a quoted title. Write 조선민주주의인민공화국/조선 and historical
 그루지야. Do not leak unrelated scripts or partially transliterated words into Korean prose.
+Write Nazism (Nationalsozialismus) and the Nazi Party as 민족사회주의 / 민족사회주의 독일 노동자당,
+never 국민사회주의; keep 국가사회주의 for Staatssozialismus and Soviet-type state socialism only.
 '''
 
 EDITOR_POLICY = EDITORIAL_POLICY + WRITING_RULES
