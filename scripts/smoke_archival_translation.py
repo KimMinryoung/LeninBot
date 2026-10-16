@@ -238,8 +238,8 @@ def main() -> int:
     # 담은 해제 상자. 손으로 쓴 문서와 이 파이프라인의 출력이 같아야 한다.
     check("byline이 제목 바로 아래 온다",
           re.search(r"</h1>\s*<p class=\"doc-byline\"><strong>", html) is not None)
-    check("해제 상자가 해제 뒤에 서지 목록을 담는다",
-          re.search(r"doc-editorial-label\">[^<]+</p>(<p>.*?</p>)+<ul><li>", html)
+    check("해제 상자가 해제 뒤 접힌 번역·편집 정보에 서지 목록을 담는다",
+          re.search(r"doc-editorial-label\">[^<]+</p>(<p>.*?</p>)+<details class=\"doc-edition\"><summary>[^<]+</summary><ul><li>", html)
           is not None)
     check("서두에 hr을 두지 않는다", "<hr" not in html)
     # 주석은 서고 전체가 한 양식을 쓴다: 본문의 [n]은 앵커이고 항목에는 돌아오는

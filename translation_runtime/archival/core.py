@@ -1419,14 +1419,18 @@ def assemble(spec: dict, docs: list[dict], translated: dict[int, list[str]]) -> 
     # 해제와 문서별 주석은 엮은이가 쓴 글이지 사료가 아니다. 같은 <p>로 흘리면
     # 독자가 명령서 본문과 구분할 수 없다 — 1차 사료를 싣는 페이지에서 이건
     # 서식 문제가 아니라 정확성 문제다.
-    label = "해제" if (spec.get("docLang") or "ko") == "ko" else "Introduction"
+    ko = (spec.get("docLang") or "ko") == "ko"
+    label = "해제" if ko else "Introduction"
+    edition = "번역·편집 정보" if ko else "Translation and editing"
 
     def _aside(paras: list[str], items: list[str] | None = None) -> str:
         body = "".join(f"<p>{_esc(p)}</p>" for p in paras if p)
-        if items:
-            body += ("<ul>"
+        # 서지(저본·번역·일러두기)는 해제 아래 접힌 번역·편집 정보에 둔다 —
+        # frontend data/commulingo/docs/README.md의 서두 틀과 같은 마크업.
+        if items and any(items):
+            body += (f'<details class="doc-edition"><summary>{edition}</summary><ul>'
                      + "".join(f"<li>{_esc(i)}</li>" for i in items if i)
-                     + "</ul>")
+                     + "</ul></details>")
         return (f'<aside class="doc-editorial">'
                 f'<p class="doc-editorial-label">{label}</p>{body}</aside>')
 
