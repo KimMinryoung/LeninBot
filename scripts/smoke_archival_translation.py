@@ -235,10 +235,10 @@ def main() -> int:
           and not any(f"<h1>{d['titleKo']}</h1>" in after_title
                       for d in docs if not d.get("heading", True)))
     # 참고 문헌 16건이 쓰는 서두 틀 — 제목, byline 한 줄, 해제와 서지 목록을
-    # 담은 엮은이 주 상자. 손으로 쓴 문서와 이 파이프라인의 출력이 같아야 한다.
+    # 담은 해제 상자. 손으로 쓴 문서와 이 파이프라인의 출력이 같아야 한다.
     check("byline이 제목 바로 아래 온다",
           re.search(r"</h1>\s*<p class=\"doc-byline\"><strong>", html) is not None)
-    check("엮은이 주 상자가 해제 뒤에 서지 목록을 담는다",
+    check("해제 상자가 해제 뒤에 서지 목록을 담는다",
           re.search(r"doc-editorial-label\">[^<]+</p>(<p>.*?</p>)+<ul><li>", html)
           is not None)
     check("서두에 hr을 두지 않는다", "<hr" not in html)

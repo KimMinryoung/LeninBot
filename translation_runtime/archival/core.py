@@ -1291,7 +1291,7 @@ def stray_cyrillic(text: str, allowed: list[str] | None = None,
     allowedCyrillic list; anything else is a hole in the translation.
     """
     lang = lang or RUSSIAN
-    # 엮은이 주 상자(해제·서지)는 엮은이가 쓴 글이지 번역 출력이 아니다. 서지의
+    # 해제 상자(해제·서지)는 엮은이가 쓴 글이지 번역 출력이 아니다. 서지의
     # 원제(«Приказ НКО СССР № 227…»)가 통째로 미번역 잔여로 찍혀, 스펙마다
     # 그 낱말들을 allowedCyrillic에 베껴 넣어야 했다. 상자는 검사에서 뺀다.
     text = re.sub(r"(?is)<aside class=\"doc-editorial\">.*?</aside>", " ", text)
@@ -1419,7 +1419,7 @@ def assemble(spec: dict, docs: list[dict], translated: dict[int, list[str]]) -> 
     # 해제와 문서별 주석은 엮은이가 쓴 글이지 사료가 아니다. 같은 <p>로 흘리면
     # 독자가 명령서 본문과 구분할 수 없다 — 1차 사료를 싣는 페이지에서 이건
     # 서식 문제가 아니라 정확성 문제다.
-    label = "엮은이 주" if (spec.get("docLang") or "ko") == "ko" else "Editorial note"
+    label = "해제" if (spec.get("docLang") or "ko") == "ko" else "Introduction"
 
     def _aside(paras: list[str], items: list[str] | None = None) -> str:
         body = "".join(f"<p>{_esc(p)}</p>" for p in paras if p)
@@ -1431,7 +1431,7 @@ def assemble(spec: dict, docs: list[dict], translated: dict[int, list[str]]) -> 
                 f'<p class="doc-editorial-label">{label}</p>{body}</aside>')
 
     # 참고 문헌의 서두는 문서 16건이 모두 같은 틀을 쓴다: 제목, 저자·부제 한 줄,
-    # 그리고 해제 문단과 서지 목록을 함께 담은 엮은이 주 상자. 손으로 쓴 문서와
+    # 그리고 해제 문단과 서지 목록을 함께 담은 해제 상자. 손으로 쓴 문서와
     # 이 파이프라인이 뽑은 문서가 화면에서 갈라지면 안 되므로 여기서도 같은
     # 마크업을 낸다. 규칙은 data/commulingo/docs/README.md에 있다.
     out = ["<article>", f"<h1>{_esc(spec['title'])}</h1>"]

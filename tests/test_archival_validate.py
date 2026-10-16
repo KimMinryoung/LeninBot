@@ -89,7 +89,7 @@ class CacheRevalidation(unittest.TestCase):
 class StrayCyrillicSkipsEditorial(unittest.TestCase):
     def test_bibliography_original_title_is_not_a_hole(self):
         from translation_runtime.archival.core import stray_cyrillic
-        html = ('<article><h1>제목</h1><aside class="doc-editorial"><p class="doc-editorial-label">엮은이 주</p>'
+        html = ('<article><h1>제목</h1><aside class="doc-editorial"><p class="doc-editorial-label">해제</p>'
                 '<ul><li>원제: Приказ Народного комиссара обороны СССР № 227</li></ul></aside>'
                 '<p>본문에 남은 Ставка 한 낱말.</p><p>병기는 괜찮다(Жуков).</p></article>')
         self.assertEqual(stray_cyrillic(html), ["Ставка"])
