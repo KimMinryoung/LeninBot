@@ -19,7 +19,7 @@ Good search queries:
 - `modern prince party collective will`
 - `passive revolution transformism caesarism`
 
-If vector results are weak, broaden the query before relying on memory. Do not invent exact quotations. If the user asks for a precise quote and vector results do not provide it, say that the passage is not confirmed.
+If vector results are weak, broaden the query before relying on memory. Do not invent exact quotations. If the user asks for a precise quote and vector results do not provide it, say that the passage is not confirmed. Conceptual explanation needs no such notice; do not open answers with a disclaimer about what the search did or did not return.
 
 ## Answer Discipline
 
