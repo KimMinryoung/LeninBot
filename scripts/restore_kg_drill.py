@@ -52,7 +52,8 @@ class DrillError(RuntimeError):
 
 
 def _run(cmd: list[str], *, check: bool = True) -> subprocess.CompletedProcess:
-    print("+ " + " ".join(cmd), flush=True)
+    shown = [re.sub(r"^(NEO4J_AUTH=[^/]*/).*", r"\1***", a) for a in cmd]
+    print("+ " + " ".join(shown), flush=True)
     return subprocess.run(cmd, check=check, text=True, capture_output=True)
 
 
@@ -207,7 +208,8 @@ def _drill(args: argparse.Namespace, work_dir: Path) -> None:
         _validate(uri, password, files)
     finally:
         if created and not args.keep_container:
-            _run(["docker", "rm", "-f", name], check=False)
+            # -v drops the image's anonymous data volumes with the container.
+            _run(["docker", "rm", "-f", "-v", name], check=False)
         elif created:
             print(f"Kept drill container: {name}", flush=True)
 

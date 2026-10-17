@@ -31,7 +31,15 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from _r2_backup import promote_systemd_credentials, prune_local_backups, r2_put
+from _r2_backup import (
+    MANIFEST_SUFFIX,
+    disk_warning,
+    promote_systemd_credentials,
+    prune_local_backups,
+    publish_manifest,
+    r2_put,
+    try_count_rows,
+)
 
 promote_systemd_credentials()
 
@@ -77,11 +85,14 @@ def main() -> int:
     archive_key = f"writer-db-backup-{today.strftime('%Y-%m-%d')}.dump"
     backup_dir = ROOT / "data" / "writer_db_backups"
     backup_dir.mkdir(parents=True, exist_ok=True)
+    disk = disk_warning(ROOT)
 
     tmp_path = tempfile.NamedTemporaryFile(suffix=".dump", delete=False).name
     try:
+        rows_before = try_count_rows(CONTAINER, "writer")
         _dump(tmp_path)
         entries = _verify(tmp_path)
+        rows_after = try_count_rows(CONTAINER, "writer")
         size_mb = os.path.getsize(tmp_path) / 1024 / 1024
         print(f"Dump built and verified: {archive_key} ({size_mb:.1f} MB, {entries} TOC entries)")
 
@@ -94,12 +105,34 @@ def main() -> int:
     finally:
         os.unlink(tmp_path)
 
-    r2_cutoff = (today - timedelta(days=R2_RETENTION_DAYS)).date()
-    prune_r2_prefix(BUCKET, "writer-db-backup", ".dump", r2_cutoff)
+    problems = []
+    shrunk = []
+    if rows_before is None or rows_after is None:
+        problems.append("dump uploaded, but row counting failed; no manifest")
+    else:
+        shrunk = publish_manifest(
+            BUCKET, backup_dir, "writer-db-backup", archive_key, "writer",
+            rows_before, rows_after,
+        )
+
+    # After a shrink, keep every older dump: the oldest may be the last copy
+    # from before the loss.
+    if not shrunk:
+        r2_cutoff = (today - timedelta(days=R2_RETENTION_DAYS)).date()
+        for suffix in (".dump", MANIFEST_SUFFIX):
+            prune_r2_prefix(BUCKET, "writer-db-backup", suffix, r2_cutoff)
 
     cutoff = (today - timedelta(days=LOCAL_RETENTION_DAYS - 1)).date()
-    prune_local_backups(backup_dir, "writer-db-backup", ".dump", cutoff)
+    for suffix in (".dump", MANIFEST_SUFFIX):
+        prune_local_backups(backup_dir, "writer-db-backup", suffix, cutoff)
 
+    if shrunk:
+        problems.append("tables shrank since the previous backup: " + "; ".join(shrunk))
+    if disk:
+        problems.append(disk)
+    if problems:
+        # Fails the unit after the upload, so the watchdog ping is withheld.
+        raise SystemExit("WARNING: " + " | ".join(problems))
     return 0
 
 

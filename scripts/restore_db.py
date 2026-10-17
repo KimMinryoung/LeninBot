@@ -160,7 +160,66 @@ def _fetch_latest_from_r2(spec: BackupSpec, dest_dir: Path, max_age_days: int | 
         r2_get(R2_BUCKET, key, str(path))
     except Exception as exc:
         raise RestoreError(f"R2 download failed for {key}: {exc}") from exc
+    manifest_key = _manifest_path(path).name
+    if manifest_key in keys:
+        print(f"+ R2 download {R2_BUCKET}/{manifest_key}", flush=True)
+        try:
+            r2_get(R2_BUCKET, manifest_key, str(_manifest_path(path)))
+        except Exception as exc:
+            raise RestoreError(f"R2 download failed for {manifest_key}: {exc}") from exc
     return path
+
+
+def _manifest_path(dump: Path) -> Path:
+    from _r2_backup import manifest_name
+
+    return dump.with_name(manifest_name(dump.name))
+
+
+# The backup counts each table just before and just after pg_dump on a live
+# replica, so the dump's true count lies in that range; the slack covers a
+# write that came and went between the two counts.
+ROW_COUNT_SLACK = 10
+
+
+def row_count_mismatches(manifest: dict, restored: dict[str, int]) -> list[str]:
+    before, after = manifest.get("rows_before", {}), manifest.get("rows_after", {})
+    problems = []
+    for table in sorted(set(before) | set(after)):
+        if table not in restored:
+            if table in before and table in after:
+                problems.append(f"{table}: missing after restore")
+            continue
+        counts = [c for c in (before.get(table), after.get(table)) if c is not None]
+        low, high = min(counts) - ROW_COUNT_SLACK, max(counts) + ROW_COUNT_SLACK
+        if not low <= restored[table] <= high:
+            problems.append(
+                f"{table}: restored {restored[table]}, backup counted {before.get(table)}"
+                f"..{after.get(table)}"
+            )
+    return problems
+
+
+def _validate_row_counts(container: str, spec: BackupSpec, dump: Path) -> None:
+    import json
+
+    from _r2_backup import ROW_COUNT_SQL
+
+    path = _manifest_path(dump)
+    if not path.is_file():
+        print(f"SKIP {spec.scope} row counts: no manifest {path.name}", flush=True)
+        return
+    manifest = json.loads(path.read_text())
+    out = _psql(container, spec.database, ROW_COUNT_SQL, capture_output=True).stdout
+    restored = {}
+    for line in out.splitlines():
+        name, _, value = line.strip().rpartition("|")
+        if name:
+            restored[name] = int(value)
+    problems = row_count_mismatches(manifest, restored)
+    if problems:
+        raise RestoreError(f"{spec.database} row counts differ: " + "; ".join(problems))
+    print(f"PASS {spec.scope} row counts: {len(restored)} tables match {path.name}", flush=True)
 
 
 def _sha256(path: Path) -> str:
@@ -743,6 +802,7 @@ def _restore_selected(
                 "writer": _validate_writer,
             }
             validators[spec.scope](container)
+            _validate_row_counts(container, spec, backups[spec.scope])
             if spec.scope == "legacy":
                 _psql(
                     container,
@@ -881,7 +941,9 @@ def _main(args: argparse.Namespace, download_dir: Path | None) -> int:
             return 0
         finally:
             if created and not args.keep_container:
-                _run(["docker", "rm", "-f", container], check=False, capture_output=True)
+                # -v: the image declares VOLUME, so without it each drill leaves a
+                # ~3 GB anonymous volume behind on the standby.
+                _run(["docker", "rm", "-f", "-v", container], check=False, capture_output=True)
             elif created:
                 print(f"Kept drill container: {container}", flush=True)
     except RestoreError as exc:

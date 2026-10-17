@@ -22,7 +22,15 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from _r2_backup import promote_systemd_credentials, prune_local_backups, r2_put
+from _r2_backup import (
+    MANIFEST_SUFFIX,
+    disk_warning,
+    promote_systemd_credentials,
+    prune_local_backups,
+    publish_manifest,
+    r2_put,
+    try_count_rows,
+)
 
 promote_systemd_credentials()
 
@@ -97,13 +105,16 @@ def _build_upload_and_save(
     backup_dir: Path,
     marker: str,
     date: str,
-) -> None:
+) -> list[str]:
+    """Back up one DB; return shrink findings against the previous manifest."""
     archive_key = f"{key_prefix}-{date}.dump"
     backup_dir.mkdir(parents=True, exist_ok=True)
     tmp_path = tempfile.NamedTemporaryFile(suffix=".dump", delete=False).name
     try:
+        rows_before = try_count_rows(CONTAINER, database)
         _dump(tmp_path, database)
         entries = _verify(tmp_path, marker)
+        rows_after = try_count_rows(CONTAINER, database)
         size_mb = os.path.getsize(tmp_path) / 1024 / 1024
         print(
             f"Dump built and verified: {archive_key} "
@@ -117,32 +128,55 @@ def _build_upload_and_save(
         print(f"Uploaded to R2: {BUCKET}/{archive_key}")
     finally:
         os.unlink(tmp_path)
+    if rows_before is None or rows_after is None:
+        raise RuntimeError("dump uploaded, but row counting failed; no manifest")
+    return publish_manifest(
+        BUCKET, backup_dir, key_prefix, archive_key, database, rows_before, rows_after
+    )
 
 
 def main() -> int:
     today = datetime.now(KST)
     date = today.strftime("%Y-%m-%d")
 
+    # Checked first but reported last: a nearly full disk may still fit
+    # today's dump, and the 2026-10 drill-volume leak filled the standby.
+    disk = disk_warning(ROOT)
+
     # One database failing must not skip the others (legacy_game went
     # unbacked while main's upload failed).
     failed = []
+    shrunk = []
     for spec in BACKUP_SPECS:
         try:
-            _build_upload_and_save(*spec, date)
+            shrunk += [f"{spec[0]}.{f}" for f in _build_upload_and_save(*spec, date)]
         except Exception as exc:
             print(f"Backup failed for {spec[0]}: {exc!r}", file=sys.stderr)
             failed.append(spec[0])
     if failed:
         raise SystemExit(f"backup failed for: {', '.join(failed)}")
 
-    r2_cutoff = (today - timedelta(days=R2_RETENTION_DAYS)).date()
-    for _database, key_prefix, _backup_dir, _marker in BACKUP_SPECS:
-        prune_r2_prefix(BUCKET, key_prefix, ".dump", r2_cutoff)
+    # After a shrink, keep every older dump: the oldest may be the last copy
+    # from before the loss.
+    if not shrunk:
+        r2_cutoff = (today - timedelta(days=R2_RETENTION_DAYS)).date()
+        for _database, key_prefix, _backup_dir, _marker in BACKUP_SPECS:
+            for suffix in (".dump", MANIFEST_SUFFIX):
+                prune_r2_prefix(BUCKET, key_prefix, suffix, r2_cutoff)
 
     cutoff = (today - timedelta(days=LOCAL_RETENTION_DAYS - 1)).date()
     for _database, key_prefix, backup_dir, _marker in BACKUP_SPECS:
-        prune_local_backups(backup_dir, key_prefix, ".dump", cutoff)
+        for suffix in (".dump", MANIFEST_SUFFIX):
+            prune_local_backups(backup_dir, key_prefix, suffix, cutoff)
 
+    problems = []
+    if shrunk:
+        problems.append("tables shrank since the previous backup: " + "; ".join(shrunk))
+    if disk:
+        problems.append(disk)
+    if problems:
+        # Fails the unit after the upload, so the watchdog ping is withheld.
+        raise SystemExit("WARNING: " + " | ".join(problems))
     return 0
 
 

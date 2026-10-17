@@ -75,7 +75,13 @@ def prune_r2_prefix(
             print(f"[dry-run] would delete expired R2 backup: {key}")
             deleted.append(key)
         else:
-            r2_delete(bucket, key)
+            try:
+                r2_delete(bucket, key)
+            except Exception as exc:
+                # A bucket lock rule (or a transient error) refusing one key
+                # must not fail a backup that has already uploaded.
+                print(f"WARNING: could not delete expired R2 backup {key}: {exc}")
+                continue
             print(f"Deleted expired R2 backup: {key}")
             deleted.append(key)
     return deleted

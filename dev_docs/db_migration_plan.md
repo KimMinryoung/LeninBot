@@ -24,13 +24,17 @@
 
 백업은 Postgres custom dump와 archive TOC 검증을 사용한다. 업로드는 `scripts/_r2_backup.py`의 `r2_put`이 R2 S3 API(boto3, 64MiB 멀티파트)로 한다. 자격 증명은 버킷 한정 Object Read & Write 토큰의 `r2_s3_access_key_id`·`r2_s3_secret_access_key`이고, R2 목록·다운로드·삭제(`r2_retention.py`, 드릴)도 같은 키를 쓰므로 백업 경로에는 계정 단위 `r2_cf_api_token`이 필요 없다. main과 standby는 각자 별도 키를 가진다. Cloudflare REST 객체 API는 약 300MiB 넘는 본문을 413으로 거부해 main 덤프가 2026-09-20~23 업로드되지 못했다. 로컬 사본은 업로드 전에 저장하고, main 스크립트는 한 DB가 실패해도 나머지를 계속 뜬 뒤 실패로 끝난다. `scripts/r2_retention.py`는 날짜 형식이 일치하는 prefix만 정리하고, 목록 조회 실패 또는 최소 보관 수 미달이면 삭제하지 않는다. KG 백업은 [knowledge_graph_design.md](knowledge_graph_design.md)를 따른다.
 
+2026-10-17부터 main/legacy/writer 백업은 덤프 직전과 직후에 테이블별 정확한 행 수를 세어 `<덤프 이름>.manifest.json`(`rows_before`·`rows_after`)으로 덤프 옆에 함께 둔다(로컬, R2). 셀 때는 `_r2_backup.ROW_COUNT_SQL`을 쓴다. 임시 테이블 없이 `query_to_xml`로 세므로 읽기 전용 복제본에서도 돌며, main 108개 테이블에 1초가 걸린다. 1000행 이상이던 테이블이 직전 매니페스트보다 절반 넘게 줄었거나 사라지면 덤프는 그대로 올린다. 대신 그날은 R2 만료 삭제를 건너뛰어 손실 전 덤프를 남기고, 마지막에 unit을 실패로 끝낸다. 그러면 워치독 핑이 빠져 최대 27시간 뒤 「메인 DB 백업」/「writer DB 백업」 무소식 알림이 온다. 원인은 `journalctl -u leninbot-standby-main-backup`의 `WARNING: tables shrank` 줄에 있다. 의도한 대량 삭제였다면 다음 날 백업은 줄어든 수치와 비교하므로 저절로 정상으로 돌아온다. 백업 호스트 디스크가 85% 이상이어도 같은 방식으로 실패한다(2026-10 드릴 볼륨 누수로 standby가 81%까지 찼다). 행 수 세기가 실패해도 덤프는 올리고 unit만 실패로 끝낸다.
+
+R2 만료 삭제가 거부된 객체(버킷 잠금 등)는 경고만 남기고 건너뛴다. 버킷 잠금 규칙은 R2 → `cyber-lenin-backups` → Settings → Bucket lock rules에서 날짜형 백업 prefix에 14일 보존으로 건다. 15일 보관보다 짧아야 만료 삭제가 막히지 않는다.
+
 복구 검증은 프로젝트 venv로 실행한다:
 
 ```bash
 venv/bin/python scripts/restore_db.py drill
 ```
 
-기본 드릴은 최신 로컬 main/legacy/writer 백업을 일회용 Postgres 17 컨테이너에 복원하고 테이블 행수·인덱스·시퀀스·HNSW·legacy 체크섬·writer 소유권/본문을 검증한다. `--scope {all,main,legacy,writer}`, 개별 `--*-backup`, `--keep-container`를 지원한다. 로컬 사본 드릴만으로 R2 다운로드 경로까지 검증했다고 간주하지 않는다. `--from-r2`는 R2에서 가장 최근 날짜의 덤프를 `/var/tmp`로 내려받아 쓰고, `--max-age-days N`은 최신 덤프가 N일보다 오래되면 실패시킨다. 작은 호스트용으로 `--jobs`(pg_restore 병렬도 상한)와 `--maintenance-work-mem`이 있다. 주간 드릴은 `--from-r2 --max-age-days 2 --jobs 1 --maintenance-work-mem 128MB`로 돈다.
+기본 드릴은 최신 로컬 main/legacy/writer 백업을 일회용 Postgres 17 컨테이너에 복원하고 테이블 행수·인덱스·시퀀스·HNSW·legacy 체크섬·writer 소유권/본문을 검증한다. 덤프 옆에 매니페스트가 있으면 복원된 테이블별 행 수가 백업 때 센 범위(`rows_before`~`rows_after`, 여유 10행) 안에 있는지도 검사한다. 범위를 벗어나거나 테이블이 빠졌으면 FAIL이고, 매니페스트가 없으면 SKIP을 출력한다. `--from-r2`는 매니페스트도 함께 내려받는다. 드릴 컨테이너는 `docker rm -f -v`로 지운다. `-v`가 없으면 이미지의 익명 데이터 볼륨이 매주 약 3 GB씩 남는다(2026-09-23~10-17에 standby에 17.6 GB가 쌓여 10-17에 정리했다). `--scope {all,main,legacy,writer}`, 개별 `--*-backup`, `--keep-container`를 지원한다. 로컬 사본 드릴만으로 R2 다운로드 경로까지 검증했다고 간주하지 않는다. `--from-r2`는 R2에서 가장 최근 날짜의 덤프를 `/var/tmp`로 내려받아 쓰고, `--max-age-days N`은 최신 덤프가 N일보다 오래되면 실패시킨다. 작은 호스트용으로 `--jobs`(pg_restore 병렬도 상한)와 `--maintenance-work-mem`이 있다. 주간 드릴은 `--from-r2 --max-age-days 2 --jobs 1 --maintenance-work-mem 128MB`로 돈다.
 
 실제 복구는 `restore --target-container <name> --confirm RECREATE_DATABASES`로 선택 DB를 drop/create한다. 활성 DB client가 남아 있으면 거부한다. 운영 컨테이너에는 추가로 `--force-production --confirm RECREATE_LENINBOT_PRODUCTION`이 필요하다. `/dev/shm` 1GiB와 Postgres major version 17을 검사한다.
 

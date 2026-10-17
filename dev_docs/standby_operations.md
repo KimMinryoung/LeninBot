@@ -56,7 +56,7 @@ ssh root@100.124.58.85 'docker exec leninbot-pg-standby psql -U postgres -d leni
 
 2026-09-23부터 매주 일요일 05:00 KST에 `leninbot-standby-restore-drill.timer`가 R2의 최신 덤프를 내려받아 일회용 컨테이너에 복원·검증한다. 3.8 GB RAM에 맞춰 4 GB 스왑(`vm.swappiness=10`)을 붙이고 `--jobs 1 --maintenance-work-mem 128MB`로 돌린다. 성공하면 watchdog `restore-drill`에 핑한다.
 
-같은 유닛이 PG 드릴 다음에 `scripts/restore_kg_drill.py --from-r2 --max-age-days 2`로 KG도 검증한다(2026-10-10 추가). Neo4j는 main에만 있어서 KG 백업이 운영 밖에서 실제로 적재되는지 확인하는 곳은 여기뿐이다. R2의 최신 `kg-backup-*.tar.gz`를 받아 일회용 Neo4j(main과 같은 이미지 digest, `--memory 1600m`, `127.0.0.1` 임의 포트)에 `restore_kg.py --clear`로 넣고, 고유 키 기준 건수(entities·RELATES_TO·MENTIONS)와 라벨 분포·추가 속성 보유 노드 수·`RELATES_TO.episodes` NULL 수를 백업 JSON과 비교한다. 첫 실행은 14k 엔티티·39k 엣지에 약 40초, 피크 450 MB였다. 백업이 텍스트 전용이라 벡터 검색은 검증 범위 밖이다. 핑은 하나라서 PG 드릴이 실패하면 KG 드릴은 돌지 않는다 — 어느 쪽이 깨졌는지는 `journalctl -u leninbot-standby-restore-drill`로 본다.
+같은 유닛이 PG 드릴 다음에 `scripts/restore_kg_drill.py --from-r2 --max-age-days 2`로 KG도 검증한다(2026-10-10 추가). Neo4j는 main에만 있어서 KG 백업이 운영 밖에서 실제로 적재되는지 확인하는 곳은 여기뿐이다. R2의 최신 `kg-backup-*.tar.gz`를 받아 일회용 Neo4j(main과 같은 이미지 digest, `--memory 1600m`, `127.0.0.1` 임의 포트)에 `restore_kg.py --clear`로 넣고, 고유 키 기준 건수(entities·RELATES_TO·MENTIONS)와 라벨 분포·추가 속성 보유 노드 수·`RELATES_TO.episodes` NULL 수를 백업 JSON과 비교한다. 첫 실행은 14k 엔티티·39k 엣지에 약 40초, 피크 450 MB였다. 백업이 텍스트 전용이라 벡터 검색은 검증 범위 밖이다. PG 드릴은 백업 매니페스트와 테이블별 행 수도 대조한다([db_migration_plan.md](db_migration_plan.md)). 드릴 컨테이너는 익명 볼륨까지 지운다(`docker rm -f -v`). 디스크가 갑자기 줄면 `docker volume ls -qf dangling=true`부터 본다. 핑은 하나라서 PG 드릴이 실패하면 KG 드릴은 돌지 않는다 — 어느 쪽이 깨졌는지는 `journalctl -u leninbot-standby-restore-drill`로 본다.
 
 ## 할 수 없는 일 / 함정
 
