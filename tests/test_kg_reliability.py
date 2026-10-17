@@ -121,6 +121,7 @@ class SyncTests(unittest.TestCase):
         self.assertEqual(extract.call_count, 3)
         self.assertEqual(stats['remaining'], 3)
         self.assertEqual(stats['failed'], 1)
+        self.assertEqual(stats['deferred'], 2)
         self.assertFalse(stats['complete'])
 
     def test_failed_document_is_retried_once_after_the_pass(self):

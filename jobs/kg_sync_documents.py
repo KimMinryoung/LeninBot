@@ -105,7 +105,7 @@ def run(*, since: datetime | None = None, full: bool = False, limit: int | None 
     use_llm = dx.llm_enabled() if use_llm is None else use_llm
     recs = load_records(kinds)  # Daily deterministic reconciliation; LLM remains hash-gated.
     stats: dict = {"documents": len(recs), "by_kind": {}, "llm": use_llm, "processed": 0,
-                   "unchanged": 0, "written": 0, "rejected": 0, "expired": 0, "errors": [], "items": [], "remaining": 0, "failed": 0, "complete": True}
+                   "unchanged": 0, "written": 0, "rejected": 0, "expired": 0, "errors": [], "items": [], "remaining": 0, "deferred": 0, "failed": 0, "complete": True}
     for r in recs:
         stats["by_kind"][r["kind"]] = stats["by_kind"].get(r["kind"], 0) + 1
 
@@ -144,6 +144,7 @@ def run(*, since: datetime | None = None, full: bool = False, limit: int | None 
         allow_extract = limit is None or attempted < limit
         if needs_extraction and not allow_extract:
             stats['remaining'] += 1
+            stats['deferred'] += 1  # held back by --limit, not failed
             continue
         if needs_extraction:
             attempted += 1

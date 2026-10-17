@@ -113,6 +113,7 @@ def sync_metrics(*, query=None) -> dict:
             "mode": stats.get("mode"), "error": stats.get("error"),
             "last_attempt_at": str(r.get("last_attempt_at"))[:19] if r.get("last_attempt_at") else None,
             "complete": stats.get("complete"), "remaining": stats.get("remaining"), "failed": stats.get("failed"),
+            "deferred": stats.get("deferred"),
             "phase": stats.get("phase", "finished"),
             "attempt_lag_hours": round((now - r["last_attempt_at"]).total_seconds() / 3600, 2) if r.get("last_attempt_at") else None,
             "written": (stats.get("write") or {}).get("written", stats.get("written")),
@@ -273,8 +274,26 @@ def collect_kg_metrics(*, usage_days: int = 14) -> dict:
     return out
 
 
+CAP_BACKLOG_MAX_HOURS = 7 * 24
+
+
+def cap_backlog_only(state: dict) -> bool:
+    """The last nightly pass finished cleanly and only the --limit cap left work.
+
+    A bulk source edit (e.g. every archival page re-rendered) queues more documents
+    than one night extracts; that backlog drains on later nights and is not a failure.
+    """
+    remaining, deferred, attempt = state.get("remaining"), state.get("deferred"), state.get("attempt_lag_hours")
+    return bool(not state.get("error") and not state.get("failed") and state.get("phase") == "finished"
+                and remaining and deferred == remaining
+                and attempt is not None and attempt < 30
+                and state.get("lag_hours") is not None and state["lag_hours"] < CAP_BACKLOG_MAX_HOURS)
+
+
 def sync_unhealthy(state: dict) -> bool:
     if state.get("phase") == "running" and state.get("attempt_lag_hours") is not None and state["attempt_lag_hours"] < 2:
+        return False
+    if cap_backlog_only(state):
         return False
     return bool(state.get("error") or state.get("complete") is False
                 or state.get("lag_hours") is None or state["lag_hours"] > 48)

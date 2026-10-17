@@ -45,6 +45,18 @@ class HealthcheckTests(unittest.TestCase):
         status["metrics"]["coverage"] = {"documents_changed": 1}
         self.assertTrue(check.healthcheck_status(status, metrics_enabled=True)["ok"])
 
+    def test_cap_backlog_alerts_only_when_stuck_or_mixed_with_failures(self):
+        status = self.status()
+        docs = status["metrics"]["sync"]["documents"]
+        docs.update(complete=False, remaining=142, deferred=142, failed=0,
+                    lag_hours=35.9, attempt_lag_hours=12)
+        self.assertTrue(check.healthcheck_status(status, metrics_enabled=True)["ok"])
+        for change in ({"lag_hours": 24 * 8}, {"attempt_lag_hours": 40},
+                       {"failed": 1, "remaining": 143}, {"deferred": None}):
+            stuck = self.status()
+            stuck["metrics"]["sync"]["documents"].update(dict(docs, **change))
+            self.assertFalse(check.healthcheck_status(stuck, metrics_enabled=True)["ok"], change)
+
     def test_missing_sync_and_metrics_error(self):
         status = self.status()
         status["metrics"]["sync"] = {"error": "database unavailable"}
