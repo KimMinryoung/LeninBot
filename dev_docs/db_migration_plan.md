@@ -26,7 +26,7 @@
 
 2026-10-17부터 main/legacy/writer 백업은 덤프 직전과 직후에 테이블별 정확한 행 수를 세어 `<덤프 이름>.manifest.json`(`rows_before`·`rows_after`)으로 덤프 옆에 함께 둔다(로컬, R2). 셀 때는 `_r2_backup.ROW_COUNT_SQL`을 쓴다. 임시 테이블 없이 `query_to_xml`로 세므로 읽기 전용 복제본에서도 돌며, main 108개 테이블에 1초가 걸린다. 1000행 이상이던 테이블이 직전 매니페스트보다 절반 넘게 줄었거나 사라지면 덤프는 그대로 올린다. 대신 그날은 R2 만료 삭제를 건너뛰어 손실 전 덤프를 남기고, 마지막에 unit을 실패로 끝낸다. 그러면 워치독 핑이 빠져 최대 27시간 뒤 「메인 DB 백업」/「writer DB 백업」 무소식 알림이 온다. 원인은 `journalctl -u leninbot-standby-main-backup`의 `WARNING: tables shrank` 줄에 있다. 의도한 대량 삭제였다면 다음 날 백업은 줄어든 수치와 비교하므로 저절로 정상으로 돌아온다. 백업 호스트 디스크가 85% 이상이어도 같은 방식으로 실패한다(2026-10 드릴 볼륨 누수로 standby가 81%까지 찼다). 행 수 세기가 실패해도 덤프는 올리고 unit만 실패로 끝낸다.
 
-R2 만료 삭제가 거부된 객체(버킷 잠금 등)는 경고만 남기고 건너뛴다. 버킷 잠금 규칙은 R2 → `cyber-lenin-backups` → Settings → Bucket lock rules에서 날짜형 백업 prefix에 14일 보존으로 건다. 15일 보관보다 짧아야 만료 삭제가 막히지 않는다.
+R2 만료 삭제가 거부된 객체(버킷 잠금 등)는 경고만 남기고 건너뛴다. 버킷 잠금 규칙은 R2 → `cyber-lenin-backups` → Settings → Bucket lock rules에서 날짜형 백업 prefix에 14일 보존으로 건다. 15일 보관보다 짧아야 만료 삭제가 막히지 않는다. 2026-10-17에 네 prefix(`main-db-backup-`·`writer-db-backup-`·`legacy-game-db-backup-`·`kg-backup-`)에 걸었고, 스탠바이 키로 삭제하면 `ObjectLockedByBucketPolicy`로 거부되는 것을 확인했다. 잠금은 덮어쓰기도 막으므로 같은 날 백업을 손으로 다시 돌리면 같은 키 업로드가 실패한다. 확인용 `*-locktest-20261017.txt` 4개는 날짜형이 아니라 만료 삭제 대상이 아니므로 10-31 이후 손으로 지운다.
 
 복구 검증은 프로젝트 venv로 실행한다:
 
