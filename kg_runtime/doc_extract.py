@@ -20,8 +20,9 @@ Two layers per document:
    Reference), each carrying ``attributes.doc_ref`` for provenance; every
    entity so asserted also gets a Document→Entity ``Reference(mentions)``.
 
-Idempotency: content_sha256 gates LLM extraction; metadata_sha256 tracks
-source profiles. Deterministic links are reconciled daily. Old assertion
+Idempotency: content_sha256 gates LLM extraction (archival: the extracted text
+without the editorial 해제 boxes, so markup and headnote edits do not re-extract);
+metadata_sha256 tracks source profiles. Deterministic links are reconciled daily. Old assertion
 versions expire only after all replacements are saved successfully.
 """
 
@@ -100,6 +101,16 @@ def html_to_text(html: str) -> str:
     return re.sub(r"\n\s*\n+", "\n", text).strip()
 
 
+# The 해제/Introduction box (with its folded 번역·편집 정보) is our editorial note, not the
+# source; collections carry one per article. Its edits must not trigger re-extraction.
+_EDITORIAL_RE = re.compile(
+    r'<aside\b[^>]*\bclass="(?:[^"]*\s)?doc-editorial(?:\s[^"]*)?"[^>]*>.*?</aside>', re.S | re.I)
+
+
+def archival_text(html: str) -> str:
+    return html_to_text(_EDITORIAL_RE.sub(" ", html or ""))
+
+
 def markdown_to_text(md: str) -> str:
     text = re.sub(r"```.*?```", " ", md or "", flags=re.S)
     text = re.sub(r"!\[[^\]]*\]\([^)]*\)", " ", text)
@@ -160,8 +171,8 @@ def archival_record(doc: dict, html: str | None) -> DocRecord:
         alias_list.extend([_clean(a) for a in (aliases.get(lang) or []) if a])
     if title.get("en"):
         alias_list.append(_clean(title["en"]))
-    text = html_to_text(html) if html else ""
-    body_for_sha = html if html is not None else json.dumps(doc, ensure_ascii=False, sort_keys=True)
+    text = archival_text(html) if html else ""
+    body_for_sha = text if html is not None else json.dumps(doc, ensure_ascii=False, sort_keys=True)
     return DocRecord(
         kind="archival", ident=doc["id"], ref=f"archival:{doc['id']}",
         title=_clean(title.get("ko") or title.get("en")) or doc["id"],

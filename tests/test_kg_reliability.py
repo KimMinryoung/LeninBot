@@ -108,6 +108,18 @@ class SyncTests(unittest.TestCase):
             self.assertEqual(dx.run_llm_extraction(rec), [])
         self.assertEqual(gen.call_count, 2)
 
+    def test_archival_hash_ignores_editorial_box_and_markup(self):
+        doc = {'id': 'd', 'title': {'ko': 'T'}}
+        body = '<p>본문 <b>첫</b> 문단</p>'
+        box = '<aside class="doc-editorial"><p class="doc-editorial-label">{}</p><p>해설</p></aside>'
+        base = dx.archival_record(doc, box.format('엮은이 주') + body)
+        edited = dx.archival_record(doc, box.format('해제') + '<p>본문 첫 문단</p>')
+        self.assertEqual(base['sha'], edited['sha'])
+        self.assertNotIn('해설', base['text'])
+        self.assertNotEqual(base['sha'], dx.archival_record(doc, body + '<p>새 문단</p>')['sha'])
+        other = dx.archival_record(doc, '<aside class="note">각주</aside>' + body)
+        self.assertIn('각주', other['text'])
+
     def test_document_cap_counts_failed_attempts_and_skips_unchanged(self):
         recs = [dx.research_record({'slug': f's{i}', 'title': 'T', 'markdown': str(i)}) for i in range(4)]
         existing = {recs[0].ref: recs[0]['sha']}
