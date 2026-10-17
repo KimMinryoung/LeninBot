@@ -509,7 +509,8 @@ def pass_night(state, clock_minute, basis):
         result["scene_minute"] += gap
         result["last_calculated_minute"] += gap
         return result, gap, None
-    result = state
+    # The omitted night has no scene evidence about its sleep, so it is ordinary sleep.
+    result = {**state, "sleep_quality": "normal"}
     for activity, minutes in (("rest", awake), ("sleep", gap - awake)):
         if minutes > 0:
             result = advance({**result, "activity": activity}, result["last_calculated_minute"] + minutes, basis)

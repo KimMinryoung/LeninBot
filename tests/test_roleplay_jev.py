@@ -121,6 +121,15 @@ class ProjectionTests(unittest.TestCase):
         self.assertEqual(after['scene_minute'], 3)
         self.assertEqual(after['story_events'][0]['status'], 'cancelled')
 
+    def test_new_sleep_without_evidence_is_not_left_poor(self):
+        before = initial(sleep_quality='poor', activity='rest')
+        after, _ = self.project('잔다', before, activity='sleep', sleep_quality='keep')
+        self.assertEqual(after['sleep_quality'], 'normal')
+        after, _ = self.project('잔다', before, activity='sleep', sleep_quality='poor')
+        self.assertEqual(after['sleep_quality'], 'poor')
+        after, _ = self.project('계속 잔다', initial(sleep_quality='poor', activity='sleep'), activity='sleep', sleep_quality='keep')
+        self.assertEqual(after['sleep_quality'], 'poor')
+
     def test_completing_ready_event_does_not_bypass_other_barriers(self):
         before = initial(story_events=[
             {'id': 'dinner', 'title': '배식', 'status': 'ready', 'due_minute': 0},

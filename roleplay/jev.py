@@ -589,6 +589,11 @@ def project(before, user_text, people, verdict, scope_id):
     quality = labels.get('sleep_quality', 'keep')
     if quality != 'keep':
         state['sleep_quality'] = quality
+    elif state['activity'] == 'sleep' and before.get('activity') != 'sleep':
+        # Quality describes one sleep. A new sleep without evidence of its own is ordinary;
+        # pain and illness already slow recovery, and a carried-over "poor" kept every
+        # later sleep at a quarter rate, pinning fatigue near 100.
+        state['sleep_quality'] = 'normal'
     if not state['conditions_initialized']:
         if labels.get('injuries_known') != 'known':
             raise ValueError('부상 조건 미확인')
