@@ -130,7 +130,7 @@ Tool exposure: `knowledge_graph_search` is available to analyst, diary, general,
 
 Scripts:
 
-- `scripts/check_kg_integrity.py [--smoke-query …] [--metrics] [--notify]` — hourly timer; `--metrics` adds `kg_runtime.metrics.collect_kg_metrics()`
+- `scripts/check_kg_integrity.py [--smoke-query …] [--metrics] [--notify] [--record]` — hourly timer runs `--record` (2026-10-17): the result goes to `output/kg_health/state.json` (latest run, open failures keyed by component such as `sync.documents`, with the time each started) and `history.jsonl` (opened/resolved events), read through MCP `pipeline_status kg_sync` → `healthcheck` (`kg_runtime.health_state.summary`, `stale` after 2 h). Telegram gets one message only when a component stays failing for 3 days, once per continuous failure; hourly alerts were all wait-or-fix-one-document cases (30 days before the change: document extraction failures, cap backlog, rejected CommuLingo facts). `--notify` still sends any failure immediately for manual runs. Neo4j being unreachable is alerted separately by the Telegram bot's `system_monitor`; `--metrics` adds `kg_runtime.metrics.collect_kg_metrics()`
 - `scripts/kg_weekly_report.py [--notify]` — Monday 09:30 KST timer, same Telegram channel as the integrity check
 - `scripts/smoke_kg_sync.py` — live but isolated end-to-end check of the mirror (scratch namespace/group, cleaned up)
 - `scripts/smoke_kg_search_modes.py [--out FILE]` — renders representative queries for before/after comparison

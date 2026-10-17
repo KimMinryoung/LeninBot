@@ -72,5 +72,7 @@ async def snapshot(pipeline, limit):
                 observe(lambda k=k: translation_queue(k, limit), timeout=30) for k in kinds))))
         else:
             parts['queue'] = await observe(kg_queue)
+            from kg_runtime.health_state import summary
+            parts['healthcheck'] = await observe(summary)
         return name, parts
     return report(dict(await asyncio.gather(*(one(name) for name in names))), exclusions=EXCLUSIONS)

@@ -215,7 +215,7 @@ No retry, publication, translation execution, notifications or service restart o
 | `service_health_snapshot` | optional `services` array (schema lists allowed names) | Systemd daemon properties plus PostgreSQL SELECT, Redis PING, Neo4j RETURN, embedding/API/proxy/web health endpoints |
 | `get_service_logs` | required `service`; `hours_back=1` (1–168), optional `level`, `query`, `limit=200` (1–1000) | Allowlisted journal, masked text, 60,000-character row budget |
 | `get_effective_runtime_config` | optional `surface`, `agent` | Allowlisted provider/model/budget/token/round fields and source chains; shared with `scripts/model_runtime_audit.py` |
-| `pipeline_status` | `pipeline=all\|commulingo\|translation\|kg_sync`, `limit=20` (1–100) | Queue/lease/stall/error data, last systemd run, next timer run and recent failure log excerpts |
+| `pipeline_status` | `pipeline=all\|commulingo\|translation\|kg_sync`, `limit=20` (1–100) | Queue/lease/stall/error data, last systemd run, next timer run and recent failure log excerpts; `kg_sync` also returns `healthcheck`, the recorded hourly KG healthcheck (open failures and since when, without rerunning it) |
 | `usage_and_budget_report` | `days=7` (1–30), optional `provider` | Official provider balances/costs, local estimates, separate UTC-today LLM/web budgets |
 
 Health distinguishes `collection_status=error` (unknown observation) from an observed

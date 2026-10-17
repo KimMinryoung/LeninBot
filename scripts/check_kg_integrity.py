@@ -111,6 +111,8 @@ def main() -> int:
     parser.add_argument("--semantic-query", help="Additionally exercise embedding/hybrid search")
     parser.add_argument("--metrics", action="store_true", help="Include graph, sync, usage and source coverage")
     parser.add_argument("--notify", action="store_true", help="Notify Telegram on failure/degradation.")
+    parser.add_argument("--record", action="store_true",
+                        help="Record the result for MCP pipeline_status; Telegram only for 3+ day failures.")
     args = parser.parse_args()
 
     status = check_kg_integrity()
@@ -133,6 +135,11 @@ def main() -> int:
     ok = health["ok"]
     if not ok and args.notify:
         _notify_telegram(format_healthcheck_alert(health))
+    if args.record:
+        from kg_runtime import health_state
+        escalate = health_state.record(health)
+        if escalate:
+            _notify_telegram(health_state.format_escalation(escalate))
     return 0 if ok else 1
 
 

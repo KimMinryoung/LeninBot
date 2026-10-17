@@ -75,7 +75,7 @@ curl -s "https://leninbot-watchdog.minryoung93.workers.dev/status/$(cat .watchdo
 
 | 유닛 | 주기 | 내용 |
 |---|---|---|
-| `leninbot-kg-integrity.timer` | 매시 | KG 무결성 + 검색 스모크 |
+| `leninbot-kg-integrity.timer` | 매시 | KG 무결성 + 검색 스모크. 결과는 기록만 하고 MCP `pipeline_status kg_sync`에서 본다. 같은 항목이 3일 넘게 실패할 때만 텔레그램 1회 (2026-10-17) |
 | `leninbot-commulingo-health.timer` | 매일 | 큐레이션 레인 헬스 |
 | `leninbot-variant-scan.timer` | 매주 | 이름 변형 후보 |
 | `leninbot-stale-secrets.timer` | 매주 | 오래된 credential |
