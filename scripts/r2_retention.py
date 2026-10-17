@@ -32,6 +32,7 @@ def prune_r2_prefix(
     *,
     dry_run: bool = False,
     min_keep: int = 2,
+    protect: frozenset[str] = frozenset(),
 ) -> list[str]:
     """Delete every `<key_prefix>-YYYY-MM-DD[_HHMMSS]<suffix>` object dated before cutoff.
 
@@ -56,7 +57,9 @@ def prune_r2_prefix(
             key_date = datetime.strptime(match.group(1), "%Y-%m-%d").date()
         except ValueError:
             continue
-        (expired if key_date < cutoff else kept).append(key)
+        # A protected key is still referenced (a newer manifest points at
+        # it), so it counts as kept whatever its date.
+        (expired if key_date < cutoff and key not in protect else kept).append(key)
 
     if not expired:
         return []

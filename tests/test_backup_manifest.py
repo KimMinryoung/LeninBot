@@ -106,6 +106,98 @@ class RetentionLockTest(unittest.TestCase):
         delete.assert_called_once_with("bucket", "main-db-backup-2026-10-01.manifest.json")
 
 
+class DumpDigestTest(unittest.TestCase):
+    def test_header_timestamp_is_ignored_but_data_is_not(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            body = b"PGDMP" + bytes(59) + b"table data" * 100
+            a, b, c = (Path(tmp) / n for n in "abc")
+            a.write_bytes(body)
+            b.write_bytes(body[:14] + b"\x01\x02\x03\x04" + body[18:])
+            c.write_bytes(body[:-1] + b"X")
+            self.assertEqual(_r2_backup.dump_digest(str(a)), _r2_backup.dump_digest(str(b)))
+            self.assertNotEqual(_r2_backup.dump_digest(str(a)), _r2_backup.dump_digest(str(c)))
+
+
+class UnchangedArchiveTest(unittest.TestCase):
+    def _check(self, previous, on_r2):
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(_r2_backup, "r2_list_keys", return_value=on_r2):
+            (Path(tmp) / "legacy-game-db-backup-2026-10-18.manifest.json").write_text(json.dumps(previous))
+            return _r2_backup.unchanged_archive(
+                "bucket", Path(tmp), "legacy-game-db-backup",
+                "legacy-game-db-backup-2026-10-19.dump", "abc",
+            )
+
+    def test_same_digest_and_dump_on_r2_reuses_it(self):
+        prev = {"content_sha256": "abc", "archive": "legacy-game-db-backup-2026-10-01.dump"}
+        self.assertEqual(self._check(prev, ["legacy-game-db-backup-2026-10-01.dump"]),
+                         "legacy-game-db-backup-2026-10-01.dump")
+
+    def test_changed_or_missing_dump_uploads(self):
+        prev = {"content_sha256": "abc", "archive": "legacy-game-db-backup-2026-10-01.dump"}
+        self.assertIsNone(self._check(prev, []))
+        self.assertIsNone(self._check({**prev, "content_sha256": "old"}, [prev["archive"]]))
+        self.assertIsNone(self._check({"archive": prev["archive"]}, [prev["archive"]]))
+
+
+class RetentionProtectTest(unittest.TestCase):
+    def test_referenced_old_dump_survives(self):
+        keys = [f"writer-db-backup-2026-10-{d:02d}.dump" for d in (1, 2, 3)]
+        with mock.patch.object(r2_retention, "r2_list_keys", return_value=keys), \
+                mock.patch.object(r2_retention, "r2_delete") as delete:
+            deleted = r2_retention.prune_r2_prefix(
+                "bucket", "writer-db-backup", ".dump", date(2026, 10, 20),
+                protect=frozenset({"writer-db-backup-2026-10-03.dump"}),
+            )
+        # Only one key would be kept, below min_keep: nothing is deleted.
+        self.assertEqual(deleted, [])
+        delete.assert_not_called()
+
+
+class FetchFollowsManifestTest(unittest.TestCase):
+    def _fetch(self, keys, manifests):
+        def get(_bucket, key, path):
+            Path(path).write_text(json.dumps(manifests[key]) if key in manifests else "dump")
+
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch("_r2_backup.r2_list_keys", return_value=keys), \
+                mock.patch("_r2_backup.r2_get", side_effect=get), \
+                mock.patch.object(restore_db, "datetime", wraps=restore_db.datetime) as dt:
+            dt.now.return_value = restore_db.datetime.fromisoformat("2026-10-20T12:00:00+09:00")
+            dt.strptime = restore_db.datetime.strptime
+            path = restore_db._fetch_latest_from_r2(restore_db.SPECS["writer"], Path(tmp), 2)
+            manifest = json.loads(restore_db._manifest_path(path).read_text())
+            return path.name, manifest
+
+    def test_unchanged_day_points_at_earlier_dump(self):
+        keys = ["writer-db-backup-2026-10-15.dump", "writer-db-backup-2026-10-15.manifest.json",
+                "writer-db-backup-2026-10-20.manifest.json"]
+        manifests = {
+            "writer-db-backup-2026-10-15.manifest.json": {"archive": "writer-db-backup-2026-10-15.dump"},
+            "writer-db-backup-2026-10-20.manifest.json": {"archive": "writer-db-backup-2026-10-15.dump",
+                                                          "rows_after": {"t": 1}},
+        }
+        name, manifest = self._fetch(keys, manifests)
+        self.assertEqual(name, "writer-db-backup-2026-10-15.dump")
+        self.assertEqual(manifest["rows_after"], {"t": 1})
+
+    def test_dangling_pointer_fails(self):
+        keys = ["writer-db-backup-2026-10-19.dump", "writer-db-backup-2026-10-20.manifest.json"]
+        manifests = {"writer-db-backup-2026-10-20.manifest.json": {"archive": "writer-db-backup-2026-10-01.dump"}}
+        with self.assertRaises(restore_db.RestoreError):
+            self._fetch(keys, manifests)
+
+    def test_newer_dump_without_manifest_wins(self):
+        keys = ["writer-db-backup-2026-10-19.manifest.json", "writer-db-backup-2026-10-19.dump",
+                "writer-db-backup-2026-10-20.dump"]
+        manifests = {"writer-db-backup-2026-10-19.manifest.json": {"archive": "writer-db-backup-2026-10-19.dump"}}
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch("_r2_backup.r2_list_keys", return_value=keys), \
+                mock.patch("_r2_backup.r2_get", side_effect=lambda b, k, p: Path(p).write_text("x")):
+            path = restore_db._fetch_latest_from_r2(restore_db.SPECS["writer"], Path(tmp), None)
+            self.assertEqual(path.name, "writer-db-backup-2026-10-20.dump")
+
+
 class DrillCleanupTest(unittest.TestCase):
     def test_trace_hides_neo4j_password(self):
         with mock.patch("subprocess.run"), mock.patch("builtins.print") as out:

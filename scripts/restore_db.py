@@ -129,44 +129,68 @@ def _resolve_backup(explicit: str | None, spec: BackupSpec) -> Path:
 
 
 def _fetch_latest_from_r2(spec: BackupSpec, dest_dir: Path, max_age_days: int | None) -> Path:
-    """Download the newest dated R2 object for spec, so a drill covers the
-    off-site copy and the download path rather than a local file."""
+    """Download the newest dated R2 backup for spec, so a drill covers the
+    off-site copy and the download path rather than a local file.
+
+    The newest dump and the newest manifest are compared. A manifest at least
+    as new wins and its "archive" names the dump to fetch, which may be an
+    earlier day's: the writer backup skips uploading an unchanged dump.
+    """
+    import json
+
     from _r2_backup import r2_get, r2_list_keys
 
     key_prefix = spec.pattern.removesuffix("-*.dump")
-    dated = re.compile(rf"^{re.escape(key_prefix)}-(\d{{4}}-\d{{2}}-\d{{2}})\.dump$")
+    day = r"(\d{4}-\d{2}-\d{2})"
+    dump_re = re.compile(rf"^{re.escape(key_prefix)}-{day}\.dump$")
+    manifest_re = re.compile(rf"^{re.escape(key_prefix)}-{day}\.manifest\.json$")
     try:
         keys = r2_list_keys(R2_BUCKET, key_prefix)
     except Exception as exc:
         raise RestoreError(f"R2 listing failed for {key_prefix}: {exc}") from exc
-    candidates = sorted(
-        (datetime.strptime(m.group(1), "%Y-%m-%d").date(), key)
-        for key in keys
-        if (m := dated.match(key))
-    )
-    if not candidates:
+
+    def newest(pattern: re.Pattern) -> tuple | None:
+        dated = sorted(
+            (datetime.strptime(m.group(1), "%Y-%m-%d").date(), key)
+            for key in keys
+            if (m := pattern.match(key))
+        )
+        return dated[-1] if dated else None
+
+    def download(key: str, path: Path) -> None:
+        print(f"+ R2 download {R2_BUCKET}/{key}", flush=True)
+        try:
+            r2_get(R2_BUCKET, key, str(path))
+        except Exception as exc:
+            raise RestoreError(f"R2 download failed for {key}: {exc}") from exc
+
+    dump, manifest = newest(dump_re), newest(manifest_re)
+    if dump is None:
         raise RestoreError(f"no {spec.scope} backup in R2 under {key_prefix}")
-    backup_date, key = candidates[-1]
+    manifest_data = None
+    if manifest and manifest[0] >= dump[0]:
+        backup_date, manifest_key = manifest
+        manifest_file = dest_dir / manifest_key
+        download(manifest_key, manifest_file)
+        manifest_data = manifest_file.read_text()
+        key = json.loads(manifest_data).get("archive") or ""
+        if key not in keys:
+            raise RestoreError(f"{manifest_key} points at {key!r}, which is not in R2")
+    else:
+        backup_date, key = dump
     if max_age_days is not None:
         age = (datetime.now(KST).date() - backup_date).days
         if age > max_age_days:
             raise RestoreError(
-                f"newest {spec.scope} backup in R2 is {key} ({age} days old, "
+                f"newest {spec.scope} backup in R2 is from {backup_date} ({age} days old, "
                 f"limit {max_age_days}); backups have stopped"
             )
     path = dest_dir / key
-    print(f"+ R2 download {R2_BUCKET}/{key}", flush=True)
-    try:
-        r2_get(R2_BUCKET, key, str(path))
-    except Exception as exc:
-        raise RestoreError(f"R2 download failed for {key}: {exc}") from exc
-    manifest_key = _manifest_path(path).name
-    if manifest_key in keys:
-        print(f"+ R2 download {R2_BUCKET}/{manifest_key}", flush=True)
-        try:
-            r2_get(R2_BUCKET, manifest_key, str(_manifest_path(path)))
-        except Exception as exc:
-            raise RestoreError(f"R2 download failed for {manifest_key}: {exc}") from exc
+    download(key, path)
+    if manifest_data is not None:
+        _manifest_path(path).write_text(manifest_data)
+    elif (own := _manifest_path(path).name) in keys:
+        download(own, _manifest_path(path))
     return path
 
 

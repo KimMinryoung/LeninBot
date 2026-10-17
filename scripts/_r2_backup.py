@@ -174,7 +174,7 @@ def shrunk_tables(previous: dict[str, int], current: dict[str, int]) -> list[str
     return findings
 
 
-def _previous_manifest(backup_dir: Path, key_prefix: str, name: str) -> dict | None:
+def previous_manifest(backup_dir: Path, key_prefix: str, name: str) -> dict | None:
     older = sorted(
         p for p in backup_dir.glob(f"{key_prefix}-*{MANIFEST_SUFFIX}") if p.name < name
     )
@@ -195,21 +195,29 @@ def publish_manifest(
     database: str,
     rows_before: dict[str, int],
     rows_after: dict[str, int],
+    *,
+    data_archive: str | None = None,
+    content_sha256: str | None = None,
 ) -> list[str]:
     """Save and upload the dump's row-count manifest; return shrink findings.
 
     rows_before/rows_after bracket the dump, which ran on a live replica, so
-    a restore drill checks each table against that range.
+    a restore drill checks each table against that range. The manifest is
+    named after today's archive_key; its "archive" is the R2 dump that holds
+    the data (data_archive, an earlier day's, when today's was identical and
+    not uploaded). A drill or restore follows that pointer.
     """
     name = manifest_name(archive_key)
-    previous = _previous_manifest(backup_dir, key_prefix, name)
+    previous = previous_manifest(backup_dir, key_prefix, name)
     manifest = {
         "database": database,
-        "archive": archive_key,
+        "archive": data_archive or archive_key,
         "taken_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "rows_before": rows_before,
         "rows_after": rows_after,
     }
+    if content_sha256:
+        manifest["content_sha256"] = content_sha256
     with tempfile.NamedTemporaryFile("w", suffix=MANIFEST_SUFFIX, delete=False) as tmp:
         json.dump(manifest, tmp, indent=1, sort_keys=True)
     try:
@@ -222,6 +230,46 @@ def publish_manifest(
         print(f"No earlier manifest for {key_prefix}; shrink check starts tomorrow")
         return []
     return shrunk_tables(previous.get("rows_after", {}), rows_before)
+
+
+# Bytes 14..29 of a custom-format archive hold its creation time, so two dumps
+# of unchanged data differ only there (checked on writer dumps, 2026-10-17).
+# Everything after the header — TOC and table data — is compared.
+_DUMP_HEADER_BYTES = 64
+
+
+def dump_digest(path: str) -> str:
+    """sha256 of a pg_dump -Fc archive minus its timestamped header."""
+    import hashlib
+
+    digest = hashlib.sha256()
+    with open(path, "rb") as f:
+        f.seek(_DUMP_HEADER_BYTES)
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def unchanged_archive(
+    bucket: str, backup_dir: Path, key_prefix: str, archive_key: str, digest: str
+) -> str | None:
+    """The earlier R2 dump holding the same data as today's, if there is one.
+
+    The writer and legacy_game DBs go days or months without a write; their
+    jobs then upload only today's manifest, pointing at that dump.
+    """
+    previous = previous_manifest(backup_dir, key_prefix, manifest_name(archive_key))
+    if not previous or previous.get("content_sha256") != digest:
+        return None
+    earlier = previous.get("archive")
+    if not earlier or earlier == archive_key:
+        return None
+    try:
+        present = earlier in r2_list_keys(bucket, earlier)
+    except Exception as exc:
+        print(f"WARNING: could not confirm {earlier} on R2, uploading: {exc}")
+        return None
+    return earlier if present else None
 
 
 def disk_warning(path: Path) -> str | None:

@@ -25,11 +25,13 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from _r2_backup import (
     MANIFEST_SUFFIX,
     disk_warning,
+    dump_digest,
     promote_systemd_credentials,
     prune_local_backups,
     publish_manifest,
     r2_put,
     try_count_rows,
+    unchanged_archive,
 )
 
 promote_systemd_credentials()
@@ -105,8 +107,12 @@ def _build_upload_and_save(
     backup_dir: Path,
     marker: str,
     date: str,
-) -> list[str]:
-    """Back up one DB; return shrink findings against the previous manifest."""
+) -> tuple[list[str], str]:
+    """Back up one DB; return shrink findings and the R2 dump holding its data.
+
+    An unchanged DB (legacy_game is read-only; main changes daily) is not
+    uploaded again: today's manifest points at the earlier dump instead.
+    """
     archive_key = f"{key_prefix}-{date}.dump"
     backup_dir.mkdir(parents=True, exist_ok=True)
     tmp_path = tempfile.NamedTemporaryFile(suffix=".dump", delete=False).name
@@ -124,15 +130,24 @@ def _build_upload_and_save(
         # (2026-09-20..23 left neither when R2 rejected the upload).
         shutil.copyfile(tmp_path, backup_dir / archive_key)
         print(f"Saved local copy: {backup_dir / archive_key}")
-        r2_put(BUCKET, archive_key, tmp_path)
-        print(f"Uploaded to R2: {BUCKET}/{archive_key}")
+        digest = dump_digest(tmp_path)
+        data_archive = unchanged_archive(BUCKET, backup_dir, key_prefix, archive_key, digest)
+        # Skip only when today's manifest can carry the pointer.
+        if data_archive and rows_before is not None and rows_after is not None:
+            print(f"Unchanged since {data_archive}; R2 dump upload skipped")
+        else:
+            data_archive = archive_key
+            r2_put(BUCKET, archive_key, tmp_path)
+            print(f"Uploaded to R2: {BUCKET}/{archive_key}")
     finally:
         os.unlink(tmp_path)
     if rows_before is None or rows_after is None:
         raise RuntimeError("dump uploaded, but row counting failed; no manifest")
-    return publish_manifest(
-        BUCKET, backup_dir, key_prefix, archive_key, database, rows_before, rows_after
+    shrunk = publish_manifest(
+        BUCKET, backup_dir, key_prefix, archive_key, database, rows_before, rows_after,
+        data_archive=data_archive, content_sha256=digest,
     )
+    return shrunk, data_archive
 
 
 def main() -> int:
@@ -147,9 +162,11 @@ def main() -> int:
     # unbacked while main's upload failed).
     failed = []
     shrunk = []
+    in_use = {}
     for spec in BACKUP_SPECS:
         try:
-            shrunk += [f"{spec[0]}.{f}" for f in _build_upload_and_save(*spec, date)]
+            findings, in_use[spec[1]] = _build_upload_and_save(*spec, date)
+            shrunk += [f"{spec[0]}.{f}" for f in findings]
         except Exception as exc:
             print(f"Backup failed for {spec[0]}: {exc!r}", file=sys.stderr)
             failed.append(spec[0])
@@ -162,7 +179,10 @@ def main() -> int:
         r2_cutoff = (today - timedelta(days=R2_RETENTION_DAYS)).date()
         for _database, key_prefix, _backup_dir, _marker in BACKUP_SPECS:
             for suffix in (".dump", MANIFEST_SUFFIX):
-                prune_r2_prefix(BUCKET, key_prefix, suffix, r2_cutoff)
+                prune_r2_prefix(
+                    BUCKET, key_prefix, suffix, r2_cutoff,
+                    protect=frozenset({in_use[key_prefix]}),
+                )
 
     cutoff = (today - timedelta(days=LOCAL_RETENTION_DAYS - 1)).date()
     for _database, key_prefix, backup_dir, _marker in BACKUP_SPECS:
