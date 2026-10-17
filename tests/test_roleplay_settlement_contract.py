@@ -128,7 +128,7 @@ class StatusRepairTests(unittest.IsolatedAsyncioTestCase):
                 message = SimpleNamespace(from_user=SimpleNamespace(id=1), text='/status', answer=AsyncMock())
                 with patch.object(bot, 'load_state', return_value=state), patch.object(bot, 'people_context', return_value={'index': []}), \
                      patch.object(bot.asyncio, 'to_thread', side_effect=inline_thread):
-                    await bot.cmd_status(message)
+                    await bot.cmd_time(message)
                 rendered = '\n'.join(call.args[0] for call in message.answer.await_args_list)
                 self.assertIn('21:27', rendered)
                 self.assertIn(expected, rendered)

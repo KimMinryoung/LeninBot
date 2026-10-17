@@ -81,12 +81,24 @@ class TestReplyPersistence(unittest.IsolatedAsyncioTestCase):
         from roleplay.memory import STATE_DEFAULTS
         with patch.object(bot.asyncio, "to_thread", new=AsyncMock(return_value={**STATE_DEFAULTS, "hunger": 50})):
             await bot.cmd_status(message)
-        self.assertIn("허기: 50", message.answer.call_args.args[0])
-        self.assertIn("⏱ 시간 계산 근거", message.answer.call_args.args[0])
-        self.assertIn("세부 부상:", message.answer.call_args.args[0])
-        self.assertIn("다음 시도:", message.answer.call_args.args[0])
-        self.assertNotIn("/status 상세", message.answer.call_args.args[0])
-        self.assertIn("의지: 미설정", message.answer.call_args.args[0])
+        brief = message.answer.call_args.args[0]
+        self.assertIn("허기: 50", brief)
+        self.assertIn("의지: 미설정", brief)
+        self.assertNotIn("⏱ 시간 계산 근거", brief)
+        self.assertNotIn("다음 시도:", brief)
+        self.assertIn("/status 상세", brief)
+        message.text = "/status 상세"
+        with patch.object(bot.asyncio, "to_thread", new=AsyncMock(return_value={**STATE_DEFAULTS, "hunger": 50})):
+            await bot.cmd_status(message)
+        full = message.answer.call_args.args[0]
+        for heading in ("⏱ 시간 계산 근거", "세부 부상:", "다음 시도:", "각성 누적"):
+            self.assertIn(heading, full)
+        with patch.object(bot.asyncio, "to_thread", new=AsyncMock(return_value={**STATE_DEFAULTS, "hunger": 50})):
+            await bot.cmd_time(message)
+        timing = message.answer.call_args.args[0]
+        self.assertIn("⏱ 시간 계산 근거", timing)
+        self.assertNotIn("허기", timing)
+        message.text = "/status"
         with patch.object(bot.asyncio, "to_thread", new=AsyncMock(return_value={**STATE_DEFAULTS, "resolve": 42.26, "humiliation": 70})):
             await bot.cmd_status(message)
         self.assertIn("의지: 42.3 · 명료함: 미설정 · 굴욕: 70", message.answer.call_args.args[0])

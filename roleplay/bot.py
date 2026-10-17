@@ -267,7 +267,7 @@ async def cmd_help(message: Message) -> None:
         "이 봇은 캐릭터와 1:1 역할극을 하는 독립 봇이야 (Cyber-Lenin과 별개).\n"
         "• 그냥 메시지를 보내면 캐릭터가 답해.\n"
         "• /new — 최근 대화 초기화 (메모·상태표 유지)\n"
-        "• /status — 상태와 계산 근거. /status 상세도 같은 내용을 표시해. 수정·초기화는 대화로 요청해.\n"
+        "• /status — 핵심 상태, /status 상세 — 전체 기록, /time — 시간 계산 근거와 누적 값. 수정·초기화는 대화로 요청해.\n"
         "• /people — 저장된 인물 목록, /people 이름 — 인물 기록 확인\n"
         "• /feedback 켜기|끄기 — 답변 뒤에 엔진이 확정한 사건·시간을 한 줄로 표시 (기본 켜짐)\n"
         "• /ask 켜기|끄기 — 기본은 중요한 결과만 확인. 켜면 일반 추정도 버튼으로 확인\n"
@@ -381,8 +381,16 @@ def _track_display(state: dict) -> str:
     return "실존 궤도: " + " · ".join(parts)
 
 
-@router.message(Command("status"))
-async def cmd_status(message: Message) -> None:
+def _status_value(value):
+    if value is None or value == "":
+        return "미설정"
+    if isinstance(value, (int, float)):
+        return f"{value:g}"
+    return str(value)
+
+
+async def _status_state(message: Message) -> dict:
+    """The saved state with display fields for /status and /time; no model call."""
     state = dict(await asyncio.to_thread(load_state, message.from_user.id))
     people = await asyncio.to_thread(people_context, message.from_user.id, state.get("participants", []))
     names = {p["person_id"]: p["name"] for p in people.get("index", [])}
@@ -452,50 +460,91 @@ async def cmd_status(message: Message) -> None:
     gaps = clock.get('uncalculated_minutes', 0)
     state["time_gaps"] = (f"{clock['unquantified_gaps']}개 구간의 활동 미상 (시간 추정 {gaps}분, 상태 미반영)" if gaps else f"{clock['unquantified_gaps']}개 구간의 경과 분량 미상 (상태 미반영)") if not clock["elapsed_complete"] else "없음"
     metrics = {"hunger": "허기", "fatigue": "피로", "pain": "통증", "tension": "긴장"}
-    def display(value):
-        if value is None or value == "":
-            return "미설정"
-        if isinstance(value, (int, float)):
-            return f"{value:g}"
-        return str(value)
-
-    mental = {"resolve": "의지", "clarity": "명료함", "humiliation": "굴욕"}
+    display = _status_value
     if not state.get("conditions_initialized"):
         state["activity"] = "미확인"
-    lines = ["📋 예조프 상태", state["calendar_display"],
-             f"장소: {display(state.get('location'))}",
-             "", "📊 수치 · 0–100",
-             " · ".join(f"{label}: {display(state.get(key))}" for key, label in metrics.items()),
-             " · ".join(f"{label}: {display(state.get(key))}" for key, label in mental.items()),
-             "의지·명료함은 높을수록 굳건·또렷, 굴욕은 높을수록 심함"]
+    state["_metric_lines"] = [
+        " · ".join(f"{label}: {display(state.get(key))}" for key, label in metrics.items()),
+        " · ".join(f"{label}: {display(state.get(key))}" for key, label in
+                   {"resolve": "의지", "clarity": "명료함", "humiliation": "굴욕"}.items())]
+    return state
 
-    def section(title, fields):
-        lines.extend(["", title])
+
+EMPTY_STATUS = (None, "", "미설정", "등록 없음", "기록 없음", "아직 지정되지 않음")
+# Engine counters behind the numbers: /time shows them, /status 상세 adds them to the full view.
+TIME_SECTIONS = [
+    ("⏱ 시간 계산 근거", [("time_certainty", "시간 확실성"), ("relative_day", "상대 일자"),
+        ("scene_minute", "장면 경과(미상 구간 추정 포함, 분)"), ("last_calculated_minute", "마지막 계산(분)"),
+        ("time_gaps", "시간 계산 공백"), ("time_evidence", "최근 시간 해석"),
+        ("time_basis", "시간 근거"), ("reason", "최근 변경 이유")]),
+    ("🧮 누적 계산 값", [("sleep_quality", "수면의 질"), ("wakefulness", "각성 누적"),
+        ("calm", "조용한 시간"), ("isolation", "고립 누적 부담(게임 환산)"),
+        ("pain_floor", "부상 기저 통증"), ("resolve_event", "최근 의지 사건")]),
+]
+
+
+def _status_lines(state, view):
+    """view: brief (default /status, filled fields only), full (/status 상세) or time (/time)."""
+    display = _status_value
+    lines = ["📋 예조프 상태", state["calendar_display"], f"장소: {display(state.get('location'))}"]
+
+    def section(title, fields, skip_empty):
+        rows = []
         for key, label in fields:
             value = state.get(key)
+            if skip_empty and (value in EMPTY_STATUS or str(value).startswith("등록 없음")):
+                continue
             shown = "기록 없음" if value in (None, "", "미설정") else display(value)
-            lines.append(f"{label}:\n{shown}" if "\n" in shown else f"{label}: {shown}")
+            rows.append(f"{label}:\n{shown}" if "\n" in shown else f"{label}: {shown}")
+        if rows:
+            lines.extend(["", title, *rows])
 
-    section("🩺 몸과 질병", [("illness_display", "질병"), ("body", "몸 상태"),
-            ("injuries", "세부 부상"), ("pain_floor", "부상 기저 통증")])
-    section("🛏 활동과 환경", [("activity", "활동"), ("sleep_quality", "수면의 질"),
-            ("threat", "위협 상태"), ("participants", "현재 장면 인물"),
-            ("contact_display", "교류"), ("isolation_display", "고립 환경"),
-            ("isolation", "고립 누적 부담(게임 환산)"), ("wakefulness", "각성 누적"), ("calm", "조용한 시간")])
-    section("💭 마음과 장면", [("mood", "기분"), ("scene", "현재 장면"), ("last_event", "직전 사건"),
-            ("goal", "목적"), ("avoid", "피하려는 결과"), ("next_action", "다음 시도"),
-            ("unresolved", "미해결"), ("holdouts_display", "아직 지키는 것"),
-            ("bargains_display", "열린 거래"), ("resolve_event", "최근 의지 사건")])
-    section("📅 예정과 기록", [("upcoming", "예정 사건"), ("routine_display", "감옥 일과"),
-            ("track_display", "실존 궤도"), ("saved_people", "저장된 인물")])
-    section("⏱ 시간 계산 근거", [("time_certainty", "시간 확실성"), ("relative_day", "상대 일자"),
-            ("scene_minute", "장면 경과(미상 구간 추정 포함, 분)"), ("last_calculated_minute", "마지막 계산(분)"),
-            ("time_gaps", "시간 계산 공백"), ("time_evidence", "최근 시간 해석"),
-            ("time_basis", "시간 근거"), ("reason", "최근 변경 이유")])
+    if view == "time":
+        for title, fields in TIME_SECTIONS:
+            section(title, fields, False)
+        return lines
+    lines.extend(["", "📊 수치 · 0–100", *state["_metric_lines"]])
+    if view == "full":
+        lines.append("의지·명료함은 높을수록 굳건·또렷, 굴욕은 높을수록 심함")
+        sections = [
+            ("🩺 몸과 질병", [("illness_display", "질병"), ("body", "몸 상태"), ("injuries", "세부 부상")]),
+            ("🛏 활동과 환경", [("activity", "활동"), ("threat", "위협 상태"), ("participants", "현재 장면 인물"),
+                ("contact_display", "교류"), ("isolation_display", "고립 환경")]),
+            ("💭 마음과 장면", [("mood", "기분"), ("scene", "현재 장면"), ("last_event", "직전 사건"),
+                ("goal", "목적"), ("avoid", "피하려는 결과"), ("next_action", "다음 시도"),
+                ("unresolved", "미해결"), ("holdouts_display", "아직 지키는 것"), ("bargains_display", "열린 거래")]),
+            ("📅 예정과 기록", [("upcoming", "예정 사건"), ("routine_display", "감옥 일과"),
+                ("track_display", "실존 궤도"), ("saved_people", "저장된 인물")]),
+            *TIME_SECTIONS]
+    else:
+        sections = [
+            ("🩺 몸", [("illness_display", "질병"), ("body", "몸 상태"), ("injuries", "세부 부상")]),
+            ("🛏 지금", [("activity", "활동"), ("threat", "위협 상태"), ("participants", "현재 장면 인물")]),
+            ("💭 마음과 장면", [("mood", "기분"), ("scene", "현재 장면"), ("goal", "목적"),
+                ("holdouts_display", "아직 지키는 것"), ("bargains_display", "열린 거래")]),
+            ("📅 예정", [("upcoming", "예정 사건")])]
+    for title, fields in sections:
+        section(title, fields, view != "full")
     if (state.get("resolve") is not None and state["resolve"] <= 25) or (state.get("humiliation") is not None and state["humiliation"] >= 75):
         lines.extend(["", "회복 경로: 작은 선택·과제 완수·경계 존중·지지 대화. 여건이 되면 자기 돌봄이나 목적 있는 작업도 가능."])
+    if view == "brief":
+        lines.extend(["", "전체: /status 상세 · 시간 계산 근거: /time"])
+    return lines
 
-    for chunk in split_message("\n".join(lines)):
+
+@router.message(Command("status"))
+async def cmd_status(message: Message) -> None:
+    args = (getattr(message, "text", None) or "").split(maxsplit=1)
+    view = "full" if len(args) > 1 and args[1].strip() in {"상세", "전체", "full"} else "brief"
+    state = await _status_state(message)
+    for chunk in split_message("\n".join(_status_lines(state, view))):
+        await message.answer(chunk)
+
+
+@router.message(Command("time"))
+async def cmd_time(message: Message) -> None:
+    state = await _status_state(message)
+    for chunk in split_message("\n".join(_status_lines(state, "time"))):
         await message.answer(chunk)
 
 
@@ -895,6 +944,7 @@ async def bot_main() -> None:
         BotCommand(command="new", description="새 대화 시작 (맥락 초기화)"),
         BotCommand(command="help", description="사용법"),
         BotCommand(command="status", description="인물 상태표"),
+        BotCommand(command="time", description="시간 계산 근거"),
         BotCommand(command="people", description="저장된 인물 기록"),
         BotCommand(command="ask", description="일반 추정까지 확인할지 설정"),
         BotCommand(command="feedback", description="확정 한 줄 표시 켜기/끄기"),
