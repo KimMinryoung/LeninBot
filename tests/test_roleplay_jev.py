@@ -117,8 +117,9 @@ class ProjectionTests(unittest.TestCase):
                 self.assertFalse(applied.get('interrupted'))
         self.assertEqual(before['story_events'][0]['status'], 'ready')
         after, applied = self.project('기다린다', before, story_0='keep')
-        self.assertTrue(applied['interrupted'])
-        self.assertEqual(after['scene_minute'], 0)
+        self.assertFalse(applied.get('interrupted'))
+        self.assertEqual(after['scene_minute'], 3)
+        self.assertEqual(after['story_events'][0]['status'], 'cancelled')
 
     def test_completing_ready_event_does_not_bypass_other_barriers(self):
         before = initial(story_events=[

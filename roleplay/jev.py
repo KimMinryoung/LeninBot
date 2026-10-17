@@ -561,12 +561,21 @@ def project(before, user_text, people, verdict, scope_id):
         if scheduled['status'] == 'ready' and not scheduled.get('when_alone')
         and labels.get(f'story_{i}') in {'complete', 'cancel'}
     }
-    if resolved_barriers:
+    # A routine beat that already came due and that this scene does not take up has
+    # passed by: it lapses instead of pinning the clock to its minute, where every later
+    # scene would stop at zero (a withheld dinner otherwise blocks the whole evening).
+    lapsed = {
+        scheduled['id'] for i, scheduled in enumerate(before.get('story_events', []))
+        if scheduled['status'] == 'ready' and scheduled.get('kind') == 'routine'
+        and scheduled['id'] not in resolved_barriers and labels.get(f'story_{i}', 'keep') == 'keep'
+    }
+    if resolved_barriers or lapsed:
         state = apply_story_updates(state, [
             {'op': labels[f'story_{i}'], 'id': scheduled['id'], 'outcome': user_text[:300]}
             for i, scheduled in enumerate(before.get('story_events', []))
             if scheduled['id'] in resolved_barriers
-        ])
+        ] + [{'op': 'cancel', 'id': eid, 'outcome': '장면에서 다뤄지지 않고 지나감'} for eid in sorted(lapsed)])
+        resolved_barriers |= lapsed
     initialized = {}
     for key in METRICS:
         value = labels.get('initial_' + key, 'unknown')

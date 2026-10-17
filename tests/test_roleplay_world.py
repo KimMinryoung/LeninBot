@@ -150,7 +150,7 @@ class RoutineTests(unittest.TestCase):
         self.assertEqual(done['story_events'][0]['status'], 'completed')
         self.assertEqual(done['hunger'], after['hunger'])  # arrival is not eating
 
-    def test_prepare_accepts_an_announced_stop_only_for_explicit_passages(self):
+    def test_prepare_settles_at_a_stop_for_explicit_and_brief_passages(self):
         state = self.routine()
         state['participants'] = []
         auth = {'user_text': '12시간 쉬어', 'labels': {'mode': 'scene', 'transition': 'current', 'span': 'brief', 'time_scope': 'explicit'}}
@@ -162,8 +162,10 @@ class RoutineTests(unittest.TestCase):
         self.assertEqual(prepared['state']['scene_minute'], 600)
         brief = {**verdict, 'duration_estimate': {'elapsed_minutes': 5}}
         with_event = jev.apply_story_updates(state, [{'op': 'schedule', 'id': 'knock', 'title': '문 두드림', 'source': '약속', 'due_minute': 2}])
-        with patch.object(turn, 'review_reply', return_value={'approved': True, 'issues': []}), self.assertRaises(ValueError):
-            turn.prepare('물을 마셔', with_event, [], [], '9', '초안', {**auth, 'user_text': '물을 마셔'}, None, brief)
+        with patch.object(turn, 'review_reply', return_value={'approved': True, 'issues': []}):
+            prepared = turn.prepare('물을 마셔', with_event, [], [], '9', '초안', {**auth, 'user_text': '물을 마셔'}, None, brief)
+        self.assertEqual(prepared['applied']['stopped_at'], ['문 두드림'])
+        self.assertEqual(prepared['state']['scene_minute'], 2)
 
     def test_routine_survives_reset_and_far_events_do_not_block_next_day(self):
         state = self.routine()

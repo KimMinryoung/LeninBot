@@ -273,10 +273,9 @@ def prepare(user_text, before, people, history, scope_id, draft, authorization, 
         applied = {**applied, 'auto_settled': verdict['auto_settled']}
     if authorization.get('auto_settled'):
         applied = {**applied, 'auto_settled': {**authorization['auto_settled'], **(applied.get('auto_settled') or {})}}
-    if applied.get('interrupted') and not (mode == 'scene' and verdict['labels'].get('elapsed') == 'explicit'):
-        raise DraftOutOfScope('예정 사건 도래로 초안 끝까지 실행할 수 없음. 도래 장면에서 멈춰야 함')
-    # An explicit passage was told where it stops (see direction/expected_stop); the settled
-    # scene ends there and the rest of the requested time is simply not spent.
+    # A scene that reaches a scheduled event settles stopped there; the rest of the
+    # requested time is simply not spent. Rejecting the draft instead only looped: the
+    # actor rewrote the same scene and the same event stopped it again.
     if stage is not None and mode in {'scene','discussion','plan'}:
         for key in ('goal','avoid','next_action','unresolved','body','mood','scene'):
             if stage['state'].get(key) != before.get(key):

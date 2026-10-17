@@ -100,7 +100,7 @@ reason에 합친다. 수치·구조 인자는 여전히 거절한다.
 ## 일과·연표 사건에서의 중단
 
 명시적 기간 진행이 등록된 일과나 예정 사건을 지나면 초안 작성 전 scene_direction에 멈출 지점을 알리고(`expected_stop`), 정산은 그 도래 시점까지만
-확정한다. 초안 소요 추정으로 진행하는 짧은 행동이 예정 사건에 걸리면 초안을 다시 쓴다. 세부는 [roleplay_game_balance.md](roleplay_game_balance.md).
+확정한다. 초안 소요 추정으로 진행하는 짧은 행동이 예정 사건에 걸려도 초안을 거절하지 않고 그 시점까지만 확정한다. 이미 도래한 일과를 장면이 다루지 않으면 그 일과는 취소(지나감)된다. 세부는 [roleplay_game_balance.md](roleplay_game_balance.md).
 
 ## 시간과 사건 경계
 
