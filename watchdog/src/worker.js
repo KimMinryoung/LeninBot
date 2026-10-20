@@ -93,6 +93,52 @@ async function transition(env, key, healthy, badText, okText) {
   return true;
 }
 
+// What to look at, for the kind of failure that actually happened. A single
+// generic paragraph left a TimeoutError alert with advice only for 522 and
+// missing content.
+function siteHint(status, detail) {
+  const transient =
+    "\n다음 점검(5분 뒤)에 🟢 복구가 오면 일시적 지연이니 반복될 때만 조사하세요.";
+  if (detail.includes("TimeoutError")) {
+    return (
+      `${SITE_TIMEOUT_MS / 1000}초 안에 응답이 없었습니다 — origin이 느리거나 멈춘 것입니다.\n` +
+      "보세요: docker ps의 leninbot-frontend 상태와 재시작 여부, " +
+      "docker logs --since 15m leninbot-frontend, 호스트 부하(uptime), " +
+      "nginx error.log의 upstream timed out, 그 시각의 배포·재시작." +
+      transient
+    );
+  }
+  if (status === 0) {
+    return (
+      "응답 없이 연결이 실패했습니다 — DNS나 Cloudflare 쪽 문제일 수 있습니다.\n" +
+      "Cloudflare 상태 페이지와 DNS 레코드를 보세요." +
+      transient
+    );
+  }
+  if (status === 521 || status === 522 || status === 523) {
+    return (
+      `${status}: Cloudflare가 origin에 못 닿습니다 — ` +
+      "방화벽 인바운드 80/443, nginx 기동 여부를 보세요."
+    );
+  }
+  if (status === 502 || status === 504 || status === 524) {
+    return (
+      `${status}: nginx·Cloudflare까지는 닿았지만 frontend가 제때 답하지 않았습니다 — ` +
+      "leninbot-frontend 컨테이너 상태와 로그를 보세요."
+    );
+  }
+  if (status >= 500) {
+    return `${status}: frontend가 오류를 냈습니다 — docker logs --since 15m leninbot-frontend를 보세요.`;
+  }
+  if (status >= 200 && status < 300) {
+    return (
+      "응답은 오는데 DB에서 글이 안 나옵니다 — " +
+      "frontend 컨테이너의 DB 접속과 leninbot-pg를 보세요."
+    );
+  }
+  return `${status}: 사이트가 예상과 다르게 답합니다 — nginx 설정과 최근 배포를 보세요.`;
+}
+
 async function checkSite(env) {
   // Cache-buster plus no-store: a cached 200 would hide a dead origin, which is
   // the exact way the 2026-08-01 outage stayed invisible.
@@ -124,14 +170,12 @@ async function checkSite(env) {
   } catch (err) {
     detail = `요청 실패: ${err && err.name ? err.name : "error"}`;
   }
+  const hint = healthy ? "" : siteHint(status, detail);
   await transition(
     env,
     "site",
     healthy,
-    `🔴 cyber-lenin.com 응답 이상\n\n${detail}\n\n` +
-      `522면 Cloudflare가 origin에 못 닿는 것입니다 — 방화벽 인바운드 80/443과 nginx를 보세요.\n` +
-      `콘텐츠 이상이면 응답은 오는데 DB에서 글이 안 나오는 것입니다 — ` +
-      `frontend 컨테이너의 DB 접속과 leninbot-pg를 보세요.`,
+    `🔴 cyber-lenin.com 응답 이상\n\n${detail}\n\n${hint}`,
     `🟢 cyber-lenin.com 복구 (${detail})`,
   );
   return { healthy, detail };

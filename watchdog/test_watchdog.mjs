@@ -72,6 +72,7 @@ console.log("═══ 사이트 감시 ═══");
   siteStatus = 522;
   let msgs = await run(env);
   check("522 → 알림 1건", msgs.length === 1 && msgs[0].includes("522"), JSON.stringify(msgs));
+  check("522 안내는 방화벽·nginx만", msgs[0] && msgs[0].includes("방화벽") && !msgs[0].includes("DB 접속"));
 
   msgs = await run(env);
   check("계속 죽어 있어도 재알림 없음", msgs.length === 0, JSON.stringify(msgs));
@@ -83,6 +84,7 @@ console.log("═══ 사이트 감시 ═══");
   siteThrows = true;
   msgs = await run(env);
   check("타임아웃도 이상으로 감지", msgs.length === 1 && msgs[0].includes("🔴"), JSON.stringify(msgs));
+  check("타임아웃 안내가 따로 붙음", msgs[0] && msgs[0].includes("응답이 없었습니다") && !msgs[0].includes("522"), JSON.stringify(msgs));
   siteThrows = false; siteStatus = 200;
   await run(env);   // 직전 타임아웃으로 bad 상태이므로 복구 알림을 먼저 소진시킨다
 
