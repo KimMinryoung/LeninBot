@@ -56,13 +56,19 @@ GROUP_RULES = {
                          "revolutionaries of the assemblies, clubs and Paris Commune (Sieyès, Robespierre, Danton, Marat, "
                          "Hébert, Babeuf), the royalists, émigrés and Vendée leaders who fought them, the generals of the "
                          "republican armies, Napoleon and his marshals and administrators, the Restoration kings to the July "
-                         "Revolution, and foreign commanders of the coalition wars (Howe, Nelson). Socialists of the 1830s and "
-                         "after (Cabet, Blanqui) are world groups.",
+                         "Revolution, and foreign commanders of the coalition wars (Howe, Nelson). From 1830 on is france-commune.",
+    "france-commune": "France from the July Revolution of 1830 to the Paris Commune of 1871: the July Monarchy (Louis-"
+                      "Philippe, Guizot), the republicans and socialists of 1848 and the June Days (Lamartine, Louis "
+                      "Blanc, Ledru-Rollin, Blanqui, Cavaignac), Louis-Napoléon's coup and the Second Empire, the French "
+                      "side of the Franco-Prussian War and the Siege of Paris (Trochu, Gambetta), and the Paris Commune, "
+                      "its foreign fighters included (Varlin, Louise Michel, Dąbrowski, Frankel), and those who crushed "
+                      "it (Thiers, MacMahon). Theorists whose weight is in international socialism (Fourier, Cabet, "
+                      "Proudhon), the Germans of 1870 and the Third Republic generation (Guesde, Jaurès) are world groups.",
     # The world shelf (migration 218) is sorted by era like the Soviet one, not by camp: revolutionaries,
     # statesmen and their opponents of one era sit together. Camp is the person's activities and the
     # position collections (counterrevolution, dissident, ...), not the group.
-    "world-before-1917": "People outside the Soviet, Chinese and French Revolution shelves whose public role peaked before "
-                         "1917: early socialists and 1848, the First and Second Internationals and the Paris Commune "
+    "world-before-1917": "People outside the Soviet, Chinese and French shelves whose public role peaked before "
+                         "1917: early socialists and 1848 outside France, the First and Second Internationals "
                          "(Marx, Engels, Bakunin, Bebel, Jaurès), and the statesmen, generals and monarchs of the imperial "
                          "age (Bismarck, Wilhelm II). A party founder whose defining role is leading it after 1917 goes to "
                          "world-interwar. A non-Soviet citizen never belongs to a Soviet era group.",
@@ -401,7 +407,7 @@ GROUP_ERAS = {
     "perestroika": (1975, None),
     "china-old-regime": (1880, 1949), "china-revolution": (1895, 1949), "china-mao-era": (1940, 1976),
     "china-reform": (1970, None),
-    "france-revolution": (1774, 1830),
+    "france-revolution": (1774, 1830), "france-commune": (1825, 1880),
     "world-before-1917": (1800, 1930), "world-interwar": (1895, 1960), "world-cold-war": (1925, None),
     "scholar": (1850, None),
 }
@@ -460,7 +466,7 @@ def group_question(groups: list[dict]) -> dict:
     return {"type": "choice", "criteria": group_criteria,
             "instructions": "Which dictionary group does this person belong to? Soviet citizens go to the era in which "
                             "their public role peaked; Chinese citizens go to the china-* group of their era or side; "
-                            "people outside both states go to the world group of the era in which their public role peaked; people of the French Revolution and Napoleon go to france-revolution. Historians researching this history use scholar regardless of nationality; actors or targets in historical events can retain the era of their activity."}
+                            "people outside both states go to the world group of the era in which their public role peaked; people of the French Revolution and Napoleon go to france-revolution; France of 1830–1871 (1848, the Second Empire, the Paris Commune) goes to france-commune. Historians researching this history use scholar regardless of nationality; actors or targets in historical events can retain the era of their activity."}
 
 
 def _text(value, lang: str) -> str:
