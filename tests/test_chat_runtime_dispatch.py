@@ -33,3 +33,22 @@ async def test_claude_branch_calls_the_claude_tool_loop():
     kwargs = loop.await_args.kwargs
     assert kwargs["model"] == "claude-sonnet-5-5"
     assert "client" in kwargs
+
+
+
+def test_claude_wire_tools_drop_top_level_combinators_but_validation_keeps_them():
+    # The Messages API 400s on a top-level anyOf (knowledge_graph_search's
+    # query-or-entity rule); local validation must still enforce it.
+    from llm.claude_loop import _ClaudeProtocolAdapter
+    from runtime_tools.registry import TOOLS
+
+    adapter = _ClaudeProtocolAdapter(
+        client=None, model="claude-sonnet-5-5", tools=TOOLS, tool_handlers={},
+        system_prompt="s", max_tokens=1024, max_input_tokens=None,
+        recover_input_via_tools=False, on_progress=None, log_event=None,
+        thinking=None, output_config=None, provider_idle_timeout_sec=None,
+    )
+    for tool in adapter.cached_tools:
+        assert not {"anyOf", "oneOf", "allOf"} & set(tool["input_schema"]), tool["name"]
+    kg = next(t for t in adapter.tool_definitions if t["name"] == "knowledge_graph_search")
+    assert "anyOf" in kg["input_schema"]

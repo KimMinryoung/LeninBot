@@ -345,6 +345,17 @@ async def _drain_stream_with_idle_guard(stream, idle_timeout_sec: float, on_prog
 
 _RAW_LOG_LIMIT = 8000
 
+_TOP_LEVEL_COMBINATORS = ("anyOf", "oneOf", "allOf")
+
+
+def _anthropic_wire_tool(tool: dict) -> dict:
+    """Return the tool with top-level schema combinators removed for the Messages API."""
+    schema = tool.get("input_schema")
+    if not isinstance(schema, dict) or not any(k in schema for k in _TOP_LEVEL_COMBINATORS):
+        return tool
+    wire_schema = {k: v for k, v in schema.items() if k not in _TOP_LEVEL_COMBINATORS}
+    return {**tool, "input_schema": wire_schema}
+
 
 def _log_empty_tool_input(model, tools, round_num, response, where):
     """Record the provider's whole response when a tool that needs arguments gets {}.
@@ -427,7 +438,11 @@ class _ClaudeProtocolAdapter:
         # Tool definitions go to the provider whole: descriptions carry the
         # usage contract, and cutting them (360/160 characters until
         # 2026-09-25) hid field rules from the model.
-        cached_tools = copy.deepcopy(list(tools or []))
+        # Local argument validation keeps the full schemas; the wire copy drops
+        # top-level anyOf/oneOf/allOf, which the Messages API rejects with 400
+        # (knowledge_graph_search's query-or-entity rule, 2026-10-23).
+        self.tool_definitions = list(tools or [])
+        cached_tools = [_anthropic_wire_tool(t) for t in copy.deepcopy(self.tool_definitions)]
         if cached_tools:
             cached_tools[-1] = {**cached_tools[-1], "cache_control": _CACHE_CONTROL_1H}
         self.cached_tools = cached_tools
@@ -685,7 +700,7 @@ class _ClaudeProtocolAdapter:
             round_num=round_num,
             log_event=self.log_event,
             idempotency_cache=self.tool_execution_cache,
-            tool_definitions=self.cached_tools,
+            tool_definitions=self.tool_definitions,
         )
 
     def note_exec_results(self, round_num, exec_results):
