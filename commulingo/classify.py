@@ -38,8 +38,9 @@ GROUP_RULES = {
     "stalin-era": "Soviet citizens whose public role peaked 1929–1953: enforcers, officials, commanders, scientists and "
                   "artists of the Stalin years, including victims of the terror whose careers began under Stalin.",
     "thaw": "Soviet citizens whose public role peaked 1953–1985: thaw and stagnation, space and science, reformers, dissidents.",
-    "perestroika": "Soviet citizens whose public role peaked 1985–1991 or who presided over the end of the USSR and the first "
-                   "post-Soviet years.",
+    "perestroika": "Soviet and post-Soviet citizens whose public role peaked 1985–1999: perestroika, the end of the "
+                   "USSR, and the 1990s in Russia and the newly independent states (Gorbachev, Yeltsin, Chernomyrdin, "
+                   "Primakov).",
     "china-old-regime": "Chinese citizens on the side the Communists fought, 1894–1949: late-Qing officials and generals "
                         "(Yuan Shikai), warlords (Zhang Zuolin), Kuomintang politicians, diplomats and generals (Chiang "
                         "Kai-shek, Wang Jingwei, T. V. Soong). NOT the Communists' foreign statesmen counterparts.",
