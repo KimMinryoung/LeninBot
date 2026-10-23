@@ -518,10 +518,11 @@ async def _dispatch_chat_provider(
     # Claude path. `messages` has already had the runtime context merged into
     # the trailing user turn by `_attach_chat_runtime_context`,
     # so history remains byte-stable across turns and prefix caching works.
+    from llm.claude_loop import chat_with_tools as claude_chat
     claude_inference = resolve_inference_extra(
         call_inference_policy, "claude", profile.model_id,
     )
-    _chat_coro = chat_with_tools(
+    _chat_coro = claude_chat(
         messages,
         client=_claude,
         model=profile.model_id,
