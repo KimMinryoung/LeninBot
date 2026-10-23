@@ -82,7 +82,8 @@ GROUP_RULES = {
     "world-cold-war": "People outside the Soviet and Chinese shelves whose public role peaked after 1945: the people's "
                       "democracies and their reformers and dissidents, decolonization and national liberation (Ho Chi Minh, "
                       "Castro, Guevara, Cabral), Cold War statesmen and anti-communist regimes (Pinochet), 1956, 1968 "
-                      "and 1989, and anyone later. A non-Soviet citizen never belongs to a Soviet era group.",
+                      "and 1989, and anyone later. A non-Soviet citizen never belongs to a Soviet era group, except that "
+                      "people of the former Soviet republics whose role peaked 1985–1999 go to perestroika.",
     "scholar": "ONLY historians and social scientists who researched and interpreted this history (Soviet studies, Marxist "
                "theory scholarship). NOT natural scientists, engineers or physicians — those belong to the era group of their "
                "Soviet career.",
@@ -467,7 +468,7 @@ def group_question(groups: list[dict]) -> dict:
     return {"type": "choice", "criteria": group_criteria,
             "instructions": "Which dictionary group does this person belong to? Soviet citizens go to the era in which "
                             "their public role peaked; Chinese citizens go to the china-* group of their era or side; "
-                            "people outside both states go to the world group of the era in which their public role peaked; people of the French Revolution and Napoleon go to france-revolution; France of 1830–1871 (1848, the Second Empire, the Paris Commune) goes to france-commune. Historians researching this history use scholar regardless of nationality; actors or targets in historical events can retain the era of their activity."}
+                            "citizens of the former Soviet republics whose role peaked 1985–1999 go to perestroika; people outside both states go to the world group of the era in which their public role peaked; people of the French Revolution and Napoleon go to france-revolution; France of 1830–1871 (1848, the Second Empire, the Paris Commune) goes to france-commune. Historians researching this history use scholar regardless of nationality; actors or targets in historical events can retain the era of their activity."}
 
 
 def _text(value, lang: str) -> str:
