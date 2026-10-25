@@ -85,9 +85,15 @@ Nginx는 Cloudflare 뒤에서 `cyber-lenin.com`의 HTTPS를 받고 모든 일반
 
 Nginx·프런트엔드의 역방향 HTTP 프록시와 내부 서비스 게이트웨이는 별개다. `llm_proxy`는 loopback `:8110`에서 모델 제공자 키를 보관·주입하고 정책·감사를 수행한다([llm_gateway.md](llm_gateway.md)). `web_gateway`는 loopback `:8111`에서 유료 검색·본문 추출 키와 공용 예산을 관리한다([web_research.md](web_research.md)). 두 서비스는 공개 Nginx 라우트가 아니다. 모델이 호출하는 도구의 가시성과 실행 권한은 [tool_gateway.md](tool_gateway.md), [security_gateway.md](security_gateway.md)가 담당한다.
 
-## Brotli 런타임 패치
+## Python 의존성 보안
 
-Python 공용 venv의 Brotli 최소 버전은 1.2.1(CVE-2026-111497 수정)이며 requirements.txt와 lock에 반영한다. requests/urllib3, httpx, aiohttp는 설치된 Brotli를 응답 해제에 사용할 수 있고 Crawl4AI가 의존하므로 제거하지 않는다. pip 업그레이드는 이미 로드한 네이티브 모듈을 교체하지 않는다. 적용은 운영자가 관련 Python 서비스를 재시작하고 확인해야 하며 Telegram은 프로그래머 작업에서 재시작하지 않는다. 프런트엔드 Node 패치는 별도 저장소 Dockerfile로 관리하고 앱·채팅 컨테이너 모두 교체해야 한다.
+- 점검: `pip-audit --path venv/lib/python3.12/site-packages`(별도 venv에 설치해 실행)와 프런트엔드 `npm audit --omit=dev`. `torch`는 로컬 빌드 표기(`+cpu`) 때문에 `--path` 감사에서 빠지므로 `torch==<버전>`을 `-r`로 따로 조회한다.
+- torch는 CPU 빌드(`--index-url https://download.pytorch.org/whl/cpu`)다. 서버에 GPU가 없고 embedding은 `device: cpu`로 돈다. PyPI 기본 torch는 CUDA 패키지 수 GB를 끌어오므로 torch를 올릴 때도 CPU 인덱스를 쓴다. `scripts/cloud_setup.sh`는 torch 계열을 설치하지 않는다.
+- `anthropic`은 0.116.0으로 고정한다. 최신 langchain-anthropic을 풀어 두면 1.x로 메이저 점프한다.
+- browser-use 0.12.5는 여러 패키지(anthropic, aiohttp, mcp, pillow, pypdf 등)를 정확한 버전으로 요구한다. 보안 업데이트는 이 고정을 넘어서 적용하고, `pip check`에 남는 browser-use 경고는 허용한다. browser worker의 import와 동작으로 확인한다.
+- Brotli 최소 버전은 1.2.1(CVE-2026-111497)이다. urllib3/httpx/aiohttp가 응답 해제에 쓴다.
+- crawl4ai는 쓰지 않아(`content_fetch/urls.py`가 의도적으로 배제) 2026-10-25 제거했다. 그것만 쓰던 nltk, pyopenssl, shapely, litellm 등도 함께 지웠다.
+- pip 업그레이드는 실행 중인 프로세스의 코드를 바꾸지 않는다. 업그레이드 뒤에는 관련 서비스를 재시작한다. `deploy --all`은 venv가 바뀐 뒤 시작되지 않은 embedding도 재시작한다. 프런트엔드 Node 패치는 별도 저장소 Dockerfile로 관리하고 앱·채팅 컨테이너 모두 교체해야 한다.
 
 ## Service Units
 

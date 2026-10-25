@@ -35,6 +35,7 @@ import logging
 import os
 import re
 import time
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import unquote
@@ -156,7 +157,15 @@ _STRIP_RESPONSE = {
 # detection is the caller's job (the loops' idle guards), not this hop's.
 _TIMEOUT = httpx.Timeout(connect=15.0, read=1200.0, write=120.0, pool=60.0)
 
-app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+# Starlette 1.0 removed on_event hooks; shutdown cleanup runs in the lifespan.
+@asynccontextmanager
+async def _lifespan(_app):
+    yield
+    if _client is not None:
+        await _client.aclose()
+
+
+app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, lifespan=_lifespan)
 _client: httpx.AsyncClient | None = None
 
 
@@ -701,8 +710,3 @@ async def proxy(provider: str, path: str, request: Request):
         },
     )
 
-
-@app.on_event("shutdown")
-async def _shutdown():
-    if _client is not None:
-        await _client.aclose()
