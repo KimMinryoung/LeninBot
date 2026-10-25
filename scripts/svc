@@ -194,16 +194,18 @@ _restart_if_enabled() {
     fi
 }
 
-# Succeeds when the unit's process still maps a venv file that pip has since
-# replaced (pip moves it to /tmp/pip-uninstall-*, so the mapping reads
-# "(deleted)"). Such a process keeps running the old native code — the
-# embedding server kept Brotli 1.2.0 after the 1.2.1 security upgrade.
-_maps_replaced_venv_files() {
-    local unit pid
+# Succeeds when a package in the venv was installed or upgraded after the
+# unit's process started. pip upgrades often run outside a deploy, and such a
+# process keeps the old code — the embedding server kept Brotli 1.2.0 after
+# the 1.2.1 security upgrade.
+_venv_changed_since_start() {
+    local unit started
     unit=$(to_unit "$1")
-    pid=$(systemctl show "$unit" -p MainPID --value 2>/dev/null || echo 0)
-    [[ -n "$pid" && "$pid" != "0" && -r "/proc/$pid/maps" ]] || return 1
-    grep -E "($VENV/|/pip-uninstall-).* \(deleted\)$" "/proc/$pid/maps" >/dev/null
+    started=$(systemctl show "$unit" -p ExecMainStartTimestamp --value 2>/dev/null)
+    [[ -n "$started" ]] || return 1
+    started=$(date -d "$started" +%s 2>/dev/null) || return 1
+    [[ -n "$(find "$VENV"/lib/python3*/site-packages -maxdepth 1 -name '*.dist-info' \
+        -newermt "@$started" -print -quit 2>/dev/null)" ]]
 }
 
 wait_healthy() {
@@ -392,12 +394,12 @@ METAEOF
         DEPLOY_COMMIT="$REMOTE"
 
         # The embedding server reloads its model on restart, so --all restarts
-        # it only when its code or the dependencies changed, or when it still
-        # runs native files pip replaced outside a deploy.
+        # it only when its code or the dependencies changed, or when pip
+        # changed the venv after it started.
         if [[ "$DID_PULL" -eq 1 ]] && git diff "$LOCAL" "$REMOTE" --name-only | grep -qE "requirements|services/embedding_server\.py"; then
             RESTART_EMBEDDING=1
-        elif _maps_replaced_venv_files embedding; then
-            log "embedding: still maps venv files replaced by pip"
+        elif _venv_changed_since_start embedding; then
+            log "embedding: venv packages changed after it started"
             RESTART_EMBEDDING=1
         fi
 
