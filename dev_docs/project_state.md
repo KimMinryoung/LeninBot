@@ -85,6 +85,10 @@ Nginx는 Cloudflare 뒤에서 `cyber-lenin.com`의 HTTPS를 받고 모든 일반
 
 Nginx·프런트엔드의 역방향 HTTP 프록시와 내부 서비스 게이트웨이는 별개다. `llm_proxy`는 loopback `:8110`에서 모델 제공자 키를 보관·주입하고 정책·감사를 수행한다([llm_gateway.md](llm_gateway.md)). `web_gateway`는 loopback `:8111`에서 유료 검색·본문 추출 키와 공용 예산을 관리한다([web_research.md](web_research.md)). 두 서비스는 공개 Nginx 라우트가 아니다. 모델이 호출하는 도구의 가시성과 실행 권한은 [tool_gateway.md](tool_gateway.md), [security_gateway.md](security_gateway.md)가 담당한다.
 
+## Brotli 런타임 패치
+
+Python 공용 venv의 Brotli 최소 버전은 1.2.1(CVE-2026-111497 수정)이며 requirements.txt와 lock에 반영한다. requests/urllib3, httpx, aiohttp는 설치된 Brotli를 응답 해제에 사용할 수 있고 Crawl4AI가 의존하므로 제거하지 않는다. pip 업그레이드는 이미 로드한 네이티브 모듈을 교체하지 않는다. 적용은 운영자가 관련 Python 서비스를 재시작하고 확인해야 하며 Telegram은 프로그래머 작업에서 재시작하지 않는다. 프런트엔드 Node 패치는 별도 저장소 Dockerfile로 관리하고 앱·채팅 컨테이너 모두 교체해야 한다.
+
 ## Service Units
 
 | Unit | Entrypoint | Role |

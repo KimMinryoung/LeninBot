@@ -29,6 +29,7 @@ graphiti-core[google-genai]
 playwright
 browser-use
 crawl4ai
+Brotli>=1.2.1  # CVE-2026-111497; used by Crawl4AI and HTTP decoders
 
 # Finance data
 yfinance

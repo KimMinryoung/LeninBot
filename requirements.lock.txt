@@ -18,7 +18,7 @@ beautifulsoup4==4.14.3
 bitarray==3.8.1
 boto3==1.43.100
 botocore==1.43.100
-brotli==1.2.0
+brotli==1.2.1
 browser-use==0.12.5
 browser-use-sdk==2.0.15
 bubus==1.5.6
