@@ -2,12 +2,14 @@
 # svc — LeninBot unified service management
 #
 # Usage:
-#   svc deploy [--api|--telegram|--frontend|--all] [--restart]
+#   svc deploy [--api|--telegram|--frontend|--all] [--restart] [--force]
 #       Pull code, install deps if changed, restart services, notify via Telegram.
 #       Called by Telegram /deploy command. Default: --all, which checks the
 #       api/telegram restart guards first and then restarts every enabled
-#       long-running unit (llm-proxy, web-gateway, api, a2a-api, email-api,
-#       novel-writer, roleplay, worker, browser, telegram last) and the frontend.
+#       long-running unit (llm-proxy, web-gateway, embedding when needed, api,
+#       a2a-api, email-api, novel-writer, roleplay, worker, browser, telegram
+#       last) and the frontend. A --restart of the commit and target deployed
+#       less than DEPLOY_RESTART_COOLDOWN seconds ago is skipped unless --force.
 #
 #   svc boot
 #       Start all services in dependency order with health checks. For server reboot.
@@ -47,6 +49,11 @@ VENV="$DEPLOY_DIR/venv"
 LOG="${DEPLOY_LOG:-/tmp/leninbot-deploy.log}"
 DEPLOY_META="${DEPLOY_META:-/tmp/leninbot-deploy-meta.json}"
 LOCK_FILE="${DEPLOY_LOCK:-/tmp/leninbot-deploy.lock}"
+# "<commit> <target> <epoch>" of the last deploy that reached the restart
+# step. A restart-only deploy of the same commit and target inside the
+# cooldown is skipped; the flock above only catches overlapping runs.
+LAST_DEPLOY_FILE="${DEPLOY_LAST:-/tmp/leninbot-deploy-last}"
+RESTART_COOLDOWN="${DEPLOY_RESTART_COOLDOWN:-600}"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -187,6 +194,18 @@ _restart_if_enabled() {
     fi
 }
 
+# Succeeds when the unit's process still maps a venv file that pip has since
+# replaced (pip moves it to /tmp/pip-uninstall-*, so the mapping reads
+# "(deleted)"). Such a process keeps running the old native code — the
+# embedding server kept Brotli 1.2.0 after the 1.2.1 security upgrade.
+_maps_replaced_venv_files() {
+    local unit pid
+    unit=$(to_unit "$1")
+    pid=$(systemctl show "$unit" -p MainPID --value 2>/dev/null || echo 0)
+    [[ -n "$pid" && "$pid" != "0" && -r "/proc/$pid/maps" ]] || return 1
+    grep -E "($VENV/|/pip-uninstall-).* \(deleted\)$" "/proc/$pid/maps" >/dev/null
+}
+
 wait_healthy() {
     local name="$1" check="$2" max_wait="${3:-30}"
     local elapsed=0
@@ -246,24 +265,40 @@ _deploy_frontend() {
     cd "$DEPLOY_DIR"
 }
 
+# Succeeds when the last deploy of this commit covered target $2 (an "all"
+# deploy covers every target) less than RESTART_COOLDOWN seconds ago.
+_recently_deployed() {
+    local commit="$1" target="$2" last_commit last_target last_at
+    [[ -r "$LAST_DEPLOY_FILE" ]] || return 1
+    read -r last_commit last_target last_at < "$LAST_DEPLOY_FILE" || return 1
+    [[ "$last_commit" == "$commit" ]] || return 1
+    [[ "$last_target" == "all" || "$last_target" == "$target" ]] || return 1
+    [[ "$last_at" =~ ^[0-9]+$ ]] || return 1
+    (( $(date +%s) - last_at < RESTART_COOLDOWN ))
+}
+
 # ════════════════════════════════════════════════════════════════
 # Commands
 # ════════════════════════════════════════════════════════════════
 
 cmd_deploy() {
     local FORCE_RESTART=0
+    local FORCE=0
     local SERVICE="all"
 
     for arg in "$@"; do
         case "$arg" in
             --restart|-r) FORCE_RESTART=1 ;;
+            --force)      FORCE=1 ;;
             --telegram)   SERVICE="telegram" ;;
             --api)        SERVICE="api" ;;
             --frontend)   SERVICE="frontend" ;;
             --all)        SERVICE="all" ;;
             --help|-h)
-                echo "Usage: svc deploy [--api|--telegram|--frontend|--all] [--restart]"
+                echo "Usage: svc deploy [--api|--telegram|--frontend|--all] [--restart] [--force]"
                 echo "  --restart, -r   Restart even when no new commit is found."
+                echo "  --force         With --restart, ignore the ${RESTART_COOLDOWN}s cooldown after"
+                echo "                  a deploy of the same commit and target."
                 echo "  --telegram      Restart leninbot-telegram only."
                 echo "  --api           Restart leninbot-api only."
                 echo "  --frontend      Rebuild and restart frontend container only."
@@ -272,7 +307,7 @@ cmd_deploy() {
                 ;;
             *)
                 err "Unknown option: $arg"
-                err "Usage: svc deploy [--api|--telegram|--frontend|--all] [--restart]"
+                err "Usage: svc deploy [--api|--telegram|--frontend|--all] [--restart] [--force]"
                 exit 2
                 ;;
         esac
@@ -292,6 +327,7 @@ cmd_deploy() {
         local error_context
         error_context=$(tail -5 "$LOG" 2>/dev/null | head -4)
         err "Deploy failed (line $failed_line, exit $exit_code)"
+        rm -f "$LAST_DEPLOY_FILE"  # a failed deploy must not block its retry
         _notify_telegram "❌ *Deploy 실패* (exit $exit_code)
 단계: line $failed_line
 \`\`\`
@@ -320,8 +356,14 @@ METAEOF
     local LOCAL="" REMOTE="" DID_PULL=0 CHANGES="" RESTARTED=""
 
     # ── Frontend-only mode: skip backend steps ──
+    local DEPLOY_COMMIT="" RESTART_EMBEDDING=0
     if [[ "$SERVICE" == "frontend" ]]; then
         CHANGES="(frontend-only deploy)"
+        DEPLOY_COMMIT=$(git -C "$FRONTEND_DIR" rev-parse HEAD 2>/dev/null || echo unknown)
+        if [[ "$FORCE" -eq 0 ]] && _recently_deployed "$DEPLOY_COMMIT" frontend; then
+            warn "frontend ${DEPLOY_COMMIT:0:8} was deployed less than ${RESTART_COOLDOWN}s ago. Skipping (use --force to redeploy)."
+            exit 0
+        fi
     else
         # 1. Git pull
         _git_fetch_with_retry
@@ -333,6 +375,10 @@ METAEOF
                 log "Already up to date. Nothing to do."
                 exit 0
             fi
+            if [[ "$FORCE" -eq 0 ]] && _recently_deployed "$LOCAL" "$SERVICE"; then
+                warn "${LOCAL:0:8} [$SERVICE] was deployed less than ${RESTART_COOLDOWN}s ago. Skipping restart (use --force to restart again)."
+                exit 0
+            fi
             log "Already up to date, but --restart requested."
             CHANGES="(no code change: restart only)"
         else
@@ -341,6 +387,18 @@ METAEOF
             echo "$CHANGES"
             git pull origin "$BRANCH"
             DID_PULL=1
+        fi
+
+        DEPLOY_COMMIT="$REMOTE"
+
+        # The embedding server reloads its model on restart, so --all restarts
+        # it only when its code or the dependencies changed, or when it still
+        # runs native files pip replaced outside a deploy.
+        if [[ "$DID_PULL" -eq 1 ]] && git diff "$LOCAL" "$REMOTE" --name-only | grep -qE "requirements|services/embedding_server\.py"; then
+            RESTART_EMBEDDING=1
+        elif _maps_replaced_venv_files embedding; then
+            log "embedding: still maps venv files replaced by pip"
+            RESTART_EMBEDDING=1
         fi
 
         # 2. Dependencies
@@ -391,7 +449,15 @@ METAEOF
             fi
         done
         for name in "${DEPLOY_EXTRA_BEFORE[@]}"; do _restart_if_enabled "$name"; done
+        if [[ "$RESTART_EMBEDDING" -eq 1 ]]; then
+            _restart_if_enabled embedding
+            wait_healthy embedding "curl -sf http://localhost:8100/health" 60 || true
+        fi
     fi
+
+    # Stamp before the restarts: restarting telegram may kill this script
+    # (Telegram /deploy), so the end of the function is not always reached.
+    echo "$DEPLOY_COMMIT $SERVICE $(date +%s)" > "$LAST_DEPLOY_FILE"
 
     if [[ "$SERVICE" == "all" || "$SERVICE" == "api" ]]; then
         do_graceful_restart api
