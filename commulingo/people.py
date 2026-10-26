@@ -273,6 +273,7 @@ _FAMILY_FIRST: dict[str, dict[str, str | None]] = {
     "north-korea": {"ko": "", "en": " "},
     "south-korea": {"ko": "", "en": " "},
     "china": {"ko": "", "en": " "},
+    "taiwan": {"ko": "", "en": " "},
     "vietnam": {"ko": "", "en": " "},
     "japan": {"ko": " ", "en": None},
     "hungary": {"ko": " ", "en": None},
