@@ -98,37 +98,54 @@ TERM_FEATURE = "commulingo_term_classification"
 # these rules left 445 under 0.8 on either axis; a reading of those changed
 # 130, so the accepted ≥0.8 answers stand as written.
 TERM_RULES = {
-    "theory": "Ideologies, doctrines, -isms, concepts, slogans and strategic or tactical doctrines; theoretical, "
-              "historiographical and methodological terms (including estimates and debates among historians); "
-              "programmatic texts and works (Critique of the Gotha Programme, April Theses); official doctrines and "
-              "ideological formulas of a state or party.",
-    "parties": "Political parties of any country and era with their own organs, congresses, conferences and programmes "
-               "(Politburo, a party congress); internationals (Comintern, Profintern); trade unions, youth, women's, "
-               "mass and armed political organizations such as Red Guards or militias of a party.",
+    "theory": "Ideologies, doctrines, -isms, concepts, slogans and strategic or tactical doctrines; theoretical and "
+              "methodological terms; programmatic texts and works (Critique of the Gotha Programme, April Theses); "
+              "official doctrines and ideological formulas of a state or party.",
+    "philosophy": "Philosophical schools, concepts and works: dialectics, materialism, epistemology, existentialism, "
+                  "Nietzsche, the Frankfurt School.",
+    "historiography": "How historians read the past: debates and interpretations among historians, historiographical "
+                      "schools and theses (totalitarian and revisionist schools), casualty and mortality estimates, "
+                      "archival gaps, myths and collective memory of past events.",
+    "parties": "Political parties of any country and era and their programmes; internationals (Comintern); youth, "
+               "mass and political associations (Komsomol). Party organs and meetings go to factions, trade unions "
+               "to labor, armed formations to military.",
+    "factions": "Party organs, offices and meetings (Politburo, Central Committee, secretariat, a party congress, "
+                "conference or plenum, a party resolution) and intra-party factions, oppositions, platforms, "
+                "tendencies and line struggles inside a party or movement, in any country.",
     "state": "States, regimes and republics as polities; constitutions; governments, ministries, commissariats, "
              "councils, legislatures, soviets and their congresses; offices and titles; elections, administrative "
              "divisions, the nomenklatura and other institutions of state power.",
-    "factions": "Intra-party factions, oppositions, platforms, tendencies and line struggles inside a party or movement, "
-                "in any country.",
-    "events": "Revolutions, uprisings, rebellions, coups, mutinies, strikes, protests, political crises and mass "
-              "political movements or campaigns as events — unless the event is a war or battle (military), a purge "
-              "or terror (repression), or an economic campaign (economy).",
-    "military": "Wars, battles, sieges, military operations and campaigns, armies, units and commands, defence lines, "
-                "weapons and military technology, military doctrine, occupation and partisan warfare.",
+    "events": "Revolutions, uprisings, rebellions, coups, mutinies, protests, political crises and mass political "
+              "movements or campaigns as events — unless the event is a war or battle (military), a purge or terror "
+              "(repression), a strike (labor) or an economic campaign (economy).",
+    "labor": "Trade unions and strike committees, strikes and general strikes, labour law and working hours, "
+             "collective bargaining, workers' associations and labour movements, workers' control and "
+             "self-management, labour-emulation campaigns (Stakhanovism), employment status and precarious work.",
+    "military": "Wars, battles, sieges, military operations and campaigns, armies, units, commands and armed "
+                "formations (Red Guards, the White movement), defence lines, weapons, military doctrine, occupation "
+                "and partisan warfare.",
     "diplomacy": "Relations between states: treaties, pacts, agreements, summits, alliances and blocs, interstate "
                  "organizations (Warsaw Pact, OEEC), borders settled between states, foreign-policy doctrines, the "
                  "Cold War order and international payment systems.",
     "repression": "Terror, purges, security and police organs, camps, prisons, trials, criminal law and repressive "
-                  "decrees, deportations of social groups, censorship, persecution, pogroms and genocide, rehabilitation.",
+                  "decrees, deportations of social groups, censorship, persecution, pogroms and genocide, "
+                  "rehabilitation — unless it targets sexuality (gender).",
     "economy": "Economic policies, plans, reforms, institutions, campaigns and concepts in any era — Soviet planning, "
                "collectivization, NEP, money and finance, industry, trade, and present-day capitalism's markets, "
                "finance, platforms and firms.",
     "nationalities": "Nationalities policy, ethnic and national questions, autonomies, minority statuses, deportations "
                      "of peoples, national identity; religion, churches, cults and anti-religious campaigns.",
-    "culture": "Literature, arts, education, science and technology, space flight, newspapers, news agencies, radio, "
-               "propaganda and official narratives, intellectual life.",
-    "society": "Social classes and groups, everyday life, labour conditions, family, women and gender, health, housing, "
-               "demography, migration, sport, and present-day social debates (climate, work, inequality).",
+    "society": "Social classes and groups, everyday life, family, health, housing, demography, migration, sport, and "
+               "present-day social debates (climate, inequality).",
+    "gender": "Sex and gender: women's movements and organizations, sexual reform and homosexual emancipation, "
+              "marriage, divorce, abortion and birth-control law, laws, trials and persecution aimed at sexuality "
+              "(Paragraph 175), feminist, gender and sexuality theory.",
+    "arts": "Literature (novels, poetry, plays), film, theatre, music, fine arts and monuments; artistic movements, "
+            "groups and doctrines (socialist realism, LEF), arts policy and prizes.",
+    "culture": "Newspapers, journals, news agencies, radio, publishing and samizdat, education and literacy, "
+               "propaganda and official narratives, intellectual life and cultural policy outside the arts.",
+    "science": "Natural science and its institutions, technology and engineering, space flight, nuclear power, "
+               "computing and AI, scientific controversies (Lysenkoism).",
 }
 TERM_REGION_RULES = {
     "russia-ussr": "The Russian Empire, Soviet Russia, the USSR and its republics, and present-day Russia.",

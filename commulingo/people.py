@@ -384,20 +384,22 @@ _PATCH_KEYS_BY_TARGET = {
 # is reachable, and the loader logs a warning on every fall back so a stale copy
 # announces itself.
 _TERM_CATEGORY_FALLBACK = (
-    ("theory", "Ideology and theory"), ("parties", "Parties and organizations"),
-    ("state", "State and government"), ("factions", "Factions and line struggles"),
-    ("events", "Revolutions and movements"), ("military", "War and the military"),
-    ("diplomacy", "Diplomacy and world order"), ("repression", "Repression and law"),
-    ("economy", "Economy"), ("nationalities", "Nations and religion"),
-    ("culture", "Culture, science and media"), ("society", "Society and everyday life"),
+    ("theory", "Ideology and theory"), ("philosophy", "Philosophy"),
+    ("historiography", "Historiography and historical debates"), ("parties", "Parties and organizations"),
+    ("factions", "Party organs and line struggles"), ("state", "State and government"),
+    ("events", "Revolutions and movements"), ("labor", "Labour and the labour movement"),
+    ("military", "War and the military"), ("diplomacy", "Diplomacy and world order"),
+    ("repression", "Repression and law"), ("economy", "Economy"), ("nationalities", "Nations and religion"),
+    ("society", "Society and everyday life"), ("gender", "Sex and gender"), ("arts", "Literature and the arts"),
+    ("culture", "Media, education and culture"), ("science", "Science and technology"),
 )
 
 
 def _load_term_categories() -> tuple[tuple[str, ...], str]:
     """(slugs, hint line) for the schema enum and the rejection messages.
 
-    The list mirrors CommuLingo's commulingo_term_categories (12 kinds since
-    frontend migration 286). It is not fetched at import: CommuLingo is reached
+    The list mirrors CommuLingo's commulingo_term_categories (18 kinds since
+    2026-10-29). It is not fetched at import: CommuLingo is reached
     only through its admin MCP, and its editorial store rejects an unknown
     category on save, so a stale copy here can only make a message less exact.
     """
