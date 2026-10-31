@@ -1332,13 +1332,14 @@ def _build_task_context_content(
     if plan_role == "synthesis" and plan_id:
         try:
             sibling_results = _query(
-                "SELECT id, agent_type, content, result, status, verification_status, verification_details FROM telegram_tasks "
+                "SELECT id, agent_type, content, result, status, verification_status, verification_details, metadata FROM telegram_tasks "
                 "WHERE plan_id = %s AND plan_role = 'subtask' "
                 "ORDER BY id ASC",
                 (plan_id,),
             )
             if sibling_results:
-                result_contexts.append(format_subtask_results(sibling_results, context_provider))
+                from telegram.result_envelope import attach_rendered
+                result_contexts.append(format_subtask_results(attach_rendered(sibling_results), context_provider))
             else:
                 result_contexts.append(wrap_context_block("subtask-results", "No subtask records available. Report missing evidence; do not infer completion.", context_provider))
         except Exception as e:
@@ -1351,13 +1352,14 @@ def _build_task_context_content(
     if isinstance(dep_task_ids, list) and dep_task_ids:
         try:
             dep_rows = _query(
-                "SELECT id, agent_type, content, result, status, verification_status, verification_details FROM telegram_tasks "
+                "SELECT id, agent_type, content, result, status, verification_status, verification_details, metadata FROM telegram_tasks "
                 "WHERE id = ANY(%s) ORDER BY id ASC",
                 ([int(x) for x in dep_task_ids],),
             )
             found_ids = {row['id'] for row in dep_rows}
             dep_rows += [{"id": int(tid), "status": "missing"} for tid in dep_task_ids if int(tid) not in found_ids]
-            result_contexts.append(format_dependency_results(dep_rows, context_provider))
+            from telegram.result_envelope import attach_rendered
+            result_contexts.append(format_dependency_results(attach_rendered(dep_rows), context_provider))
         except Exception as e:
             logger.warning("Dependency result injection failed for task %d: %s", task_id, e)
             result_contexts.append(wrap_context_block("dependency-results", "Dependency lookup failed. Report unavailable evidence; do not guess the results.", context_provider))
@@ -2122,6 +2124,9 @@ async def _hand_off_interrupted_task(
     restart_state = restart_ctx["state"] if restart_ctx["initiated"] else None
 
     metadata = dict(_load_task_metadata(row))
+    # The handoff is a new attempt; it must record its own result envelope.
+    from telegram.result_envelope import strip as _strip_result_envelope
+    _strip_result_envelope(metadata)
     if restart_state:
         # This startup proves only the Telegram process restarted.
         # Preserve pending API/browser restart claims as unconfirmed.

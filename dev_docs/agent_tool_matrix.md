@@ -21,6 +21,7 @@
 Notes:
 
 - Empty `finalization_tools`/`terminal_tools` means the agent uses only its normal tool list.
+- The worker adds task-context tools to every delegated agent except `stasova` after this list is filtered: `save_finding`, `read_user_chat`, `send_message`, `read_messages`, and `report_result` (structured outcome; see [multi_agent_architecture.md](multi_agent_architecture.md#delegated-result-envelope)).
 - `finalization_tools` remain callable after budget/round exhaustion so durable state can still be saved.
 - `terminal_tools` end the loop after a successful call and use the tool result as the task report.
 - The scheduled CommUlingo runners further reduce this declared surface per stage: discovery gets only the local typed `commulingo_candidate_select` terminal, new-person creation gets only `commulingo_person_create`, enrichment gets the three applicable people-write tools, and glossary maintenance gets only `commulingo_term_create`.

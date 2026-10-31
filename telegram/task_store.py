@@ -79,6 +79,9 @@ def create_task_in_db(
 
     try:
         metadata = dict(metadata or {})
+        # A new execution attempt never inherits the previous one's outcome.
+        from telegram.result_envelope import strip as _strip_result_envelope
+        _strip_result_envelope(metadata)
         if restart_state is not None:
             metadata["restart_state"] = restart_state
         restart_state = metadata.get("restart_state") if isinstance(metadata.get("restart_state"), dict) else None

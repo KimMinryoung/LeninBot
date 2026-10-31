@@ -3009,7 +3009,10 @@ def build_task_context_tools(task_id: int, user_id: int, depth: int = 0, mission
         "send_message": _exec_send_message,
         "read_messages": _exec_read_messages,
     }
-    return list(TASK_CONTEXT_TOOLS), handlers
+    # Structured outcome (telegram/result_envelope.py), stored on the task row.
+    from telegram import result_envelope
+    handlers[result_envelope.TOOL["name"]] = result_envelope.make_handler(task_id)
+    return list(TASK_CONTEXT_TOOLS) + [result_envelope.TOOL], handlers
 
 
 # Plural/legacy content_type spellings accepted by read_self. The web

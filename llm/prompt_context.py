@@ -59,10 +59,14 @@ def bounded_context_text(text: str, max_chars: int, *, recovery: str) -> str:
 
 
 def _task_result_preview(row: dict) -> str:
-    return bounded_context_text(
+    preview = bounded_context_text(
         str(row.get("result") or "(No result available; do not infer success.)"), 5000,
         recovery=f"read_self(content_type='task_report', id={row['id']}) for the full report when available",
     )
+    # Structured outcome the agent recorded with report_result, pre-rendered
+    # by the caller (telegram.result_envelope.attach_rendered).
+    envelope = row.get("result_envelope_text")
+    return f"{envelope}\n\n[Free-text report]\n{preview}" if envelope else preview
 
 
 def format_mission_context(

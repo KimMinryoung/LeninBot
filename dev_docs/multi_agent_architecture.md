@@ -436,6 +436,48 @@ For diary tasks, the runtime distinguishes new diary writing by exact scheduled 
 
 The diary prompt treats finance/securities data as background context by default during scheduled writing: it may be collected for judgment, but routine stock prices, tickers, index moves, and market fluctuations should not appear in diary prose unless directly necessary to explain the actual events, decisions, or political-economic contradiction of the period. `telegram/bot.py` also guards the `save_diary` handler and rejects publication attempts unless the task matches the configured scheduled diary-writing prompt. Published diary edits use `edit_content(content_type="diary", id=...)`; deletion and non-publication/unpublish requests use `edit_content(content_type="diary", id=..., action="delete"|"unpublish", confirm=true)`. Because `ai_diary` has no private/unpublished status column, unpublish removes the row from public diary storage after clearing publication audit FK references and invalidating caches.
 
+## Delegated Result Envelope
+
+Delegation input is already structured: `delegate`/`multi_delegate` take
+`success_criteria`, `required_capabilities`, `target_identifiers` and
+`forbidden_assumptions`, rendered as a `<delegation-contract>` block. The
+result side adds a matching structure (`telegram/result_envelope.py`).
+
+`report_result` is a task-context tool (`build_task_context_tools`, so every
+delegated agent except Stasova receives it). Agents not backed by Codex also get
+a one-paragraph instruction appended to the system prompt: call it once before
+the final answer. Fields:
+
+| Field | Rule |
+|---|---|
+| `status` | `done` / `partial` / `blocked` / `failed`: the agent's own judgment of goal completion. `partial` requires `open_questions`; `blocked` and `failed` require `blockers` (otherwise `ToolRejection`) |
+| `answer` | substantive result, ≤4,000 chars |
+| `findings` | ≤20 claims (≤600 chars) with ≤5 sources each (URL, slug/id, tool with key argument, task id) |
+| `open_questions`, `blockers`, `artifacts` | ≤10 items each, ≤500 chars |
+
+The handler stores the envelope in `telegram_tasks.metadata['result_envelope']`
+(existing JSONB column, no migration; the last call wins) and its risk class is
+`state`. The stored envelope carries the `task_id` that recorded it, and
+`load` returns it only for that task. Metadata is copied into retries and restart
+handoffs (`create_task_in_db` parent inheritance, the startup handoff INSERT),
+and both copy points also strip the envelope, so a new attempt never presents
+its predecessor's status and findings as its own. Consumers render it as "the agent's own structured claims, not
+independent verification", above the unchanged free-text report:
+
+- orchestrator task callback (`_orchestrator_report_task`), for done and failed tasks
+- synthesis `<subtask-results>` and DAG `<dependency-results>` (`attach_rendered`
+  pre-renders it as `result_envelope_text`; `llm/prompt_context.py` does not import `telegram`)
+
+The rendering flags two mismatches: execution ended normally while the agent
+reports anything other than `done`, and an agent-reported `done` with a failed
+independent verification. Execution status, the verifier and the free-text
+report are unchanged. The envelope adds a field; it does not replace them.
+
+Limits: the tool is not a finalization tool, so an agent that exhausts its
+budget or rounds before calling it ends without an envelope. Codex-backed agents
+(`programmer`) never see it. In both cases consumers get the free-text report
+exactly as before. Regression: `tests/test_result_envelope.py`.
+
 ## Owner Chat Context Across Turns
 
 The Telegram orchestrator's provider call starts from text-only history: native
