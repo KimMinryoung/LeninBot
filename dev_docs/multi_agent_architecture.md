@@ -461,8 +461,19 @@ table yields an `unavailable` record rather than a failed turn. Records are
 historical references, not receipts of new actions; a read-only call must be
 repeated for full or current output. Delegated agents do not use this table.
 
-Schema: `scripts/schema_migrations.py --only telegram-tool-evidence` (apply
-before deploying the code; until then the record reads as unavailable).
+Schema: `telegram.tool_evidence.DDL`, also registered as the
+`telegram-tool-evidence` migration. Apply it before deploying the code; until
+then the record reads as unavailable. On the production server an ad-hoc shell
+has no `DB_PASSWORD` (the runner connects as read-only `leninbot_ro`, and
+`LENINBOT_ALLOW_WRITE=1` alone then fails on the missing password), so pipe the
+DDL through the approved write path, which connects as the service login:
+
+```bash
+venv/bin/python -c "from telegram.tool_evidence import DDL; print(DDL)" | scripts/psql-main
+scripts/psql-main -c '\d telegram_tool_evidence'
+```
+
+Applied in production on 2026-10-31 this way.
 Regression: `tests/test_context_compaction.py`.
 
 ## Redis Runtime State
