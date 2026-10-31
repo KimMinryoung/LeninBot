@@ -24,12 +24,15 @@ from llm.tool_loop_common import (
     call_with_transient_retry,
     dedupe_tools_by_name,
     estimate_text_tokens,
+    InputTokenCalibrator,
+    usage_input_tokens,
     is_transient_provider_error as _is_transient_provider_error,
     provider_status_code as _provider_status_code,
 )
 from tool_gateway.dispatcher import execute_tool, execute_tools_batch
 from llm.provider_registry import anthropic_pricing_row, anthropic_pricing_table
 from llm.instrumented_clients import with_audit_owner
+from llm.context_compaction import compact_anthropic_messages
 
 logger = logging.getLogger(__name__)
 
@@ -455,6 +458,7 @@ class _ClaudeProtocolAdapter:
         )
         _tools_cache_blocks = 1 if cached_tools else 0
         self.message_cache_marks = max(0, 4 - _system_cache_blocks - _tools_cache_blocks)
+        self.token_calibrator = InputTokenCalibrator()
 
     def bind(self, state):
         self.state = state
@@ -472,77 +476,52 @@ class _ClaudeProtocolAdapter:
         # Callers that don't care about text_delta (e.g. Telegram) simply drop
         # the event — the final Message object is identical either way.
         if self.max_input_tokens is not None:
-            request_blob = json.dumps(
-                {
-                    "system": kwargs.get("system", []),
-                    "messages": kwargs.get("messages", []),
-                    "tools": kwargs.get("tools", []),
-                },
-                ensure_ascii=False,
-                default=str,
-            )
-            estimated_input = estimate_tokens(request_blob)
-            if estimated_input > int(self.max_input_tokens) and self.recover_input_via_tools:
-                compacted = [dict(message) for message in kwargs.get("messages", [])]
+            ceiling = int(self.max_input_tokens)
+
+            def fits(messages):
+                raw = estimate_tokens(json.dumps(
+                    {
+                        "system": kwargs.get("system", []),
+                        "messages": messages,
+                        "tools": kwargs.get("tools", []),
+                    },
+                    ensure_ascii=False,
+                    default=str,
+                ))
+                estimate = self.token_calibrator.calibrate(raw)
+                fits.raw = raw
+                return estimate <= ceiling, estimate
+
+            messages = kwargs.get("messages", [])
+            if self.recover_input_via_tools:
+                # Staged compaction (llm/context_compaction.py): replay stubs for
+                # replay-safe reads, excerpts for other old results, then a
+                # structural digest in place of the oldest whole rounds.
                 from tool_gateway.inference import is_replay_safe_tool
-                tool_names_by_id = {}
-                for prior in compacted:
-                    prior_content = prior.get("content")
-                    if not isinstance(prior_content, list):
-                        continue
-                    for prior_block in prior_content:
-                        if isinstance(prior_block, dict) and prior_block.get("type") == "tool_use":
-                            tool_names_by_id[str(prior_block.get("id") or "")] = str(
-                                prior_block.get("name") or ""
-                            )
-                # Replay-safe read results are reproducible from their source. Keep tool names and arguments in the preceding
-                # assistant tool_use block, but replace bulky result bodies
-                # oldest-first with an explicit replay instruction. The latest
-                # result is eligible only if older results are insufficient; order
-                # naturally gives it that last-resort behavior.
-                for message in compacted:
-                    content = message.get("content")
-                    if not isinstance(content, list):
-                        continue
-                    changed = False
-                    blocks = []
-                    for block in content:
-                        if (
-                            isinstance(block, dict)
-                            and block.get("type") == "tool_result"
-                            and is_replay_safe_tool(tool_names_by_id.get(
-                                str(block.get("tool_use_id") or "")
-                            ))
-                            and len(str(block.get("content") or "")) > 800
-                        ):
-                            block = dict(block)
-                            block["content"] = (
-                                "[Input checkpoint: prior tool result omitted from replay. "
-                                "The source remains stored; repeat the preceding read-only tool "
-                                "call with the exact same tool name and arguments to recover it.]"
-                            )
-                            changed = True
-                        blocks.append(block)
-                    if changed:
-                        message["content"] = blocks
-                        request_blob = json.dumps(
-                            {"system": kwargs.get("system", []), "messages": compacted, "tools": kwargs.get("tools", [])},
-                            ensure_ascii=False, default=str,
-                        )
-                        estimated_input = estimate_tokens(request_blob)
-                        if estimated_input <= int(self.max_input_tokens):
-                            break
-                kwargs["messages"] = compacted
-            if estimated_input > int(self.max_input_tokens):
+                messages, estimated_input = compact_anthropic_messages(
+                    messages, fits, is_replay_safe=is_replay_safe_tool,
+                )
+                # Cache marks sit on assistant messages; compaction rewrites only
+                # user-side blocks and drops whole rounds, so the mark count can
+                # only shrink and never exceeds the request's slot budget.
+                kwargs["messages"] = messages
+            fit, estimated_input = fits(messages)
+            if not fit:
                 raise ValueError(
                     f"Estimated input {estimated_input} tokens exceeds policy limit "
-                    f"{int(self.max_input_tokens)}; compact to durable summary and anchor-based reads first."
+                    f"{ceiling}; compact to durable summary and anchor-based reads first."
                 )
+            self.token_calibrator.mark(fits.raw)
         if self.thinking is not None:
             kwargs["thinking"] = self.thinking
         if self.output_config is not None:
             kwargs["output_config"] = self.output_config
         kwargs = with_audit_owner(self.client, kwargs, "loop")
+        response = await self._send(kwargs)
+        self.token_calibrator.observe(usage_input_tokens(getattr(response, "usage", None)))
+        return response
+
+    async def _send(self, kwargs):
         if self.on_progress is None:
             call = self.client.messages.create(**kwargs)
             if self.provider_idle_timeout_sec:

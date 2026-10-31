@@ -27,6 +27,70 @@ def estimate_text_tokens(text: str) -> int:
     return cjk + (other // 4)
 
 
+class InputTokenCalibrator:
+    """Correct the character heuristic with the provider's reported input usage.
+
+    Before each request the adapter calls ``mark(raw_estimate)``; after the
+    response it calls ``observe(actual_input_tokens)``. The ratio
+    actual/raw is smoothed (EMA) and clamped, and ``calibrate`` scales later
+    raw estimates. The ceiling check and compaction thus track the real
+    tokenizer of the model in use without a separate count-tokens round trip.
+    Small requests are ignored because fixed per-request overhead dominates
+    them and would skew the ratio.
+    """
+
+    MIN_RATIO = 0.6
+    MAX_RATIO = 4.0
+    MIN_SAMPLE_TOKENS = 1000
+    SMOOTHING = 0.5
+
+    def __init__(self):
+        self.ratio = 1.0
+        self.samples = 0
+        self._pending: int | None = None
+
+    def calibrate(self, raw_estimate: int) -> int:
+        return int(raw_estimate * self.ratio + 0.999)
+
+    def mark(self, raw_estimate: int) -> None:
+        self._pending = int(raw_estimate) if raw_estimate else None
+
+    def observe(self, actual_input_tokens) -> None:
+        raw, self._pending = self._pending, None
+        try:
+            actual = int(actual_input_tokens or 0)
+        except (TypeError, ValueError):
+            return
+        if not raw or raw < self.MIN_SAMPLE_TOKENS or actual <= 0:
+            return
+        ratio = min(self.MAX_RATIO, max(self.MIN_RATIO, actual / raw))
+        if self.samples == 0:
+            self.ratio = ratio
+        else:
+            self.ratio = self.SMOOTHING * self.ratio + (1 - self.SMOOTHING) * ratio
+        self.samples += 1
+
+
+def usage_input_tokens(usage) -> int:
+    """Total prompt tokens from an Anthropic or OpenAI usage object/dict.
+
+    Anthropic splits input into uncached, cache-write and cache-read parts; the
+    request size is their sum. OpenAI reports one ``prompt_tokens`` (Chat
+    Completions) or ``input_tokens`` (Responses) figure that already includes
+    cached tokens.
+    """
+    if usage is None:
+        return 0
+
+    def get(name):
+        value = usage.get(name) if isinstance(usage, dict) else getattr(usage, name, None)
+        return value if isinstance(value, (int, float)) else 0
+
+    prompt = get("prompt_tokens")
+    if prompt:
+        return int(prompt)
+    return int(get("input_tokens") + get("cache_creation_input_tokens") + get("cache_read_input_tokens"))
+
 
 # ── Transient provider-error classification ──────────────────────────
 # Shared by both agent loops. The name-token list subsumes every httpx

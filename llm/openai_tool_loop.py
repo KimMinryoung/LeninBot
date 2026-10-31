@@ -32,8 +32,11 @@ from llm.tool_loop_common import (
     build_stripped_limit_message, EMPTY_RESPONSE_FALLBACK,
     call_with_transient_retry,
     estimate_text_tokens,
+    InputTokenCalibrator,
     is_transient_provider_error,
+    usage_input_tokens,
 )
+from llm.context_compaction import compact_openai_messages
 from tool_gateway.dispatcher import (
     execute_tool,
     execute_tools_batch,
@@ -1067,44 +1070,25 @@ def _build_tc_list(sdk_mode, tool_calls) -> list[dict]:
 
 def _checkpoint_tool_results_for_replay(
     msgs: list[dict], max_input_tokens: int, tool_schema_tokens: int = 0,
+    calibrator=None,
 ) -> tuple[list[dict], int]:
-    """Replace large tool results with explicit same-call replay checkpoints.
+    """Compact tool history until the request fits ``max_input_tokens``.
 
-    The preceding assistant tool_call remains intact, including its exact tool
-    name and arguments. The model can therefore issue the same call again when
-    it needs the omitted source instead of receiving silently truncated text.
+    Staged (llm/context_compaction.py): replay-safe results become same-call
+    replay checkpoints (the preceding assistant tool_call keeps its exact name
+    and arguments), other old results become marked excerpts, and finally the
+    oldest whole rounds become a structural digest. Returns the original list
+    object when nothing had to change. ``calibrator`` (InputTokenCalibrator)
+    scales the heuristic estimate by the provider's observed usage.
     """
-    estimated = _estimate_tokens(msgs) + max(0, tool_schema_tokens)
-    if estimated <= max_input_tokens:
-        return msgs, estimated
-
-    checkpointed = [dict(message) for message in msgs]
     from tool_gateway.inference import is_replay_safe_tool
-    tool_names_by_id = {}
-    for message in checkpointed:
-        for tool_call in message.get("tool_calls") or []:
-            if not isinstance(tool_call, dict):
-                continue
-            function = tool_call.get("function") or {}
-            tool_names_by_id[str(tool_call.get("id") or "")] = str(function.get("name") or "")
-    candidates = [
-        index for index, message in enumerate(checkpointed)
-        if message.get("role") == "tool"
-        and is_replay_safe_tool(tool_names_by_id.get(str(message.get("tool_call_id") or "")))
-        and len(str(message.get("content", ""))) > 800
-        and not str(message.get("content", "")).startswith("[Input checkpoint:")
-    ]
-    for index in candidates:
-        tool_call_id = checkpointed[index].get("tool_call_id", "unknown")
-        checkpointed[index]["content"] = (
-            "[Input checkpoint: prior tool result omitted to stay within the "
-            "input ceiling. Re-run the preceding tool call with the same name "
-            f"and arguments if its complete source is needed. tool_call_id={tool_call_id}]"
-        )
-        estimated = _estimate_tokens(checkpointed) + max(0, tool_schema_tokens)
-        if estimated <= max_input_tokens:
-            break
-    return checkpointed, estimated
+
+    def fits(messages):
+        raw = _estimate_tokens(messages) + max(0, tool_schema_tokens)
+        estimate = calibrator.calibrate(raw) if calibrator is not None else raw
+        return estimate <= max_input_tokens, estimate
+
+    return compact_openai_messages(msgs, fits, is_replay_safe=is_replay_safe_tool)
 
 
 # ── Tool-use loop ────────────────────────────────────────────────────
@@ -1153,6 +1137,7 @@ class _OpenAIProtocolAdapter:
         self.openai_tools = _convert_tools(copy.deepcopy(list(tools or [])))
         self.side_effect_work_details: list[str] = []
         self.tool_execution_cache: dict[str, tuple[str, bool]] = {}
+        self.token_calibrator = InputTokenCalibrator()
         self.state = None
 
     def bind(self, state):
@@ -1183,14 +1168,18 @@ class _OpenAIProtocolAdapter:
             if self.recover_input_via_tools:
                 request_messages, estimated_input = _checkpoint_tool_results_for_replay(
                     request_messages, int(self.max_input_tokens), schema_tokens,
+                    calibrator=self.token_calibrator,
                 )
             else:
-                estimated_input = _estimate_tokens(request_messages) + schema_tokens
+                estimated_input = self.token_calibrator.calibrate(
+                    _estimate_tokens(request_messages) + schema_tokens
+                )
             if estimated_input > int(self.max_input_tokens):
                 raise RuntimeError(
                     f"Estimated input tokens {estimated_input} exceed configured ceiling "
                     f"{int(self.max_input_tokens)}; persist a durable summary and use anchored tool reads."
                 )
+            self.token_calibrator.mark(_estimate_tokens(request_messages) + schema_tokens)
 
         # Streaming is enabled in SDK mode when the caller provides
         # on_progress — text deltas are pushed through the callback so the UI
@@ -1212,11 +1201,14 @@ class _OpenAIProtocolAdapter:
                 request_messages, tools, max_tokens, parallel_tool_calls, stream_cb,
             )
 
-        return await call_with_transient_retry(
+        response = await call_with_transient_retry(
             _do_call,
             label=self.active_usage_label,
             on_progress=self.on_progress,
         )
+        if self.max_input_tokens is not None:
+            self.token_calibrator.observe(usage_input_tokens(_obj_get(response, "usage", None)))
+        return response
 
     async def _api_call_once(self, messages, tools, max_tokens, parallel_tool_calls, stream_cb):
         return await _api_call(
@@ -1246,10 +1238,13 @@ class _OpenAIProtocolAdapter:
             if self.recover_input_via_tools:
                 checkpointed, estimated_input = _checkpoint_tool_results_for_replay(
                     msgs, int(self.max_input_tokens), tool_schema_tokens,
+                    calibrator=self.token_calibrator,
                 )
                 msgs[:] = checkpointed
             else:
-                estimated_input = _estimate_tokens(msgs) + tool_schema_tokens
+                estimated_input = self.token_calibrator.calibrate(
+                    _estimate_tokens(msgs) + tool_schema_tokens
+                )
             if estimated_input > int(self.max_input_tokens):
                 raise RuntimeError(
                     f"Estimated input tokens {estimated_input} exceed configured ceiling "

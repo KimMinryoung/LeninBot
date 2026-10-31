@@ -31,6 +31,12 @@ def _telegram_summaries() -> None:
     ensure_summary_tables({})
 
 
+def _telegram_tool_evidence() -> None:
+    from telegram.tool_evidence import ensure_table
+
+    ensure_table()
+
+
 def _roleplay_tables() -> None:
     from telegram.schema import ensure_roleplay_tables
 
@@ -175,6 +181,7 @@ MIGRATIONS: list[tuple[str, Callable[[], None]]] = [
     ("commulingo-sources", _commulingo_sources),
     ("telegram-core", _telegram_core),
     ("telegram-summaries", _telegram_summaries),
+    ("telegram-tool-evidence", _telegram_tool_evidence),
     ("roleplay-tables", _roleplay_tables),
     ("research-documents", _research_documents),
     ("translation-freshness", _translation_freshness),

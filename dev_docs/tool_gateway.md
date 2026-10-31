@@ -83,7 +83,7 @@ The gateway is a facade, not a wholesale policy rewrite. These modules still own
 - The execution-time `security_gateway` remains defense-in-depth, not a replacement for allow-lists.
 - MCP gateway is not the runtime gateway; keep the names and docs distinct.
 - `tool_loop_common` re-exports dispatcher functions only for compatibility; new runtime imports should use `tool_gateway.dispatcher`.
-- Gateway-managed input overflow must not silently drop conversation text. Large results from explicitly replay-safe read-only tools become replay checkpoints that preserve the preceding tool call and its exact arguments; the model must re-run that call when it needs the complete source. Side-effecting tools are never marked for replay.
+- Gateway-managed input overflow must not silently drop conversation text. Large results from explicitly replay-safe read-only tools become replay checkpoints that preserve the preceding tool call and its exact arguments; the model must re-run that call when it needs the complete source. Side-effecting tools are never marked for replay. If that is not enough, other old results become marked excerpts and then the oldest rounds become a marked structural digest (`llm/context_compaction.py`, [llm_provider_architecture.md](llm_provider_architecture.md)); every removal is stated in the request.
 - Output continuation is bounded by policy and does not consume an ordinary tool round solely because a completion hit its output ceiling.
 - Unknown arguments are rejected rather than silently dropped. Provider schema defaults
   are normalized before idempotency hashing and handler dispatch.
@@ -99,6 +99,15 @@ validation failure, the dispatcher supplies the tool name, attempted arguments
 and error so the curator can preserve its draft for repair. Callback failures
 are logged and never change the rejection or audit verdict; outside that scope
 the hook is inactive. The observer does not weaken validation or invoke tools.
+
+`tool_gateway.observations.tool_result_observer` is a second optional ContextVar
+callback. `execute_tool` reports each completed call (name, arguments, final
+result text after the result cap, error flag) just before returning. Blocked and
+deduplicated early returns are not reported; the audit log covers them. The
+Telegram owner-chat orchestrator installs it per call to record cross-turn tool
+evidence (`telegram/tool_evidence.py`); every other `chat_with_tools` call sets
+it to `None`, so a delegated run nested inside an orchestrator turn stays out of
+that record. Observer failures are logged and never change the tool result.
 Scheduled CommuLingo runs extend existing narrow write schemas locally with
 draft_id/repairs. Authorization and the outer schema still run in the dispatcher;
 the wrapper reconstructs only its scoped rejected draft and validates the full
