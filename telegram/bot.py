@@ -1497,12 +1497,21 @@ async def _orchestrator_report_task(b: Bot, task: dict, result: dict, chat_id: i
                     logger.exception("Mail briefing delivery failed for task #%d; unsent items remain unbriefed", task_id)
                 return
         tool_log = ""
+        envelope_section = ""
         try:
             row = await asyncio.to_thread(
                 _query_one,
-                "SELECT tool_log FROM telegram_tasks WHERE id = %s", (task_id,),
+                "SELECT tool_log, metadata FROM telegram_tasks WHERE id = %s", (task_id,),
             )
             tool_log = (row or {}).get("tool_log", "") or ""
+            from telegram import result_envelope
+            envelope_text = result_envelope.render(
+                result_envelope.load(row or {}),
+                execution_status=status,
+                verification_status=(result.get("verification") or {}).get("status"),
+            )
+            if envelope_text:
+                envelope_section = f"\n\n{envelope_text}\n"
         except Exception:
             pass
 
@@ -1549,7 +1558,8 @@ async def _orchestrator_report_task(b: Bot, task: dict, result: dict, chat_id: i
 
             prompt = (
                 f"[TASK REPORT] Task #{task_id} [{agent_type}] execution ended{' (interrupted)' if was_interrupted else ''}; goal completion is not implied\n\n"
-                f"Original request:\n{_truncate_for_prompt(task.get('content', ''), 1000)}\n\n"
+                f"Original request:\n{_truncate_for_prompt(task.get('content', ''), 1000)}"
+                f"{envelope_section}\n\n"
                 f"Agent's report (claims, not independent verification):\n{report_for_callback(task_id, report)}"
                 f"{tool_log_section}"
                 f"{verification_section}"
@@ -1569,7 +1579,7 @@ async def _orchestrator_report_task(b: Bot, task: dict, result: dict, chat_id: i
             prompt = (
                 f"[TASK REPORT] Task #{task_id} [{agent_type}] failed\n\n"
                 f"Original request:\n{_truncate_for_prompt(task.get('content', ''), 500)}\n\n"
-                f"Error: {error}\n\n"
+                f"Error: {error}{envelope_section}\n\n"
                 f"Inform the user of the failure and its cause concisely. "
                 f"Do not re-delegate if the issue would not be resolved by retrying."
                 f"{mission_close_hint}"
@@ -1716,6 +1726,10 @@ async def _process_task_wrapper(b: Bot, task: dict):
     inference_policy = resolve_agent_inference_policy(spec)
     _agent_provider = spec.effective_provider(task_provider)
     system_prompt = spec.render_prompt(provider=_agent_provider)
+    # Codex runs its own toolset and never sees report_result.
+    if "report_result" in agent_handlers and spec.provider != "codex":
+        from telegram.result_envelope import GUIDANCE as _RESULT_GUIDANCE
+        system_prompt += _RESULT_GUIDANCE
 
     # Inject runtime environment info for programmer (needs venv, packages, services)
     if agent_type == "programmer":

@@ -52,6 +52,7 @@ TOOL_RISK_CLASS: dict[str, str] = {
     "route_task": "delegate",
     "mission": "state",
     "save_finding": "state",
+    "report_result": "state",  # delegated task's structured outcome on its own row
     "add_research_note": "state",
     "define_practice_output": "state",  # project #4 tick-local descriptor only
     "send_message": "state",
