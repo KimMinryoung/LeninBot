@@ -4,12 +4,18 @@
 # Usage:
 #   svc deploy [--api|--telegram|--frontend|--all] [--restart] [--force]
 #       Pull code, install deps if changed, restart services, notify via Telegram.
-#       Called by Telegram /deploy command. Default: --all, which checks the
-#       api/telegram restart guards first and then restarts every enabled
-#       long-running unit (llm-proxy, web-gateway, embedding when needed, api,
-#       a2a-api, email-api, novel-writer, roleplay, worker, browser, telegram
-#       last) and the frontend. A --restart of the commit and target deployed
-#       less than DEPLOY_RESTART_COOLDOWN seconds ago is skipped unless --force.
+#       Called by Telegram /deploy command. Default: --all, which diffs the
+#       last deployed commit against origin and restarts only the enabled
+#       long-running units whose code changed (scripts/affected_services.py;
+#       docs-only changes restart nothing, unattributable changes restart all),
+#       after checking the api/telegram restart guards, in dependency order
+#       (llm-proxy, web-gateway, embedding, api, a2a-api, email-api,
+#       novel-writer, roleplay, worker, browser, telegram last). The frontend
+#       repository deploys itself only when its revision changed.
+#       --restart restarts every backend unit even without a change (not the
+#       frontend unless --frontend); a --restart of the commit and target
+#       deployed less than DEPLOY_RESTART_COOLDOWN seconds ago is skipped
+#       unless --force.
 #
 #   svc boot
 #       Start all services in dependency order with health checks. For server reboot.
@@ -23,8 +29,10 @@
 #   svc status
 #       Show status of all services and timers.
 #
-# Services: neo4j embedding api telegram browser frontend
+# Services (boot/kill/restart/status): neo4j embedding api telegram browser frontend
 # Timers:   experience
+# deploy --all also covers: llm-proxy web-gateway a2a-api email-api
+#           novel-writer roleplay worker
 # Special:  all
 
 set -euo pipefail
@@ -53,6 +61,12 @@ LOCK_FILE="${DEPLOY_LOCK:-/tmp/leninbot-deploy.lock}"
 # step. A restart-only deploy of the same commit and target inside the
 # cooldown is skipped; the flock above only catches overlapping runs.
 LAST_DEPLOY_FILE="${DEPLOY_LAST:-/tmp/leninbot-deploy-last}"
+# Backend commit the long-running services were last restarted onto by a
+# `deploy --all`. The next deploy diffs against it (scripts/affected_services.py)
+# so a manual `git pull` before deploying is still attributed correctly. Kept
+# outside /tmp so a reboot does not force a full restart. Missing or invalid
+# means unknown, which restarts every service.
+DEPLOYED_FILE="${DEPLOY_DEPLOYED:-$HOME/.local/state/leninbot/deployed-commit}"
 RESTART_COOLDOWN="${DEPLOY_RESTART_COOLDOWN:-600}"
 
 RED='\033[0;31m'
@@ -298,13 +312,15 @@ cmd_deploy() {
             --all)        SERVICE="all" ;;
             --help|-h)
                 echo "Usage: svc deploy [--api|--telegram|--frontend|--all] [--restart] [--force]"
-                echo "  --restart, -r   Restart even when no new commit is found."
+                echo "  --restart, -r   Restart every backend service even without a change"
+                echo "                  (the frontend only together with --frontend)."
                 echo "  --force         With --restart, ignore the ${RESTART_COOLDOWN}s cooldown after"
                 echo "                  a deploy of the same commit and target."
                 echo "  --telegram      Restart leninbot-telegram only."
                 echo "  --api           Restart leninbot-api only."
                 echo "  --frontend      Rebuild and restart frontend container only."
-                echo "  --all           Restart every enabled long-running service (default)."
+                echo "  --all           Restart the enabled long-running services whose code"
+                echo "                  changed since the last deploy (default)."
                 exit 0
                 ;;
             *)
@@ -330,6 +346,7 @@ cmd_deploy() {
         error_context=$(tail -5 "$LOG" 2>/dev/null | head -4)
         err "Deploy failed (line $failed_line, exit $exit_code)"
         rm -f "$LAST_DEPLOY_FILE"  # a failed deploy must not block its retry
+        rm -f "$DEPLOYED_FILE"     # services may be mixed; next deploy restarts all
         _notify_telegram "❌ *Deploy 실패* (exit $exit_code)
 단계: line $failed_line
 \`\`\`
@@ -359,6 +376,9 @@ METAEOF
 
     # ── Frontend-only mode: skip backend steps ──
     local DEPLOY_COMMIT="" RESTART_EMBEDDING=0
+    # Restart plan for --all: FULL=1 restarts every unit; otherwise only the
+    # names in AFFECTED (space-padded list) restart.
+    local FULL=0 AFFECTED=" " BASE="" CHANGED_FILES=""
     if [[ "$SERVICE" == "frontend" ]]; then
         CHANGES="(frontend-only deploy)"
         DEPLOY_COMMIT=$(git -C "$FRONTEND_DIR" rev-parse HEAD 2>/dev/null || echo unknown)
@@ -372,17 +392,34 @@ METAEOF
         LOCAL=$(git rev-parse HEAD)
         REMOTE=$(git rev-parse "origin/$BRANCH")
 
+        # Commit the running services were last deployed onto (see DEPLOYED_FILE).
+        local DEPLOYED=""
+        if [[ -r "$DEPLOYED_FILE" ]]; then
+            DEPLOYED=$(tr -d '[:space:]' < "$DEPLOYED_FILE")
+            git cat-file -e "${DEPLOYED}^{commit}" 2>/dev/null || DEPLOYED=""
+        fi
+
         if [[ "$LOCAL" == "$REMOTE" ]]; then
-            if [[ "$FORCE_RESTART" -eq 0 ]]; then
-                log "Already up to date. Nothing to do."
+            if [[ "$FORCE_RESTART" -eq 1 ]]; then
+                if [[ "$FORCE" -eq 0 ]] && _recently_deployed "$LOCAL" "$SERVICE"; then
+                    warn "${LOCAL:0:8} [$SERVICE] was deployed less than ${RESTART_COOLDOWN}s ago. Skipping restart (use --force to restart again)."
+                    exit 0
+                fi
+                log "Already up to date, but --restart requested."
+                CHANGES="(no code change: restart only)"
+            elif [[ "$SERVICE" != "all" || "$DEPLOYED" == "$LOCAL" ]]; then
+                log "Already up to date. No backend restart needed."
+                if [[ "$SERVICE" == "all" && -d "$FRONTEND_DIR" ]]; then
+                    _deploy_frontend 0
+                fi
                 exit 0
+            else
+                # Code was pulled outside deploy (e.g. a manual git pull):
+                # the services still run ${DEPLOYED:-an unknown commit}.
+                local shown="${DEPLOYED:0:8}"
+                log "Code already at ${LOCAL:0:8}; services were last deployed at ${shown:-an unknown commit}."
+                CHANGES=$([[ -n "$DEPLOYED" ]] && git log "$DEPLOYED..$LOCAL" --oneline || echo "(last deployed commit unknown)")
             fi
-            if [[ "$FORCE" -eq 0 ]] && _recently_deployed "$LOCAL" "$SERVICE"; then
-                warn "${LOCAL:0:8} [$SERVICE] was deployed less than ${RESTART_COOLDOWN}s ago. Skipping restart (use --force to restart again)."
-                exit 0
-            fi
-            log "Already up to date, but --restart requested."
-            CHANGES="(no code change: restart only)"
         else
             CHANGES=$(git log "$LOCAL..$REMOTE" --oneline)
             log "Changes detected: $LOCAL → $REMOTE"
@@ -393,10 +430,21 @@ METAEOF
 
         DEPLOY_COMMIT="$REMOTE"
 
-        # The embedding server reloads its model on restart, so --all restarts
-        # it only when its code or the dependencies changed, or when pip
-        # changed the venv after it started.
-        if [[ "$DID_PULL" -eq 1 ]] && git diff "$LOCAL" "$REMOTE" --name-only | grep -qE "requirements|services/embedding_server\.py"; then
+        # Diff base for dependency/unit checks and the restart plan: the last
+        # deployed commit, else the pre-pull HEAD.
+        if [[ -n "$DEPLOYED" ]]; then
+            BASE="$DEPLOYED"
+        elif [[ "$DID_PULL" -eq 1 ]]; then
+            BASE="$LOCAL"
+        fi
+        if [[ -n "$BASE" ]]; then
+            CHANGED_FILES=$(git diff --name-only "$BASE" "$REMOTE")
+        fi
+
+        # The embedding server reloads its model on restart, so it restarts
+        # only when its code or the dependencies changed, or when pip changed
+        # the venv after it started.
+        if echo "$CHANGED_FILES" | grep -qE "requirements|services/embedding_server\.py"; then
             RESTART_EMBEDDING=1
         elif _venv_changed_since_start embedding; then
             log "embedding: venv packages changed after it started"
@@ -404,7 +452,7 @@ METAEOF
         fi
 
         # 2. Dependencies
-        if [[ "$DID_PULL" -eq 1 ]] && git diff "$LOCAL" "$REMOTE" --name-only | grep -q "requirements"; then
+        if echo "$CHANGED_FILES" | grep -q "requirements"; then
             log "Requirements changed → pip install"
             source "$VENV/bin/activate"
             pip install -r requirements.txt --quiet
@@ -421,28 +469,64 @@ METAEOF
 {
   "timestamp": "$(date -Iseconds)",
   "status": "success",
-  "prev_commit": "$LOCAL",
+  "prev_commit": "${BASE:-$LOCAL}",
   "new_commit": "$REMOTE",
   "changes": $(echo "$CHANGES" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read().strip()))'),
-  "deps_updated": $(git diff "$LOCAL" "$REMOTE" --name-only | grep -q "requirements" && echo "true" || echo "false")
+  "deps_updated": $(echo "$CHANGED_FILES" | grep -q "requirements" && echo "true" || echo "false")
 }
 METAEOF
 
         # 4. daemon-reload if systemd units changed
-        if [[ "$DID_PULL" -eq 1 ]] && git diff "$LOCAL" "$REMOTE" --name-only | grep -q "systemd/"; then
+        if echo "$CHANGED_FILES" | grep -q "^systemd/"; then
             log "systemd unit files changed → daemon-reload"
             _run_systemctl daemon-reload
         fi
+
+        # 5a. Restart plan
+        if [[ "$SERVICE" == "all" ]]; then
+            if [[ "$FORCE_RESTART" -eq 1 ]]; then
+                FULL=1
+                log "Restart plan: every service (--restart)"
+            elif [[ -z "$BASE" ]]; then
+                FULL=1
+                log "Restart plan: every service (last deployed commit unknown)"
+            else
+                local plan
+                if ! plan=$("$VENV/bin/python" "$DEPLOY_DIR/scripts/affected_services.py" "$BASE" "$REMOTE"); then
+                    warn "affected_services.py failed; restarting every service"
+                    plan="ALL"
+                fi
+                if [[ "$plan" == "ALL" ]]; then
+                    FULL=1
+                    log "Restart plan: every service (change cannot be attributed)"
+                else
+                    [[ -n "$plan" ]] && AFFECTED=" $(echo $plan) "
+                    if [[ "$AFFECTED" == " " ]]; then
+                        log "Restart plan: nothing (no running service affected)"
+                    else
+                        log "Restart plan:${AFFECTED% }"
+                    fi
+                fi
+            fi
+        fi
     fi
+
+    # Whether --all restarts service $1 under the plan above.
+    _planned() { [[ "$FULL" -eq 1 || "$AFFECTED" == *" $1 "* ]]; }
 
     # 5. Restart services
     local SUMMARY
     SUMMARY=$(git log --oneline -1 2>/dev/null || echo "n/a")
 
+    local ANY_RESTART=0
+    if [[ "$SERVICE" == "all" ]] && { [[ "$FULL" -eq 1 || "$AFFECTED" != " " || "$RESTART_EMBEDDING" -eq 1 ]]; }; then
+        ANY_RESTART=1
+    fi
+
     # Check both guards before restarting anything: the proxy restart below
     # would otherwise cut in-flight LLM calls of a task the telegram guard
     # later protects.
-    if [[ "$SERVICE" == "all" ]]; then
+    if [[ "$ANY_RESTART" -eq 1 ]]; then
         local guarded name
         for guarded in api telegram; do
             if ! "$VENV/bin/python" "$DEPLOY_DIR/scripts/restart_guard.py" "$guarded"; then
@@ -450,8 +534,10 @@ METAEOF
                 exit 2
             fi
         done
-        for name in "${DEPLOY_EXTRA_BEFORE[@]}"; do _restart_if_enabled "$name"; done
-        if [[ "$RESTART_EMBEDDING" -eq 1 ]]; then
+        for name in "${DEPLOY_EXTRA_BEFORE[@]}"; do
+            if _planned "$name"; then _restart_if_enabled "$name"; fi
+        done
+        if [[ "$RESTART_EMBEDDING" -eq 1 ]] || { [[ "$FULL" -eq 0 ]] && _planned embedding; }; then
             _restart_if_enabled embedding
             wait_healthy embedding "curl -sf http://localhost:8100/health" 60 || true
         fi
@@ -460,18 +546,28 @@ METAEOF
     # Stamp before the restarts: restarting telegram may kill this script
     # (Telegram /deploy), so the end of the function is not always reached.
     echo "$DEPLOY_COMMIT $SERVICE $(date +%s)" > "$LAST_DEPLOY_FILE"
+    if [[ "$SERVICE" == "all" ]]; then
+        mkdir -p "$(dirname "$DEPLOYED_FILE")"
+        echo "$DEPLOY_COMMIT" > "$DEPLOYED_FILE"
+    fi
 
-    if [[ "$SERVICE" == "all" || "$SERVICE" == "api" ]]; then
+    if [[ "$SERVICE" == "api" ]] || { [[ "$SERVICE" == "all" ]] && _planned api; }; then
         do_graceful_restart api
         RESTARTED="${RESTARTED:+$RESTARTED+}api"
     fi
 
     if [[ "$SERVICE" == "all" ]]; then
-        for name in "${DEPLOY_EXTRA_AFTER_API[@]}"; do _restart_if_enabled "$name"; done
+        for name in "${DEPLOY_EXTRA_AFTER_API[@]}"; do
+            if _planned "$name"; then _restart_if_enabled "$name"; fi
+        done
     fi
 
     # 6. Notify BEFORE restarting telegram (since telegram restart kills the bot)
-    _notify_telegram "✅ *Deploy 완료* [$SERVICE]
+    local PENDING=""
+    if [[ "$SERVICE" == "telegram" ]] || { [[ "$SERVICE" == "all" ]] && _planned telegram; }; then
+        PENDING="+telegram"
+    fi
+    _notify_telegram "✅ *Deploy 완료* [$SERVICE] 재시작: ${RESTARTED:-없음}${PENDING}
 \`$SUMMARY\`
 변경 커밋:
 \`\`\`
@@ -482,21 +578,26 @@ $CHANGES
     # Read-only queries run without sudo: sudoers allows only
     # "is-active leninbot-*", so "sudo systemctl is-active --quiet ..." asked
     # for a password, failed, and the browser was silently never restarted.
-    if [[ "$SERVICE" == "all" ]] && systemctl is-active --quiet leninbot-browser 2>/dev/null; then
+    if [[ "$SERVICE" == "all" ]] && _planned browser && systemctl is-active --quiet leninbot-browser 2>/dev/null; then
         do_graceful_restart browser
         RESTARTED="${RESTARTED:+$RESTARTED+}browser"
     fi
 
     # 8. Telegram last (restarts the bot process — may kill this script)
-    if [[ "$SERVICE" == "all" || "$SERVICE" == "telegram" ]]; then
+    if [[ "$SERVICE" == "telegram" ]] || { [[ "$SERVICE" == "all" ]] && _planned telegram; }; then
         do_graceful_restart telegram
         RESTARTED="${RESTARTED:+$RESTARTED+}telegram"
     fi
 
-    # 9. Frontend
+    # 9. Frontend. Its own deploy skips an already deployed revision; --restart
+    # is forwarded only when the frontend was the explicit target.
     if [[ "$SERVICE" == "all" || "$SERVICE" == "frontend" ]]; then
         if [[ -d "$FRONTEND_DIR" ]]; then
-            _deploy_frontend "$FORCE_RESTART"
+            if [[ "$SERVICE" == "frontend" ]]; then
+                _deploy_frontend "$FORCE_RESTART"
+            else
+                _deploy_frontend 0
+            fi
             RESTARTED="${RESTARTED:+$RESTARTED+}frontend"
         fi
     fi
