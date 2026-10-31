@@ -146,12 +146,24 @@ def normalize(status, answer, findings=None, open_questions=None, blockers=None,
 
 
 def save(task_id: int, envelope: dict) -> None:
+    """Store the envelope bound to the task that recorded it.
+
+    Task metadata is copied into retries and restart handoffs
+    (``create_task_in_db`` parent inheritance, the startup handoff INSERT), so
+    ``task_id`` lets ``load`` reject an envelope the current row only inherited.
+    """
     from db import execute
     execute(
         "UPDATE telegram_tasks SET metadata = COALESCE(metadata, '{}'::jsonb) "
         "|| jsonb_build_object(%s::text, %s::jsonb) WHERE id = %s",
-        (METADATA_KEY, json.dumps(envelope, ensure_ascii=False), task_id),
+        (METADATA_KEY, json.dumps({**envelope, "task_id": int(task_id)}, ensure_ascii=False), task_id),
     )
+
+
+def strip(metadata: dict) -> dict:
+    """Drop the envelope from metadata copied into a new execution attempt."""
+    metadata.pop(METADATA_KEY, None)
+    return metadata
 
 
 def make_handler(task_id: int):
@@ -176,8 +188,15 @@ def make_handler(task_id: int):
     return _exec_report_result
 
 
-def load(row_or_metadata) -> dict | None:
-    """Envelope from a task row (with ``metadata``) or a metadata dict/JSON string."""
+def load(row_or_metadata, task_id: int | None = None) -> dict | None:
+    """Envelope recorded by this task, from a task row or a metadata dict/JSON string.
+
+    The envelope must carry the ``task_id`` of the task being rendered: the id
+    passed here, else the row's ``id``. An envelope inherited from a parent or
+    earlier attempt (different id), or with no id at all, is ignored.
+    """
+    if task_id is None and isinstance(row_or_metadata, dict):
+        task_id = row_or_metadata.get("id")
     metadata = row_or_metadata
     if isinstance(row_or_metadata, dict) and "metadata" in row_or_metadata:
         metadata = row_or_metadata.get("metadata")
@@ -190,6 +209,13 @@ def load(row_or_metadata) -> dict | None:
         return None
     envelope = metadata.get(METADATA_KEY)
     if not isinstance(envelope, dict) or envelope.get("status") not in STATUSES:
+        return None
+    try:
+        owner = int(envelope.get("task_id"))
+        expected = int(task_id)
+    except (TypeError, ValueError):
+        return None
+    if owner != expected:
         return None
     return envelope
 

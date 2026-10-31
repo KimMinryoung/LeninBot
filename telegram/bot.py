@@ -1506,7 +1506,7 @@ async def _orchestrator_report_task(b: Bot, task: dict, result: dict, chat_id: i
             tool_log = (row or {}).get("tool_log", "") or ""
             from telegram import result_envelope
             envelope_text = result_envelope.render(
-                result_envelope.load(row or {}),
+                result_envelope.load(row or {}, task_id=task_id),
                 execution_status=status,
                 verification_status=(result.get("verification") or {}).get("status"),
             )

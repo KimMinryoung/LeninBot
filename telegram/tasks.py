@@ -2124,6 +2124,9 @@ async def _hand_off_interrupted_task(
     restart_state = restart_ctx["state"] if restart_ctx["initiated"] else None
 
     metadata = dict(_load_task_metadata(row))
+    # The handoff is a new attempt; it must record its own result envelope.
+    from telegram.result_envelope import strip as _strip_result_envelope
+    _strip_result_envelope(metadata)
     if restart_state:
         # This startup proves only the Telegram process restarted.
         # Preserve pending API/browser restart claims as unconfirmed.

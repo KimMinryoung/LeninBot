@@ -46,15 +46,28 @@ class NormalizeTest(unittest.TestCase):
 
 class LoadRenderTest(unittest.TestCase):
     ENVELOPE = {"status": "partial", "answer": "half", "findings": [{"claim": "c", "sources": []}],
-                "open_questions": ["rest"], "blockers": [], "artifacts": []}
+                "open_questions": ["rest"], "blockers": [], "artifacts": [], "task_id": 1}
 
     def test_load_from_row_json_and_dict(self):
-        self.assertEqual(env.load({"metadata": {"result_envelope": self.ENVELOPE}}), self.ENVELOPE)
-        self.assertEqual(env.load({"metadata": json.dumps({"result_envelope": self.ENVELOPE})}),
+        self.assertEqual(env.load({"id": 1, "metadata": {"result_envelope": self.ENVELOPE}}),
                          self.ENVELOPE)
+        self.assertEqual(env.load({"id": 1, "metadata": json.dumps({"result_envelope": self.ENVELOPE})}),
+                         self.ENVELOPE)
+        self.assertEqual(env.load({"result_envelope": self.ENVELOPE}, task_id=1), self.ENVELOPE)
         self.assertIsNone(env.load({"metadata": None}))
         self.assertIsNone(env.load({"metadata": {"result_envelope": {"status": "weird"}}}))
         self.assertIsNone(env.load({"metadata": "not json"}))
+
+    def test_inherited_or_unbound_envelope_is_ignored(self):
+        # A retry/handoff row carries its parent's metadata (Codex review, PR #47).
+        inherited = {"id": 2, "metadata": {"result_envelope": self.ENVELOPE}}
+        self.assertIsNone(env.load(inherited))
+        self.assertIsNone(env.load(inherited["metadata"], task_id=2))
+        unbound = {k: v for k, v in self.ENVELOPE.items() if k != "task_id"}
+        self.assertIsNone(env.load({"id": 1, "metadata": {"result_envelope": unbound}}))
+        self.assertIsNone(env.load({"metadata": {"result_envelope": self.ENVELOPE}}))
+        rows = env.attach_rendered([dict(inherited, status="failed", result="r")])
+        self.assertNotIn("result_envelope_text", rows[0])
 
     def test_render_flags_mismatches(self):
         text = env.render(self.ENVELOPE, execution_status="done")
@@ -93,6 +106,34 @@ class HandlerTest(unittest.TestCase):
         self.assertIn("status=done", out)
         with self.assertRaises(ToolRejection):
             asyncio.run(handler("blocked", "no"))
+
+    def test_save_binds_envelope_to_task(self):
+        with mock.patch("db.execute") as execute:
+            env.save(42, {"status": "done", "answer": "ok"})
+        stored = json.loads(execute.call_args[0][1][1])
+        self.assertEqual(stored["task_id"], 42)
+        self.assertEqual(execute.call_args[0][1][2], 42)
+
+    def test_new_attempt_does_not_inherit_parent_envelope(self):
+        from telegram.task_store import create_task_in_db
+        parent = {"depth": 0, "mission_id": 3, "agent_type": "analyst",
+                  "metadata": {"result_envelope": self.ENVELOPE_PARENT, "keep": 1}}
+        inserted = []
+
+        def query(sql, params=None):
+            if sql.lstrip().startswith("SELECT depth"):
+                return [parent]
+            if "INSERT INTO telegram_tasks" in sql:
+                inserted.append(json.loads(params[8]))
+                return [{"id": 99}]
+            return []
+
+        with mock.patch("db.query", side_effect=query), mock.patch("db.execute"):
+            create_task_in_db("retry", parent_task_id=1)
+        self.assertEqual(inserted, [{"keep": 1}])
+        self.assertIn("result_envelope", parent["metadata"])  # parent row untouched
+
+    ENVELOPE_PARENT = {"status": "done", "answer": "parent", "task_id": 1}
 
     def test_save_failure_is_tool_failure(self):
         from tool_gateway.results import is_failure

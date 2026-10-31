@@ -457,7 +457,11 @@ the final answer. Fields:
 
 The handler stores the envelope in `telegram_tasks.metadata['result_envelope']`
 (existing JSONB column, no migration; the last call wins) and its risk class is
-`state`. Consumers render it as "the agent's own structured claims, not
+`state`. The stored envelope carries the `task_id` that recorded it, and
+`load` returns it only for that task. Metadata is copied into retries and restart
+handoffs (`create_task_in_db` parent inheritance, the startup handoff INSERT),
+and both copy points also strip the envelope, so a new attempt never presents
+its predecessor's status and findings as its own. Consumers render it as "the agent's own structured claims, not
 independent verification", above the unchanged free-text report:
 
 - orchestrator task callback (`_orchestrator_report_task`), for done and failed tasks
