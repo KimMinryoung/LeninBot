@@ -944,6 +944,13 @@ def _load_context_with_summaries(user_id: int) -> list[dict]:
             context[-1][RUNTIME_EVENTS_KEY] = [{
                 "source": "tool_audit_log", "coverage": "unavailable",
             }]
+        # Result excerpts of earlier orchestrator tool calls (the audit log
+        # above carries arguments only). Same window: the retained raw tail.
+        from telegram.tool_evidence import recent_tool_evidence
+        context[-1][RUNTIME_EVENTS_KEY] = (
+            list(context[-1].get(RUNTIME_EVENTS_KEY, []))
+            + recent_tool_evidence(user_id, raw_rows[0]["created_at"])
+        )
 
     if summary_records:
         from llm.execution_context import attach_context

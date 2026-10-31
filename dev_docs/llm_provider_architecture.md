@@ -221,7 +221,15 @@ provider가 `stop`을 보내고도 문장 중간에서 멈춘 경우는 감지�
 `length`/`max_tokens` 이어받기는 원래 공백을 보존하고 응답 조각 사이에 임의의
 개행을 넣지 않는다. 따라서 단어 중간에 끊긴 응답도 같은 답변으로 연결된다.
 
-For delegated agents, both Anthropic and OpenAI-compatible loops enforce the gateway input ceiling. When tool output growth crosses it, large prior results from explicitly replay-safe read-only tools are replaced in the request by explicit replay checkpoints while their preceding tool calls retain the exact tool name and arguments. This allows complete source material to be retrieved again instead of silently truncating it. Write, publish, send, execute, and other side-effecting results are never checkpointed with a replay instruction. Output-length stops continue from the exact cutoff up to the configured bounded continuation count.
+For delegated agents, both Anthropic and OpenAI-compatible loops enforce the gateway input ceiling. When tool output growth crosses it, `llm/context_compaction.py` compacts the request in stages and stops as soon as it fits:
+
+1. Large results (>800 chars) from explicitly replay-safe read-only tools become replay checkpoints; the preceding tool call keeps its exact name and arguments, so the complete source can be retrieved again.
+2. Other large results, except the newest round's, are cut to a 600-character head with a marker giving the original length and stating that re-running the call will not recover the rest. Side-effecting results never get a replay instruction.
+3. The oldest whole tool rounds are removed, keeping the newest two intact, and a deterministic structural digest of the removed rounds (tool name, argument excerpt, status, result excerpt, assistant text excerpt) is appended to the first user message. The digest is generated from the removed protocol blocks, not by a model, and tells the model that listed side-effect calls already ran.
+
+Cuts land on round boundaries, so every remaining `tool_use`/`tool_calls` keeps its result. Only when all three stages still exceed the ceiling does the call fail with the ceiling error. The Anthropic loop compacts a per-request copy (the loop's own message list keeps the full transcript); the OpenAI loop applies the result to its working list.
+
+The ceiling check uses `estimate_text_tokens` (CJK ≈ 1 token/char, other ≈ 4 chars/token) scaled by a per-call `InputTokenCalibrator` (`llm/tool_loop_common.py`). After each response the adapter compares the raw estimate it sent with the provider's reported input (`input_tokens + cache_creation_input_tokens + cache_read_input_tokens` for Anthropic, `prompt_tokens`/`input_tokens` for OpenAI-compatible), smooths the ratio (EMA 0.5, clamped 0.6–4.0, requests under 1,000 raw tokens ignored), and scales later estimates by it. The first request of a call is uncalibrated. Output-length stops continue from the exact cutoff up to the configured bounded continuation count.
 
 Provider-facing tool definitions are compacted before API calls: long human-readable `description` strings in tool definitions and nested schemas are shortened, while tool names, schema keys, types, enums, defaults, and required fields are preserved. This reduces prompt overhead without changing execution capabilities.
 

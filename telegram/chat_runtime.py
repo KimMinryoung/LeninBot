@@ -5,6 +5,7 @@ Separated from telegram/bot.py so library code (jobs, runtime_tools, browser,
 llm.reflexion) does not import the bot entry point. telegram.bot re-exports
 these under their old private names."""
 
+import asyncio
 import logging
 import time as _time
 from datetime import datetime
@@ -659,19 +660,35 @@ async def chat_with_tools(
         terminal_required=terminal_required,
     )
 
-    return await _dispatch_chat_provider(
-        messages,
-        effective_provider=effective_provider,
-        profile=profile,
-        loop_kwargs=loop_kwargs,
-        call_inference_policy=call_inference_policy,
-        is_orchestrator=is_orchestrator,
-        runtime_kind=_runtime_kind,
-        deepseek_thinking_override=deepseek_thinking_override,
-        budget_tracker=budget_tracker,
-        on_progress=on_progress,
-        gw_ctx=_gw_ctx,
+    # Cross-turn tool evidence (telegram/tool_evidence.py): the owner-chat
+    # orchestrator records result excerpts for the next turn; every other call
+    # disables the observer so nested agent runs stay out of that record.
+    from telegram import tool_evidence
+    evidence_user = (
+        tool_evidence.owner_user_id(session_id)
+        if is_orchestrator and _interface == "telegram" else None
     )
+    with tool_evidence.capture_turn(evidence_user is not None) as evidence:
+        try:
+            return await _dispatch_chat_provider(
+                messages,
+                effective_provider=effective_provider,
+                profile=profile,
+                loop_kwargs=loop_kwargs,
+                call_inference_policy=call_inference_policy,
+                is_orchestrator=is_orchestrator,
+                runtime_kind=_runtime_kind,
+                deepseek_thinking_override=deepseek_thinking_override,
+                budget_tracker=budget_tracker,
+                on_progress=on_progress,
+                gw_ctx=_gw_ctx,
+            )
+        finally:
+            if evidence_user is not None and evidence:
+                await asyncio.to_thread(
+                    tool_evidence.persist_turn, evidence_user, list(evidence),
+                    scope_type=scope_type, scope_id=scope_id,
+                )
 
 
 async def get_model_for_agent(spec):

@@ -592,6 +592,8 @@ async def execute_tool(
     except Exception as exc:
         logger.warning("gateway audit failed (ignored) for %s: %s", name, exc)
 
+    from tool_gateway.observations import observe_tool_result
+    observe_tool_result(name, args, result, is_error)
     return result, is_error
 
 

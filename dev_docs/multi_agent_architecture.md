@@ -436,6 +436,35 @@ For diary tasks, the runtime distinguishes new diary writing by exact scheduled 
 
 The diary prompt treats finance/securities data as background context by default during scheduled writing: it may be collected for judgment, but routine stock prices, tickers, index moves, and market fluctuations should not appear in diary prose unless directly necessary to explain the actual events, decisions, or political-economic contradiction of the period. `telegram/bot.py` also guards the `save_diary` handler and rejects publication attempts unless the task matches the configured scheduled diary-writing prompt. Published diary edits use `edit_content(content_type="diary", id=...)`; deletion and non-publication/unpublish requests use `edit_content(content_type="diary", id=..., action="delete"|"unpublish", confirm=true)`. Because `ai_diary` has no private/unpublished status column, unpublish removes the row from public diary storage after clearing publication audit FK references and invalidating caches.
 
+## Owner Chat Context Across Turns
+
+The Telegram orchestrator's provider call starts from text-only history: native
+tool protocol is generated only inside one call and never replayed across turns
+(`_normalize_initial_messages`, `llm/execution_context.py`). Earlier turns reach
+the model through these channels, assembled by `_load_context_with_summaries`
+in `telegram/bot.py`:
+
+| Channel | Source | Content |
+|---|---|---|
+| conversation summaries | `chat_history_summaries` | up to 3 model-written summaries of 10-message chunks, as a `conversation_summary` record |
+| raw tail | `telegram_chat_history` | every message after the newest summary (append-only between summarizer runs, for prompt caching); hard cap 500 rows |
+| tool call receipts | `tool_audit_log` (`telegram/execution_history.py`) | newest 24 orchestrator calls in the raw window: tool, decision, status, argument excerpt (350 chars), error excerpt — no results |
+| prior tool results | `telegram_tool_evidence` (`telegram/tool_evidence.py`) | newest orchestrator tool results in the raw window as a `prior_tool_results` record: tool, argument excerpt, status, original length, redacted result excerpt (≤1,200 chars); at most 12 calls and 12,000 characters |
+
+`chat_with_tools` (`telegram/chat_runtime.py`) installs the dispatcher's
+`tool_result_observer` only for the owner-chat orchestrator (`interface=telegram`,
+`session_id=telegram:<chat id>`), covering both user messages and task-report
+callbacks. It records up to 30 calls per call (excluding `list_agent_tools`) and
+writes them after the call ends, even on error. Rows older than 14 days are
+deleted on each write. Persistence and loading failures are logged; a missing
+table yields an `unavailable` record rather than a failed turn. Records are
+historical references, not receipts of new actions; a read-only call must be
+repeated for full or current output. Delegated agents do not use this table.
+
+Schema: `scripts/schema_migrations.py --only telegram-tool-evidence` (apply
+before deploying the code; until then the record reads as unavailable).
+Regression: `tests/test_context_compaction.py`.
+
 ## Redis Runtime State
 
 Leninbot uses Redis database 1 (`REDIS_URL=redis://localhost:6379/1`); database 0
