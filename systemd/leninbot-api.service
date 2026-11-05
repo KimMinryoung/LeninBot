@@ -10,6 +10,9 @@ Wants=leninbot-neo4j.service
 User=grass
 WorkingDirectory=/home/grass/leninbot
 EnvironmentFile=/home/grass/leninbot/.env
+# glibc gives each thread its own malloc arena (up to 64 on 8 cores); freed
+# memory stays in them, so an idle API held 2 GB. Two arenas are enough here.
+Environment=MALLOC_ARENA_MAX=2
 ExecStart=/home/grass/leninbot/venv/bin/python -m uvicorn services.api:app --host 172.17.0.1 --port 8000
 Restart=always
 RestartSec=5
