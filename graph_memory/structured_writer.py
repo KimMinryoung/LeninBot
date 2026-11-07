@@ -243,6 +243,93 @@ async def _cross_script_twin(session, name: str, etype: str, vec) -> dict | None
     return None
 
 
+# ── Repeated-claim check (agent and news writes) ──────────────────────────────
+#
+# Agent and news writes carry no sync key, so nothing stopped the same claim
+# from being stored again on every run: Kevin Warsh —Affiliation→ Federal
+# Reserve had 9 active relations, 한동백 → 디아마트 9 (2026-11-07 audit). Before
+# writing, each fact between two existing nodes is compared with the active
+# relations of the same predicate between them; a System One judgement
+# (registry ``kg_claim_dedupe``) decides whether it restates one of them.
+# Different dates, figures or later developments are new claims and stay.
+
+CLAIM_DEDUPE_FEATURE = "kg_claim_dedupe"
+CLAIM_DEDUPE_PER_FACT = 6     # most recent existing relations compared per fact
+CLAIM_DEDUPE_MAX_PAIRS = 40   # pairs judged per write (one request)
+_CLAIM_DEDUPE_INSTRUCTIONS = (
+    "The new fact restates the existing fact: it reports the same event, action, statement or state, with the "
+    "same date and the same figures, so storing it again adds no information. Wording or language differences "
+    "do not matter. It is NOT a restatement when it reports a different event or statement, a different date, "
+    "a different number, a later development, or a correction of the existing fact."
+)
+
+CYPHER_SAME_RELATIONS = """
+UNWIND $pairs AS p
+MATCH (a:Entity {uuid: p.s})-[r:RELATES_TO]->(b:Entity {uuid: p.t})
+WHERE r.name = p.pred AND r.expired_at IS NULL
+WITH p, r ORDER BY r.created_at DESC
+WITH p, collect({uuid: r.uuid, fact: r.fact, valid_at: toString(r.valid_at)})[0..$per_fact] AS existing
+RETURN p.i AS i, existing
+"""
+
+
+async def _existing_same_relations(session, pairs: list[dict]) -> dict[int, list[dict]]:
+    result = await session.run(CYPHER_SAME_RELATIONS, pairs=pairs, per_fact=CLAIM_DEDUPE_PER_FACT)
+    return {row["i"]: list(row["existing"]) async for row in result}
+
+
+async def _drop_repeated_claims(session, resolved: list, indices: list[int]) -> tuple[list, list[int], list[dict]]:
+    """Remove facts that restate an active relation. Returns (kept, kept indices, duplicates)."""
+    from llm.call_registry import decide, fan_out, resolve
+
+    profile = resolve(CLAIM_DEDUPE_FEATURE)
+    extra = profile.extra or {}
+    if not extra.get("enabled", True):
+        return resolved, indices, []
+    pairs = [{"i": n, "s": s_uuid, "t": t_uuid, "pred": f["predicate"]}
+             for n, (f, s_uuid, s_new, t_uuid, t_new) in enumerate(resolved) if not s_new and not t_new]
+    if not pairs:
+        return resolved, indices, []
+    existing = await _existing_same_relations(session, pairs)
+    items: dict[str, dict] = {}
+    for n, rows in existing.items():
+        f = resolved[n][0]
+        for j, row in enumerate(rows):
+            if len(items) >= CLAIM_DEDUPE_MAX_PAIRS:
+                break
+            items[f"f{n}e{j}"] = {
+                "new_fact": f["fact"], "new_valid_at": f.get("valid_at"),
+                "existing_fact": row["fact"], "existing_valid_at": row["valid_at"],
+            }
+    if not items:
+        return resolved, indices, []
+    state, questions = fan_out(items, {"same": {"type": "noul", "instructions": _CLAIM_DEDUPE_INSTRUCTIONS}})
+    decision = await decide(CLAIM_DEDUPE_FEATURE, state, questions)
+    if decision is None:
+        logger.warning("[KG STRUCTURED] repeated-claim check unavailable; writing all %d fact(s)", len(resolved))
+        return resolved, indices, []
+    threshold = float((extra.get("thresholds") or {}).get("same", 0.9))
+    same: dict[int, tuple[str, str, float]] = {}
+    for item_id in items:
+        p = decision.noul(f"{item_id}_same") or 0.0
+        n, j = (int(x) for x in item_id[1:].split("e"))
+        if p >= threshold and p > same.get(n, ("", "", 0.0))[2]:
+            row = existing[n][j]
+            same[n] = (row["uuid"], row["fact"], p)
+    kept, kept_indices, duplicates = [], [], []
+    for n, (item, index) in enumerate(zip(resolved, indices)):
+        if n in same:
+            uuid, fact, p = same[n]
+            duplicates.append({"index": index, "existing_edge": uuid[:8], "existing_fact": fact,
+                               "probability": round(p, 2)})
+            continue
+        kept.append(item)
+        kept_indices.append(index)
+    logger.info("[KG STRUCTURED] repeated-claim check: %d pair(s) judged, %d fact(s) skipped",
+                len(items), len(duplicates))
+    return kept, kept_indices, duplicates
+
+
 # ── Build phase ───────────────────────────────────────────────────────────────
 
 def _make_synthetic_episode(group_id: str, agent: str, mission_id: int | None,
@@ -392,6 +479,7 @@ async def write_structured_facts(
     provenance_footer: str = "",
     allow_sync_predicates: bool = False,
     cross_script_guard: bool = False,
+    dedupe_claims: bool = False,
 ) -> dict:
     """Write a batch of structured facts to the KG.
 
@@ -412,6 +500,8 @@ async def write_structured_facts(
         cross_script_guard: reject facts whose new Person/Organization/Location
             name closely matches an existing node written in the other script
             (agent writes; a fact may opt out with confirm_new_entities: true).
+        dedupe_claims: skip facts that restate an active relation of the same
+            predicate between the same two nodes (agent and news writes).
 
     Returns:
         {
@@ -619,6 +709,29 @@ async def write_structured_facts(
                     "rejected_facts": rejected_facts,
                 }
 
+    # ── 2c. Repeated claims ──────────────────────────────────────────────
+    duplicate_facts: list[dict] = []
+    if dedupe_claims:
+        try:
+            async with driver_client.session(database=database) as session:
+                resolved, written_fact_indices, duplicate_facts = await _drop_repeated_claims(
+                    session, resolved, written_fact_indices)
+        except Exception as exc:  # the check must not block writes
+            logger.warning("[KG STRUCTURED] repeated-claim check skipped: %s", exc)
+        if not resolved:
+            return {
+                "status": "partial_success" if rejected_facts else "ok",
+                "message": (f"no new facts: {len(duplicate_facts)} already stored"
+                            + (f", {len(rejected_facts)} rejected" if rejected_facts else "")),
+                "facts_written": 0,
+                "facts_rejected": len(rejected_facts),
+                "facts_duplicate": len(duplicate_facts),
+                "duplicate_facts": duplicate_facts,
+                "written_fact_indices": [],
+                "rejected_facts": rejected_facts,
+                "edge_uuids": [],
+            }
+
     # ── 3. Build synthetic episode + entity/edge/mentions objects ────────
     episode = _make_synthetic_episode(
         group_id=group_id, agent=agent, mission_id=mission_id,
@@ -781,6 +894,8 @@ async def write_structured_facts(
         f"{new_count} new entity(ies), {reused_count} reused, "
         f"episode={episode.name}"
     )
+    if duplicate_facts:
+        msg += f" | skipped {len(duplicate_facts)} fact(s) already stored (duplicate_facts)"
     if identity_errors:
         msg += f" | identity updates failed: {identity_errors}"
     if rejected_facts:
@@ -801,6 +916,8 @@ async def write_structured_facts(
         "facts_rejected": len(rejected_facts),
         "written_fact_indices": written_fact_indices,
         "rejected_facts": rejected_facts,
+        "facts_duplicate": len(duplicate_facts),
+        "duplicate_facts": duplicate_facts,
         "new_entities": new_count,
         "reused_entities": reused_count,
         "identity_updates": identity_updates,

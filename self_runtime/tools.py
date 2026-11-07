@@ -737,7 +737,9 @@ SELF_TOOLS = [
                             },
                             "valid_at": {
                                 "type": "string",
-                                "description": "Optional ISO date (YYYY-MM-DD) for when the fact became true.",
+                                "description": ("Optional ISO date (YYYY-MM-DD) for when the fact became true; never a future "
+                                                "date. For a forecast, plan or scheduled event use the announcement date and "
+                                                "put the target date in the fact sentence."),
                             },
                             "confirm_new_entities": {
                                 "type": "boolean",
@@ -2085,6 +2087,7 @@ async def _exec_write_kg_structured(
         trust_tier=trust_tier,
         provenance_footer=provenance_footer,
         cross_script_guard=True,
+        dedupe_claims=True,
     )
 
     # Audit records partial_success as "ok"; these counts keep rejections visible.

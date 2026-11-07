@@ -22,6 +22,8 @@ choice/noul/score, confidence, 실제 모델·usage·비용을 공통 객체로 
 | `commulingo_review_citation_support` | 검토 finding과 직접 조회한 인용의 지지 관계 | 독립 검토 유지 |
 | `task_routing_decision` | 태스크 담당 에이전트 후보 | 기존 LLM 라우팅 advisor |
 | `scout_kg_fact_filter` | KG에 넣을 문장의 사실성 | 기존 문장 유지 |
+| `kg_claim_dedupe` | 에이전트·뉴스 KG 사실이 기존 활성 관계를 반복하는지 | 전부 쓰기 |
+| `kg_document_genre` | 문서 LLM 추출 전 소설(창작 서사) 여부 | 비소설로 추출 |
 
 크레딧 소진이나 키 문제로 TypeSafe 경로가 거부되면 OpenRouter 경로로 우회하고 소유자에게 한 번 알린다.
 두 경로가 모두 막히면 위 표의 판정 불가 처리를 따른다. 세부는

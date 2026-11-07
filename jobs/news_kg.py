@@ -87,6 +87,7 @@ NEWS_EXTRACTION_SYSTEM = (
     "- Use only facts about this event. Ignore other topics the page happens to contain (sidebars,\n"
     "  related headlines, unrelated sections of a report).\n"
     + dx.ENTITY_GUIDELINES
+    + dx.FUTURE_GUIDELINE
     + "- Never use the article, the news outlet or the reporter as an entity unless the outlet itself acts\n"
     "  in the event. Skip quotes of anonymous sources and speculation about what may happen.\n"
     + dx.DISTINCT_ENDPOINTS_GUIDELINE
@@ -233,7 +234,7 @@ def recent_story_titles(days: int = RECENT_DAYS) -> list[str]:
         return []
     from db import query
     rows = query("SELECT DISTINCT story_title FROM kg_news_items "
-                 "WHERE processed_at > NOW() - make_interval(days => %s) AND status = 'written' "
+                 "WHERE processed_at > NOW() - make_interval(days => %s) AND status IN ('written', 'duplicate') "
                  "AND story_title IS NOT NULL", (days,))
     return [r["story_title"] for r in rows]
 
@@ -478,7 +479,7 @@ def _write(story: dict, facts: list[dict]) -> dict:
     from kg_runtime.writes import add_kg_structured
     footer = f"news: {story['title']}\n" + "\n".join(f"url: {a['url']}" for a in story["articles"])
     return add_kg_structured(facts, group_id=story["group_id"], agent=AGENT, trust_tier=trust_tier(story),
-                             provenance_footer=footer, cross_script_guard=True)
+                             provenance_footer=footer, cross_script_guard=True, dedupe_claims=True)
 
 
 def write_story(story: dict, facts: list[dict], run_date: str) -> dict:
@@ -498,7 +499,8 @@ def write_story(story: dict, facts: list[dict], run_date: str) -> dict:
     return {"status": "error" if infra_error else ("ok" if not final_rejected else
                                                    "partial_success" if written else "rejected"),
             "message": infra_error, "facts_written": written, "facts_rejected": final_rejected,
-            "facts_repaired": len(repaired)}
+            "facts_repaired": len(repaired),
+            "facts_duplicate": int(res.get("facts_duplicate") or 0) + int(second.get("facts_duplicate") or 0)}
 
 
 # ── Run ───────────────────────────────────────────────────────────────────────
@@ -576,7 +578,8 @@ def run(*, max_stories: int | None = None, dry_run: bool = False) -> dict:
         written = int(res.get("facts_written") or 0)
         entry.update(status=res.get("status"), facts_written=written,
                      facts_rejected=int(res.get("facts_rejected") or 0),
-                     facts_repaired=int(res.get("facts_repaired") or 0))
+                     facts_repaired=int(res.get("facts_repaired") or 0),
+                     facts_duplicate=int(res.get("facts_duplicate") or 0))
         stats["facts_written"] += written
         stats["facts_rejected"] += entry["facts_rejected"]
         if res.get("status") == "error" and not res.get("facts_rejected"):
@@ -584,7 +587,9 @@ def run(*, max_stories: int | None = None, dry_run: bool = False) -> dict:
             errors.append(f"{story['title']}: {entry['error']}")
             continue  # infrastructure failure, not recorded: a later run retries these URLs
         # Schema rejections that survived the repair round are a quality outcome, not a run failure.
-        record_items(_item_rows(story, "written" if written else "rejected", written))
+        # A story whose every fact is already stored is not a rejection.
+        status = "written" if written else "duplicate" if entry["facts_duplicate"] and not entry["facts_rejected"] else "rejected"
+        record_items(_item_rows(story, status, written))
     if not dry_run and (msg := rejection_alert(stats)):
         errors.append(msg)
     if errors:

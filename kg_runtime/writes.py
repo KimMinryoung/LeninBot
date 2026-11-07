@@ -105,6 +105,7 @@ def add_kg_structured(
     provenance_footer: str = "",
     allow_sync_predicates: bool = False,
     cross_script_guard: bool = False,
+    dedupe_claims: bool = False,
 ) -> dict:
     """Write structured facts to the KG (sync — for scripts/cron).
 
@@ -128,6 +129,7 @@ def add_kg_structured(
             provenance_footer=provenance_footer,
             allow_sync_predicates=allow_sync_predicates,
             cross_script_guard=cross_script_guard,
+            dedupe_claims=dedupe_claims,
         )
     except Exception as e:
         logger.error("[shared] add_kg_structured error: %s", e)
@@ -146,6 +148,7 @@ async def add_kg_structured_async(
     trust_tier: str = "unverified",
     provenance_footer: str = "",
     cross_script_guard: bool = False,
+    dedupe_claims: bool = False,
 ) -> dict:
     """Async wrapper around add_kg_structured. Hops to the KG loop via
     asyncio.to_thread for the same reasons as add_kg_episode_async."""
@@ -158,6 +161,7 @@ async def add_kg_structured_async(
         trust_tier=trust_tier,
         provenance_footer=provenance_footer,
         cross_script_guard=cross_script_guard,
+        dedupe_claims=dedupe_claims,
     )
 
 

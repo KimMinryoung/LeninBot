@@ -365,6 +365,13 @@ ENTITY_GUIDELINES = """- Entity names: Korean canonical form for Korean people/o
 - "fact" must be a self-contained sentence in the document's language, with dates/numbers when present.
 """
 
+# Forecasts were stored at their target date (gold $5,000 "valid" from 2026-12-31,
+# Hyundai Atlas mass production from 2028), so as-of reads saw them as future facts.
+FUTURE_GUIDELINE = """- valid_at is when the stated fact became true, never later than the source's own date. A forecast,
+  target, plan, promise or scheduled event is a fact about the announcement: say who forecast/planned/
+  scheduled what for when (the target date goes in the sentence), and use the announcement date as valid_at.
+"""
+
 DISTINCT_ENDPOINTS_GUIDELINE = """- Subject and object must be distinct entities. Never use an actor as its own Statement target;
   use a specifically named work or claim, or omit the fact when no such target exists.
 """
@@ -375,6 +382,7 @@ EXTRACTION_SYSTEM = ("""You extract knowledge-graph facts from a document for a 
                      + """- At most %d facts; prefer the document's central, specific, dated claims. Skip trivia and rhetoric.
 """ % MAX_LLM_FACTS
                      + ENTITY_GUIDELINES
+                     + FUTURE_GUIDELINE
                      + """- Never extract the document itself, its author's persona, internal task ids, file names or code.
 """
                      + DISTINCT_ENDPOINTS_GUIDELINE)
@@ -479,16 +487,68 @@ def run_llm_extraction(rec: DocRecord) -> list[dict]:
     return llm_facts(rec, parse_llm_facts(raw, strict=True))
 
 
+# Fiction (short stories, novels, imagined future histories) states invented
+# people and events in the past tense; the extractor stored them as facts —
+# "로잔 엘레나 바스케스는 2028년 2월 … 논문을 발표했다" from the research story
+# 기울기 — 루멘에 관한 이야기 (2026-11-07 audit). Before LLM extraction a System
+# One judgement (registry ``kg_document_genre``) decides whether the document is
+# fiction; fiction keeps its Document node and deterministic links only.
+GENRE_FEATURE = "kg_document_genre"
+GENRE_SAMPLE_CHARS = 2500
+_FICTION_INSTRUCTIONS = (
+    "This document is fiction or another invented narrative: a short story, novel or novel excerpt, fable, play, "
+    "or an imagined scenario or future history told as if it happened. Its characters, events and dates are not "
+    "claims about the real world. Reports, analyses, essays, speeches, letters, laws, minutes, memoirs and other "
+    "historical or documentary sources are NOT fiction, even when they are rhetorical or partisan."
+)
+
+
+def is_fiction_document(rec: DocRecord) -> tuple[bool, float | None]:
+    """(fiction?, probability). Unavailable judgement → (False, None): extraction proceeds as before."""
+    from llm.call_registry import decide_sync, resolve
+
+    extra = resolve(GENRE_FEATURE).extra or {}
+    if not extra.get("enabled", True):
+        return False, None
+    state = {"title": rec.get("title"), "kind": rec.get("kind"), "kind_label": rec.get("kind_label"),
+             "source": rec.get("source"), "description": (rec.get("description") or "")[:500],
+             "opening": (rec.get("text") or "")[:GENRE_SAMPLE_CHARS]}
+    decision = decide_sync(GENRE_FEATURE, state, {"fiction": {"type": "noul", "instructions": _FICTION_INSTRUCTIONS}})
+    p = decision.noul("fiction") if decision else None
+    if p is None:
+        logger.warning("[doc-extract] genre judgement unavailable for %s; extracting as non-fiction", rec.ref)
+        return False, None
+    threshold = float((extra.get("thresholds") or {}).get("fiction", 0.8))
+    return p >= threshold, p
+
+
+def mark_document_genre(ref: str, fiction: bool, probability: float | None) -> None:
+    from kg_runtime.search import _get_neo4j_sync_driver
+    with _get_neo4j_sync_driver() as (drv, db):
+        with drv.session(database=db) as s:
+            s.run("MATCH (n:Entity:Document) WHERE $ref IN coalesce(n.external_ids, []) "
+                  "SET n.fiction = $fiction, n.fiction_probability = $p, n.genre_checked_at = datetime()",
+                  ref=ref, fiction=fiction, p=probability).consume()
+
+
 # ── Per-document pipeline ─────────────────────────────────────────────────────
 
 def build_document_facts(rec: DocRecord, *, names: dict[str, dict[str, str]] | None = None,
-                         alias_index=None, use_llm: bool = False) -> list[dict]:
+                         alias_index=None, use_llm: bool = False, genre: dict | None = None) -> list[dict]:
+    """``genre`` (optional out-param) receives the fiction judgement when LLM extraction was considered."""
     facts = [collection_fact(rec)]
     facts.extend(curated_link_facts(rec, names or {}))
     # A curated "about" link already says the document covers the entity;
     # a weaker "mentions" link for the same name is noise.
     linked_names = {f["object_name"] for f in facts}
     facts.extend(f for f in mention_facts(rec, alias_index) if f["object_name"] not in linked_names)
+    if use_llm:
+        fiction, probability = is_fiction_document(rec)
+        if genre is not None:
+            genre.update(fiction=fiction, probability=probability)
+        if fiction:
+            logger.info("[doc-extract] %s judged fiction (p=%.2f); no LLM facts", rec.ref, probability)
+            use_llm = False
     if use_llm:
         linked_names |= {f["object_name"] for f in facts if f["predicate"] == "Reference"}
         for f in run_llm_extraction(rec):
@@ -663,7 +723,8 @@ def _extract_document(rec: DocRecord, *, names=None, alias_index=None, use_llm: 
     use_llm = llm_enabled() if use_llm is None else use_llm
     if not force and existing_sha and existing_sha == rec["sha"]:
         return {"ref": rec.ref, "status": "unchanged"}
-    facts = build_document_facts(rec, names=names, alias_index=alias_index, use_llm=use_llm)
+    genre: dict = {}
+    facts = build_document_facts(rec, names=names, alias_index=alias_index, use_llm=use_llm, genre=genre)
     facts, skipped = filter_resolved_self_loops(facts)
     res = write_document_facts(rec, facts)
     successful = (res.get("status") == "ok" and not res.get("facts_rejected")
@@ -673,6 +734,8 @@ def _extract_document(rec: DocRecord, *, names=None, alias_index=None, use_llm: 
     if successful:
         expired = expire_document_edges(rec.ref, keep_uuids=res.get("edge_uuids", []))
         stamp_document_node(rec, clear_withdrawn=True)
+        if genre:
+            mark_document_genre(rec.ref, genre["fiction"], genre["probability"])
     # Put the actual rejection first so bounded sync/health alerts retain it.
     rejected = [{"index": item.get("index"), "reason": item.get("reason", "unknown rejection")}
                 for item in res.get("rejected_facts", [])]
@@ -684,6 +747,7 @@ def _extract_document(rec: DocRecord, *, names=None, alias_index=None, use_llm: 
         "ref": rec.ref, "status": "ok" if successful else "error", "facts": len(facts), "written": res.get("facts_written", 0),
         "rejected": res.get("facts_rejected", 0), "expired": expired, "llm": use_llm,
         "message": message[:200], "rejected_facts": rejected, "skipped_facts": skipped,
+        "fiction": genre.get("fiction"),
     }
 
 

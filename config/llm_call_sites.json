@@ -418,6 +418,28 @@
     },
     "note": "scout 보고서→KG 저장 전 사실 필터(kg_runtime/scout_ingest.py::_filter_fact_lines): 추출된 줄(최대 12)마다 noul '외부 세계에 대한 사실인가(메일함 UID·처리 절차·추론 메모가 아닌가)'를 한 요청으로 묻고 thresholds.keep 이상만 최대 7줄 저장, 남는 줄이 없으면 episode를 쓰지 않는다. 판정 불가 시 전부 유지(기존 동작). 2026-09-19 기준선(실제 scout 보고서 30건 100줄): 절차 줄 92건 전부 p≤0.11, 실제 뉴스 사실 6건 p≥0.85, 제목·표 행은 0.1~0.83. 보고서당 ~$0.00004. dev_docs/jev_system_one_adoption.md 4.10"
   },
+  "kg_claim_dedupe": {
+    "provider": "typesafe",
+    "model": "jev-1.13.0",
+    "timeout": 15,
+    "kind": "system_one",
+    "enabled": true,
+    "thresholds": {
+      "same": 0.9
+    },
+    "note": "에이전트·뉴스 KG 쓰기 직전 반복 주장 제거(graph_memory/structured_writer.py::_drop_repeated_claims): 두 끝점이 이미 있는 사실마다 같은 두 노드 사이의 같은 술어 활성 관계(최근 6개)와 쌍을 지어, 한 요청(최대 40쌍)에서 noul '같은 사건·날짜·수치를 다시 말하는가'를 묻고 thresholds.same 이상이면 쓰지 않고 duplicate_facts로 돌려준다. 날짜·수치가 다르거나 후속 전개·정정이면 새 주장으로 쓴다. 판정 불가면 전부 쓴다(기존 동작). 2026-11-07 도입: Kevin Warsh→Federal Reserve 활성 9건, 한동백→디아마트 9건. 문서 동기화(sync_key 있는 사실)에는 적용하지 않는다."
+  },
+  "kg_document_genre": {
+    "provider": "typesafe",
+    "model": "jev-1.13.0",
+    "timeout": 15,
+    "kind": "system_one",
+    "enabled": true,
+    "thresholds": {
+      "fiction": 0.8
+    },
+    "note": "문서 LLM 사실 추출 전 소설 판정(kg_runtime/doc_extract.py::is_fiction_document): 제목·종류·설명·첫 2,500자로 noul '소설·우화·가상 시나리오 같은 창작 서사인가'를 묻고 thresholds.fiction 이상이면 LLM 사실을 만들지 않는다(Document 노드·결정적 링크는 유지). 결과는 Document 노드 fiction/fiction_probability에 남는다. 판정 불가면 비소설로 추출(기존 동작). content_sha256이 바뀐 문서에만 돈다. 2026-11-07 도입: 연구 소설 '기울기 — 루멘에 관한 이야기'·'각자의 방, 하나의 집'의 인물·사건이 사실로 저장돼 있었다."
+  },
   "commulingo_person_classification": {
     "provider": "typesafe",
     "model": "jev-1.13.0",
