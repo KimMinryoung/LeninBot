@@ -67,6 +67,9 @@ from .conformance import validate_episode_result, apply_hard_fixes
 
 logger = logging.getLogger(__name__)
 
+# Extra results requested while hidden-document relations are filtered out after search.
+HIDDEN_EDGE_OVERFETCH_CAP = 50
+
 
 _EMBED_RETRYABLE_KEYWORDS = (
     "429",
@@ -516,7 +519,7 @@ class GraphMemoryService:
         graphiti = self._ensure_initialized()
 
         # SearchFilters 구성
-        from kg_runtime.read_policy import ReadPolicy, edge_where
+        from kg_runtime.read_policy import ReadPolicy
         from kg_runtime.search import _run_rows
         policy = read_policy or ReadPolicy()
         params = await asyncio.to_thread(policy.params)
@@ -529,10 +532,17 @@ class GraphMemoryService:
                 [DateFilter(date=instant, comparison_operator=ComparisonOperator.less_than_equal)]]
             search_filter.invalid_at = [[DateFilter(comparison_operator=ComparisonOperator.is_null)],
                 [DateFilter(date=instant, comparison_operator=ComparisonOperator.greater_than)]]
+        # Hidden-document relations are removed after the search. Passing every
+        # visible relation UUID as an allow-list (≈44k) made each semantic search
+        # take 4-5 s while one withdrawn document was hidden (2026-11-07);
+        # withdrawn documents' relations are already expired, so this set is
+        # usually empty. Hydration re-checks the policy in any case.
+        hidden_edges: set[str] = set()
         if params['hidden_refs']:
             rows = await asyncio.to_thread(_run_rows,
-                'MATCH ()-[r:RELATES_TO]->() WHERE ' + edge_where() + ' RETURN r.uuid AS uuid', **params)
-            search_filter.edge_uuids = [r['uuid'] for r in rows] or ['__no_visible_edge__']
+                'MATCH ()-[r:RELATES_TO]->() WHERE r.doc_ref IN $hidden_refs '
+                'AND ($include_expired OR r.expired_at IS NULL) RETURN r.uuid AS uuid', **params)
+            hidden_edges = {r['uuid'] for r in rows}
         if edge_types:
             search_filter.edge_types = edge_types
         if node_labels:
@@ -547,7 +557,7 @@ class GraphMemoryService:
                 search_methods=[NodeSearchMethod.bm25, NodeSearchMethod.cosine_similarity],
                 reranker=NodeReranker.rrf,
             ),
-            limit=num_results + len(params['hidden_nodes']),
+            limit=num_results + len(params['hidden_nodes']) + min(len(hidden_edges), HIDDEN_EDGE_OVERFETCH_CAP),
         )
 
         results = await graphiti.search_(
@@ -575,8 +585,8 @@ class GraphMemoryService:
                 "invalid_at": str(edge.invalid_at) if edge.invalid_at else None,
                 "uuid": edge.uuid,
             }
-            for edge in results.edges[:num_results]
-        ]
+            for edge in results.edges if edge.uuid not in hidden_edges
+        ][:num_results]
 
         return {"nodes": nodes[:num_results], "edges": edges}
 

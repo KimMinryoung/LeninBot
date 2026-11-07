@@ -487,7 +487,16 @@ def _pick_key_hit(rows: list[dict], entity_type: str, name: str) -> ResolveResul
     exact = [r for r in rows if _strip_key(r.get("name", "").casefold()) == _strip_key(name.casefold())]
     candidates = exact or [r for r in rows if _labels_compatible(entity_type, r.get("labels"))]
     if len(candidates) > 1:
-        return ResolveResult(None, "ambiguous")
+        # A source-owned node beats agent/LLM namesakes of the same label.
+        # Treating the tie as ambiguous created yet another node on every
+        # write: 헬무트 클로츠 and 요한 바프티스트 폰 슈바이처 reached three
+        # nodes, and an agent '레닌' alias split archival Lenin facts onto a
+        # new '블라디미르 레닌' node (2026-10/11).
+        sourced = [r for r in candidates if r.get("external_ids") and
+                   (r.get("same_label") or entity_type in (r.get("labels") or ()))]
+        if len(sourced) != 1:
+            return ResolveResult(None, "ambiguous")
+        candidates = sourced
     best = candidates[0] if candidates else rows[0]
     if best.get("same_label") or _labels_compatible(entity_type, best.get("labels")):
         return ResolveResult(best["uuid"], "alias", best.get("name"), list(best.get("labels") or []))

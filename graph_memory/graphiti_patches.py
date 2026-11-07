@@ -73,9 +73,96 @@ def apply_graphiti_patches() -> None:
     _patch_to_prompt_json()
     _patch_extract_edges()
     _patch_record_parsers()
+    _patch_vector_search()
     _build_name_normalization_regex()
 
     _PATCHES_APPLIED = True
+
+
+# ── Vector-index similarity search ──────────────────────────────────
+# graphiti's Neo4j path scores every node/relation with
+# vector.similarity.cosine. At 18k nodes / 57k relations (2026-11-07) that was
+# 1.3 s + 2.8 s of each semantic knowledge_graph_search, although the
+# entity_name_embedding / edge_fact_embedding HNSW indexes exist. The index
+# returns the K nearest candidates, and graphiti's filters (expired_at,
+# validity, labels, group) apply to those. K over-fetches so filtered-out
+# candidates rarely starve the result; endpoint-anchored edge searches keep
+# graphiti's exact path.
+
+VECTOR_SEARCH_MIN_K = 200
+VECTOR_SEARCH_OVERFETCH = 20
+VECTOR_SEARCH_MAX_K = 1000
+
+
+def _vector_k(limit: int) -> int:
+    return max(VECTOR_SEARCH_MIN_K, min(VECTOR_SEARCH_MAX_K, int(limit) * VECTOR_SEARCH_OVERFETCH))
+
+
+def _index_score(min_score: float) -> float:
+    # Neo4j cosine vector indexes report (1 + cosine) / 2.
+    return (1.0 + float(min_score)) / 2.0
+
+
+def _patch_vector_search() -> None:
+    from graphiti_core.driver.driver import GraphProvider
+    from graphiti_core.search import search as search_mod
+    from graphiti_core.search import search_utils as su
+
+    orig_edge = su.edge_similarity_search
+    orig_node = su.node_similarity_search
+
+    def _uses_index(driver) -> bool:
+        return driver.search_interface is None and driver.provider == GraphProvider.NEO4J
+
+    async def edge_similarity_search(driver, search_vector, source_node_uuid, target_node_uuid,
+                                     search_filter, group_ids=None, limit=su.RELEVANT_SCHEMA_LIMIT,
+                                     min_score=su.DEFAULT_MIN_SCORE):
+        if not _uses_index(driver) or source_node_uuid is not None or target_node_uuid is not None:
+            return await orig_edge(driver, search_vector, source_node_uuid, target_node_uuid,
+                                   search_filter, group_ids, limit, min_score)
+        filters, params = su.edge_search_filter_query_constructor(search_filter, driver.provider)
+        if group_ids is not None:
+            filters.append('e.group_id IN $group_ids')
+            params['group_ids'] = group_ids
+        where = (' WHERE ' + ' AND '.join(filters)) if filters else ''
+        query = (
+            "CALL db.index.vector.queryRelationships('edge_fact_embedding', $k, $search_vector) "
+            "YIELD relationship AS e, score WHERE score > $index_min_score "
+            "MATCH (n:Entity)-[e]->(m:Entity)" + where +
+            " RETURN " + su.get_entity_edge_return_query(driver.provider) +
+            " ORDER BY score DESC LIMIT $limit"
+        )
+        records, _, _ = await driver.execute_query(
+            query, search_vector=search_vector, k=_vector_k(limit), limit=limit,
+            index_min_score=_index_score(min_score), routing_='r', **params,
+        )
+        return [su.get_entity_edge_from_record(r, driver.provider) for r in records]
+
+    async def node_similarity_search(driver, search_vector, search_filter, group_ids=None,
+                                     limit=su.RELEVANT_SCHEMA_LIMIT, min_score=su.DEFAULT_MIN_SCORE):
+        if not _uses_index(driver):
+            return await orig_node(driver, search_vector, search_filter, group_ids, limit, min_score)
+        filters, params = su.node_search_filter_query_constructor(search_filter, driver.provider)
+        if group_ids is not None:
+            filters.append('n.group_id IN $group_ids')
+            params['group_ids'] = group_ids
+        where = (' AND ' + ' AND '.join(filters)) if filters else ''
+        query = (
+            "CALL db.index.vector.queryNodes('entity_name_embedding', $k, $search_vector) "
+            "YIELD node AS n, score WHERE n:Entity AND score > $index_min_score" + where +
+            " RETURN " + su.get_entity_node_return_query(driver.provider) +
+            " ORDER BY score DESC LIMIT $limit"
+        )
+        records, _, _ = await driver.execute_query(
+            query, search_vector=search_vector, k=_vector_k(limit), limit=limit,
+            index_min_score=_index_score(min_score), routing_='r', **params,
+        )
+        return [su.get_entity_node_from_record(r, driver.provider) for r in records]
+
+    su.edge_similarity_search = edge_similarity_search
+    su.node_similarity_search = node_similarity_search
+    search_mod.edge_similarity_search = edge_similarity_search
+    search_mod.node_similarity_search = node_similarity_search
 
 
 # ── 레거시 엣지 방어 ─────────────────────────────────────────────────

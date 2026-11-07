@@ -44,8 +44,11 @@ from .edges import EDGE_TYPES
 from .entities import ENTITY_TYPES
 from .conformance import validate_episode_result, apply_hard_fixes
 from kg_runtime.identity import (
+    _labels_compatible,
     build_identity_props,
+    normalize_alias_key,
     resolve_entity_async,
+    split_alias_keys,
     upsert_identity_async,
 )
 
@@ -482,6 +485,26 @@ async def write_structured_facts(
         h["name_ko"] = h["name_ko"] or side["name_ko"]
         h["name_en"] = h["name_en"] or side["name_en"]
 
+    # Name keys of the nodes this batch already resolved or created. The
+    # database lookup cannot see nodes that are only assigned in this batch, so
+    # a CommuLingo-linked side (cached by external id) and an LLM side with the
+    # same name (cached by name) each created a node in the same document sync:
+    # 예쯔, 헬무트 클로츠, 아르툠 베숄리 … (2026-10/11).
+    batch_keys: dict[str, set[tuple[str, str]]] = {}
+
+    def _register_keys(uuid: str, side: dict, trusted: bool) -> None:
+        keys = [normalize_alias_key(side["name"])]
+        if trusted:
+            keys += split_alias_keys(side["name"], side["aliases"], side["name_ko"], side["name_en"])[0]
+        for k in keys:
+            if k:
+                batch_keys.setdefault(k, set()).add((uuid, side["type"]))
+
+    def _batch_hit(side: dict) -> str | None:
+        hits = {u for u, t in batch_keys.get(normalize_alias_key(side["name"]), ())
+                if _labels_compatible(side["type"], [t])}
+        return next(iter(hits)) if len(hits) == 1 else None
+
     async def get_or_assign(side: dict) -> tuple[str, bool]:
         """Return (uuid, is_new). Reuses an existing node through the identity
         resolver (external id → alias/name across groups → optional NN)."""
@@ -493,6 +516,11 @@ async def write_structured_facts(
             if trusted or uuid in new_uuids:
                 _remember_hints(uuid, side)
             return uuid, uuid in new_uuids
+        if not trusted and not side["uuid"]:
+            hit = _batch_hit(side)
+            if hit:
+                entity_lookup_cache[key] = hit
+                return hit, hit in new_uuids
         existing = await find_pinned_entity_uuid(driver_client, database, side["uuid"], etype) if side["uuid"] else await find_canonical_entity_uuid(
             driver_client, database, name, etype,
             external_id=side["external_id"], aliases=side["aliases"], embedder=embedder,
@@ -500,6 +528,7 @@ async def write_structured_facts(
         )
         if existing:
             entity_lookup_cache[key] = existing
+            _register_keys(existing, side, trusted)
             # An untrusted side attaches its edge and nothing else: no alias
             # union, no summary, no name_ko/name_en (2026-09-03 United States
             # pollution).
@@ -509,12 +538,21 @@ async def write_structured_facts(
         new_uuid = str(uuid4())
         entity_lookup_cache[key] = new_uuid
         new_uuids.add(new_uuid)
+        _register_keys(new_uuid, side, trusted)
         if not trusted:
             side = dict(side)
             side["aliases"] = await _untrusted_aliases(driver_client, database, name, side["aliases"])
             side["summary"] = ""
         _remember_hints(new_uuid, side)
         return new_uuid, True
+
+    # Source-owned sides first, so an LLM side later in the batch (or earlier
+    # in fact order) finds the node they create instead of making its own.
+    for f in valid_facts:
+        for role in ("subject", "object"):
+            side = _side(f, role)
+            if side["trusted"]:
+                await get_or_assign(side)
 
     resolved = []  # list of (fact, src_uuid, src_is_new, tgt_uuid, tgt_is_new)
     for f in valid_facts:
@@ -597,6 +635,9 @@ async def write_structured_facts(
 
     def _new_node(name: str, etype: str, uuid: str) -> EntityNode:
         hints = identity_hints.get(uuid, {})
+        # The side that created the node names it (source-owned sides go first),
+        # not whichever fact happens to mention it first.
+        name = hints.get("name") or name
         identity = build_identity_props(
             name,
             aliases=hints.get("aliases", ()),
