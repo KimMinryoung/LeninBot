@@ -495,11 +495,17 @@ def run_llm_extraction(rec: DocRecord) -> list[dict]:
 # fiction; fiction keeps its Document node and deterministic links only.
 GENRE_FEATURE = "kg_document_genre"
 GENRE_SAMPLE_CHARS = 2500
+# Judge by form, not by whether the events are familiar: the first backfill
+# (2026-11-07) called 13 real research reports on 2026 markets and wars fiction
+# at p≥0.8, because the model had never heard of those events.
 _FICTION_INSTRUCTIONS = (
-    "This document is fiction or another invented narrative: a short story, novel or novel excerpt, fable, play, "
-    "or an imagined scenario or future history told as if it happened. Its characters, events and dates are not "
-    "claims about the real world. Reports, analyses, essays, speeches, letters, laws, minutes, memoirs and other "
-    "historical or documentary sources are NOT fiction, even when they are rhetorical or partisan."
+    "This document is a work of fiction: a short story, novel or novel excerpt, fable or play, written as "
+    "narrative with characters, scenes and dialogue that the author invented. "
+    "Judge by the document's form and genre, NOT by whether you recognise its events: `today` is the current "
+    "date and the document was registered on `published_at`, so events up to then may be real even if you have "
+    "never heard of them. Reports, analyses, market or news briefings, forecasts, essays, speeches, letters, "
+    "laws, minutes, memoirs and other documentary sources are NOT fiction, even when they are rhetorical, "
+    "partisan or about events unknown to you."
 )
 
 
@@ -510,7 +516,8 @@ def is_fiction_document(rec: DocRecord) -> tuple[bool, float | None]:
     extra = resolve(GENRE_FEATURE).extra or {}
     if not extra.get("enabled", True):
         return False, None
-    state = {"title": rec.get("title"), "kind": rec.get("kind"), "kind_label": rec.get("kind_label"),
+    state = {"today": datetime.now(timezone.utc).date().isoformat(), "published_at": rec.get("published_at"),
+             "title": rec.get("title"), "kind": rec.get("kind"), "kind_label": rec.get("kind_label"),
              "source": rec.get("source"), "description": (rec.get("description") or "")[:500],
              "opening": (rec.get("text") or "")[:GENRE_SAMPLE_CHARS]}
     decision = decide_sync(GENRE_FEATURE, state, {"fiction": {"type": "noul", "instructions": _FICTION_INSTRUCTIONS}})
