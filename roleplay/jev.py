@@ -885,7 +885,7 @@ def adjudicate_turn(user_id, user_text, history, scope_id, *, prepared=None):
             projected['recent_events'] = (projected.get('recent_events', []) + [f'jev-{scope_id}'])[-100:]
             audit = {'revision': projected['revision'], 'action': 'automatic', 'source_scope_id': scope_id,
                      'reason': projected['reason'], 'before': before, 'after': projected, 'jev': verdict, 'applied': applied, 'staged_records': prepared['stage'] if prepared is not None else None}
-            conn.execute('INSERT INTO state_history(user_id,revision,payload) VALUES (?,?,?)', (uid,projected['revision'],json.dumps(audit,ensure_ascii=False)))
+            conn.execute('INSERT INTO state_history(user_id,revision,payload) VALUES (?,?,?)', (uid,projected['revision'],json.dumps(memory.compact_audit(audit),ensure_ascii=False)))
             conn.execute('DELETE FROM state_history WHERE user_id=? AND id NOT IN (SELECT id FROM state_history WHERE user_id=? ORDER BY id DESC LIMIT 1000)', (uid,uid))
             conn.execute('INSERT INTO character_state VALUES (?,?) ON CONFLICT(user_id) DO UPDATE SET payload=excluded.payload', (uid,json.dumps(projected,ensure_ascii=False)))
         if prepared is not None and outcome['status'] in {'applied', 'unchanged'}:

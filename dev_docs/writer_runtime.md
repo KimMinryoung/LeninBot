@@ -37,3 +37,5 @@ DeepSeek 모델 카탈로그는 `deepseek_flash` 항목 하나만 제공하며 �
 Writer 조사기는 basic 검색부터 시작하고 근거가 충분하면 중단한다. 기존 출처가 있는 brief는 문장·저장 오류 때문에 다시 조사하지 않는다. 검색 API 비용은 LLM sub-run 비용과 별도로 [공용 web 예산](web_research.md)에 집계된다.
 
 **동시 편집 경계 (2026-11-12).** 프로젝트당 실행은 하나다. `stream_writer_reply`는 요청 시점에 프로젝트 슬롯을 동기적으로 잡아 중복 제출(더블 클릭·두 탭)을 오류 SSE로 돌려보낸다. 휴지통(`status='deleted'`) 프로젝트는 실행할 수 없다. 실행 중에는 브라우저의 원고 저장·추가·범위 치환 API가 `409`를 반환한다. `_write_manuscript`는 원고 행을 `FOR UPDATE`로 잠그고 호출자가 읽은 본문(`expected_before`)과 다르면 `ManuscriptChanged`를 낸다. 도구 추가·치환은 다시 읽고 최대 3회 재시도하며, 클라이언트 범위 치환은 `409`로 거절한다.
+
+**원고 리비전 보존 (2026-11-12).** `writer_manuscript_revisions`는 모든 편집의 메타데이터(`before_char_count`·`after_char_count`·편집 종류·시각)를 무기한 남기지만, 본문은 다음 규칙으로 줄인다. `before_body`는 프로젝트의 첫 리비전에만 저장한다(나머지는 직전 리비전의 `after_body`와 같다). `after_body`는 프로젝트별 최신 `REVISION_BODY_KEEP`(50)건과 날짜별 마지막 리비전에만 남기고, 쓰기마다 `prune_revision_bodies`가 같은 트랜잭션에서 나머지를 `''`로 비운다. 이미 쌓인 행은 `ensure_writer_tables`가 시작 시 같은 규칙으로 정리한다. 문서 목록의 원고 길이는 `after_char_count`를 쓴다.

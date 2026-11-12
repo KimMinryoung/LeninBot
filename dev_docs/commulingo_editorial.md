@@ -13,7 +13,8 @@ Python `commulingo/people.py`와 제안 승인 스크립트는
 사건 카드·본문 절·사건 인물·직책 행 쓰기도 2026-10-05부터 frontend
 `content-editorial-service.js`(MCP `editorial_store`의 history_event·history_event_section·
 history_event_person·office_row 대상)가 검증·반영·제안 기록·리비전을 맡는다. `_run_edit`는
-작성자 정책 검사(`_validate`, 모델용 안내)만 먼저 하고, 승인은 `scripts/commulingo_suggestions.py`가
+이 네 대상에 한해 작성자 정책 검사(`_validate`, 모델용 안내)만 먼저 하고(인물·인물 절·용어는
+Python 쪽 검증 없이 JS 저장소로 바로 넘긴다. 옛 Python 검증기는 2026-11-12 삭제), 승인은 `scripts/commulingo_suggestions.py`가
 같은 MCP로 한다. 읽기와 쓰기 전 검증은 `commulingo/reads.py`가 MCP 조회로 한다(2026-10-05).
 사건 큐레이터의 curation gap 기록은 MCP `gap_file`이 중복 판정과 함께 맡는다. 운영자 일괄 정리
 스크립트(줄표·표기 정규화·국적 백필 등)는 삭제했다: 대량 작업은 frontend에서 직접 한다.

@@ -273,6 +273,11 @@ threatening으로 넘겨 의지가 −2.5/h로 0까지 소모됐다. 다음 규�
 안의 연속 호출은 예외로 현재 revision에 적용하고 warnings로 알린다. 다른 턴의 충돌은 오류이며 read로 최신값을
 확인한다. reset은 상대 시간·조건·이벤트 목록을 초기화하며 revision은 계속 증가한다.
 변경 전후와 이유는 같은 SQLite 트랜잭션으로 state_history에 저장한다(사용자별 최근 1000건).
+행은 압축 형태로 저장한다(`memory.compact_audit`, 2026-11-12): `after`에서 누적 기록 키
+(`event_timestamps`·`resolve_events`·`recent_events`·`last_calculation`)를 빼고, 변경 전은 달라진 키만
+`before_changed`·`before_absent`로, 스테이징 스냅샷은 바뀐 테이블만 `staged_changes`로 남긴다. 읽을 때
+`expand_audit`가 `before`를 복원하며 옛 형식 행도 그대로 읽힌다. 기존 행은
+`scripts/compact_roleplay_history.py`(멱등, `--dry-run`)로 한 번 변환했다(41.6MB→7.8MB).
 `history`는 최근 20건의 요약을 반환한다. 인물 삭제에 따른 participants 정리는 revision을 올리지만
 이 수치 계산 이력에 추가하지 않는다. 저장 시점 UTC를 장면 시간으로 해석하지 않는다.
 

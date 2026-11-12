@@ -33,7 +33,7 @@ def list_documents(project_id: int) -> list[dict]:
     # reference material has no per-project staleness.
     return db_query(
         f"""SELECT {_DOCUMENT_COLUMNS},
-                   (SELECT length(r.after_body)::int
+                   (SELECT r.after_char_count
                       FROM writer_manuscript_revisions r
                      WHERE r.project_id = writer_documents.project_id
                        AND r.created_at <= writer_documents.updated_at

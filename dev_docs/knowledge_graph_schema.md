@@ -46,7 +46,7 @@ graphiti 기본 속성(`uuid`, `name`, `summary`, `group_id`, `created_at`, `nam
 
 ### 1.2 엔티티 이름 표기 표준 (2026-10-06)
 
-에이전트 기록(`write_kg_structured`)과 검토 개명이 따르는 규칙. CommuLingo 인명 규칙(`commulingo/people.py`의 `_FAMILY_FIRST`, 외래어 표기법 검사)과 같은 기준이다.
+에이전트 기록(`write_kg_structured`)과 검토 개명이 따르는 규칙. CommuLingo 인명 규칙(성-이름 순서, 외래어 표기법 검사. 인물 쓰기 검증은 프런트엔드 JS 저장소가 소유한다)과 같은 기준이다.
 
 1. **이미 있는 엔티티는 저장된 이름 그대로 쓴다.** `knowledge_graph_search`가 보여 주는 이름이나 별칭이면 같은 노드로 해석된다.
 2. **새 엔티티는 한글 표준명**으로 쓴다. 번역명·원어를 괄호로 덧붙이지 않는다(원어는 `fact` 문장에 쓴다). 괄호는 동명 구분에만 쓴다(`니콜라이 쿠즈네초프 (첩보원)`).

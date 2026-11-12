@@ -151,6 +151,52 @@ def ensure_writer_tables() -> None:
         "CREATE INDEX IF NOT EXISTS writer_documents_project_idx "
         "ON writer_documents(project_id, updated_at DESC, id DESC)"
     )
+    # Revision bodies: before_body duplicated the previous revision's
+    # after_body and every edit stored both full texts. Lengths live in their
+    # own columns so listings and staleness checks need no body.
+    db_execute("ALTER TABLE writer_manuscript_revisions ADD COLUMN IF NOT EXISTS before_char_count INT")
+    db_execute("ALTER TABLE writer_manuscript_revisions ADD COLUMN IF NOT EXISTS after_char_count INT")
+    db_execute(
+        """UPDATE writer_manuscript_revisions
+              SET before_char_count = length(before_body), after_char_count = length(after_body)
+            WHERE after_char_count IS NULL"""
+    )
+    db_execute(
+        """UPDATE writer_manuscript_revisions r SET before_body = ''
+            WHERE before_body <> ''
+              AND EXISTS (SELECT 1 FROM writer_manuscript_revisions o
+                           WHERE o.project_id = r.project_id
+                             AND (o.created_at, o.id) < (r.created_at, r.id))"""
+    )
+    for row in db_query("SELECT DISTINCT project_id FROM writer_manuscript_revisions"):
+        prune_revision_bodies(row["project_id"])
+
+
+# Revision retention: full bodies for the newest REVISION_BODY_KEEP revisions
+# of a project plus the last revision of each earlier day (a daily restore
+# point); older rows keep their metadata and lengths. Off-host writer DB
+# backups hold anything older.
+REVISION_BODY_KEEP = 50
+
+
+def _prune_revision_bodies_sql() -> str:
+    return """UPDATE writer_manuscript_revisions r SET after_body = ''
+               WHERE r.project_id = %s AND r.after_body <> ''
+                 AND r.id NOT IN (SELECT id FROM writer_manuscript_revisions
+                                   WHERE project_id = %s
+                                   ORDER BY created_at DESC, id DESC LIMIT %s)
+                 AND r.id NOT IN (SELECT DISTINCT ON (created_at::date) id
+                                    FROM writer_manuscript_revisions
+                                   WHERE project_id = %s
+                                   ORDER BY created_at::date, created_at DESC, id DESC)"""
+
+
+def prune_revision_bodies(project_id: int, cur=None) -> None:
+    params = (project_id, project_id, REVISION_BODY_KEEP, project_id)
+    if cur is not None:
+        cur.execute(_prune_revision_bodies_sql(), params)
+    else:
+        db_execute(_prune_revision_bodies_sql(), params)
 
 
 # ── Settings ─────────────────────────────────────────────────────────
@@ -474,12 +520,19 @@ def _write_manuscript(project_id: int, body: str, *, action: str, note: str = ""
             before_body = str((cur.fetchone() or {}).get("body") or "")
             if expected_before is not None and before_body != expected_before:
                 raise ManuscriptChanged("The manuscript changed since it was read; reload and retry.")
+            # The first revision keeps its before text (no earlier revision
+            # holds it); later ones only reference it through the previous row.
+            cur.execute("SELECT 1 FROM writer_manuscript_revisions WHERE project_id = %s LIMIT 1", (project_id,))
+            first_revision = cur.fetchone() is None
             cur.execute(
                 """INSERT INTO writer_manuscript_revisions
-                          (project_id, action, before_body, after_body, note)
-                     VALUES (%s, %s, %s, %s, %s)""",
-                (project_id, action, before_body, body, note.strip()),
+                          (project_id, action, before_body, after_body, note,
+                           before_char_count, after_char_count)
+                     VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+                (project_id, action, before_body if first_revision else "", body, note.strip(),
+                 len(before_body), len(body)),
             )
+            prune_revision_bodies(project_id, cur)
             cur.execute(
                 """UPDATE writer_manuscripts
                       SET body = %s,
@@ -686,8 +739,7 @@ def search_manuscript(project_id: int, query: str, limit: int = 20) -> list[dict
 def list_manuscript_revisions(project_id: int, limit: int = 30) -> list[dict]:
     return db_query(
         """SELECT id, project_id, action, note,
-                  length(before_body)::int AS before_char_count,
-                  length(after_body)::int AS after_char_count,
+                  before_char_count, after_char_count,
                   created_at
              FROM writer_manuscript_revisions
             WHERE project_id = %s

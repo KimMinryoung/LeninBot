@@ -24,6 +24,10 @@ from roleplay.dynamics import (METRICS, CONDITION_SCHEMA, REQUIRED_CONDITIONS, R
 
 MEMORY_PATH = Path(__file__).resolve().parents[1] / "output" / "roleplay_memory.sqlite3"
 MEMORY_OVERRIDE = ContextVar("roleplay_draft_memory", default=None)
+# state_history keeps what the history view and audits read. These keys are
+# bookkeeping that character_state already holds and that made every audit row
+# carry two full copies (~80 KB per turn); they are left out of history rows.
+HISTORY_OMITTED_STATE_KEYS = ("event_timestamps", "resolve_events", "recent_events", "last_calculation")
 MAX_NOTES = 30
 
 
@@ -59,6 +63,48 @@ def set_preference(user_id: str | int, key: str, value: str) -> None:
                      (str(user_id), key, value))
 
 
+def _history_state(state: dict) -> dict:
+    return {k: v for k, v in (state or {}).items() if k not in HISTORY_OMITTED_STATE_KEYS}
+
+
+def _staged_changes(stage) -> dict | None:
+    """Only the note/people tables a draft actually changed (baseline and result)."""
+    if not isinstance(stage, dict) or not isinstance(stage.get("records"), dict):
+        return None
+    baseline = stage.get("baseline") or {}
+    return {table: {"baseline": baseline.get(table), "records": rows}
+            for table, rows in stage["records"].items() if rows != baseline.get(table)}
+
+
+def compact_audit(audit: dict) -> dict:
+    """Shrink a state_history payload: ``after`` without bookkeeping keys,
+    ``before`` as only the keys that differ from it, and a draft stage as the
+    changed tables (its state/people copies duplicate ``after``)."""
+    out = dict(audit)
+    after = _history_state(out.get("after") or {})
+    if "before" in out:
+        before = _history_state(out.pop("before") or {})
+        out["before_changed"] = {k: v for k, v in before.items() if k not in after or after[k] != v}
+        absent = [k for k in after if k not in before]
+        if absent:
+            out["before_absent"] = absent
+    out["after"] = after
+    if "staged_records" in out:
+        out["staged_changes"] = _staged_changes(out.pop("staged_records"))
+    return out
+
+
+def expand_audit(record: dict) -> dict:
+    """Inverse view of compact_audit for readers: rebuild ``before`` (minus the
+    omitted bookkeeping keys). Rows written before compaction pass through."""
+    if "before_changed" in record and "before" not in record:
+        before = {**(record.get("after") or {}), **record["before_changed"]}
+        for key in record.get("before_absent") or ():
+            before.pop(key, None)
+        record = {**record, "before": before}
+    return record
+
+
 def mutate_state(user_id: str | int, reason: str, mutate) -> dict:
     """Apply a director command (routine, track) as one audited revision. ``mutate`` takes the
     loaded state and returns the new one; raising leaves everything untouched."""
@@ -71,7 +117,7 @@ def mutate_state(user_id: str | int, reason: str, mutate) -> dict:
         state["revision"] = before["revision"] + 1
         state["reason"] = reason
         audit = {"revision": state["revision"], "action": "command", "reason": reason, "before": before, "after": state}
-        conn.execute("INSERT INTO state_history(user_id, revision, payload) VALUES (?, ?, ?)", (uid, state["revision"], json.dumps(audit, ensure_ascii=False)))
+        conn.execute("INSERT INTO state_history(user_id, revision, payload) VALUES (?, ?, ?)", (uid, state["revision"], json.dumps(compact_audit(audit), ensure_ascii=False)))
         conn.execute("INSERT INTO character_state VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET payload = excluded.payload",
                      (uid, json.dumps(state, ensure_ascii=False)))
     return state
@@ -617,7 +663,8 @@ def roleplay_state(action: str, changes: dict | None = None, reason: str = "", *
         with _connection() as conn:
             retracted = {r[0] for r in conn.execute("SELECT scope_id FROM turn_retractions WHERE user_id = ?", (user_id,))}
             rows = conn.execute("SELECT payload FROM state_history WHERE user_id = ? ORDER BY id DESC LIMIT 1000", (user_id,)).fetchall()
-        records = [record for row in rows if (record := json.loads(row[0])).get("source_scope_id") not in retracted][:20]
+        records = [expand_audit(record) for row in rows
+                   if (record := json.loads(row[0])).get("source_scope_id") not in retracted][:20]
         if caller.scope_type == "telegram_message":
             return json.dumps([actor_state_view(record.get("after", {})) for record in records], ensure_ascii=False)
         for record in records:
@@ -785,7 +832,7 @@ def roleplay_state(action: str, changes: dict | None = None, reason: str = "", *
                  "resolve_event": applied_resolve, "story_updates": story_updates, "deferred_effects": deferred_effects,
                  "source_scope_id": caller.scope_id, "before": before, "after": state}
         conn.execute("INSERT INTO state_history(user_id, revision, payload) VALUES (?, ?, ?)",
-                     (user_id, state["revision"], json.dumps(audit, ensure_ascii=False)))
+                     (user_id, state["revision"], json.dumps(compact_audit(audit), ensure_ascii=False)))
         conn.execute("DELETE FROM state_history WHERE user_id = ? AND id NOT IN (SELECT id FROM state_history WHERE user_id = ? ORDER BY id DESC LIMIT 1000)", (user_id, user_id))
         conn.execute("INSERT INTO character_state VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET payload = excluded.payload",
                      (user_id, json.dumps(state, ensure_ascii=False)))
