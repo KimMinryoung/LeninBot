@@ -77,6 +77,8 @@ Chromium과 Playwright 드라이버를 종료한다. 다음 요청은 저장된 
 보수적으로 1크레딧을 예약한다. Tavily의 실제 `usage.credits`(0 포함)로 정산한다.
 사용량이 없거나 비정상이면 예약 추정액을 유지한다. 실패·취소는 `outcome_unknown`,
 강제 종료는 `reserved`로 남아 예산에 계속 포함된다. 정산 기록 실패도 예약을 유지한다.
+게이트웨이의 비동기 경로(검색·추출)는 `paid_request_async`/`charge.complete_async`로 SQLite 예약·정산을
+스레드에서 해 이벤트 루프를 막지 않는다(`BEGIN IMMEDIATE`는 최대 5초 대기, 2026-11-12).
 Brave는 요청당 단가를 사용한다. 공급자 규칙이 바뀌어 예약보다 큰 사용량이 보고되면
 그대로 기록하므로 단가·과금 규칙 변경은 운영자가 반영해야 한다.
 
@@ -143,8 +145,12 @@ venv/bin/python scripts/smoke_url_security.py
 
 ## 다운로드·추출 결과 진단
 
-`download_file`과 `download_image`는 공통 `safe_requests_get`으로 최초 주소와 매 리다이렉트를
-검증한다. 파일 100 MiB, 이미지 20 MiB를 Content-Length와 실제 스트리밍 바이트 수 양쪽에서
+`download_file`과 `download_image`, 무료 HTTP 추출은 공통 `safe_requests_get`으로 최초 주소와 매
+리다이렉트를 검증한다. 각 hop의 호스트는 한 번만 풀고, 모든 답이 공인 IP여야 하며, 연결은 그
+검증된 IP로만 맺는다(urllib3 연결 고정, `trust_env=False`; SNI·인증서 검증·Host 헤더는 호스트명
+그대로). 두 번째 DNS 조회가 없어 재바인딩으로 사설 주소에 닿지 못한다(2026-11-12). Playwright
+추출은 `page.route`로 모든 요청을 다시 검증하고 `route_web_socket`으로 WebSocket을 전부 닫는다.
+Chromium 자체 DNS 조회는 고정하지 못하므로 브라우저 경로의 재바인딩 창은 좁혀졌을 뿐 닫히지 않았다. 파일 100 MiB, 이미지 20 MiB를 Content-Length와 실제 스트리밍 바이트 수 양쪽에서
 제한한다. 같은 출력 디렉터리의 임시 파일에 받은 뒤 성공 시 원자적으로 교체하므로 실패한
 부분 파일은 제거되고 기존 완성 파일은 보존된다. 빈 응답·용량 초과·이미지 형식 오류도 실패다.
 

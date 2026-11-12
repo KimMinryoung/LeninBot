@@ -67,6 +67,64 @@ class ClaimDedupeTests(unittest.IsolatedAsyncioTestCase):
         decide.assert_not_awaited()
 
 
+class BatchAndSessionTests(unittest.IsolatedAsyncioTestCase):
+    """In-batch repeats, the pair cap, and no open session during the judgement."""
+
+    async def _drop(self, facts, *, existing, noul, decide_hook=None):
+        resolved = [(f, 'node-a', False, 'node-b', False) for f in facts]
+        answers = Decision(answers={k: {'noul': noul} for k in
+                                    [f'f{n}{x}{m}_same' for n in range(len(facts)) for x in 'eb' for m in range(50)]},
+                           model='m')
+        client = _TrackingClient()
+
+        async def fake_decide(*args):
+            if decide_hook:
+                decide_hook(client)
+            return answers
+
+        with patch.object(writer, '_existing_same_relations', new=AsyncMock(return_value=existing)), \
+             patch('llm.call_registry.resolve', return_value=_profile('kg_claim_dedupe', same=0.9)), \
+             patch('llm.call_registry.decide', new=AsyncMock(side_effect=fake_decide)) as decide:
+            kept, kept_idx, dups = await writer._drop_repeated_claims(client, 'neo4j', resolved, list(range(len(facts))))
+        return kept_idx, dups, decide
+
+    async def test_exact_repeat_in_batch_is_dropped_without_judgement(self):
+        facts = [_fact('Warsh  joined the Fed.'), _fact('warsh joined the fed.')]
+        kept, dups, decide = await self._drop(facts, existing={}, noul=0.0)
+        self.assertEqual(kept, [0])
+        self.assertEqual((dups[0]['index'], dups[0]['duplicate_of_index']), (1, 0))
+        decide.assert_not_awaited()
+
+    async def test_restatement_in_batch_is_judged(self):
+        facts = [_fact('Warsh joined the Fed in May.'), _fact('In May Warsh became part of the Fed.')]
+        kept, dups, decide = await self._drop(facts, existing={}, noul=0.95)
+        self.assertEqual(kept, [0])
+        self.assertEqual(dups[0]['duplicate_of_index'], 0)
+        self.assertIn('f1b0', decide.await_args.args[1]['items'])
+
+    async def test_session_is_closed_before_judgement_and_cap_is_logged(self):
+        existing = {0: [{'uuid': f'edge-{j}', 'fact': f'old {j}', 'valid_at': None} for j in range(45)]}
+        open_during_decide = []
+        with self.assertLogs(writer.logger, level='WARNING') as logs:
+            await self._drop([_fact('new')], existing=existing, noul=0.0,
+                             decide_hook=lambda c: open_during_decide.append(c.open))
+        self.assertEqual(open_during_decide, [0])
+        self.assertTrue(any('judging the first 40' in line for line in logs.output))
+
+
+class _TrackingClient:
+    def __init__(self):
+        self.open = 0
+
+    @asynccontextmanager
+    async def session(self, **kwargs):
+        self.open += 1
+        try:
+            yield object()
+        finally:
+            self.open -= 1
+
+
 class FictionGateTests(unittest.TestCase):
     REC = dx.DocRecord(kind='research', ident='story', ref='research:story', title='기울기 — 루멘에 관한 이야기',
                        description='', text='2028년 2월, 로잔 엘레나 바스케스는 논문을 발표했다.', url=None,

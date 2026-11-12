@@ -78,6 +78,8 @@ SQLite 확정과 PostgreSQL 대화 기록·Telegram 전송은 분산 트랜잭�
 - 기본 `/ask 끄기`도 중요한 불확실성은 초안을 보여 주고 **결과 확정 / 결과 없이 다시 작성 / 초안 버리기**로 묻는다.
   질문에 대상과 후보 결과를 표시한다. `/ask 켜기`는 일반 추정도 기존 후보 버튼으로 묻는다.
   Telegram 경계는 `prepare_result`의 prepared/pending 결과를 사용한다. 내부 `prepare/project`의 PendingChoice는 호환용으로 유지한다.
+  버튼으로 묻는 키는 사건·강도·활동·중요 결과·holdout/bargain/story다. 입력 허가(`authorize_time`)는 PendingChoice를 내지 않으므로
+  mode·within_scope 버튼과 옛 `turn.decide` 게이트는 2026-11-12 삭제했다.
 - 확인은 같은 초안·임시 기록·분류·시간 검사 결과를 재사용한다. `confirmed_important`에는 확인한 라벨과 대상 ID가 남는다.
   기준 상태·인물·입력·초안·허가를 묶은 cache_key가 바뀌면 기존 판정을 재사용하지 않는다.
 - 결과 없이 재작성은 새로운 임시 저장에서 1회 수행한다. 폐기한 초안의 인물 기록은 가져오지 않으며,

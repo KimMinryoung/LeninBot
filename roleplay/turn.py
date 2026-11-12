@@ -2,18 +2,16 @@
 import asyncio
 from contextlib import asynccontextmanager, closing, contextmanager
 from copy import deepcopy
-from dataclasses import replace
 from datetime import datetime, timedelta
 import json
 import hashlib
 import logging
 import time
-import math
 import sqlite3
 import tempfile
 from pathlib import Path
 
-from llm.call_registry import decide_detailed, generate_detailed, resolve, resolve_provider_connection
+from llm.call_registry import generate_detailed, resolve, resolve_provider_connection
 from roleplay.decisions import (AdjudicationUnavailable, DraftOutOfScope, StateConflict,
     pending_important, settle_general, important_candidates, describe_important)
 from roleplay import memory, jev
@@ -23,47 +21,6 @@ from roleplay.clock import interpret_clock
 from roleplay.dynamics import pass_night
 from roleplay.story import blocking_events
 from roleplay.pacing import policy_for, turn_time_scope, check_time_request, check_time_result
-
-
-def decide(label, payload, questions, defaults=None):
-    """Closed-set answers for every question. A key listed in ``defaults`` falls back to the
-    conservative value when Jev stays unsure; any other unsure key becomes a PendingChoice
-    so the player can settle it instead of losing the turn."""
-    profile = resolve(jev.FEATURE)
-    if not profile.extra.get('enabled', False):
-        raise ValueError('판정기가 비활성화됨')
-    result = decide_detailed(jev.FEATURE, payload, questions, profile=profile, label=label)
-    if result.decision is None:
-        raise ValueError('장면 검증을 완료하지 못함')
-    labels, unresolved = {}, []
-    threshold = float(profile.extra.get('thresholds', {}).get('accept', .75))
-    def accepted(decision, key):
-        value, confidence = decision.choice(key), decision.confidence(key)
-        return value if value in questions[key]['criteria'] and confidence is not None and math.isfinite(confidence) and confidence >= threshold else None
-    for key in questions:
-        value = accepted(result.decision, key)
-        if value is None: unresolved.append(key)
-        else: labels[key] = value
-    review = None
-    candidate_decision = result.decision
-    if unresolved:
-        focused = ({'current_user':payload['current_user'],'accepted':labels,'current':{'clock':(payload.get('current') or {}).get('clock')},'history':payload.get('history') if 'mode' in unresolved else []} if label == 'roleplay-authorize' else payload)
-        retry = decide_detailed(jev.FEATURE, focused, {key:questions[key] for key in unresolved}, profile=profile, label=label+'-review')
-        if retry.decision is not None:
-            review = retry.decision.answers
-            candidate_decision = retry.decision
-            for key in unresolved:
-                value = accepted(retry.decision,key)
-                if value is not None: labels[key] = value
-    defaulted = {}
-    for key in sorted(set(questions) - set(labels)):
-        if defaults and key in defaults:
-            labels[key] = defaulted[key] = defaults[key]
-            continue
-        probabilities = candidate_decision.probabilities(key)
-        ranked = sorted(questions[key]['criteria'], key=lambda k: -float(probabilities.get(k) or 0))
-        raise jev.PendingChoice(key, [(k, questions[key]['criteria'][k]) for k in ranked[:4]], '장면 검증 미확정: ' + key)
-    return {'labels': labels, 'answers': result.decision.answers, 'review':review, 'model': result.decision.model, 'defaulted': defaulted}
 
 
 def authorize(user_text, state, history):
@@ -197,10 +154,9 @@ def commit_staged(conn, uid, stage):
             conn.executemany(f'INSERT INTO {table} VALUES (?,?,?)',[(str(uid),*row) for row in stage['records'][table]])
 
 
-def prepare(user_text, before, people, history, scope_id, draft, authorization, stage=None, verdict=None, scope_ok=False):
+def prepare(user_text, before, people, history, scope_id, draft, authorization, stage=None, verdict=None):
     """Gate and classify the draft, then project it. A ``verdict`` from an earlier attempt
-    (the player settled a choice Jev left open) skips the scope gate and the classifier;
-    ``scope_ok`` means the player confirmed the draft stays within the authorized scene."""
+    (the player settled a choice Jev left open) skips the classifier."""
     cache_key = hashlib.sha256(json.dumps([before, people, user_text, draft,
         authorization], sort_keys=True, ensure_ascii=False).encode()).hexdigest()
     if verdict is not None and verdict.get('cache_key') not in (None, cache_key):
@@ -223,7 +179,7 @@ def prepare(user_text, before, people, history, scope_id, draft, authorization, 
         # No scope gate. The classifier's own labels (location, events, elapsed minutes
         # capped by the pacing policy) settle what the draft actually did; a second Jev
         # call to ask "did it overrun?" only ever produced rejected turns.
-        gate = {'labels': {'within_scope': 'yes'}, 'skipped': True, 'player_confirmed': bool(scope_ok)}
+        gate = {'labels': {'within_scope': 'yes'}, 'skipped': True}
         verdict = jev.classify(user_text,before,people,history,draft=draft,authorization=authorization)
         if verdict['status'] != 'classified':
             raise AdjudicationUnavailable('초안 사건 판정 실패')

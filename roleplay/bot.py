@@ -37,7 +37,7 @@ from roleplay.actor import actor_state_view
 from roleplay import turn as roleplay_turn
 from roleplay.timing import TimeAuthorizationUnavailable
 from roleplay.dynamics import with_defaults, holdout_titles, open_bargains, routine_occurrences
-from roleplay.pacing import policy_for, turn_time_scope
+from roleplay.pacing import turn_time_scope
 from roleplay.memory import (load_notes, load_state, load_people, people_context, excluded_history_ids,
                                            get_preference, set_preference, mutate_state, set_routine, exclude_history_message)
 from roleplay import track as roleplay_track
@@ -624,18 +624,6 @@ async def handle_message(message: Message) -> None:
         await message.answer("시간 판정 모델 서비스에 연결하지 못해 이번 진행은 저장하지 않았어. "
                              "지시 내용이 잘못된 건 아니야. 잠시 후 같은 메시지를 다시 보내줘.")
         return
-    except PendingChoice as exc:
-        # Jev could not tell whether this is a scene to play or a question to answer.
-        if await asyncio.to_thread(_asks_player, user_id):
-            PENDING_CHOICES[user_id] = {**turn, "key": exc.key, "phase": "authorize", "candidates": exc.candidates}
-            await message.answer(_choice_prompt(exc), reply_markup=_choice_keyboard(turn["scope_id"], exc))
-            return
-        # A director line that might be a scene is played as one: a discussion draft can
-        # never move the story, while a scene draft with nothing in it settles harmlessly.
-        candidates = [label for label, _ in exc.candidates]
-        pick = "scene" if "scene" in candidates or not candidates else candidates[0]
-        authorization = {"user_text": user_text, "labels": {"mode": pick, "transition": "current", "span": "brief"},
-                         "auto_settled": {exc.key: pick}}
     except Exception as exc:
         logger.exception("roleplay authorization failed")
         await asyncio.to_thread(_drop_unsettled, user_id, turn, f"허가 판정 실패: {_issue_text(exc)}")
@@ -765,11 +753,7 @@ def _draft_revision_context(history, user_text, authorization, state, chat_id, e
 
 
 _ISSUE_TEXT = {
-    "장면 검증 미확정: within_scope": "초안이 지시한 장면 범위 안인지 판정 불확실",
-    "장면 검증 미확정: mode": "장면 실행인지 질문·상담인지 판정 불확실",
-    "장면 검증 미확정: span": "짧은 행동인지 긴 세션인지 판정 불확실",
     "초안 사건 판정 실패": "초안의 사건 분류 호출 실패",
-    "장면 검증을 완료하지 못함": "판정기 호출 실패",
 }
 
 
@@ -799,26 +783,15 @@ def _choice_prompt(exc: PendingChoice) -> str:
         return str(exc) + ("\n이 결과를 확정할까, 이 결과 없이 초안을 다시 쓸까?"
                            if any(label == "rewrite" for label, _ in exc.candidates) else "\n이 결과를 확정하거나 초안을 버릴 수 있어.")
     return {
-        "mode": "이 메시지가 장면 실행인지, 질문·상담인지 판정하지 못했어. 골라 주면 그대로 진행할게.",
-        "within_scope": "쓴 초안이 지시한 장면 범위 안인지 판정하지 못했어. 범위 안이면 이 초안을 그대로 확정할게.",
         "intensity": "이 장면의 사건 강도를 판정하지 못했어. 골라 주면 이 초안을 그대로 확정할게.",
         "activity": "이 장면 동안 인물이 무엇을 하고 있었는지(활동) 판정하지 못했어. 골라 주면 이 초안을 그대로 확정할게.",
     }.get(exc.key, "이 장면에서 실제로 일어난 사건을 판정하지 못했어. 골라 주면 이 초안을 그대로 확정할게.")
 
 
-_CHOICE_LABELS = {
-    "mode": {"scene": "장면 실행", "discussion": "질문·상담", "plan": "예정만 등록", "correction": "수치 정정", "reset": "새 장면"},
-    "within_scope": {"yes": "범위 안 — 이 초안 확정", "no": "범위 밖 — 버리기"},
-}
-
-
 def _choice_keyboard(scope_id: str, exc: PendingChoice) -> InlineKeyboardMarkup:
-    names = _CHOICE_LABELS.get(exc.key, {})
-    # "범위 밖" and the discard button meant the same thing; keep one.
-    candidates = [(label, korean) for label, korean in exc.candidates if not (exc.key == "within_scope" and label == "no")]
-    rows = [[InlineKeyboardButton(text=names.get(label, korean)[:60], callback_data=f"rp:{scope_id}:{exc.key}:{label}")]
-            for label, korean in candidates]
-    rows.append([InlineKeyboardButton(text="버리기" if exc.key == "mode" else "이 초안 버리기", callback_data=f"rp:{scope_id}:cancel:-")])
+    rows = [[InlineKeyboardButton(text=korean[:60], callback_data=f"rp:{scope_id}:{exc.key}:{label}")]
+            for label, korean in exc.candidates]
+    rows.append([InlineKeyboardButton(text="이 초안 버리기", callback_data=f"rp:{scope_id}:cancel:-")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -846,17 +819,7 @@ async def on_choice(query: CallbackQuery) -> None:
     # must not settle the same draft twice in parallel.
     PENDING_CHOICES.pop(user_id, None)
     await query.answer()
-    chosen = _CHOICE_LABELS.get(key, {}).get(value) or next((korean for label, korean in _candidates_of(pending, key) if label == value), value)
-    if key == "mode":
-        await query.message.edit_text(f"선택: {chosen}")
-        authorization = {"user_text": pending["user_text"], "labels": {"mode": value, "transition": "current", "span": "brief"},
-                         "player_confirmed": True}
-        await _draft_and_settle(query.message, user_id, pending, authorization)
-        return
-    if key == "within_scope" and value != "yes":
-        await asyncio.to_thread(_drop_unsettled, user_id, pending, "플레이어가 범위 밖으로 판정")
-        await query.message.edit_text("이 초안은 버렸어. 어디까지 진행할지 다시 말해줘.")
-        return
+    chosen = next((korean for label, korean in _candidates_of(pending, key) if label == value), value)
     verdict = pending.get("verdict")
     if key == 'important' and value == 'rewrite':
         if pending.get('rewrite_without'):

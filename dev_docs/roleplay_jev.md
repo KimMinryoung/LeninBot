@@ -68,7 +68,8 @@ Telegram의 별도 plan 입력은 입력 LLM이 반환한 appointment.title과 d
 기존 내부/legacy `project` 호출의 plan_action 경로는 남아 있으나 Telegram의 plan은 Jev를 호출하지 않는다.
 
 분류·시간 추정은 DB 쓰기 잠금 밖에서 실행한다. 저장 직전 revision 비교와 SQLite 트랜잭션으로
-경쟁 변경을 덮어쓰지 않는다. `automatic_turns`는 사용자/메시지별 처리 결과를 보존하여 재처리를 막는다.
+경쟁 변경을 덮어쓰지 않는다. `automatic_turns`는 사용자/메시지별 처리 결과를 보존하여 재처리를 막는다. 보류(deferred) 결과는 아무것도 쓰지 않았으므로
+기록하지 않는다(2026-11-12). 같은 메시지를 나중에 다시 정산할 수 있고, 그 전에 기록된 deferred 행도 막지 않는다.
 `state_history`에는 판정 원문, 시간 추정 모델/근거, 변경 전후를 남긴다. 보류 시 기존 상태를 보존한다.
 
 연기 모델에 공개하는 `roleplay_state` 스키마는 조회/이력과 질적 필드 변경만 허용한다. Telegram 실행

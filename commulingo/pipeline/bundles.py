@@ -13,10 +13,3 @@ def work_topics(job):
     if job['kind'] == 'person' and len(pending) > 1:
         return [topic for topic in pending if topic != 'sections']
     return pending
-
-
-def advance(job, value):
-    if not (job.get('payload') or {}).get('topics'):
-        return value
-    remaining = [topic for topic in topics(job) if topic not in work_topics(job)]
-    return {**value, 'remaining_topics': remaining} if remaining else value

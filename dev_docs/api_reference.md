@@ -45,8 +45,8 @@ Inbound A2A is served by `leninbot-a2a-api.service` and controlled by non-secret
 | `POST` | `/chat/feedback` | store rating/tone feedback for a web chat answer |
 | `POST` | `/chat/messages/{message_id}/deactivate` | soft-delete one user or assistant side of a stored web-chat exchange |
 | `GET` | `/personas` | selectable public web-chat persona catalog |
-| `GET` | `/history` | chat history visible to fingerprint/proxy identity |
-| `GET` | `/sessions` | session list visible to fingerprint/proxy identity |
+| `GET` | `/history` | chat history for the fingerprint/proxy identity; trusted frontend proxy required (403 otherwise) |
+| `GET` | `/sessions` | session list for the fingerprint/proxy identity; trusted frontend proxy required (403 otherwise) |
 | `GET` | `/x402-demo/quote` | x402 demo quote route from `api_routes/x402_demo.py` |
 
 Route ownership inside `leninbot-api.service` is split by module, but still runs in one process on port `8000`: `api_routes/admin_users.py` owns `/admin/users*`; `api_routes/chat_history.py` owns `/logs`, `/history`, `/sessions`, and `/session/{session_id}`; `api_routes/task_reports.py` owns `/reports*`; `api_routes/private_reports.py` owns `/private-reports*`; and `api_routes/x402_demo.py` owns `/x402-demo/quote`. `services/api.py` itself owns `/chat`, `/chat/feedback`, and `/personas`. The `/admin/private-reports` browser shell is served by the frontend; FastAPI only serves the private report JSON endpoints. `/email/*` is served by `leninbot-email-api.service`; `/.well-known/agent-card.json` and `/a2a` are served by `leninbot-a2a-api.service`.
@@ -197,6 +197,8 @@ Query:
 | `limit` | no | 1-200, default 50 |
 
 Returns `{"history": [...]}` with sanitized `user_query`, `bot_answer`, and `created_at`.
+
+`/history` and `/sessions` require the `X-Webchat-Proxy-Secret` header the frontend proxy injects (2026-11-12): the frontend normally answers both from its own `chat_logs` copy and falls through here only on a DB failure, so a direct caller holding just a fingerprint gets 403.
 
 ### `GET /sessions`
 

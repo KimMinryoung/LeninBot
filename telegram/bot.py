@@ -52,6 +52,7 @@ from llm.runtime_profile import resolve_runtime_profile
 from telegram.schema import hydrate_summary_state
 from telegram.task_reporting import report_for_callback, RESULT_RELAY_GUIDANCE
 from telegram._send_utils import make_progress_callback, split_message
+from telegram.background import spawn, track
 from ops.logs import log_event
 from llm.json_utils import extract_json_object
 from llm.claude_loop import dedupe_tools_by_name
@@ -1623,7 +1624,7 @@ async def _orchestrator_report_task(b: Bot, task: dict, result: dict, chat_id: i
 
         for chunk in _split_message(reply):
             await b.send_message(chat_id=chat_id, text=chunk)
-        asyncio.create_task(_persist_assistant_turn_after_send(chat_id, reply))
+        spawn(_persist_assistant_turn_after_send(chat_id, reply), name="persist_task_report")
         await asyncio.to_thread(_save_system_event, chat_id, "task_report", f"task #{task_id} [{agent_type}] {status}")
 
     except Exception as e:
@@ -1987,7 +1988,7 @@ async def bot_main():
                 except Exception:
                     pass
         try:
-            asyncio.get_event_loop().create_task(_shutdown_notify_and_checkpoint())
+            track(asyncio.get_event_loop().create_task(_shutdown_notify_and_checkpoint()))
         except Exception:
             pass
         asyncio.get_event_loop().call_soon_threadsafe(dp.stop_polling)
@@ -2022,7 +2023,7 @@ async def bot_main():
             except Exception:
                 pass
 
-    asyncio.create_task(_notify_ready(), name="startup_notify")
+    spawn(_notify_ready(), name="startup_notify")
 
     # drop_pending_updates: new instance takes over quickly, avoids processing stale updates
     await dp.start_polling(

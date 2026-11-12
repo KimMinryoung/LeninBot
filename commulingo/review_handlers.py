@@ -27,11 +27,10 @@ def review_risks(row, current):
     return sorted(reasons)
 
 
-def make_handlers(read_handlers, proposal, snapshots, box, gate=None, triage=None):
+def make_handlers(read_handlers, proposal, snapshots, box, gate=None):
     """``snapshots`` collects the slices this review retrieves (review_source);
     ``gate(value)`` (async) may annotate the resolved decision or raise
-    ValueError to send it back to the reviewer before it is boxed;
-    ``triage(text)`` (async) sees each rendered web_search result (shadow)."""
+    ValueError to send it back to the reviewer before it is boxed."""
     from tool_gateway.results import ToolRejection, ToolResult, is_failure
     from commulingo.pipeline.evidence import Passages
     from provenance.runtime import external_body
@@ -44,8 +43,6 @@ def make_handlers(read_handlers, proposal, snapshots, box, gate=None, triage=Non
                 if is_failure(result):
                     return result
                 text = str(result)
-                if tool_name == 'web_search' and triage is not None:
-                    await triage(text)
                 body = external_body(text)
                 if tool_name in {'fetch_url','wiki_get'} and body and len(body[1])>20:
                     urls = [kwargs.get('url')] if tool_name=='fetch_url' else re.findall(r'https?://[^\s<>\]"\)]+', text[:1000])

@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from commulingo.pipeline.draft_repair import DraftRepair
 from commulingo.pipeline.editor import Editor
-from commulingo.pipeline.evidence import SourceHandles, snapshot, Passages, resolve_passages, compile_evidence
+from commulingo.pipeline.evidence import snapshot, Passages, resolve_passages, compile_evidence
 from commulingo.pipeline.engine import Usage
 from scripts.commulingo_write_session import draft_id
 from commulingo_test_support import EditorCase
@@ -22,43 +22,6 @@ class EvidenceContracts(TestCase):
         self.assertNotIn('kind', tool_fate['properties'])
         schema_validate({'label':{'ko':'사망 경위 미확정','en':'Circumstances unconfirmed'}},tool_fate)
 
-    def test_handles_are_one_per_url_and_follow_the_latest_snapshot(self):
-        source=snapshot('https://example.org/archive','Documented fact. '*80)
-        sources={source['id']:source}
-        handles=SourceHandles(sources)
-        passages=Passages(); passages.show(source['id'],source['body'])
-        self.assertEqual(resolve_passages([{'field':'body','claim':'fact','passages':['P1']}],passages,sources)[0]['start'],0)
-        other=snapshot('https://example.org/other','Another page. '*10)
-        self.assertEqual(handles.handle(other),'S2')
-        self.assertEqual(handles.handle(source),'S1')
-        # A later snapshot of the same URL keeps the handle and becomes its current target.
-        later=snapshot('https://example.org/archive','Documented fact. '*80+'Appended page.')
-        self.assertEqual(handles.handle(later),'S1')
-        self.assertEqual(handles.ids['S1'],later['id'])
-
-    def test_pages_of_one_url_merge_into_one_snapshot(self):
-        from commulingo.pipeline.evidence import SourcePages
-        pages=SourcePages()
-        first,span1,created=pages.absorb('https://example.org/long','A'*600)
-        self.assertTrue(created); self.assertEqual(span1,(0,600))
-        second,span2,created=pages.absorb('https://example.org/long','B'*500)
-        self.assertTrue(created)
-        self.assertEqual(span2,(601,1101))
-        self.assertEqual(second['body'],'A'*600+'\n'+'B'*500)
-        again,span_again,created=pages.absorb('https://example.org/long','A'*600)
-        self.assertFalse(created); self.assertIs(again,second); self.assertEqual(span_again,span1)
-        # Snapshots a job already holds for one URL are merged oldest first.
-        from datetime import datetime,timezone,timedelta
-        t=datetime.now(timezone.utc)-timedelta(days=1)
-        old={**snapshot('https://example.org/p','page one. '*30,now=t),}
-        new={**snapshot('https://example.org/p','page two. '*30,now=t+timedelta(minutes=1))}
-        single=snapshot('https://example.org/q','only page. '*30,now=t)
-        seeded=SourcePages()
-        merged=seeded.seed({old['id']:old,new['id']:new,single['id']:single})
-        self.assertEqual([m['url'] for m in merged],['https://example.org/p'])
-        self.assertTrue(merged[0]['body'].startswith('page one. ') and merged[0]['body'].endswith('page two. '))
-        self.assertIs(seeded.current['https://example.org/q'],single)
-
     def test_empty_arguments_are_explained_as_unparsed_json(self):
         from tool_gateway.validation import validate_tool_arguments, ToolArgumentValidationError
         schema={'type':'object','properties':{'fields':{'type':'object'}},'required':['fields']}
@@ -75,7 +38,7 @@ class EvidenceContracts(TestCase):
 
     def test_many_passages_are_all_kept(self):
         source=snapshot('https://example.org/archive','Documented fact number one. '*100)
-        sources={source['id']:source}; handles=SourceHandles(sources)
+        sources={source['id']:source}
         passages=Passages(); passages.show(source['id'],source['body'])
         claim={'field':'body','claim':'fact','passages':['P1']}
         result=resolve_passages([claim]*40,passages,sources)

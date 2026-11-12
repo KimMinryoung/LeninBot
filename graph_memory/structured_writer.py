@@ -278,50 +278,88 @@ async def _existing_same_relations(session, pairs: list[dict]) -> dict[int, list
     return {row["i"]: list(row["existing"]) async for row in result}
 
 
-async def _drop_repeated_claims(session, resolved: list, indices: list[int]) -> tuple[list, list[int], list[dict]]:
-    """Remove facts that restate an active relation. Returns (kept, kept indices, duplicates)."""
+def _claim_text_key(fact: dict) -> tuple:
+    return (" ".join(str(fact.get("fact") or "").casefold().split()), str(fact.get("valid_at") or ""))
+
+
+async def _drop_repeated_claims(driver_client, database: str, resolved: list,
+                                indices: list[int]) -> tuple[list, list[int], list[dict]]:
+    """Remove facts that restate an active relation or an earlier fact of the same batch.
+
+    Returns (kept, kept indices, duplicates). The Neo4j read finishes and its
+    session is closed before the judgement call, so a slow System One request
+    never holds a pooled session.
+    """
     from llm.call_registry import decide, fan_out, resolve
 
     profile = resolve(CLAIM_DEDUPE_FEATURE)
     extra = profile.extra or {}
     if not extra.get("enabled", True):
         return resolved, indices, []
+    # Same batch, same endpoints and predicate, same text and date: no judgement needed.
+    same: dict[int, dict] = {}
+    seen_exact: dict[tuple, int] = {}
+    by_triple: dict[tuple, list[int]] = {}
+    for n, (f, s_uuid, _s_new, t_uuid, _t_new) in enumerate(resolved):
+        triple = (s_uuid, t_uuid, f["predicate"])
+        first = seen_exact.setdefault((triple, _claim_text_key(f)), n)
+        if first != n:
+            same[n] = {"existing_edge": None, "duplicate_of_index": indices[first],
+                       "existing_fact": resolved[first][0]["fact"], "probability": 1.0}
+            continue
+        by_triple.setdefault(triple, []).append(n)
     pairs = [{"i": n, "s": s_uuid, "t": t_uuid, "pred": f["predicate"]}
-             for n, (f, s_uuid, s_new, t_uuid, t_new) in enumerate(resolved) if not s_new and not t_new]
-    if not pairs:
-        return resolved, indices, []
-    existing = await _existing_same_relations(session, pairs)
-    items: dict[str, dict] = {}
+             for n, (f, s_uuid, s_new, t_uuid, t_new) in enumerate(resolved)
+             if not s_new and not t_new and n not in same]
+    existing: dict[int, list[dict]] = {}
+    if pairs:
+        try:
+            async with driver_client.session(database=database) as session:
+                existing = await _existing_same_relations(session, pairs)
+        except Exception as exc:  # stored relations unknown; in-batch checks still apply
+            logger.warning("[KG STRUCTURED] repeated-claim read failed: %s", exc)
+    # (new fact n, earlier fact in the store or in this batch)
+    candidates: list[tuple[str, int, dict]] = []
     for n, rows in existing.items():
-        f = resolved[n][0]
         for j, row in enumerate(rows):
-            if len(items) >= CLAIM_DEDUPE_MAX_PAIRS:
-                break
-            items[f"f{n}e{j}"] = {
-                "new_fact": f["fact"], "new_valid_at": f.get("valid_at"),
-                "existing_fact": row["fact"], "existing_valid_at": row["valid_at"],
-            }
-    if not items:
+            candidates.append((f"f{n}e{j}", n, {"uuid": row["uuid"], "fact": row["fact"],
+                                                 "valid_at": row["valid_at"]}))
+    for members in by_triple.values():
+        for pos, n in enumerate(members):
+            for m in members[:pos]:
+                f = resolved[m][0]
+                candidates.append((f"f{n}b{m}", n, {"uuid": None, "batch_index": indices[m],
+                                                     "fact": f["fact"], "valid_at": f.get("valid_at")}))
+    if len(candidates) > CLAIM_DEDUPE_MAX_PAIRS:
+        logger.warning("[KG STRUCTURED] repeated-claim check: %d candidate pair(s), judging the first %d; "
+                       "the rest are written unchecked", len(candidates), CLAIM_DEDUPE_MAX_PAIRS)
+        candidates = candidates[:CLAIM_DEDUPE_MAX_PAIRS]
+    items = {item_id: {"new_fact": resolved[n][0]["fact"], "new_valid_at": resolved[n][0].get("valid_at"),
+                       "existing_fact": other["fact"], "existing_valid_at": other["valid_at"]}
+             for item_id, n, other in candidates}
+    decision = None
+    if items:
+        state, questions = fan_out(items, {"same": {"type": "noul", "instructions": _CLAIM_DEDUPE_INSTRUCTIONS}})
+        decision = await decide(CLAIM_DEDUPE_FEATURE, state, questions)
+        if decision is None:
+            logger.warning("[KG STRUCTURED] repeated-claim check unavailable; writing all %d fact(s)",
+                           len(resolved) - len(same))
+    if decision is not None:
+        threshold = float((extra.get("thresholds") or {}).get("same", 0.9))
+        for item_id, n, other in candidates:
+            p = decision.noul(f"{item_id}_same") or 0.0
+            if p >= threshold and p > same.get(n, {}).get("probability", 0.0):
+                entry = {"existing_edge": other["uuid"][:8] if other["uuid"] else None,
+                         "existing_fact": other["fact"], "probability": round(p, 2)}
+                if other["uuid"] is None:
+                    entry["duplicate_of_index"] = other["batch_index"]
+                same[n] = entry
+    if not same:
         return resolved, indices, []
-    state, questions = fan_out(items, {"same": {"type": "noul", "instructions": _CLAIM_DEDUPE_INSTRUCTIONS}})
-    decision = await decide(CLAIM_DEDUPE_FEATURE, state, questions)
-    if decision is None:
-        logger.warning("[KG STRUCTURED] repeated-claim check unavailable; writing all %d fact(s)", len(resolved))
-        return resolved, indices, []
-    threshold = float((extra.get("thresholds") or {}).get("same", 0.9))
-    same: dict[int, tuple[str, str, float]] = {}
-    for item_id in items:
-        p = decision.noul(f"{item_id}_same") or 0.0
-        n, j = (int(x) for x in item_id[1:].split("e"))
-        if p >= threshold and p > same.get(n, ("", "", 0.0))[2]:
-            row = existing[n][j]
-            same[n] = (row["uuid"], row["fact"], p)
     kept, kept_indices, duplicates = [], [], []
     for n, (item, index) in enumerate(zip(resolved, indices)):
         if n in same:
-            uuid, fact, p = same[n]
-            duplicates.append({"index": index, "existing_edge": uuid[:8], "existing_fact": fact,
-                               "probability": round(p, 2)})
+            duplicates.append({"index": index, **same[n]})
             continue
         kept.append(item)
         kept_indices.append(index)
@@ -713,9 +751,8 @@ async def write_structured_facts(
     duplicate_facts: list[dict] = []
     if dedupe_claims:
         try:
-            async with driver_client.session(database=database) as session:
-                resolved, written_fact_indices, duplicate_facts = await _drop_repeated_claims(
-                    session, resolved, written_fact_indices)
+            resolved, written_fact_indices, duplicate_facts = await _drop_repeated_claims(
+                driver_client, database, resolved, written_fact_indices)
         except Exception as exc:  # the check must not block writes
             logger.warning("[KG STRUCTURED] repeated-claim check skipped: %s", exc)
         if not resolved:

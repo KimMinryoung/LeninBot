@@ -169,7 +169,7 @@ local 파일이 없거나 특정 key가 없으면 tracked default를 그대로 �
 }
 ```
 
-- 예산 체크는 `llm_audit_log`의 당일 SUM(cost_usd) (60초 캐시).
+- 예산 체크는 `llm_audit_log`의 당일 SUM(cost_usd) (60초 캐시). 이벤트 루프 스레드에서는 조회를 기다리지 않는다: 오래된 캐시(첫 채움 전에는 미확인=fail-open)를 쓰고 백그라운드 스레드가 갱신한다(2026-11-12). 프록시의 정책 판정도 같은 함수를 쓴다.
 - **DB 조회 실패 시 fail-open** — 봇 가용성이 enforcement보다 우선.
 - 롤아웃은 툴 게이트웨이와 동일: shadow로 데이터를 쌓고, would_deny가 오탐 없음이
   확인되면 enforce로 올린다. **2026-08-05 enforce 전환 완료** — 차단 리스트·예산은

@@ -43,6 +43,11 @@ def _parse_authenticated_user_id(http_req: Request) -> int | None:
     return value if value > 0 else None
 
 
+def _require_trusted_proxy(http_req: Request) -> None:
+    if not trusted_proxy_request(http_req):
+        raise HTTPException(status_code=403, detail="Trusted frontend proxy required")
+
+
 class DeactivateChatMessageRequest(BaseModel):
     part: Literal["user", "assistant"]
     fingerprint: str = Field(default="", max_length=256)
@@ -56,7 +61,8 @@ async def get_logs(
     offset: int = Query(default=0, ge=0),
 ):
     """Fetch chat logs (admin view, ordered by most recent first)."""
-    rows = db_query(
+    rows = await asyncio.to_thread(
+        db_query,
         "SELECT * FROM chat_logs ORDER BY created_at DESC LIMIT %s OFFSET %s",
         (limit, offset),
     )
@@ -71,6 +77,10 @@ async def get_history(
     persona: str | None = Query(default=None, description="Restrict to a single chat persona"),
     limit: int = Query(default=50, ge=1, le=200),
 ):
+    # A fingerprint is the anonymous visitor's identity, so it must come through
+    # the frontend proxy (which owns that session), never straight from a caller
+    # that only learned or guessed the value.
+    _require_trusted_proxy(http_req)
     fps = list({f for f in (_parse_user_fingerprints(http_req) + [fingerprint or ""]) if f})
     if not fps:
         return {"history": []}
@@ -78,7 +88,8 @@ async def get_history(
     persona_clause = " AND persona = %s" if persona else ""
     if session_id:
         params = (session_id, fps) + ((persona,) if persona else ()) + (limit,)
-        rows = db_query(
+        rows = await asyncio.to_thread(
+            db_query,
             f"""SELECT id AS message_id,
                       CASE WHEN user_query_active THEN user_query ELSE NULL END AS user_query,
                       CASE WHEN bot_answer_active THEN bot_answer ELSE NULL END AS bot_answer,
@@ -91,7 +102,8 @@ async def get_history(
         )
     else:
         params = (fps,) + ((persona,) if persona else ()) + (limit,)
-        rows = db_query(
+        rows = await asyncio.to_thread(
+            db_query,
             f"""SELECT id AS message_id,
                       CASE WHEN user_query_active THEN user_query ELSE NULL END AS user_query,
                       CASE WHEN bot_answer_active THEN bot_answer ELSE NULL END AS bot_answer,
@@ -114,8 +126,7 @@ async def deactivate_chat_message(
     """Soft-delete one side of a stored web-chat exchange."""
     if message_id < 1:
         raise HTTPException(status_code=422, detail="Invalid message id")
-    if not trusted_proxy_request(http_req):
-        raise HTTPException(status_code=403, detail="Trusted frontend proxy required")
+    _require_trusted_proxy(http_req)
 
     account_user_id = _parse_authenticated_user_id(http_req)
     fingerprints = list({f for f in (_parse_user_fingerprints(http_req) + [payload.fingerprint]) if f})
@@ -124,7 +135,8 @@ async def deactivate_chat_message(
 
     column = "user_query_active" if payload.part == "user" else "bot_answer_active"
     identity_clause, identity_params = chat_identity_clause(account_user_id, fingerprints)
-    changed = db_execute_rowcount(
+    changed = await asyncio.to_thread(
+        db_execute_rowcount,
         f"""UPDATE chat_logs
                SET {column} = false
              WHERE id = %s
@@ -145,13 +157,15 @@ async def list_sessions(
     persona: str | None = Query(default=None, description="Restrict to a single chat persona"),
     limit: int = Query(default=50, ge=1, le=200),
 ):
+    _require_trusted_proxy(http_req)
     fps = list({f for f in (_parse_user_fingerprints(http_req) + [fingerprint or ""]) if f})
     if not fps:
         return {"sessions": []}
 
     persona_clause = " AND persona = %s" if persona else ""
     params = (fps,) + ((persona,) if persona else ()) + (limit,)
-    rows = db_query(
+    rows = await asyncio.to_thread(
+        db_query,
         f"""WITH scoped AS (
               SELECT id, session_id, fingerprint, user_query,
                      user_query_active, bot_answer_active, created_at

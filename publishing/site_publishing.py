@@ -27,6 +27,8 @@ import unicodedata
 from datetime import datetime
 from pathlib import Path
 
+import psycopg2.errors
+
 from db import execute as db_execute, query as db_query, query_one as db_query_one
 from shared import KST
 from publishing.autonomous_publication_controls import (
@@ -268,22 +270,33 @@ async def _exec_publish_hub_curation(
 
     tag_list = [str(t)[:50] for t in (tags or [])][:20]
 
-    row = db_query_one(
-        """
-        INSERT INTO hub_curations(
-            slug, title, source_url, source_title, source_author,
-            source_publication, source_published_at,
-            selection_rationale, context, tags
-        )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        RETURNING id, published_at
-        """,
-        (
-            slug, title, source_url, source_title, source_author,
-            source_publication, source_published_at,
-            selection_rationale, context, json.dumps(tag_list),
-        ),
-    )
+    # _unique_slug only reads, so a concurrent publish can take the same slug
+    # before this INSERT; the UNIQUE constraint catches it and the next free
+    # suffix is tried.
+    for attempt in range(3):
+        try:
+            row = db_query_one(
+                """
+                INSERT INTO hub_curations(
+                    slug, title, source_url, source_title, source_author,
+                    source_publication, source_published_at,
+                    selection_rationale, context, tags
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id, published_at
+                """,
+                (
+                    slug, title, source_url, source_title, source_author,
+                    source_publication, source_published_at,
+                    selection_rationale, context, json.dumps(tag_list),
+                ),
+            )
+            break
+        except psycopg2.errors.UniqueViolation:
+            if attempt == 2:
+                return f"Error: slug '{slug}' kept colliding with concurrent publishes; retry."
+            slug = _unique_slug(slug, "hub_curations")
+            public_url = f"https://cyber-lenin.com/hub/{slug}"
     # Fetch the source article body and stash it on the row so the nightly ingest
     # job can chunk + embed it into lenin_corpus.modern_analysis later. Fetch here
     # (cheap, seconds) rather than embedding here (tens of seconds per long doc).

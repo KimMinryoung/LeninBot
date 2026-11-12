@@ -311,12 +311,51 @@ _spend_cache_at = 0.0
 
 
 def _today_spend() -> dict[str, float] | None:
-    """Today's (UTC) cost by provider from llm_audit_log; None if unknown."""
-    global _spend_cache, _spend_cache_at
+    """Today's (UTC) cost by provider from llm_audit_log; None if unknown.
+
+    The lookup is a DB query or an HTTP call to the proxy. On an event-loop
+    thread it never runs inline: the cached value is returned even when stale
+    (None before the first fill, which fails open like any other unknown) and a
+    background thread refreshes it. Elsewhere a stale cache refreshes inline.
+    """
     now = time.monotonic()
     with _spend_lock:
-        if _spend_cache is not None and now - _spend_cache_at < _SPEND_CACHE_TTL_SEC:
-            return _spend_cache
+        cached, fresh = _spend_cache, _spend_cache is not None and now - _spend_cache_at < _SPEND_CACHE_TTL_SEC
+    if fresh:
+        return cached
+    try:
+        import asyncio
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return _refresh_today_spend()
+    _start_spend_refresh()
+    return cached
+
+
+_spend_refreshing = False
+
+
+def _start_spend_refresh() -> None:
+    global _spend_refreshing
+    with _spend_lock:
+        if _spend_refreshing:
+            return
+        _spend_refreshing = True
+
+    def run() -> None:
+        global _spend_refreshing
+        try:
+            _refresh_today_spend()
+        finally:
+            with _spend_lock:
+                _spend_refreshing = False
+
+    threading.Thread(target=run, name="llm-spend-refresh", daemon=True).start()
+
+
+def _refresh_today_spend() -> dict[str, float] | None:
+    global _spend_cache, _spend_cache_at
+    now = time.monotonic()
     try:
         from ops import audit_sink
         if audit_sink.mode() == "proxy":
@@ -332,8 +371,6 @@ def _today_spend() -> dict[str, float] | None:
         _spend_cache, _spend_cache_at = spend, now
     return spend
 
-
-# ── Policy gate ──────────────────────────────────────────────────────
 
 def evaluate_policy(
     *, provider: str | None, model: str | None,

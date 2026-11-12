@@ -85,7 +85,7 @@ Usage에는 `citation_requests`(배치 요청 수), `citation_cache_hits`(캐시
 검토 게이트의 지표에는 `review_` 접두사가 붙는다. requests는 내부 HTTP 재시도 횟수를 포함하지 않는다.
 판정 수치는 해당 claim에 붙여 근거가 재배치되어도 대응이 어긋나지 않게 한다.
 P 문단 라벨·원문 offset·인용문 포함 여부는 결정적 코드로 검증한다.
-Jev가 라벨이나 인용 위치를 추측하지 않는다. editor는 legacy 검색 shadow triage를 호출하지 않는다.
+Jev가 라벨이나 인용 위치를 추측하지 않는다. 검색 결과 shadow triage(`search_triage`, 호출 지점 `commulingo_search_triage`)는 어디서도 연결되지 않아 2026-11-12 삭제했다.
 실제 호출 비용은 단계 비용과 `jev_calls`·`jev_cost_usd`에 기록한다.
 
 ## 태스크 라우팅

@@ -1,11 +1,9 @@
 """Passage identity survives viewports, refetches, and source-page restarts."""
 import re
 import unittest
-from contextlib import nullcontext
-from unittest.mock import patch
 
 from commulingo.pipeline.evidence import (
-    Passages, SourcePages, compile_evidence, resolve_passages, snapshot,
+    Passages, compile_evidence, resolve_passages, snapshot,
 )
 from commulingo.review_policy import review_source, resolve_review_checks
 
@@ -49,14 +47,13 @@ class ImmutablePassageTests(unittest.TestCase):
         self.assertEqual(registry.show(old['id'], old['body']), '[P1] Appointed in 1917.')
 
     def test_growing_and_restarted_snapshots_do_not_invalidate_old_labels(self):
-        pages, registry, sources = SourcePages(), Passages(), {}
-        with patch('commulingo.pipeline.evidence.MAX_SNAPSHOT_CHARS', 50):
-            for body in ('first page', 'second page', 'z' * 45):
-                logging = self.assertLogs('commulingo.pipeline.evidence', level='WARNING') if body.startswith('z') else nullcontext()
-                with logging:
-                    source, span, _ = pages.absorb('https://example.org/page', body)
-                sources[source['id']] = source
-                registry.show(source['id'], source['body'], *span)
+        registry, sources = Passages(), {}
+        # One URL's snapshot grows by a page, then restarts from a new page.
+        url = 'https://example.org/page'
+        for body, span in (('first page', (0, 10)), ('first page\nsecond page', (11, 22)), ('z' * 45, (0, 45))):
+            source = snapshot(url, body)
+            sources[source['id']] = source
+            registry.show(source['id'], source['body'], *span)
         ranges = registry.resolve(['P1', 'P2', 'P3'], lambda sid: sources[sid]['body'])
         self.assertEqual([sources[sid]['body'][s:e] for sid, s, e in ranges],
                          ['first page', 'second page', 'z' * 45])

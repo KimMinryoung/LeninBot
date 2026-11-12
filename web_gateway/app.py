@@ -121,9 +121,9 @@ async def extract(request: Request):
         return {"error": True, "message": "Extraction provider unavailable"}
     token = budget.usage_identity.set(payload.caller.model_dump())
     try:
-        with budget.paid_request("tavily", "extract", "basic") as charge:
+        async with budget.paid_request_async("tavily", "extract", "basic") as charge:
             result = await AsyncTavilyClient(api_key=key).extract(urls=[url], extract_depth="basic", include_usage=True)
-            charge.complete((result.get("usage") or {}).get("credits"))
+            await charge.complete_async((result.get("usage") or {}).get("credits"))
         return {"results": [{"raw_content": str(item.get("raw_content") or item.get("content") or "")}
                             for item in result.get("results", []) if isinstance(item, dict)], "error": False}
     except budget.PaidWebBudgetError as exc:

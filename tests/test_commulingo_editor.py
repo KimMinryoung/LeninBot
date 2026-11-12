@@ -287,12 +287,6 @@ class EditorTests(EditorCase):
             result = await Editor(store)(job, [], Usage(), .2)
         self.assertEqual(result.value['research']['status'], 'not_applicable')
 
-    async def test_judge_holds_create_reported_complete_without_entry(self):
-        from commulingo.pipeline.stages import judge
-        research = {'current':None,'baseline':'','status':'complete','reason':'saved','inspected_sources':[]}
-        result = await judge({**JOB,'action':'create','payload':{}}, [{'stage':'research','value':{'editor_version':2,'research':research}}], Usage(), .2)
-        self.assertEqual((result.next_stage, result.status), ('complete', 'escalated'))
-
     async def test_saved_error_survives_restart_without_a_research_reopen_step(self):
         store = store_mock()
         async def first(**kwargs):

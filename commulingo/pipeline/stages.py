@@ -1,4 +1,4 @@
-"""Shared stage helpers, the model-call runner, discovery and the no-edit judge.
+"""Shared stage helpers, the model-call runner and discovery.
 
 The editor workflow (editor.py, workflow.py) owns authoring, review and
 publication; the legacy two-RPC Research/Draft/Review/submit stages were
@@ -11,8 +11,6 @@ import logging
 import re
 
 from .engine import Result
-from . import service
-from .bundles import work_topics, advance
 
 logger = logging.getLogger(__name__)
 
@@ -242,32 +240,6 @@ async def model_call(*, spec, prompt, tool, handler, reads, usage, budget, read_
         raise RuntimeError('stage ended without validated result; collected sources are retained'
                            + (f'; saved partial submissions: {partials}' if partials else '')
                            + (f'; last rejections: {detail}' if detail else ''))
-
-
-async def judge(job, artifacts, usage, budget):
-    research = latest(artifacts,'research')
-    if (job.get('payload') or {}).get('replaces_suggestion_id'):
-        return Result({'research':research,'hold_reason':'correction research produced no supported edit'},'complete','escalated')
-    if research.get('current'):
-        try:
-            for topic in work_topics(job):
-                suffix = ':'+topic if (job.get('payload') or {}).get('topics') else ''
-                await asyncio.to_thread(service.call,{'command':'enrichment','target':job['kind'],
-                    'id':job['target'],'topic':topic,'status':research['status'],'reason':research['reason'],
-                    'sources':research['inspected_sources'],'expectedRevision':research['baseline'],
-                    'idempotencyKey':f'pipeline:{job["id"]}:{len(artifacts)}:enrichment{suffix}'})
-        except ValueError as exc:
-            if 'revision_conflict' in str(exc):
-                return Result({'reason':str(exc)},'research')
-            raise
-    if research['status']=='sources_unavailable':
-        return Result({'status':research['status']},'research','deferred',90*86400)
-    if job.get('action')=='create' and research['status']=='complete' and not research.get('current'):
-        return Result({'research':research,'hold_reason':'create judged complete but the entry does not exist'},
-                      'complete','escalated')
-    value = advance(job, {'status':research['status']})
-    return Result(value,'research' if value.get('remaining_topics') else 'complete',
-                  'ready' if value.get('remaining_topics') else 'complete')
 
 
 class Discover:

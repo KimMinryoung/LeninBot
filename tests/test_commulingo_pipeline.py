@@ -27,12 +27,11 @@ class EvidenceTests(unittest.TestCase):
         self.assertEqual(source['id'],same['id'])
 
     def test_passage_labels_resolve_to_displayed_paragraphs(self):
-        from commulingo.pipeline.evidence import SourceHandles, Passages, resolve_passages
+        from commulingo.pipeline.evidence import Passages, resolve_passages
         body = ('Intro sentence here.\n•\n그는 1917년에 입당했다 — «Правда» 편집부에서 일했다.\n\n'
                 'Later he was exiled to Siberia! Final sentence of the page.')
         source = snapshot('https://example.org/source', body)
         sources = {source['id']:source}
-        handles = SourceHandles(sources)
         passages = Passages()
         text = passages.show(source['id'], body)
         # Each displayed paragraph has an immutable short label.
@@ -84,34 +83,15 @@ class EvidenceTests(unittest.TestCase):
             compile_evidence([claim],{source['id']:source},{'bio'})
 
 
-class BatchTests(unittest.IsolatedAsyncioTestCase):
-
-
-    async def test_bundle_judges_each_card_topic_then_advances_to_sections(self):
-        from commulingo.pipeline.stages import judge
+class ReviewDefaultStoreTests(unittest.IsolatedAsyncioTestCase):
+    async def test_fetch_backoff_saves_without_a_pipeline_store(self):
         from commulingo.pipeline.engine import Usage
-        from commulingo.pipeline.bundles import work_topics
-        job = {'id':7,'kind':'person','target':'p','topic':'enrichment',
-               'payload':{'topics':['basics','bio','sections']}}
-        research = {'current':{'revision':'r1'},'baseline':'r1','status':'complete',
-                    'reason':'All card facts already supported','inspected_sources':['source']}
-        with patch('commulingo.pipeline.stages.service.call') as rpc:
-            result = await judge(job,[{'stage':'research','value':research}],Usage(),.2)
-        self.assertEqual([c.args[0]['topic'] for c in rpc.call_args_list],['basics','bio'])
-        self.assertEqual({c.args[0]['expectedRevision'] for c in rpc.call_args_list},{'r1'})
-        self.assertEqual(result.next_stage,'research')
-        self.assertEqual(result.value['remaining_topics'],['sections'])
-        self.assertEqual(work_topics({**job,'payload':{**job['payload'],**result.value}}),['sections'])
-
-    async def test_bundle_unavailable_does_not_skip_topics(self):
-        from commulingo.pipeline.stages import judge
-        from commulingo.pipeline.engine import Usage
-        job = {'id':7,'kind':'person','target':'p','topic':'enrichment',
-               'payload':{'topics':['bio','sections']}}
-        with patch('commulingo.pipeline.stages.service.call'):
-            result = await judge(job,[{'stage':'research','value':{'status':'sources_unavailable'}}],Usage(),.2)
-        self.assertEqual(result.status,'deferred')
-        self.assertNotIn('remaining_topics',result.value)
+        from commulingo.pipeline.fetch_backoff import FetchBackoff
+        from commulingo.pipeline.workflow import _RunLocalFailures
+        backoff = FetchBackoff(_RunLocalFailures(), {'id': 1}, Usage(), [])
+        backoff.failures['k'] = {'until': 9e12, 'reason': 'http_forbidden'}
+        await backoff.save()
+        self.assertIn('k', backoff.failures)
 
 
 class EngineTests(unittest.IsolatedAsyncioTestCase):

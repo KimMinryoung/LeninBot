@@ -5,6 +5,7 @@ Only provider requests enter this ledger; caches and free retrieval do not.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from contextvars import ContextVar
@@ -12,7 +13,7 @@ import logging
 import sqlite3
 import sys
 import uuid
-from contextlib import contextmanager
+from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation, ROUND_CEILING
@@ -105,6 +106,9 @@ class Charge:
         status = "reported" if credit_micros is not None else "estimated"
         self._finish(status, amount, credit_micros)
 
+    async def complete_async(self, credits=None):
+        await asyncio.to_thread(self.complete, credits)
+
     def _finish(self, status, amount, credits=None):
         try:
             with _db(self.path) as db:
@@ -172,6 +176,19 @@ def paid_request(provider: str, operation: str, depth: str):
             # Includes timeout, cancellation, malformed response and process
             # interruption. A hard crash leaves status=reserved, also counted.
             charge._finish("outcome_unknown", charge.reserved)
+
+
+@asynccontextmanager
+async def paid_request_async(provider: str, operation: str, depth: str):
+    """paid_request for async handlers: the SQLite ledger work (BEGIN IMMEDIATE
+    waits up to 5 s on a busy file) runs on a thread, not the event loop.
+    Settle inside the block with ``await charge.complete_async(...)``."""
+    charge = await asyncio.to_thread(reserve, provider, operation, depth)
+    try:
+        yield charge
+    finally:
+        if not charge.done:
+            await asyncio.to_thread(charge._finish, "outcome_unknown", charge.reserved)
 
 
 def report(since: str, *, by: str = "service") -> list[dict]:

@@ -182,9 +182,8 @@ def diagnose_url_fetch_failure(url: str, observed_errors: list[str] | None = Non
         )
 
     try:
-        import requests as _req
         headers = {"User-Agent": "Mozilla/5.0", "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8"}
-        resp = safe_requests_get(url, request_get=_req.get, headers=headers, timeout=timeout, stream=True)
+        resp = safe_requests_get(url, headers=headers, timeout=timeout, stream=True)
         status = resp.status_code
         resp.close()
         if status in (401, 403):
@@ -257,12 +256,11 @@ def _fetch_url_fallbacks(url: str, max_chars: int = 10000) -> _Optional[str]:
 
     # 1) requests + BeautifulSoup (no paid API)
     try:
-        import requests as _req
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
             "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
         }
-        resp = safe_requests_get(url, request_get=_req.get, headers=headers, timeout=15, stream=True)
+        resp = safe_requests_get(url, headers=headers, timeout=15, stream=True)
         resp.raise_for_status()
         _buffer_capped_body(resp)
 

@@ -31,7 +31,16 @@ def validate_public_http_url(
     *,
     resolver: Callable[..., list[tuple]] = socket.getaddrinfo,
 ) -> str:
-    """Return a stripped public HTTP(S) URL or raise :class:`UnsafeUrlError`.
+    """Return a stripped public HTTP(S) URL or raise :class:`UnsafeUrlError`."""
+    return resolve_public_http_url(url, resolver=resolver)[0]
+
+
+def resolve_public_http_url(
+    url: str,
+    *,
+    resolver: Callable[..., list[tuple]] = socket.getaddrinfo,
+) -> tuple[str, str, list[str]]:
+    """Validate ``url`` and return ``(url, host, public_addresses)``.
 
     Every DNS answer must be globally routable. Rejecting mixed public/private
     answers prevents a hostname from smuggling a private fallback address into
@@ -73,8 +82,7 @@ def validate_public_http_url(
     except ValueError:
         pass
     else:
-        _public_ip(host)
-        return value
+        return value, host, [_public_ip(host).compressed]
 
     try:
         infos = resolver(host, effective_port, type=socket.SOCK_STREAM)
@@ -83,18 +91,104 @@ def validate_public_http_url(
     if not infos:
         raise UnsafeUrlError(f"URL hostname has no addresses: {host}")
 
-    addresses: set[str] = set()
+    addresses: list[str] = []
     for info in infos:
         try:
             raw = str(info[4][0])
-            addresses.add(_public_ip(raw).compressed)
+            address = _public_ip(raw).compressed
+            if address not in addresses:
+                addresses.append(address)
         except (IndexError, TypeError, ValueError) as exc:
             if isinstance(exc, UnsafeUrlError):
                 raise
             raise UnsafeUrlError(f"invalid DNS answer for {host}") from exc
     if not addresses:
         raise UnsafeUrlError(f"URL hostname has no usable addresses: {host}")
-    return value
+    return value, host, addresses
+
+
+class _PinnedConnectionMixin:
+    """urllib3 connection that dials only the addresses validated for its host.
+
+    ``self.host`` keeps the hostname, so the Host header, SNI and certificate
+    verification are unchanged; only the TCP destination is fixed. Without this,
+    requests resolves the name a second time and a rebinding DNS server can
+    answer that lookup with a private address.
+    """
+
+    _pins: dict[str, list[str]] = {}
+
+    def _new_conn(self):  # type: ignore[override]
+        from socket import timeout as socket_timeout
+
+        from urllib3.exceptions import ConnectTimeoutError, NewConnectionError
+        from urllib3.util import connection as util_connection
+
+        addresses = self._pins.get(self.host.lower())
+        if not addresses:
+            raise NewConnectionError(self, f"Refusing to connect to unvalidated host {self.host}")
+        error: Exception | None = None
+        for address in addresses:
+            try:
+                return util_connection.create_connection(
+                    (address, self.port), self.timeout,
+                    source_address=self.source_address, socket_options=self.socket_options,
+                )
+            except socket_timeout:
+                error = ConnectTimeoutError(
+                    self, f"Connection to {self.host} timed out. (connect timeout={self.timeout})")
+            except OSError as exc:
+                error = NewConnectionError(self, f"Failed to establish a new connection: {exc}")
+        raise error  # type: ignore[misc]
+
+
+def _pinned_session(host: str, addresses: list[str]):
+    """A requests session whose connections may reach only ``host`` at ``addresses``."""
+    import requests
+    from requests.adapters import HTTPAdapter
+    from urllib3.connection import HTTPConnection, HTTPSConnection
+    from urllib3.connectionpool import HTTPConnectionPool, HTTPSConnectionPool
+
+    pins = {host.lower(): list(addresses)}
+
+    class PinnedAdapter(HTTPAdapter):
+        def init_poolmanager(self, *args, **kwargs):
+            super().init_poolmanager(*args, **kwargs)
+            pools = {}
+            for scheme, pool_cls, conn_cls in (("http", HTTPConnectionPool, HTTPConnection),
+                                               ("https", HTTPSConnectionPool, HTTPSConnection)):
+                pinned_conn = type(f"Pinned{conn_cls.__name__}", (_PinnedConnectionMixin, conn_cls),
+                                   {"_pins": pins})
+                pools[scheme] = type(f"Pinned{pool_cls.__name__}", (pool_cls,), {"ConnectionCls": pinned_conn})
+            self.poolmanager.pool_classes_by_scheme = pools
+
+    session = requests.Session()
+    # Environment proxies would move DNS resolution to the proxy and bypass the pin.
+    session.trust_env = False
+    adapter = PinnedAdapter()
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+    return session
+
+
+def _pinned_get(url: str, host: str, addresses: list[str], **kwargs: Any):
+    session = _pinned_session(host, addresses)
+    try:
+        response = session.get(url, **kwargs)
+    except BaseException:
+        session.close()
+        raise
+    # A streamed body still needs the pool; close the session with the response.
+    close_response = response.close
+
+    def close() -> None:
+        try:
+            close_response()
+        finally:
+            session.close()
+
+    response.close = close  # type: ignore[method-assign]
+    return response
 
 
 def safe_requests_get(
@@ -105,16 +199,19 @@ def safe_requests_get(
     max_redirects: int = MAX_REDIRECTS,
     **kwargs: Any,
 ):
-    """Run ``requests.get`` while validating every redirect before following it."""
-    if request_get is None:
-        import requests
+    """GET ``url`` following redirects, validating and pinning every hop.
 
-        request_get = requests.get
-
+    Each hop's hostname is resolved once; all answers must be public, and the
+    connection dials exactly those addresses (no second lookup to rebind).
+    ``request_get`` replaces the pinned transport (tests, special callers).
+    """
     kwargs.pop("allow_redirects", None)
-    current = validate_public_http_url(url, resolver=resolver)
+    current, host, addresses = resolve_public_http_url(url, resolver=resolver)
     for redirect_count in range(max_redirects + 1):
-        response = request_get(current, allow_redirects=False, **kwargs)
+        if request_get is None:
+            response = _pinned_get(current, host, addresses, allow_redirects=False, **kwargs)
+        else:
+            response = request_get(current, allow_redirects=False, **kwargs)
         if response.status_code not in REDIRECT_STATUS_CODES:
             return response
 
@@ -123,7 +220,7 @@ def safe_requests_get(
             return response
         next_url = urljoin(current, location)
         try:
-            next_url = validate_public_http_url(next_url, resolver=resolver)
+            next_url, host, addresses = resolve_public_http_url(next_url, resolver=resolver)
         except Exception:
             response.close()
             raise

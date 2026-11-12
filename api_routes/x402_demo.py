@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import os
@@ -41,19 +42,8 @@ async def x402_demo_quote(request: Request):
 
     payment_header = request.headers.get("PAYMENT-SIGNATURE")
     if not payment_header:
-        record_x402_attempt(
-            direction="inbound",
-            stage="challenge",
-            status="payment_required",
-            resource=resource,
-            method="GET",
-            pay_to=pay_to,
-            amount_atomic=X402_DEMO_AMOUNT_ATOMIC,
-            asset=requirements.get("asset"),
-            network=requirements.get("network"),
-            http_status=402,
-            metadata={"route": "/x402-demo/quote"},
-        )
+        # A bare challenge is not recorded: any unauthenticated GET would add a
+        # ledger row, and nothing reads them. Verification and settlement are.
         body = x402.build_402_body(requirements)
         return Response(
             content=json.dumps(body, ensure_ascii=False),
@@ -70,7 +60,8 @@ async def x402_demo_quote(request: Request):
         decoded = x402.decode_payment_header(payment_header)
         signer = x402.verify_payment(decoded, requirements)
     except Exception as exc:
-        record_x402_attempt(
+        await asyncio.to_thread(
+            record_x402_attempt,
             direction="inbound",
             stage="verify",
             status="failed",
@@ -90,7 +81,8 @@ async def x402_demo_quote(request: Request):
         settlement = await x402.settle_payment(decoded["payload"])
     except Exception as exc:
         auth = (decoded.get("payload") or {}).get("authorization") or {}
-        record_x402_attempt(
+        await asyncio.to_thread(
+            record_x402_attempt,
             direction="inbound",
             stage="settle",
             status="failed",
@@ -109,7 +101,8 @@ async def x402_demo_quote(request: Request):
 
     if settlement.get("status") != "success":
         auth = (decoded.get("payload") or {}).get("authorization") or {}
-        record_x402_attempt(
+        await asyncio.to_thread(
+            record_x402_attempt,
             direction="inbound",
             stage="settle",
             status="failed",
@@ -129,7 +122,8 @@ async def x402_demo_quote(request: Request):
         raise HTTPException(status_code=502, detail=f"settlement tx not success: {settlement}")
 
     auth = decoded["payload"]["authorization"]
-    record_x402_attempt(
+    await asyncio.to_thread(
+        record_x402_attempt,
         direction="inbound",
         stage="settle",
         status="success",

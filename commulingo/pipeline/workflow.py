@@ -8,6 +8,14 @@ from .engine import Result
 from .patches import patch_hash, changes
 from .bundles import work_topics
 
+class _RunLocalFailures:
+    """Fetch backoff kept for this run only. The pipeline Store has no
+    save_fetch_failures (the worker's TaskStore carries it back to the frontend),
+    so a Review built without a store must not fall back to it."""
+    def save_fetch_failures(self, job, value):
+        pass
+
+
 class Review:
     uses_llm = True
 
@@ -47,8 +55,7 @@ class Review:
             return {**value,'checks':annotate(checks,await check_review_checks(checks,usage=usage,
                 decide=decisions.decide,cache=decisions.citations))}
         from .fetch_backoff import FetchBackoff
-        from .store import Store
-        backoff = FetchBackoff(self.store if self.store is not None else Store(), job, usage, artifacts)
+        backoff = FetchBackoff(self.store if self.store is not None else _RunLocalFailures(), job, usage, artifacts)
         handlers = make_handlers({k:backoff.wrap(k,TOOL_HANDLERS[k]) for k in READS},proposal,snapshots,box,gate=gate)
         tool = decision_tool(proposal)
         tool['input_schema']['properties'].update({

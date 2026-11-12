@@ -25,7 +25,7 @@ import httpx
 
 from provenance.runtime import _wrap_external
 from web_gateway.credentials import credential
-from web_gateway.budget import PaidWebBudgetError, paid_request
+from web_gateway.budget import PaidWebBudgetError, paid_request_async
 from tool_gateway.results import ToolFailure, ToolResult
 
 logger = logging.getLogger(__name__)
@@ -303,9 +303,9 @@ async def _search_tavily(
             # Focused chunks reduce downstream LLM context without an extra
             # Extract call. Advanced itself still costs two Tavily credits.
             kwargs["chunks_per_source"] = 2
-        with paid_request("tavily", "search", search_depth) as charge:
+        async with paid_request_async("tavily", "search", search_depth) as charge:
             response = await client.search(query, **kwargs)
-            charge.complete((response.get("usage") or {}).get("credits"))
+            await charge.complete_async((response.get("usage") or {}).get("credits"))
     except (SearchProviderError, PaidWebBudgetError):
         raise
     except Exception as exc:
@@ -358,11 +358,11 @@ async def _search_brave(
     }
     try:
         async with httpx.AsyncClient(timeout=20.0) as client:
-            with paid_request("brave", "search", search_depth) as charge:
+            async with paid_request_async("brave", "search", search_depth) as charge:
                 response = await client.get(url, headers=headers, params=params)
                 response.raise_for_status()
                 payload = response.json()
-                charge.complete()
+                await charge.complete_async()
     except PaidWebBudgetError:
         raise
     except Exception as exc:

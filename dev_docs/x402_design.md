@@ -40,6 +40,6 @@
 
 ## 감사·운영 경계
 
-`crypto_wallet/x402_ledger.py`는 `x402_payment_attempts`에 outbound 요청과 inbound 데모 단계를 best-effort로 기록한다. 서명·개인키·raw 결제 헤더는 저장하지 않는다. 테이블은 `venv/bin/python scripts/schema_migrations.py --only x402-ledger`로 적용한다. 결제 요청의 일반 도구 권한·감사는 [security_gateway.md](security_gateway.md)를 따른다.
+`crypto_wallet/x402_ledger.py`는 `x402_payment_attempts`에 outbound 요청과 inbound 데모의 검증·정산 단계를 best-effort로 기록한다(결제 헤더 없는 402 응답은 기록하지 않는다 — 무인증 요청마다 행이 쌓였다, 2026-11-12). 데모 라우트의 기록은 스레드에서 한다. 서명·개인키·raw 결제 헤더는 저장하지 않는다. 테이블은 `venv/bin/python scripts/schema_migrations.py --only x402-ledger`로 적용한다. 결제 요청의 일반 도구 권한·감사는 [security_gateway.md](security_gateway.md)를 따른다.
 
 API 라우트에는 정산용 `eth.privkey` credential이 필요하다. 배포 시 실제 unit의 credential 설정을 확인한다. 현재 코드는 자체 정산 데모 하나만 제공하며 외부 facilitator·공개 유료 콘텐츠·일일 결제 한도는 구현하지 않았다. 외부 공개 여부와 reverse proxy 설정은 코드만으로 단정하지 않는다.

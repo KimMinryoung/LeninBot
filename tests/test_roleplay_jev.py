@@ -257,6 +257,18 @@ class AutomaticTransactionTests(unittest.TestCase):
             self.assertEqual(memory.load_state(1),before)
         self.assertEqual(memory.load_state(2)['revision'],0)
 
+    def test_deferred_turn_can_settle_later_but_only_once(self):
+        self.assertEqual(self.run_turn({'status':'unavailable','reason':'transport'},scope='retry')['status'],'deferred')
+        with memory._connection() as conn:
+            self.assertIsNone(conn.execute("SELECT 1 FROM automatic_turns WHERE scope_id='retry'").fetchone())
+            conn.execute('INSERT INTO automatic_turns VALUES (?,?,?)',('1','legacy',json.dumps({'status':'deferred'})))
+        for scope in ('retry','legacy'):
+            with self.subTest(scope=scope):
+                self.assertEqual(self.run_turn(verdict(event='meal'),scope=scope)['status'],'applied')
+                after=memory.load_state(1)
+                self.assertTrue(self.run_turn(verdict(event='meal'),scope=scope)['replayed'])
+                self.assertEqual(memory.load_state(1),after)
+
     def test_duration_failure_preserves_state_and_explicit_bypasses_estimator(self):
         before = memory.load_state(1)
         with patch.object(jev, 'estimate_duration', side_effect=ValueError('bad duration')) as estimator:

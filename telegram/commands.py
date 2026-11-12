@@ -4,6 +4,7 @@ All handlers access shared dependencies via the module-level `_ctx` dict,
 which is populated by `register_handlers()` at startup.
 """
 
+import html
 import os
 import json
 import asyncio
@@ -21,6 +22,7 @@ from aiogram.filters import Command
 
 from shared import KST
 from db import query as _query, execute as _execute, query_one as _query_one, get_conn as _get_conn
+from telegram.background import spawn
 from telegram.task_store import create_task_in_db
 from psycopg2.extras import RealDictCursor
 from services.replicate_image import (
@@ -1593,7 +1595,7 @@ async def handle_photo(message: Message):
                     user_id, elapsed, in_tok, out_tok)
 
         await message.reply(reply_text)
-        asyncio.create_task(_persist_assistant_turn(user_id, reply_text))
+        spawn(_persist_assistant_turn(user_id, reply_text), name="persist_assistant_turn")
     except Exception as e:
         if llm_started:
             record_llm_call(
@@ -1756,7 +1758,7 @@ async def handle_message(message: Message):
 
     for chunk in _ctx["split_message"](reply):
         await message.answer(chunk)
-    asyncio.create_task(_persist_assistant_turn(user_id, reply))
+    spawn(_persist_assistant_turn(user_id, reply), name="persist_assistant_turn")
 
     # Create background task for unfinished work
     if continuation_task:
@@ -1783,7 +1785,7 @@ async def handle_message(message: Message):
     _reflection_counter[user_id] = _reflection_counter.get(user_id, 0) + 1
     if _reflection_counter[user_id] >= 5:
         _reflection_counter[user_id] = 0
-        asyncio.create_task(_reflect_on_recent(user_id))
+        spawn(_reflect_on_recent(user_id), name="reflect_on_recent")
 
 
 # ── Auto-Recall & Reflection (experiential learning) ─────────────────
@@ -1860,6 +1862,23 @@ async def _reflect_on_recent(user_id: int):
 #  자가수정 핸들러 — Telegram 전용
 # ═══════════════════════════════════════════════════════════════
 
+def _h(value) -> str:
+    return html.escape(str(value), quote=False)
+
+
+def _modify_summary_html(filepath: str, reason: str, insertions: int, deletions: int, diff_preview: str) -> str:
+    """Approval card for /modify. HTML-escaped: legacy Markdown has no escaping,
+    so a reason with '*' or a diff containing backticks made Telegram reject
+    the message and the approval buttons never arrived."""
+    return (
+        f"📝 <b>자가수정 요청</b>\n"
+        f"파일: <code>{_h(filepath)}</code>\n"
+        f"이유: {_h(reason)}\n"
+        f"변경: +{insertions} / -{deletions} 라인\n\n"
+        f"<pre>{_h(diff_preview)}</pre>"
+    )
+
+
 async def cmd_modify(message: Message):
     """자가수정 명령어 — 허가된 Telegram 사용자만"""
     if not _ctx["is_allowed"](message.from_user.id):
@@ -1884,7 +1903,7 @@ async def cmd_modify(message: Message):
         await message.answer("❌ 허용된 디렉토리 밖의 파일은 수정할 수 없어.")
         return
     if not _os.path.isfile(abs_path):
-        await message.answer(f"❌ 파일을 찾을 수 없어: `{filepath}`", parse_mode="Markdown")
+        await message.answer(f"❌ 파일을 찾을 수 없어: <code>{_h(filepath)}</code>", parse_mode="HTML")
         return
 
     # diff 생성
@@ -1920,18 +1939,12 @@ async def cmd_modify(message: Message):
     }
 
     diff_preview = diff_text[:3000] + ("\n…(생략)…" if len(diff_text) > 3000 else "")
-    summary = (
-        f"📝 *자가수정 요청*\n"
-        f"파일: `{filepath}`\n"
-        f"이유: {reason}\n"
-        f"변경: +{insertions} / -{deletions} 라인\n\n"
-        f"```\n{diff_preview}\n```"
-    )
+    summary = _modify_summary_html(filepath, reason, insertions, deletions, diff_preview)
     kb = InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text="✅ 승인", callback_data=f"selfmod_approve:{approval_id}"),
         InlineKeyboardButton(text="❌ 거부", callback_data=f"selfmod_reject:{approval_id}"),
     ]])
-    await message.answer(summary, parse_mode="Markdown", reply_markup=kb)
+    await message.answer(summary, parse_mode="HTML", reply_markup=kb)
 
 
 async def cb_modify_approve(callback: CallbackQuery):
@@ -1963,23 +1976,23 @@ async def cb_modify_approve(callback: CallbackQuery):
         )
     except Exception as e:
         await callback.message.edit_text(
-            f"❌ 패치 적용 중 예외 발생:\n`{e}`", parse_mode="Markdown"
+            f"❌ 패치 적용 중 예외 발생:\n<code>{_h(e)}</code>", parse_mode="HTML"
         )
         return
 
     if result.status == "success":
-        commit_info = f"\n커밋: `{result.commit_hash}`" if result.commit_hash else ""
+        commit_info = f"\n커밋: <code>{_h(result.commit_hash)}</code>" if result.commit_hash else ""
         await callback.message.edit_text(
-            f"✅ *패치 완료*\n"
-            f"파일: `{result.filepath}`\n"
+            f"✅ <b>패치 완료</b>\n"
+            f"파일: <code>{_h(result.filepath)}</code>\n"
             f"변경: {result.changes_count} 라인{commit_info}\n"
             f"⚠️ 재시작 후 적용됩니다.",
-            parse_mode="Markdown"
+            parse_mode="HTML"
         )
     else:
         await callback.message.edit_text(
-            f"❌ *패치 실패* ({result.status})\n`{result.error}`",
-            parse_mode="Markdown"
+            f"❌ <b>패치 실패</b> ({_h(result.status)})\n<code>{_h(result.error)}</code>",
+            parse_mode="HTML"
         )
 
 

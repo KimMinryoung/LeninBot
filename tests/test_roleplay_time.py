@@ -45,8 +45,7 @@ class TimeAuthorizationTests(unittest.TestCase):
                      duration_minutes=20, corrections={}, appointment=None, reason='Only the current rest is authorized')
         value.update(changes)
         result = SimpleNamespace(text=json.dumps(value), error_kind=None, truncated=False, latency_ms=1)
-        with patch.object(timing, 'generate_detailed', return_value=result), \
-             patch.object(turn, 'decide_detailed', side_effect=AssertionError('Jev must not authorize time')):
+        with patch.object(timing, 'generate_detailed', return_value=result):
             return turn.authorize(text, initial(), [])
 
     def test_current_duration_is_not_sum_of_all_numbers(self):

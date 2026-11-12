@@ -5,7 +5,6 @@ from copy import deepcopy
 from pathlib import Path
 from unittest.mock import patch
 from types import SimpleNamespace
-from llm.call_registry import Decision, DecisionResult
 
 from roleplay import memory, turn, jev
 from roleplay.dynamics import with_defaults
@@ -13,17 +12,6 @@ from tool_gateway.security import caller_scope, new_run_context
 
 
 class PostDraftTests(unittest.TestCase):
-    def test_pending_candidates_use_latest_retry_probabilities(self):
-        results = [DecisionResult(decision=Decision(model='test', answers={'mode': {
-            'choice': label, 'confidence': .4, 'probabilities': probabilities}}))
-            for label, probabilities in [('scene', {'scene': .6, 'discussion': .4}),
-                                          ('discussion', {'scene': .3, 'discussion': .7})]]
-        with patch.object(turn, 'resolve', return_value=SimpleNamespace(extra={'enabled': True})), \
-             patch.object(turn, 'decide_detailed', side_effect=results), \
-             self.assertRaises(jev.PendingChoice) as caught:
-            turn.decide('test', {}, {'mode': jev.choice('mode', {'scene': 'scene', 'discussion': 'discussion'})})
-        self.assertEqual(caught.exception.candidates[0][0], 'discussion')
-
     def setUp(self):
         temp=tempfile.TemporaryDirectory();self.addCleanup(temp.cleanup)
         p=patch.object(memory,'MEMORY_PATH',Path(temp.name)/'state.sqlite3');p.start();self.addCleanup(p.stop)
@@ -37,7 +25,7 @@ class PostDraftTests(unittest.TestCase):
         self.verdict={'confirmed_important':[{'key':'event_pressure','label':'implicating_others','target_id':None}], 'status':'classified','labels':{'mode':'scene','event':'implicating_others','intensity':'moderate','activity':'light'},'uncertain':[],'model':'test'}
 
     def prepare(self,stage=None,final=True):
-        with patch.object(turn,'decide',return_value={'labels':{'within_scope':'yes'}}), patch.object(turn,'review_reply',return_value={'approved':final,'issues':[] if final else ['contradiction']}), \
+        with patch.object(turn,'review_reply',return_value={'approved':final,'issues':[] if final else ['contradiction']}), \
              patch.object(jev,'classify',return_value=deepcopy(self.verdict)) as classified, \
              patch.object(jev,'estimate_duration',return_value={'elapsed_minutes':90}):
             prepared=turn.prepare(self.text,self.before,stage['people'] if stage else [],[], '77','아침에 명단 진술을 마쳤다',self.auth,stage)
@@ -90,10 +78,10 @@ class PostDraftTests(unittest.TestCase):
         self.assertIsNone(turn.committed_reply('1','77'))
 
     def test_no_scope_gate_the_classifier_settles_the_draft(self):
-        with patch.object(turn,'decide') as gate, patch.object(jev,'classify',return_value=deepcopy(self.verdict)), \
+        with patch.object(jev,'classify',return_value=deepcopy(self.verdict)), \
              patch.object(jev,'estimate_duration',return_value={'elapsed_minutes':90}), patch.object(turn,'review_reply',return_value={'approved':True,'issues':[]}):
             prepared=turn.prepare(self.text,self.before,[],[],'77','감방에서 자고 다음 날 식사했다',self.auth)
-        gate.assert_not_called(); self.assertTrue(prepared['verdict']['scope_review']['skipped'])
+        self.assertTrue(prepared['verdict']['scope_review']['skipped'])
 
     def test_review_failure_does_not_discard_or_falsely_approve_turn(self):
         with patch.object(jev, 'classify', return_value=deepcopy(self.verdict)), \

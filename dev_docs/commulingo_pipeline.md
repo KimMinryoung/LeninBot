@@ -10,11 +10,13 @@ CommuLingo 보강 파이프라인(작업 대기열, 후보 선정, 예산, 검�
 |---|---|
 | `worker/commulingo.py` | 일꾼 작업 종류 `commulingo_editor`(research·draft), `commulingo_review`, `commulingo_discover`. 입력 `{job, artifacts, settings}`, 출력 `{stage, artifacts, notes, usage, costComplete}` |
 | `commulingo/pipeline/editor.py` | 저자 세션: 원문 열람(P 문단), 나눠 제출 저장, 초안 수리, 인용 지지 검사, Jev 분류, 체크포인트 |
-| `commulingo/pipeline/workflow.py` | 독립 검토 세션(`Review`) |
+| `commulingo/pipeline/workflow.py` | 독립 검토 세션(`Review`). 저장소 없이 만들면 fetch 실패 backoff는 그 실행 안에서만 유지한다(일꾼은 `TaskStore`가 frontend로 돌려준다) |
 | `commulingo/pipeline/stages.py` | `model_call`, `Discover`, 공용 단계 헬퍼 |
 | `commulingo/pipeline/store.py` | 출처 캐시(`commulingo_pipeline_sources`, `fetch_cache`, `job_sources`): leninbot 조사 인프라. 만료 본문은 `leninbot-worker`가 매시간 지운다 |
 | `commulingo/pipeline/{author_draft,evidence,citation_gate,decisions,issues,patches,…}.py` | 세션이 쓰는 검증·근거·패치 규칙 |
 | `agents/commulingo_curator.py`, `agents/commulingo_reviewer.py` | 저자·검토자 지시문과 모델 설정 |
+
+no-edit 판정 단계(`judge`, editor가 넘기는 `nextStage`)는 frontend가 처리한다. Python 쪽 옛 `stages.judge`·`SourceHandles`/`SourcePages`·검색 triage는 2026-11-12 삭제했다.
 
 세션은 CommuLingo를 관리자 MCP로만 읽고(`person_get`, `term_get`, `entry_lookup` 등), 초안은 `editorial_pipeline validate`로 검사하며, 쓰지 않는다. 판정 기록·검증·공개·검토 메모는 frontend 단계가 한다.
 

@@ -255,6 +255,15 @@ async def _fetch_apw_page(context, url: str, max_chars: int) -> _Optional[str]:
             await route.continue_()
 
         await page.route("**/*", _guard_outbound_request)
+
+        async def _refuse_websocket(ws_route) -> None:
+            # page.route never sees WebSocket handshakes, so a page script could
+            # otherwise open ws:// to an internal address. Text extraction needs
+            # no sockets: close every one without connecting to the server.
+            logger.info("[URL] blocked Playwright WebSocket: %s", ws_route.url[:120])
+            await ws_route.close(code=1008, reason="blocked")
+
+        await page.route_web_socket(_re.compile(".*"), _refuse_websocket)
         try:
             await page.goto(url, wait_until="domcontentloaded", timeout=30000)
         except Exception as e:

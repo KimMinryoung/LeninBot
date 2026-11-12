@@ -831,16 +831,27 @@ def _lose_holdouts(state, before, labels, scope_id, user_text):
     return lost
 
 
+def _settled_turn(conn, uid, scope_id):
+    """The saved outcome for this message, or None when it was never settled.
+
+    Rows written before deferrals stopped being recorded may hold a deferred
+    outcome; those settled nothing, so they do not block a later settlement.
+    """
+    row = conn.execute('SELECT payload FROM automatic_turns WHERE user_id=? AND scope_id=?', (uid, scope_id)).fetchone()
+    saved = json.loads(row[0]) if row else None
+    return None if saved is None or saved.get('status') == 'deferred' else saved
+
+
 def adjudicate_turn(user_id, user_text, history, scope_id, *, prepared=None):
     """Call Jev once, then compare-and-commit an audited projection exactly once."""
     from roleplay import memory
     uid, scope_id = str(user_id), str(scope_id)
     with memory._connection() as conn:
-        saved = conn.execute('SELECT payload FROM automatic_turns WHERE user_id=? AND scope_id=?', (uid, scope_id)).fetchone()
+        saved = _settled_turn(conn, uid, scope_id)
     if saved:
-        if prepared is not None and not json.loads(saved[0]).get('reply'):
+        if prepared is not None and not saved.get('reply'):
             return {'status':'deferred','reason':'구형 처리 이력에는 검증된 답변이 없음; 자동 재적용하지 않음'}
-        return {**{k:v for k,v in json.loads(saved[0]).items() if k != 'decision'}, 'replayed': True}
+        return {**{k:v for k,v in saved.items() if k != 'decision'}, 'replayed': True}
     before = memory.load_state(uid)
     people = memory.load_people(uid)
     if prepared is not None and before['revision'] != prepared['before_revision']:
@@ -864,11 +875,11 @@ def adjudicate_turn(user_id, user_text, history, scope_id, *, prepared=None):
             outcome['reason'] = str(exc)
     with memory._connection() as conn:
         conn.execute('BEGIN IMMEDIATE')
-        existing = conn.execute('SELECT payload FROM automatic_turns WHERE user_id=? AND scope_id=?', (uid,scope_id)).fetchone()
+        existing = _settled_turn(conn, uid, scope_id)
         if existing:
-            if prepared is not None and not json.loads(existing[0]).get('reply'):
+            if prepared is not None and not existing.get('reply'):
                 return {'status':'deferred','reason':'검증된 답변 없는 기존 처리 이력'}
-            return {**{k:v for k,v in json.loads(existing[0]).items() if k != 'decision'}, 'replayed': True}
+            return {**{k:v for k,v in existing.items() if k != 'decision'}, 'replayed': True}
         row = conn.execute('SELECT payload FROM character_state WHERE user_id=?', (uid,)).fetchone()
         current = with_defaults({**memory.STATE_DEFAULTS, **(json.loads(row[0]) if row else {})})
         if current['revision'] != before['revision']:
@@ -890,6 +901,11 @@ def adjudicate_turn(user_id, user_text, history, scope_id, *, prepared=None):
             conn.execute('INSERT INTO character_state VALUES (?,?) ON CONFLICT(user_id) DO UPDATE SET payload=excluded.payload', (uid,json.dumps(projected,ensure_ascii=False)))
         if prepared is not None and outcome['status'] in {'applied', 'unchanged'}:
             outcome['reply'] = prepared['reply']
-        conn.execute('INSERT INTO automatic_turns VALUES (?,?,?)', (uid,scope_id,json.dumps({**outcome, 'decision': verdict},ensure_ascii=False)))
+        if outcome['status'] == 'deferred':
+            # Nothing was written, so a later settlement of the same message is
+            # not a double settlement; recording the deferral would block it.
+            return outcome
+        conn.execute('INSERT INTO automatic_turns VALUES (?,?,?) ON CONFLICT(user_id, scope_id) DO UPDATE SET payload=excluded.payload',
+                     (uid,scope_id,json.dumps({**outcome, 'decision': verdict},ensure_ascii=False)))
         conn.execute('DELETE FROM automatic_turns WHERE user_id=? AND rowid NOT IN (SELECT rowid FROM automatic_turns WHERE user_id=? ORDER BY rowid DESC LIMIT 1000)', (uid,uid))
     return outcome

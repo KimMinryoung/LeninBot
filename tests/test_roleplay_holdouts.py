@@ -4,7 +4,6 @@ import json
 import tempfile
 import unittest
 from contextlib import contextmanager
-from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -170,12 +169,12 @@ class PlayerChoiceTests(unittest.TestCase):
             state, applied = jev.project(initial(participants=[]), '한 시간 쉬어', [], settled, 'scope')
         self.assertEqual((state['activity'], applied['activity_defaulted'], applied['intensity'], state['scene_minute']), ('rest', 'rest', 'moderate', 60))
 
-    def test_prepare_with_settled_verdict_skips_gate_and_classifier(self):
+    def test_prepare_with_settled_verdict_skips_the_classifier(self):
         before = initial()
         auth = {'user_text': '심문', 'labels': {'mode': 'scene', 'transition': 'current', 'span': 'brief'}}
         verdict = {'status': 'classified', 'labels': {'mode': 'scene', 'activity': 'light', 'location': 'keep'}, 'uncertain': ['event'],
                    'answers': {}, 'model': 't', 'draft': '초안', 'authorization': auth, 'duration_estimate': {'elapsed_minutes': 3}}
-        with patch.object(turn, 'decide') as gate, patch.object(jev, 'classify') as classify, patch.object(jev, 'estimate_duration') as estimate, \
+        with patch.object(jev, 'classify') as classify, patch.object(jev, 'estimate_duration') as estimate, \
              patch.object(turn, 'review_reply', return_value={'approved': True, 'issues': []}):
             with self.assertRaises(jev.PendingChoice) as caught:
                 turn.prepare('심문', before, [], [], '9', '초안', auth, None, verdict)
@@ -183,7 +182,7 @@ class PlayerChoiceTests(unittest.TestCase):
             settled = dict(caught.exception.verdict)
             settled['labels'] = {**settled['labels'], 'event': 'interrogation'}
             prepared = turn.prepare('심문', before, [], [], '9', '초안', auth, None, settled)
-        gate.assert_not_called(); classify.assert_not_called(); estimate.assert_not_called()
+        classify.assert_not_called(); estimate.assert_not_called()
         self.assertEqual(prepared['applied']['event'], 'interrogation')
         self.assertEqual(prepared['state']['scene_minute'], 3)
 
@@ -260,99 +259,7 @@ if __name__ == '__main__':
     unittest.main()
 
 
-class AuthorizeToleranceTests(unittest.TestCase):
-    """Short director commands must not lose the turn over secondary uncertainty."""
-
-    def decision(self, answers):
-        from llm.call_registry import Decision, DecisionResult
-        return DecisionResult(decision=Decision(answers=answers, model='jev-test'))
-
-    def test_unsure_span_and_transition_default_to_the_smaller_scene(self):
-        sure = {'mode': {'choice': 'scene', 'confidence': .95, 'probabilities': {'scene': .95}},
-                'transition': {'choice': 'current', 'confidence': .5}, 'span': {'choice': 'session', 'confidence': .55}}
-        profile = SimpleNamespace(extra={'enabled': True, 'thresholds': {'accept': .75}})
-        with patch.object(turn, 'resolve', return_value=profile), patch.object(turn, 'decide_detailed', side_effect=[self.decision(sure), self.decision(sure)]):
-            result = turn.decide('compatibility', {}, {k: jev.choice(k, options) for k, options in {
-                'mode': {'scene': 'scene'}, 'transition': {'current': 'current'},
-                'span': {'brief': 'brief', 'session': 'session'}, 'time_scope': {'none': 'none'}}.items()},
-                defaults={'transition': 'current', 'span': 'brief', 'time_scope': 'none'})
-            result['user_text'] = '아침 배식이나 해라'
-        self.assertEqual(result['labels'], {'mode': 'scene', 'transition': 'current', 'span': 'brief', 'time_scope': 'none'})
-        self.assertEqual(result['defaulted'], {'transition': 'current', 'span': 'brief', 'time_scope': 'none'})
-        self.assertEqual(turn.policy_for_authorization(result).max_minutes, 10)
-
-    def test_unsure_mode_and_scope_become_player_choices(self):
-        unsure = {'mode': {'choice': 'scene', 'confidence': .6, 'probabilities': {'scene': .6, 'discussion': .35, 'plan': .05}},
-                  'transition': {'choice': 'current', 'confidence': .9}, 'span': {'choice': 'brief', 'confidence': .9}}
-        profile = SimpleNamespace(extra={'enabled': True, 'thresholds': {'accept': .75}})
-        with patch.object(turn, 'resolve', return_value=profile), patch.object(turn, 'decide_detailed', side_effect=[self.decision(unsure), self.decision(unsure)]):
-            with self.assertRaises(jev.PendingChoice) as caught:
-                turn.decide('compatibility', {}, {'mode': jev.choice('mode', {k: k for k in ('scene', 'discussion', 'plan', 'correction', 'reset')})})
-        self.assertEqual(caught.exception.key, 'mode')
-        self.assertEqual([k for k, _ in caught.exception.candidates], ['scene', 'discussion', 'plan', 'correction'])
-        auth = {'user_text': '의사 재방문', 'labels': {'mode': 'scene', 'transition': 'current', 'span': 'brief'}}
-        verdict = {'status': 'classified', 'labels': {'mode': 'scene', 'event': 'treatment', 'activity': 'light', 'location': 'keep'}, 'uncertain': [], 'answers': {}, 'model': 't'}
-        # The player's confirmation skips the gate; the classifier then runs as usual.
-        with patch.object(turn, 'decide') as gate_call, patch.object(jev, 'classify', return_value=deepcopy(verdict)), \
-             patch.object(jev, 'estimate_duration', return_value={'elapsed_minutes': 4}), patch.object(turn, 'review_reply', return_value={'approved': True, 'issues': []}):
-            prepared = turn.prepare('의사 재방문', initial(), [], [], '9', '초안', auth, None, None, True)
-        gate_call.assert_not_called()
-        self.assertEqual(prepared['applied']['event'], 'treatment')
-        self.assertTrue(prepared['verdict']['scope_review']['player_confirmed'])
-
-
-class BotAuthorizeChoiceTests(unittest.IsolatedAsyncioTestCase):
-    async def test_mode_choice_runs_the_turn_with_the_players_answer(self):
-        from roleplay import bot
-        message = SimpleNamespace(from_user=SimpleNamespace(id=1), text='의사 재방문', message_id=8, chat=SimpleNamespace(id=1),
-                                  answer=AsyncMock(), bot=SimpleNamespace(send_chat_action=AsyncMock()))
-        async def inline_thread(func, *args, **kwargs):
-            return func(*args, **kwargs)
-        pending = jev.PendingChoice('mode', [('scene', 'Perform'), ('discussion', 'Discuss')], '불확정')
-        with patch.object(bot.asyncio, 'to_thread', side_effect=inline_thread), \
-             patch.object(bot.roleplay_turn, 'committed_reply', return_value=None), \
-             patch.object(bot.roleplay_turn, 'authorize', side_effect=pending), \
-             patch.object(bot, '_draft_and_settle', new_callable=AsyncMock) as run, \
-             patch.object(bot, 'save_message'), patch.object(bot, 'load_history', return_value=[]), \
-             patch.object(bot, 'get_preference', return_value='on'), \
-             patch.object(bot, 'load_notes', return_value=[]), patch.object(bot, 'load_state', return_value={'hunger': 25}), \
-             patch.object(bot, 'people_context', return_value={'index': [], 'present': []}):
-            await bot.handle_message(message)
-            run.assert_not_awaited()
-            markup = message.answer.call_args.kwargs['reply_markup']
-            self.assertEqual([b.text for row in markup.inline_keyboard for b in row], ['장면 실행', '질문·상담', '버리기'])
-            query = SimpleNamespace(from_user=SimpleNamespace(id=1), data='rp:8:mode:scene', answer=AsyncMock(),
-                                    message=SimpleNamespace(edit_text=AsyncMock(), answer=AsyncMock()))
-            await bot.on_choice(query)
-            run.assert_awaited_once()
-            turn_ctx, authorization = run.await_args.args[2], run.await_args.args[3]
-            self.assertEqual(turn_ctx['scope_id'], '8')
-            self.assertEqual(authorization['labels'], {'mode': 'scene', 'transition': 'current', 'span': 'brief'})
-            self.assertNotIn(1, bot.PENDING_CHOICES)
-
-
 class AutoSettleTests(unittest.IsolatedAsyncioTestCase):
-    async def test_unsure_mode_plays_the_scene_when_buttons_are_off(self):
-        from roleplay import bot
-        message = SimpleNamespace(from_user=SimpleNamespace(id=1), text='(맘대로 쉬어라)', message_id=4, chat=SimpleNamespace(id=1),
-                                  answer=AsyncMock(), bot=SimpleNamespace(send_chat_action=AsyncMock()))
-        async def inline_thread(func, *args, **kwargs):
-            return func(*args, **kwargs)
-        pending = jev.PendingChoice('mode', [('discussion', 'Discuss'), ('scene', 'Perform')], '불확정')
-        with patch.object(bot.asyncio, 'to_thread', side_effect=inline_thread), \
-             patch.object(bot.roleplay_turn, 'committed_reply', return_value=None), \
-             patch.object(bot.roleplay_turn, 'authorize', side_effect=pending), \
-             patch.object(bot, '_draft_and_settle', new_callable=AsyncMock) as run, \
-             patch.object(bot, 'save_message', return_value=1), patch.object(bot, 'load_history', return_value=[]), \
-             patch.object(bot, 'get_preference', return_value='off'), \
-             patch.object(bot, 'load_notes', return_value=[]), patch.object(bot, 'load_state', return_value={'hunger': 25}), \
-             patch.object(bot, 'people_context', return_value={'index': [], 'present': []}):
-            await bot.handle_message(message)
-        authorization = run.await_args.args[3]
-        self.assertEqual(authorization['labels']['mode'], 'scene')
-        self.assertEqual(authorization['auto_settled'], {'mode': 'scene'})
-        message.answer.assert_not_awaited()
-
     async def test_buttons_off_takes_the_most_probable_value_and_says_so(self):
         from roleplay import bot
         message = SimpleNamespace(from_user=SimpleNamespace(id=1), text='죽을 건넸다', message_id=9, chat=SimpleNamespace(id=1),
