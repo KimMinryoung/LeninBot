@@ -126,7 +126,7 @@ async def _exec_fetch_url(
         content = await fetch_url_content_async(url, max_chars=fetch_limit)
         if not content or not content.strip():
             return ToolFailure("Failed to extract content from this URL. No usable body was obtained; "
-                               "this is not evidence about the page's claims.\n" + diagnose_url_fetch_failure(url),
+                               "this is not evidence about the page's claims.\n" + await asyncio.to_thread(diagnose_url_fetch_failure, url),
                                {"empty": True, "extracted_chars": 0, "failure_type": "empty_extraction"})
         if start >= len(content):
             raise ToolRejection(
@@ -158,7 +158,7 @@ async def _exec_fetch_url(
         try:
             from content_fetch.urls import diagnose_url_fetch_failure
 
-            diagnosis = diagnose_url_fetch_failure(url, [str(exc)])
+            diagnosis = await asyncio.to_thread(diagnose_url_fetch_failure, url, [str(exc)])
             return ToolFailure(f"URL fetch failed: {exc}\n{diagnosis}", {"failure_type": type(exc).__name__})
         except Exception:
             return ToolFailure(f"URL fetch failed: {exc}", {"failure_type": type(exc).__name__})

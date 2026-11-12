@@ -15,14 +15,11 @@ import imaplib
 import json
 import logging
 import os
-import smtplib
-import ssl
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.header import decode_header, make_header
 from email.message import Message
-from email.message import EmailMessage
-from email.utils import getaddresses, make_msgid, parseaddr, parsedate_to_datetime
+from email.utils import getaddresses, parseaddr, parsedate_to_datetime
 from html import unescape
 from pathlib import Path
 from typing import Any, Callable
@@ -879,27 +876,3 @@ def run_polling_cycle(limit: int = 10) -> dict[str, Any]:
     }
 
 
-def build_inbound_summary_notification(item: dict[str, Any], row: dict[str, Any] | None = None) -> str:
-    classification = (item.get("classification") or {}) if isinstance(item, dict) else {}
-    route = classification.get("route") or "manual_review"
-    labels = ", ".join(classification.get("labels") or []) or "-"
-    preview_source = ""
-    if row:
-        preview_source = (row.get("text_body") or row.get("html_body") or "").strip()
-    preview = preview_source.replace("```", "'''")[:500] if preview_source else ""
-    lines = [
-        "📨 새 메일 수신",
-        f"inbound_id: `{item.get('stored_message_id') or '-'}`",
-        f"from: {item.get('sender') or '-'}",
-        f"subject: {item.get('subject') or '(no subject)'}",
-        f"route: `{route}` / labels: {labels}",
-        f"status: `{item.get('processing_status') or '-'}`",
-    ]
-    source_mailbox = (item.get("mailbox") or (row or {}).get("mailbox") or "").strip()
-    if source_mailbox and source_mailbox != CONFIG.imap_mailbox:
-        lines.insert(1, f"folder: ⚠️ {source_mailbox}")
-    if classification.get("contains_attachments"):
-        lines.append("attachments: 감지됨 — 자동처리 금지")
-    if preview:
-        lines.append(f"preview:\n{preview}")
-    return "\n".join(lines)

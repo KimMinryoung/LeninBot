@@ -1,5 +1,5 @@
 {
-  "version": 41,
+  "version": 55,
   "functions": [
     {
       "id": "political-leadership",
@@ -1186,6 +1186,27 @@
       "periods": [
         [
           1894,
+          null
+        ]
+      ]
+    },
+    {
+      "id": "party-taiwan-dpp",
+      "kind": "party",
+      "label": {
+        "ko": "민주진보당",
+        "en": "Democratic Progressive Party"
+      },
+      "termIds": [
+        "democratic-progressive-party-taiwan"
+      ],
+      "countryCode": "taiwan",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Choose only when the cited career explicitly establishes service or organizational membership in this body; not citizenship or sympathy.",
+      "periods": [
+        [
+          1986,
           null
         ]
       ]
@@ -2427,6 +2448,27 @@
         [
           1920,
           1991
+        ]
+      ]
+    },
+    {
+      "id": "british-fabian-society",
+      "kind": "party",
+      "label": {
+        "ko": "페이비언 협회",
+        "en": "Fabian Society"
+      },
+      "termIds": [
+        "fabian-society"
+      ],
+      "countryCode": "uk",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in the Fabian Society. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1884,
+          null
         ]
       ]
     },
@@ -4891,6 +4933,27 @@
       ]
     },
     {
+      "id": "party-austrian-communist",
+      "kind": "party",
+      "label": {
+        "ko": "오스트리아 공산당",
+        "en": "Communist Party of Austria (KPÖ)"
+      },
+      "termIds": [
+        "communist-party-of-austria"
+      ],
+      "countryCode": "austria",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Communist Party of Austria (KPÖ). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1918,
+          null
+        ]
+      ]
+    },
+    {
       "id": "party-austrian-ovp",
       "kind": "party",
       "label": {
@@ -4996,6 +5059,48 @@
       ]
     },
     {
+      "id": "party-german-progress",
+      "kind": "party",
+      "label": {
+        "ko": "독일 진보당",
+        "en": "German Progress Party (DFP)"
+      },
+      "termIds": [
+        "german-progress-party"
+      ],
+      "countryCode": "germany",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in German Progress Party (DFP). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1861,
+          1884
+        ]
+      ]
+    },
+    {
+      "id": "party-german-free-minded",
+      "kind": "party",
+      "label": {
+        "ko": "독일 자유사상당",
+        "en": "German Free-minded Party"
+      },
+      "termIds": [
+        "german-free-minded-party"
+      ],
+      "countryCode": "germany",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in German Free-minded Party. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1884,
+          1893
+        ]
+      ]
+    },
+    {
       "id": "party-german-national-liberal",
       "kind": "party",
       "label": {
@@ -5030,6 +5135,27 @@
       "icon": "flag",
       "parentId": null,
       "criteria": "Only documented service, membership or organizational activity in German People's Party (DVP). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1918,
+          1933
+        ]
+      ]
+    },
+    {
+      "id": "party-german-ddp",
+      "kind": "party",
+      "label": {
+        "ko": "독일민주당",
+        "en": "German Democratic Party (DDP)"
+      },
+      "termIds": [
+        "german-democratic-party"
+      ],
+      "countryCode": "germany",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in German Democratic Party (DDP), renamed German State Party in 1930. Never infer affiliation from nationality, residence or ideology.",
       "periods": [
         [
           1918,
@@ -9835,6 +9961,9 @@
           1905,
           1912
         ]
+      ],
+      "termIds": [
+        "tongmenghui"
       ]
     },
     {
@@ -10346,6 +10475,1488 @@
           1831,
           1848
         ]
+      ]
+    },
+    {
+      "id": "party-polish-national-democracy",
+      "kind": "party",
+      "label": {
+        "ko": "민족민주당 (엔데차)",
+        "en": "National Democracy (Endecja)"
+      },
+      "termIds": [
+        "polish-national-democracy"
+      ],
+      "countryCode": "poland",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in National Democracy (Endecja): the National League, the National Democratic Party (SDN), the Popular National Union (ZLN) and the National Party (SN). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1893,
+          1947
+        ]
+      ]
+    },
+    {
+      "id": "party-british-sdf",
+      "kind": "party",
+      "label": {
+        "ko": "사회민주연맹 (영국)",
+        "en": "Social Democratic Federation (SDF)"
+      },
+      "termIds": [
+        "social-democratic-federation"
+      ],
+      "countryCode": "uk",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Social Democratic Federation (SDF). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1881,
+          1911
+        ]
+      ]
+    },
+    {
+      "id": "party-british-socialist-league",
+      "kind": "party",
+      "label": {
+        "ko": "사회주의 동맹 (영국)",
+        "en": "Socialist League (UK, 1885)"
+      },
+      "termIds": [
+        "socialist-league-uk"
+      ],
+      "countryCode": "uk",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Socialist League (UK, 1885). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1885,
+          1901
+        ]
+      ]
+    },
+    {
+      "id": "party-british-ilp",
+      "kind": "party",
+      "label": {
+        "ko": "독립노동당",
+        "en": "Independent Labour Party (ILP)"
+      },
+      "termIds": [
+        "independent-labour-party"
+      ],
+      "countryCode": "uk",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Independent Labour Party (ILP). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1893,
+          1975
+        ]
+      ]
+    },
+    {
+      "id": "british-national-secular-society",
+      "kind": "force",
+      "label": {
+        "ko": "전국 세속 협회",
+        "en": "National Secular Society"
+      },
+      "termIds": [
+        "national-secular-society"
+      ],
+      "countryCode": "uk",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in National Secular Society. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1866,
+          null
+        ]
+      ]
+    },
+    {
+      "id": "british-malthusian-league",
+      "kind": "force",
+      "label": {
+        "ko": "맬서스 연맹",
+        "en": "Malthusian League"
+      },
+      "termIds": [
+        "malthusian-league"
+      ],
+      "countryCode": "uk",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Malthusian League. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1877,
+          1927
+        ]
+      ]
+    },
+    {
+      "id": "british-humanitarian-league",
+      "kind": "force",
+      "label": {
+        "ko": "인도주의 연맹",
+        "en": "Humanitarian League"
+      },
+      "termIds": [
+        "humanitarian-league"
+      ],
+      "countryCode": "uk",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Humanitarian League. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1891,
+          1919
+        ]
+      ]
+    },
+    {
+      "id": "british-bsssp",
+      "kind": "force",
+      "label": {
+        "ko": "영국 성심리학 연구회",
+        "en": "British Society for the Study of Sex Psychology"
+      },
+      "termIds": [
+        "british-society-for-the-study-of-sex-psychology"
+      ],
+      "countryCode": "uk",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in British Society for the Study of Sex Psychology. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1913,
+          null
+        ]
+      ]
+    },
+    {
+      "id": "british-alra",
+      "kind": "force",
+      "label": {
+        "ko": "낙태법 개혁 협회",
+        "en": "Abortion Law Reform Association"
+      },
+      "termIds": [
+        "abortion-law-reform-association"
+      ],
+      "countryCode": "uk",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Abortion Law Reform Association. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1936,
+          null
+        ]
+      ]
+    },
+    {
+      "id": "international-theosophical-society",
+      "kind": "international",
+      "label": {
+        "ko": "신지학회",
+        "en": "Theosophical Society"
+      },
+      "termIds": [
+        "theosophical-society"
+      ],
+      "countryCode": null,
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Theosophical Society. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1875,
+          null
+        ]
+      ]
+    },
+    {
+      "id": "spanish-mujeres-libres",
+      "kind": "force",
+      "label": {
+        "ko": "자유여성",
+        "en": "Mujeres Libres"
+      },
+      "termIds": [
+        "mujeres-libres"
+      ],
+      "countryCode": "spain",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Mujeres Libres. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1936,
+          1939
+        ]
+      ]
+    },
+    {
+      "id": "spanish-league-for-sexual-reform",
+      "kind": "force",
+      "label": {
+        "ko": "스페인 성개혁 연맹",
+        "en": "Spanish League for Sexual Reform"
+      },
+      "termIds": [
+        "spanish-league-for-sexual-reform"
+      ],
+      "countryCode": "spain",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Spanish League for Sexual Reform. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1932,
+          null
+        ]
+      ]
+    },
+    {
+      "id": "spanish-sia",
+      "kind": "force",
+      "label": {
+        "ko": "국제 반파시즘 연대 (SIA)",
+        "en": "Solidaridad Internacional Antifascista (SIA)"
+      },
+      "termIds": [
+        "solidaridad-internacional-antifascista"
+      ],
+      "countryCode": "spain",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Solidaridad Internacional Antifascista (SIA). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1937,
+          null
+        ]
+      ]
+    },
+    {
+      "id": "party-spanish-federal-republican",
+      "kind": "party",
+      "label": {
+        "ko": "연방민주공화당 (스페인)",
+        "en": "Federal Democratic Republican Party (Spain)"
+      },
+      "termIds": [
+        "federal-democratic-republican-party"
+      ],
+      "countryCode": "spain",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Federal Democratic Republican Party (Spain). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1868,
+          null
+        ]
+      ]
+    },
+    {
+      "id": "party-spanish-radical-republican",
+      "kind": "party",
+      "label": {
+        "ko": "급진공화당 (스페인)",
+        "en": "Radical Republican Party (Spain)"
+      },
+      "termIds": [
+        "radical-republican-party"
+      ],
+      "countryCode": "spain",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Radical Republican Party (Spain). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1908,
+          1936
+        ]
+      ]
+    },
+    {
+      "id": "german-scientific-humanitarian-committee",
+      "kind": "force",
+      "label": {
+        "ko": "과학적 인도주의 위원회",
+        "en": "Scientific-Humanitarian Committee (WhK)"
+      },
+      "termIds": [
+        "scientific-humanitarian-committee"
+      ],
+      "countryCode": "germany",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Scientific-Humanitarian Committee (WhK). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1897,
+          1933
+        ]
+      ]
+    },
+    {
+      "id": "german-bund-fur-menschenrecht",
+      "kind": "force",
+      "label": {
+        "ko": "인권동맹",
+        "en": "Bund für Menschenrecht (BfM)"
+      },
+      "termIds": [
+        "bund-fur-menschenrecht"
+      ],
+      "countryCode": "germany",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Bund für Menschenrecht (BfM). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1920,
+          1936
+        ]
+      ]
+    },
+    {
+      "id": "german-gemeinschaft-der-eigenen",
+      "kind": "force",
+      "label": {
+        "ko": "아이게네 공동체",
+        "en": "Gemeinschaft der Eigenen"
+      },
+      "termIds": [
+        "gemeinschaft-der-eigenen"
+      ],
+      "countryCode": "germany",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Gemeinschaft der Eigenen. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1903,
+          1933
+        ]
+      ]
+    },
+    {
+      "id": "german-bund-fur-mutterschutz",
+      "kind": "force",
+      "label": {
+        "ko": "독일 모성보호·성개혁 동맹",
+        "en": "League for the Protection of Mothers and Sexual Reform"
+      },
+      "termIds": [
+        "bund-fur-mutterschutz"
+      ],
+      "countryCode": "germany",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in the League for the Protection of Mothers and Sexual Reform (Bund für Mutterschutz). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1905,
+          1933
+        ]
+      ]
+    },
+    {
+      "id": "german-sex-pol",
+      "kind": "force",
+      "label": {
+        "ko": "섹스폴",
+        "en": "Sex-Pol (German Reich Association for Proletarian Sexual Politics)"
+      },
+      "termIds": [
+        "sex-pol"
+      ],
+      "countryCode": "germany",
+      "icon": "flag",
+      "parentId": "party-german-communist",
+      "criteria": "Only documented service, membership or organizational activity in Sex-Pol (Deutscher Reichsverband für proletarische Sexualpolitik) and the exile Sex-Pol circle. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1931,
+          1939
+        ]
+      ]
+    },
+    {
+      "id": "international-world-league-for-sexual-reform",
+      "kind": "international",
+      "label": {
+        "ko": "세계 성개혁 연맹",
+        "en": "World League for Sexual Reform (WLSR)"
+      },
+      "termIds": [
+        "world-league-for-sexual-reform"
+      ],
+      "countryCode": null,
+      "icon": "globe",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in World League for Sexual Reform (WLSR). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1928,
+          1935
+        ]
+      ]
+    },
+    {
+      "id": "german-institute-for-sexual-science",
+      "kind": "institution",
+      "label": {
+        "ko": "성과학 연구소",
+        "en": "Institute for Sexual Science"
+      },
+      "termIds": [
+        "institute-for-sexual-science"
+      ],
+      "countryCode": "germany",
+      "icon": "landmark",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in the Institute for Sexual Science (Institut für Sexualwissenschaft), Berlin. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1919,
+          1933
+        ]
+      ]
+    },
+    {
+      "id": "party-romanian-national-liberal",
+      "kind": "party",
+      "label": {
+        "ko": "국민자유당 (루마니아)",
+        "en": "National Liberal Party (Romania, 1875–1947)"
+      },
+      "termIds": [
+        "national-liberal-party-romania-1875"
+      ],
+      "countryCode": "romania",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in the National Liberal Party (PNL) of Romania, 1875–1947, including its 1930–1938 Gheorghe Brătianu and 1944–1947 Tătărescu wings. Kinship with the Brătianu family, royal favour for the party or support for its governments does not qualify. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1875,
+          1947
+        ]
+      ]
+    },
+    {
+      "id": "party-romanian-socialist",
+      "kind": "party",
+      "label": {
+        "ko": "루마니아 사회당 (1918–1921)",
+        "en": "Socialist Party of Romania (1918–1921)"
+      },
+      "termIds": [
+        "socialist-party-of-romania-1918"
+      ],
+      "countryCode": "romania",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in the Socialist Party of Romania (Partidul Socialist), founded in December 1918 from the Social Democratic Party of Romania; its maximalist majority became the Communist Party of Romania in May 1921 (use party-romanian-communist from then). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1918,
+          1921
+        ]
+      ]
+    },
+    {
+      "id": "bulgarian-fatherland-front",
+      "kind": "force",
+      "label": {
+        "ko": "조국전선 (불가리아)",
+        "en": "Fatherland Front (Bulgaria)"
+      },
+      "termIds": [
+        "fatherland-front-bulgaria"
+      ],
+      "countryCode": "bulgaria",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented individual membership, posts or organizational activity in the Fatherland Front of Bulgaria (1942–1990): joining the Front, its National Committee or National Council, or its committees. Membership of a constituent party (Bulgarian Communist Party, Agrarian Union, Zveno, Social Democrats, Radicals) does not by itself count as Front membership; ministerial, military or other state service under Fatherland Front governments belongs to state-bulgaria, and party posts to the party. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1942,
+          1990
+        ]
+      ]
+    },
+    {
+      "id": "party-bulgarian-democratic-alliance",
+      "kind": "party",
+      "label": {
+        "ko": "민주동맹 (불가리아)",
+        "en": "Democratic Alliance (Bulgaria)"
+      },
+      "termIds": [
+        "democratic-alliance-bulgaria"
+      ],
+      "countryCode": "bulgaria",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Democratic Alliance (Bulgaria). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1923,
+          1934
+        ]
+      ]
+    },
+    {
+      "id": "party-bulgarian-radical-democratic",
+      "kind": "party",
+      "label": {
+        "ko": "급진민주당 (불가리아)",
+        "en": "Radical Democratic Party (Bulgaria)"
+      },
+      "termIds": [
+        "radical-democratic-party-bulgaria"
+      ],
+      "countryCode": "bulgaria",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in the Radical Democratic Party of Bulgaria (Radical Party from 1926; Radical Party (United) 1945–1949). The party re-founded in 1989 is a separate later organisation. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1905,
+          1934
+        ],
+        [
+          1944,
+          1949
+        ]
+      ]
+    },
+    {
+      "id": "bulgarian-zveno",
+      "kind": "force",
+      "label": {
+        "ko": "즈베노 (불가리아)",
+        "en": "Zveno (Bulgaria)"
+      },
+      "termIds": [
+        "zveno-bulgaria"
+      ],
+      "countryCode": "bulgaria",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in the Bulgarian political circle Zveno (from 1944 the People's Union Zveno), 1927–1949. Taking part in the 1934 coup or the Military League alone does not qualify, nor does closeness to its leaders. Not the Soviet kolkhoz work team (zveno). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1927,
+          1949
+        ]
+      ]
+    },
+    {
+      "id": "party-hungarian-independent-democratic",
+      "kind": "party",
+      "label": {
+        "ko": "독립헝가리민주당",
+        "en": "Independent Hungarian Democratic Party (FMDP)"
+      },
+      "termIds": [
+        "independent-hungarian-democratic-party"
+      ],
+      "countryCode": "hungary",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Independent Hungarian Democratic Party (FMDP). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1947,
+          1949
+        ]
+      ]
+    },
+    {
+      "id": "german-sds",
+      "kind": "force",
+      "label": {
+        "ko": "독일 사회주의 학생동맹",
+        "en": "Socialist German Student Union (SDS)"
+      },
+      "termIds": [
+        "socialist-german-student-union"
+      ],
+      "countryCode": "germany",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented membership or organizational activity in the Socialist German Student Union (SDS, Sozialistischer Deutscher Studentenbund, 1946–1970). Not the American Students for a Democratic Society, not Die Linke.SDS (2007–), not the SPD itself. Never infer affiliation from nationality, residence, student status or ideology.",
+      "periods": [
+        [
+          1946,
+          1970
+        ]
+      ]
+    },
+    {
+      "id": "party-german-greens",
+      "kind": "party",
+      "label": {
+        "ko": "독일 녹색당",
+        "en": "Alliance 90/The Greens (The Greens)"
+      },
+      "termIds": [
+        "alliance-90-the-greens"
+      ],
+      "countryCode": "germany",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in The Greens (Die Grünen, founded January 1980) or, from May 1993, Alliance 90/The Greens. Local precursor lists before 1980 (Bremer Grüne Liste, GLU, AL) and Green parties of other countries do not qualify. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1980,
+          null
+        ]
+      ]
+    },
+    {
+      "id": "party-greek-communist-interior",
+      "kind": "party",
+      "label": {
+        "ko": "그리스 공산당 (국내파)",
+        "en": "Communist Party of Greece (Interior)"
+      },
+      "termIds": [
+        "communist-party-of-greece-interior"
+      ],
+      "countryCode": "greece",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in the Communist Party of Greece (Interior) (KKE Interior / KKE Esoterikou), from the 1968 split until the 1987 split into the Greek Left and KKE Interior–Renewing Left. Membership of the KKE before 1968 belongs to party-greek-communist. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1968,
+          1987
+        ]
+      ]
+    },
+    {
+      "id": "british-reform-league",
+      "kind": "force",
+      "label": {
+        "ko": "개혁동맹 (영국)",
+        "en": "Reform League (UK)"
+      },
+      "termIds": [
+        "reform-league-uk"
+      ],
+      "countryCode": "uk",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in the Reform League (1865–1869), the British manhood-suffrage organisation. Never infer affiliation from nationality, residence or ideology. Not the middle-class Reform Union or the 1858 Political Reform League.",
+      "periods": [
+        [
+          1865,
+          1869
+        ]
+      ]
+    },
+    {
+      "id": "british-labour-representation-league",
+      "kind": "force",
+      "label": {
+        "ko": "노동대표동맹",
+        "en": "Labour Representation League (LRL)"
+      },
+      "termIds": [
+        "labour-representation-league"
+      ],
+      "countryCode": "uk",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in the Labour Representation League (1869–1882). Never infer affiliation from nationality, residence or ideology. Not the Labour Representation Committee of 1900, which is party-british-labour.",
+      "periods": [
+        [
+          1869,
+          1882
+        ]
+      ]
+    },
+    {
+      "id": "british-land-and-labour-league",
+      "kind": "force",
+      "label": {
+        "ko": "토지노동동맹",
+        "en": "Land and Labour League"
+      },
+      "termIds": [
+        "land-and-labour-league"
+      ],
+      "countryCode": "uk",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in the Land and Labour League (1869–1873). Never infer affiliation from nationality, residence or ideology. Not the Scottish Land and Labour League of the 1880s.",
+      "periods": [
+        [
+          1869,
+          1873
+        ]
+      ]
+    },
+    {
+      "id": "british-chartism",
+      "kind": "force",
+      "label": {
+        "ko": "차티스트 운동",
+        "en": "Chartist movement"
+      },
+      "termIds": [
+        "chartism"
+      ],
+      "countryCode": "uk",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Documented participation in the Chartist movement for the People's Charter (1838–1858): membership or office in the National Charter Association or a local Chartist association, delegation to a Chartist convention, or leading and organizing the movement. Sympathy for the Charter, friendship with Chartists or writing about Chartism does not qualify. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1838,
+          1858
+        ]
+      ]
+    },
+    {
+      "id": "british-london-school-board",
+      "kind": "institution",
+      "label": {
+        "ko": "런던 교육위원회",
+        "en": "School Board for London (London School Board)"
+      },
+      "termIds": [
+        "london-school-board"
+      ],
+      "countryCode": "uk",
+      "icon": "landmark",
+      "parentId": null,
+      "criteria": "Only documented election to and service on the School Board for London (1870–1904), the elected local education authority, or employment by it. Standing as an unsuccessful candidate does not qualify. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1870,
+          1904
+        ]
+      ]
+    },
+    {
+      "id": "party-british-whig",
+      "kind": "party",
+      "label": {
+        "ko": "영국 휘그당",
+        "en": "Whigs (British political party)"
+      },
+      "termIds": [
+        "whigs-uk"
+      ],
+      "countryCode": "uk",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in the Whigs (1679–1859). Never infer affiliation from nationality, residence or ideology. From the 1859 formation of the Liberal Party use party-british-liberal. Not the American Whig Party.",
+      "periods": [
+        [
+          1679,
+          1859
+        ]
+      ]
+    },
+    {
+      "id": "british-andersonian-institution",
+      "kind": "institution",
+      "label": {
+        "ko": "앤더슨 학원",
+        "en": "Andersonian Institution (Anderson's University), Glasgow"
+      },
+      "termIds": [
+        "andersonian-institution"
+      ],
+      "countryCode": "uk",
+      "icon": "landmark",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in the Andersonian Institution, renamed Anderson's University in 1828, in Glasgow (1796–1887). Never infer affiliation from nationality, residence or ideology. Its successor technical colleges and the University of Strathclyde are not this entry.",
+      "periods": [
+        [
+          1796,
+          1887
+        ]
+      ]
+    },
+    {
+      "id": "party-french-ftsf",
+      "kind": "party",
+      "label": {
+        "ko": "프랑스 사회주의노동자연맹 (가능파)",
+        "en": "Federation of the Socialist Workers of France (FTSF, Possibilists)"
+      },
+      "termIds": [
+        "possibilists-france"
+      ],
+      "countryCode": "france",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented membership or leadership in the Federation of the Socialist Workers' Party of France founded at the Marseille congress of 1879 and, after the Guesdists left in 1882, its Possibilist (Broussist) continuation, renamed the Fédération des travailleurs socialistes de France (FTSF) in 1883, until it joined Jaurès's French Socialist Party in 1902. Guesde's Parti ouvrier (1880/1882–1902) and Allemane's POSR (1890) are not this entry. Never infer affiliation from reformist opinion or attendance at a congress alone.",
+      "periods": [
+        [
+          1879,
+          1902
+        ]
+      ]
+    },
+    {
+      "id": "party-french-crc",
+      "kind": "party",
+      "label": {
+        "ko": "중앙혁명위원회 (블랑키파)",
+        "en": "Central Revolutionary Committee (CRC, Blanquist)"
+      },
+      "termIds": [
+        "central-revolutionary-committee-france"
+      ],
+      "countryCode": "france",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented membership or leadership in the Blanquist Comité révolutionnaire central founded in 1881 by Eudes, Granger and Vaillant, until it became the Revolutionary Socialist Party in 1898. Granger's Boulangist Central Revolutionary Socialist Committee (1889) is not this entry. Never infer affiliation from Blanquist opinion or electoral support alone.",
+      "periods": [
+        [
+          1881,
+          1898
+        ]
+      ]
+    },
+    {
+      "id": "party-french-psr-1898",
+      "kind": "party",
+      "label": {
+        "ko": "혁명사회당 (프랑스)",
+        "en": "Revolutionary Socialist Party (PSR, France, 1898–1901)"
+      },
+      "termIds": [
+        "revolutionary-socialist-party-france-1898"
+      ],
+      "countryCode": "france",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented membership or leadership in Vaillant's Parti socialiste révolutionnaire (1898–1901), the renamed Central Revolutionary Committee, including its Revolutionary Communist Alliance wing. NOT Allemane's Parti ouvrier socialiste révolutionnaire (POSR). From the Revolutionary Socialist Unity of November 1901 on, use the Socialist Party of France (1901–1905).",
+      "periods": [
+        [
+          1898,
+          1901
+        ]
+      ]
+    },
+    {
+      "id": "party-french-psdf-1902",
+      "kind": "party",
+      "label": {
+        "ko": "프랑스사회당(게드·바양)",
+        "en": "Socialist Party of France (PSdF, Guesde–Vaillant, 1902–1905)"
+      },
+      "termIds": [
+        "socialist-party-of-france-1902"
+      ],
+      "countryCode": "france",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented membership or leadership in the Parti socialiste de France of Guesde and Vaillant, launched as the Revolutionary Socialist Unity in November 1901 and founded at Commentry in 1902, until the SFIO of April 1905. NOT Jaurès's Parti socialiste français of 1902–1905 (party-french-socialist-1902) nor the neo-socialist PSdF of 1933–1935.",
+      "periods": [
+        [
+          1901,
+          1905
+        ]
+      ]
+    },
+    {
+      "id": "french-twenty-arrondissements-committee",
+      "kind": "force",
+      "label": {
+        "ko": "20개 구 공화주의 중앙위원회",
+        "en": "Republican Central Committee of the Twenty Arrondissements"
+      },
+      "termIds": [
+        "republican-central-committee-twenty-arrondissements"
+      ],
+      "countryCode": "france",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented membership in, or delegation to, the Comité central républicain des Vingt arrondissements of Paris (September 1870 – May 1871, called the Delegation of the Twenty Arrondissements from January 1871). NOT the Central Committee of the National Guard nor the Commune council (french-paris-commune-1871). Signing one of its posters alone is not membership.",
+      "periods": [
+        [
+          1870,
+          1871
+        ]
+      ]
+    },
+    {
+      "id": "party-french-posr",
+      "kind": "party",
+      "label": {
+        "ko": "혁명적 사회주의노동자당 (프랑스)",
+        "en": "Revolutionary Socialist Workers' Party (POSR, France)"
+      },
+      "termIds": [
+        "revolutionary-socialist-workers-party-france"
+      ],
+      "countryCode": "france",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented membership or leadership in Jean Allemane's Parti ouvrier socialiste révolutionnaire (Allemanists, 1890–1901). NOT the Federation of the Socialist Workers of France it split from (party-french-ftsf), NOT Vaillant's Parti socialiste révolutionnaire (party-french-psr-1898). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1890,
+          1901
+        ]
+      ]
+    },
+    {
+      "id": "party-german-kapd",
+      "kind": "party",
+      "label": {
+        "ko": "독일 공산주의 노동자당",
+        "en": "Communist Workers' Party of Germany (KAPD)"
+      },
+      "termIds": [
+        "communist-workers-party-of-germany"
+      ],
+      "countryCode": "germany",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in the Communist Workers' Party of Germany (KAPD). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1920,
+          1933
+        ]
+      ]
+    },
+    {
+      "id": "party-dutch-sdap",
+      "kind": "party",
+      "label": {
+        "ko": "네덜란드 사회민주노동자당",
+        "en": "Social Democratic Workers' Party (Netherlands) (SDAP)"
+      },
+      "termIds": [
+        "social-democratic-workers-party-netherlands"
+      ],
+      "countryCode": "netherlands",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in the Dutch Social Democratic Workers' Party (SDAP). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1894,
+          1946
+        ]
+      ]
+    },
+    {
+      "id": "party-catalan-erc",
+      "kind": "party",
+      "label": {
+        "ko": "카탈루냐 공화좌파",
+        "en": "Republican Left of Catalonia (ERC)"
+      },
+      "termIds": [
+        "republican-left-of-catalonia"
+      ],
+      "countryCode": "spain",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in the Republican Left of Catalonia (ERC). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1931,
+          null
+        ]
+      ]
+    },
+    {
+      "id": "party-hungarian-national-peasant",
+      "kind": "party",
+      "label": {
+        "ko": "민족농민당 (헝가리)",
+        "en": "National Peasant Party (Hungary) (NPP)"
+      },
+      "termIds": [
+        "national-peasant-party-hungary"
+      ],
+      "countryCode": "hungary",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in the Hungarian National Peasant Party (NPP, 1956 Petőfi Party). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1939,
+          1949
+        ],
+        [
+          1956,
+          1956
+        ]
+      ]
+    },
+    {
+      "id": "party-chilean-mir",
+      "icon": "flag",
+      "kind": "party",
+      "label": {
+        "ko": "좌파혁명운동 (칠레)",
+        "en": "Revolutionary Left Movement (Chile)"
+      },
+      "periods": [
+        [
+          1965,
+          null
+        ]
+      ],
+      "termIds": [
+        "revolutionary-left-movement-chile"
+      ],
+      "criteria": "Only documented service, membership or organizational activity in the Revolutionary Left Movement (MIR) of Chile. Never infer affiliation from nationality, residence or ideology.",
+      "parentId": null,
+      "countryCode": "chile"
+    },
+    {
+      "id": "party-chilean-christian-democratic",
+      "icon": "flag",
+      "kind": "party",
+      "label": {
+        "ko": "칠레 기독민주당",
+        "en": "Christian Democratic Party of Chile"
+      },
+      "periods": [
+        [
+          1957,
+          null
+        ]
+      ],
+      "termIds": [
+        "christian-democratic-party-of-chile"
+      ],
+      "criteria": "Only documented service, membership or organizational activity in the Christian Democratic Party of Chile. Never infer affiliation from nationality, residence or ideology.",
+      "parentId": null,
+      "countryCode": "chile"
+    },
+    {
+      "id": "international-ecb",
+      "kind": "international",
+      "label": {
+        "ko": "유럽중앙은행",
+        "en": "European Central Bank"
+      },
+      "countryCode": null,
+      "icon": "landmark",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in the European Central Bank. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1998,
+          null
+        ]
+      ],
+      "termIds": [
+        "european-central-bank"
+      ]
+    },
+    {
+      "id": "party-greek-syriza",
+      "kind": "party",
+      "label": {
+        "ko": "시리자",
+        "en": "Syriza (Coalition of the Radical Left)"
+      },
+      "countryCode": "greece",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Syriza (Coalition of the Radical Left). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          2004,
+          null
+        ]
+      ],
+      "termIds": [
+        "syriza"
+      ]
+    },
+    {
+      "id": "party-greek-pasok",
+      "kind": "party",
+      "label": {
+        "ko": "범그리스 사회주의 운동",
+        "en": "Panhellenic Socialist Movement (PASOK)"
+      },
+      "countryCode": "greece",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Panhellenic Socialist Movement (PASOK). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1974,
+          null
+        ]
+      ],
+      "termIds": [
+        "pasok"
+      ]
+    },
+    {
+      "id": "party-french-socialist-1969",
+      "kind": "party",
+      "label": {
+        "ko": "사회당 (프랑스, 1969–)",
+        "en": "Socialist Party (PS, France, 1969–)"
+      },
+      "countryCode": "france",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Socialist Party (PS, France, 1969–). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1969,
+          null
+        ]
+      ],
+      "termIds": [
+        "socialist-party-france"
+      ]
+    },
+    {
+      "id": "party-korean-ncnp",
+      "kind": "party",
+      "label": {
+        "ko": "새정치국민회의",
+        "en": "National Congress for New Politics"
+      },
+      "countryCode": "south-korea",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in National Congress for New Politics. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1995,
+          2000
+        ]
+      ],
+      "termIds": [
+        "national-congress-for-new-politics"
+      ]
+    },
+    {
+      "id": "party-korean-new-korea",
+      "kind": "party",
+      "label": {
+        "ko": "신한국당·민주자유당",
+        "en": "New Korea Party / Democratic Liberal Party (South Korea)"
+      },
+      "countryCode": "south-korea",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in New Korea Party / Democratic Liberal Party (South Korea). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1990,
+          1997
+        ]
+      ],
+      "termIds": [
+        "new-korea-party"
+      ]
+    },
+    {
+      "id": "party-indonesian-golkar",
+      "kind": "party",
+      "label": {
+        "ko": "골카르",
+        "en": "Golkar (Party of Functional Groups)"
+      },
+      "countryCode": "indonesia",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Golkar (Party of Functional Groups). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1964,
+          null
+        ]
+      ],
+      "termIds": [
+        "golkar"
+      ]
+    },
+    {
+      "id": "party-malaysian-umno",
+      "kind": "party",
+      "label": {
+        "ko": "통일말레이국민조직",
+        "en": "United Malays National Organisation (UMNO)"
+      },
+      "countryCode": "malaysia",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in United Malays National Organisation (UMNO). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1946,
+          null
+        ]
+      ],
+      "termIds": [
+        "united-malays-national-organisation"
+      ]
+    },
+    {
+      "id": "state-malaysia",
+      "kind": "state",
+      "label": {
+        "ko": "말레이시아 국가기관",
+        "en": "Malaysia state institutions"
+      },
+      "countryCode": "malaysia",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-thailand",
+      "kind": "state",
+      "label": {
+        "ko": "태국 국가기관",
+        "en": "Thailand state institutions"
+      },
+      "countryCode": "thailand",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-saudi-arabia",
+      "kind": "state",
+      "label": {
+        "ko": "사우디아라비아 국가기관",
+        "en": "Saudi Arabia state institutions"
+      },
+      "countryCode": "saudi-arabia",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify. A reigning king belongs here with the monarchy function; royal birth alone does not qualify."
+    },
+    {
+      "id": "state-iran",
+      "kind": "state",
+      "label": {
+        "ko": "이란 국가기관",
+        "en": "Iran state institutions"
+      },
+      "countryCode": "iran",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify. Covers the Pahlavi monarchy (1925–1979) and the Islamic Republic (from 1979) alike, including the Shah as monarch and the Supreme Leader. Opposition to the monarchy before 1979 does NOT qualify; later service for the Islamic Republic is a separate activity."
+    },
+    {
+      "id": "state-egypt",
+      "kind": "state",
+      "label": {
+        "ko": "이집트 국가기관",
+        "en": "Egypt state institutions"
+      },
+      "countryCode": "egypt",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-algeria",
+      "kind": "state",
+      "label": {
+        "ko": "알제리 국가기관",
+        "en": "Algeria state institutions"
+      },
+      "countryCode": "algeria",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify. Covers independent Algeria from 1962. Membership and posts in the ruling National Liberation Front belong to party-algerian-fln; a person who held both gets both activities."
+    },
+    {
+      "id": "state-venezuela",
+      "kind": "state",
+      "label": {
+        "ko": "베네수엘라 국가기관",
+        "en": "Venezuela state institutions"
+      },
+      "countryCode": "venezuela",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify."
+    },
+    {
+      "id": "state-mexico",
+      "kind": "state",
+      "label": {
+        "ko": "멕시코 국가기관",
+        "en": "Mexico state institutions"
+      },
+      "countryCode": "mexico",
+      "icon": "landmark",
+      "criteria": "Actual service for the state or its armed forces. Citizenship, ethnicity, residence, academic subject or opposition to the state does NOT qualify. Membership and posts in the Institutional Revolutionary Party belong to party-mexican-pri; a person who held both gets both activities."
+    },
+    {
+      "id": "party-mexican-pri",
+      "kind": "party",
+      "label": {
+        "ko": "제도혁명당 (멕시코)",
+        "en": "Institutional Revolutionary Party (PRI, Mexico)"
+      },
+      "termIds": [
+        "institutional-revolutionary-party"
+      ],
+      "countryCode": "mexico",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Institutional Revolutionary Party (PRI, Mexico). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1929,
+          null
+        ]
+      ]
+    },
+    {
+      "id": "party-venezuelan-ad",
+      "kind": "party",
+      "label": {
+        "ko": "민주행동당 (베네수엘라)",
+        "en": "Democratic Action (AD, Venezuela)"
+      },
+      "termIds": [
+        "democratic-action-venezuela"
+      ],
+      "countryCode": "venezuela",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Democratic Action (AD, Venezuela). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1941,
+          null
+        ]
+      ]
+    },
+    {
+      "id": "soviet-rapp",
+      "kind": "institution",
+      "label": {
+        "ko": "러시아 프롤레타리아 작가 협회",
+        "en": "Russian Association of Proletarian Writers (RAPP)"
+      },
+      "termIds": [
+        "rapp"
+      ],
+      "countryCode": "soviet",
+      "icon": "landmark",
+      "parentId": null,
+      "criteria": "Only documented membership, office or leadership in the Russian Association of Proletarian Writers (RAPP), counted from its founding conference of January 1925 (until 1928 under the name VAPP, the All-Russian Association of Proletarian Writers) to its dissolution by the Central Committee resolution of 23 April 1932. Its local sections (MAPP in Moscow, LAPP, the North Caucasian and other regional associations) count from 1925. The pre-1924 Kuznitsa-led VAPP, the October group and the journal Na postu before 1925, the all-Union federation VOAPP as such, Pereval and LEF do NOT qualify; nor do being attacked by RAPP, writing for its journals, or later posts in the Union of Soviet Writers. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1925,
+          1932
+        ]
+      ]
+    },
+    {
+      "id": "frankfurt-school",
+      "icon": "landmark",
+      "kind": "institution",
+      "label": {
+        "ko": "프랑크푸르트학파",
+        "en": "Frankfurt School"
+      },
+      "periods": [
+        [
+          1923,
+          null
+        ]
+      ],
+      "termIds": [
+        "frankfurt-school"
+      ],
+      "criteria": "Documented staff membership, paid research association or directorship of the Institute for Social Research (Institut für Sozialforschung, Frankfurt; Geneva, Paris and New York/Columbia in exile 1933–1950), the institutional home of the Frankfurt School. Not mere intellectual influence, publication in its journal alone, or later reception of critical theory.",
+      "parentId": null,
+      "countryCode": "germany"
+    },
+    {
+      "id": "party-us-wwp",
+      "icon": "flag",
+      "kind": "party",
+      "label": {
+        "en": "Workers World Party (WWP)",
+        "ko": "노동자세계당"
+      },
+      "periods": [
+        [
+          1959,
+          null
+        ]
+      ],
+      "termIds": [
+        "workers-world-party"
+      ],
+      "criteria": "Only documented service, membership or organizational activity in the Workers World Party (WWP, United States). Never infer affiliation from nationality, residence or ideology.",
+      "parentId": null,
+      "countryCode": "usa"
+    },
+    {
+      "id": "party-korean-hanmin",
+      "kind": "party",
+      "label": {
+        "ko": "한국민주당",
+        "en": "Korea Democratic Party"
+      },
+      "termIds": [
+        "korea-democratic-party"
+      ],
+      "countryCode": "south-korea",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in the Korea Democratic Party (Hanmindang, 1945-1949). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1945,
+          1949
+        ]
+      ]
+    },
+    {
+      "id": "party-koryo-communist-irkutsk",
+      "kind": "party",
+      "label": {
+        "ko": "이르쿠츠크파 고려공산당",
+        "en": "Korean Communist Party (Irkutsk faction)"
+      },
+      "countryCode": "korea",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Korean Communist Party (Irkutsk faction). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1921,
+          1922
+        ]
+      ],
+      "termIds": [
+        "korean-communist-party-irkutsk-faction"
       ]
     }
   ],

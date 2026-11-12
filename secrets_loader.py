@@ -42,7 +42,7 @@ _ENV_NAME_RE = re.compile(r"^[a-z_][a-z0-9_]*$")
 def _bridge_credentials_to_env() -> None:
     """Populate os.environ from every credential in CREDENTIALS_DIRECTORY.
 
-    Third-party SDKs (openai, anthropic, langchain_tavily, graphiti-core's
+    Third-party SDKs (openai, anthropic, tavily, graphiti-core's
     cross_encoder, etc.) read API keys directly from os.environ at client
     construction — they don't know about credstore. Running this at import
     time ensures those reads succeed even when the value only lives in the

@@ -1,5 +1,5 @@
 """Authorize -> isolated draft -> adjudicate/project -> verify -> commit/send."""
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from copy import deepcopy
 from dataclasses import replace
 from datetime import datetime, timedelta
@@ -137,7 +137,7 @@ def staged_memory(uid):
     """Existing tools validate normally, but write only to a disposable snapshot."""
     with tempfile.TemporaryDirectory(prefix='roleplay-draft-') as tmp:
         path = Path(tmp)/'memory.sqlite3'
-        with memory._connection() as source, sqlite3.connect(path) as dest:
+        with memory._connection() as source, closing(sqlite3.connect(path)) as dest:
             baseline = _records(source, uid)
             source.backup(dest)
         token = memory.MEMORY_OVERRIDE.set(path)

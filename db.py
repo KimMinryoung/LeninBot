@@ -12,6 +12,7 @@ DB_PASSWORD they log in as the read-only role leninbot_ro instead
 
 import os
 import json
+import threading
 from contextlib import contextmanager
 
 import psycopg2
@@ -23,6 +24,9 @@ from secrets_loader import get_secret
 
 _pool: pool.ThreadedConnectionPool | None = None
 _writer_pool: pool.ThreadedConnectionPool | None = None
+# Pools are created lazily from many asyncio.to_thread workers; without a
+# lock two first callers could each build one and orphan a connection.
+_pool_init_lock = threading.Lock()
 
 
 def _application_name() -> str:
@@ -87,6 +91,13 @@ def _tag_conn(conn) -> None:
 
 
 def _get_pool() -> pool.ThreadedConnectionPool:
+    if _pool is not None:
+        return _pool
+    with _pool_init_lock:
+        return _create_pool()
+
+
+def _create_pool() -> pool.ThreadedConnectionPool:
     global _pool
     if _pool is None:
         host = os.getenv("DB_HOST")
@@ -137,6 +148,13 @@ def _get_writer_pool() -> pool.ThreadedConnectionPool:
     """Pool for the `writer` database (same leninbot-pg instance, separate
     DB/role). Falls back to the main pool when unconfigured.
     """
+    if _writer_pool is not None:
+        return _writer_pool
+    with _pool_init_lock:
+        return _create_writer_pool()
+
+
+def _create_writer_pool() -> pool.ThreadedConnectionPool:
     global _writer_pool
     if _writer_pool is None:
         writer_dbname = os.getenv("WRITER_DB_NAME", "writer")
@@ -184,21 +202,24 @@ def _conn_from_pool(p: pool.ThreadedConnectionPool):
     conn = p.getconn()
     try:
         # Detect stale connections (e.g. after a leninbot-pg container restart)
-        if conn.closed:
-            p.putconn(conn, close=True)
-            conn = p.getconn()
-            _tag_conn(conn)
-        else:
+        stale = bool(conn.closed)
+        if not stale:
             try:
                 _tag_conn(conn)
             except psycopg2.Error:
+                stale = True
                 try:
                     conn.close()
                 except Exception:
                     pass
-                p.putconn(conn, close=True)
-                conn = p.getconn()
-                _tag_conn(conn)
+        if stale:
+            p.putconn(conn, close=True)
+            # Cleared before getconn so a failure there is not followed by a
+            # second putconn of the discarded connection (which would raise
+            # PoolError and hide the real error).
+            conn = None
+            conn = p.getconn()
+            _tag_conn(conn)
         yield conn
         conn.commit()
     except pg_errors.ReadOnlySqlTransaction as exc:
@@ -214,7 +235,8 @@ def _conn_from_pool(p: pool.ThreadedConnectionPool):
             pass
         raise
     finally:
-        p.putconn(conn)
+        if conn is not None:
+            p.putconn(conn)
 
 
 def query(sql: str, params: tuple | list = None) -> list[dict]:

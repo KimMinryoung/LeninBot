@@ -142,25 +142,6 @@ def ask(
     return _call_llm(messages, temperature, timeout)
 
 
-def ask_with_system(
-    user_prompt: str,
-    system_prompt: str,
-    model: str | None = None,
-    temperature: float = 0.7,
-) -> str:
-    """시스템 프롬프트 포함 호출."""
-    return ask(prompt=user_prompt, system_prompt=system_prompt, temperature=temperature)
-
-
-def ask_chat(
-    messages: list[dict],
-    model: str | None = None,
-    temperature: float = 0.7,
-) -> str:
-    """다중 턴 대화용 호출."""
-    return _call_llm(messages, temperature)
-
-
 def check_llm() -> dict:
     """서버 상태 확인 (하위호환)."""
     try:
@@ -168,7 +149,6 @@ def check_llm() -> dict:
         return {"status": "ok", "backend": b["name"], "model": b["model"], "url": b["base"]}
     except Exception as e:
         return {"status": "error", "reason": str(e)}
-
 
 
 # ── 빠른 테스트 ──────────────────────────────────────────────────────────────

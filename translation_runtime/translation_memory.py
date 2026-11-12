@@ -25,7 +25,8 @@ Statuses (lookup precedence: machine < published < reviewed):
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Iterator, Sequence
+from contextlib import contextmanager
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -50,12 +51,30 @@ CREATE INDEX IF NOT EXISTS idx_segments_doc ON segments (lang_pair, doc_id);
 """
 
 
-def _connect(db_path: Path | str | None = None) -> sqlite3.Connection:
+_schema_ready: set[str] = set()
+
+
+@contextmanager
+def _connect(db_path: Path | str | None = None) -> Iterator[sqlite3.Connection]:
+    """Open the TM database, commit (or roll back) and always close.
+
+    ``with sqlite3.connect(...)`` alone only ends the transaction; the handle
+    stayed open until garbage collection. The schema script runs once per path.
+    """
     path = Path(db_path or DEFAULT_DB)
-    path.parent.mkdir(parents=True, exist_ok=True)
+    key = str(path.resolve())
+    fresh = key not in _schema_ready or not path.exists()
+    if fresh:
+        path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path)
-    conn.executescript(_SCHEMA)
-    return conn
+    try:
+        if fresh:
+            conn.executescript(_SCHEMA)
+            _schema_ready.add(key)
+        with conn:
+            yield conn
+    finally:
+        conn.close()
 
 
 def record_segments(

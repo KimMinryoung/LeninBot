@@ -488,13 +488,13 @@ async def _dispatch_chat_provider(
         from llm.provider_failover import resolve_deepseek_failover_model
         failover_model = await resolve_deepseek_failover_model(runtime_kind, _openai_client)
 
-        def _terra_failover():
+        def _terra_failover(budget_usd: float | None = None):
             from llm.openai_tool_loop import chat_with_tools as openai_chat
             return openai_chat(
                 messages,
                 client=_openai_client,
                 model=failover_model,
-                **loop_kwargs,
+                **{**loop_kwargs, "budget_usd": budget_usd if budget_usd is not None else loop_kwargs.get("budget_usd")},
                 provider_label="openai:failover",
             )
 
@@ -506,6 +506,7 @@ async def _dispatch_chat_provider(
                 fallback_label=failover_model or "openai",
                 budget_tracker=budget_tracker,
                 on_progress=on_progress,
+                budget_usd=loop_kwargs.get("budget_usd"),
             )
 
     if effective_provider in ("openai", "deepseek", "kimi"):

@@ -89,6 +89,7 @@ _webchat_hits: defaultdict[str, deque[float]] = defaultdict(deque)
 _webchat_active_count = 0
 _WEBCHAT_RATE_LIMIT = max(1, int(os.getenv("WEBCHAT_RATE_LIMIT", "20") or "20"))
 _WEBCHAT_RATE_WINDOW_SECONDS = max(10, int(os.getenv("WEBCHAT_RATE_WINDOW_SECONDS", "300") or "300"))
+_WEBCHAT_IP_RATE_MULTIPLIER = 3
 _WEBCHAT_GLOBAL_ACTIVE_LIMIT = max(1, int(os.getenv("WEBCHAT_GLOBAL_ACTIVE_LIMIT", "8") or "8"))
 _parse_cors_origins = parse_cors_origins
 
@@ -185,18 +186,34 @@ def _parse_authenticated_user_id(http_req: Request) -> int | None:
 
 
 def _client_ip(http_req: Request) -> str:
+    """Client address as nginx saw it.
+
+    nginx overwrites X-Real-IP with $remote_addr and *appends* the peer to
+    X-Forwarded-For, so the leftmost XFF entry is whatever the client sent.
+    Prefer X-Real-IP, then the rightmost XFF hop.
+    """
     if _trusted_proxy_request(http_req):
+        real_ip = (http_req.headers.get("x-real-ip") or "").strip()
+        if real_ip:
+            return real_ip
         forwarded = http_req.headers.get("x-forwarded-for", "")
         if forwarded:
-            return forwarded.split(",")[0].strip()
+            return forwarded.split(",")[-1].strip()
     return http_req.client.host if http_req.client else ""
 
 
-def _webchat_rate_key(request: ChatRequest, http_req: Request, ip_address: str) -> str:
+def _webchat_rate_keys(request: ChatRequest, http_req: Request, ip_address: str) -> list[str]:
+    """Rate-limit buckets for one request.
+
+    The IP bucket always applies: a client that rotates fingerprints would
+    otherwise never hit a limit. It is wider than the fingerprint bucket so
+    visitors sharing one NAT address are not throttled together.
+    """
+    keys = [f"ip:{ip_address or 'unknown'}"]
     fingerprint = (request.fingerprint or "").strip()
     if fingerprint:
-        return f"fp:{fingerprint[:128]}"
-    return f"ip:{ip_address or 'unknown'}"
+        keys.insert(0, f"fp:{fingerprint[:128]}")
+    return keys
 
 
 def _check_webchat_rate_limit(key: str) -> bool:
@@ -205,7 +222,8 @@ def _check_webchat_rate_limit(key: str) -> bool:
     cutoff = now - _WEBCHAT_RATE_WINDOW_SECONDS
     while hits and hits[0] < cutoff:
         hits.popleft()
-    if len(hits) >= _WEBCHAT_RATE_LIMIT:
+    limit = _WEBCHAT_RATE_LIMIT * (_WEBCHAT_IP_RATE_MULTIPLIER if key.startswith("ip:") else 1)
+    if len(hits) >= limit:
         return False
     hits.append(now)
     if len(_webchat_hits) > 5000:
@@ -235,7 +253,7 @@ async def chat(request: ChatRequest, http_req: Request):
     ip_address = _client_ip(http_req)
     user_fingerprints = _parse_user_fingerprints(http_req)
     authenticated_user_id = _parse_authenticated_user_id(http_req)
-    rate_key = _webchat_rate_key(request, http_req, ip_address)
+    rate_keys = _webchat_rate_keys(request, http_req, ip_address)
 
     # Admin-only personas (e.g. adult roleplay) require a valid X-Admin-Key.
     persona_spec = get_persona(request.persona)
@@ -262,8 +280,9 @@ async def chat(request: ChatRequest, http_req: Request):
                 "content": "이전 질문의 답변을 계속 생성 중입니다. 잠시 후 대화 기록에서 복구됩니다.",
             })
             return
-        if not _check_webchat_rate_limit(rate_key):
-            logger.warning("web chat rate limited key=%s session=%s", rate_key[:24], request.session_id)
+        limited_key = next((key for key in rate_keys if not _check_webchat_rate_limit(key)), None)
+        if limited_key:
+            logger.warning("web chat rate limited key=%s session=%s", limited_key[:24], request.session_id)
             yield format_sse({"type": "error", "content": "요청이 너무 많습니다. 잠시 후 다시 시도해 주세요."})
             return
         effective_active_count = _webchat_active_count + detached_web_chat_run_count()

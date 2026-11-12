@@ -77,7 +77,8 @@ class Rejected(ValueError):
 
 def _task_id(arguments: dict) -> str:
     task_id = str(arguments.get("taskId") or "")
-    if not task_id.isdigit():
+    # ASCII digits only and within bigint: str.isdigit() also accepts "²".
+    if not re.fullmatch(r"[0-9]{1,18}", task_id):
         raise Rejected("taskId must be numeric")
     return task_id
 
@@ -127,6 +128,8 @@ def worker_router(clients: dict[str, bytes] | None = None) -> APIRouter:
         if not isinstance(message, dict) or message.get("jsonrpc") != "2.0" or not isinstance(message.get("method"), str):
             return rpc_error(None, -32600, "invalid request", 400)
         request_id, method, params = message.get("id"), message["method"], message.get("params") or {}
+        if not isinstance(params, dict):
+            return rpc_error(request_id, -32602, "params must be an object", 400)
         if request_id is None:
             return Response(status_code=202)
         if method == "initialize":

@@ -12,7 +12,7 @@ and writes the result. It never writes CommuLingo.
 | Piece | Where | What |
 |---|---|---|
 | MCP endpoint | `worker/endpoint.py`, mounted on leninbot-api at `POST /worker/mcp` (172.17.0.1:8000, the port the frontend container already reaches) | `agent_task_submit`, `agent_task_get`, `agent_task_cancel`; stateless JSON-RPC, one message per request |
-| Executor | `worker/service.py`, `leninbot-worker.service` | polls `agent_worker_tasks`, runs up to `WORKER_CONCURRENCY` (2) tasks, stops cancelled ones, re-runs a task interrupted by a restart once its 15-minute lease expires (2 attempts) |
+| Executor | `worker/service.py`, `leninbot-worker.service` | polls `agent_worker_tasks`, runs up to `WORKER_CONCURRENCY` (2) tasks, stops cancelled ones and renews the 15-minute lease of its running tasks on every poll (one batched heartbeat query), so only a task interrupted by a restart is re-run once its lease expires (2 attempts) |
 | Run loop | `worker/runner.py` | generalized from the CommuLingo pipeline's `model_call`: AgentSpec per tier, research tools, terminal `worker_submit_result` checked against `resultSchema` and the validator; content-risk refusal retried once on the fallback provider |
 | Catalog | `worker/catalog.py` | research tools, model tiers, validator tools |
 | Table | `worker/schema.sql` (`scripts/schema_migrations.py --only agent-worker`) | request, status, lease, result, sources, usage, rejections |

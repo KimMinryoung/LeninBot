@@ -213,12 +213,6 @@ def _extract_text(parts: list[dict]) -> str:
     return "\n".join(texts)
 
 
-def _normalize_role(role: str) -> str:
-    """Accept both v0.2 and v1.0 role formats."""
-    mapping = {"user": "ROLE_USER", "agent": "ROLE_AGENT"}
-    return mapping.get(role, role)
-
-
 # ── Main handler ─────────────────────────────────────────────────────
 
 async def handle_a2a_message(request_body: dict) -> dict:
@@ -234,9 +228,11 @@ async def handle_a2a_message(request_body: dict) -> dict:
     if method != "SendMessage":
         return _make_error(rpc_id, -32601, f"Method not found: {method}")
 
+    if not isinstance(params, dict) or not isinstance(params.get("message", {}), dict):
+        return _make_error(rpc_id, -32602, "Invalid params: params and params.message must be objects")
     message = params.get("message", {})
     parts = message.get("parts", [])
-    if not parts:
+    if not isinstance(parts, list) or not parts:
         return _make_error(rpc_id, -32602, "Invalid params: message.parts is empty")
 
     user_text = _extract_text(parts)
@@ -250,11 +246,14 @@ async def handle_a2a_message(request_body: dict) -> dict:
 
     # v1.0: configuration (also accept legacy "config" for interop)
     configuration = params.get("configuration") or params.get("config") or {}
+    if not isinstance(configuration, dict):
+        configuration = {}
 
     # Skill routing: check configuration, then metadata
     skill_id = configuration.get("skillId")
     if not skill_id:
-        skill_id = (params.get("metadata") or {}).get("skillId")
+        metadata = params.get("metadata")
+        skill_id = metadata.get("skillId") if isinstance(metadata, dict) else None
 
     skill_cfg = _SKILLS.get(skill_id) if skill_id else None
 

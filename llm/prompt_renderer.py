@@ -114,25 +114,3 @@ def render(prompt: SystemPrompt, provider: str) -> str:
 # that the dynamic tail of the system prompt stays coherent with the static
 # structure chosen by the renderer.
 
-def format_current_model(
-    provider: str, *, model_id: str, attrs: dict[str, str]
-) -> str:
-    """Format the current-model context block for the given provider."""
-    if provider == "claude":
-        attr_str = " ".join(f'{k}="{v}"' for k, v in attrs.items())
-        return f"<current-model {attr_str}>{model_id}</current-model>"
-    # Markdown: bullet with inline metadata
-    meta = ", ".join(f"{k}={v}" for k, v in attrs.items())
-    return f"- **Current Model**: {model_id} ({meta})"
-
-
-def format_system_alerts(provider: str, *, alerts: list[str]) -> str:
-    """Format the system-alerts block. Empty list → empty string so the
-    caller can omit the slot cleanly."""
-    if not alerts:
-        return ""
-    if provider == "claude":
-        items = "\n".join(f"- {a}" for a in alerts)
-        return f"\n<system-alerts>\n{items}\n</system-alerts>"
-    items = "\n".join(f"- {a}" for a in alerts)
-    return f"\n### System Alerts\n{items}"

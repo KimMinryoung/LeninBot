@@ -9,18 +9,18 @@ pytest  # imported by pytest-style modules under tests/
 pydantic
 psycopg2-binary
 requests
+jsonschema  # worker/runner.py, commulingo pipeline validators
+beautifulsoup4  # content_fetch, archival sources HTML parsing
+psutil  # telegram /status, scripts/metrics_collector.py
 boto3
 httpx
 openai
 
-# LangChain / LangGraph
+# LangChain (embeddings)
 langchain-core
-langchain-google-genai
 langchain-huggingface
 sentence-transformers
-langchain-tavily
 tavily-python  # web_gateway calls the Tavily client directly
-langgraph
 
 # Knowledge Graph (Graphiti + Neo4j)
 graphiti-core[google-genai]
@@ -36,6 +36,7 @@ yfinance
 # Telegram bot
 aiogram>=3.0,<4.0
 anthropic
+resend  # outbound mail (services/email_bridge.py, mail_runtime)
 croniter
 
 # Document conversion

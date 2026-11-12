@@ -58,6 +58,37 @@ def _classify_url_error_text(error_text: str) -> str | None:
     return None
 
 
+_FALLBACK_MAX_BYTES = 10 * 1024 * 1024
+_FALLBACK_DEADLINE_SECONDS = 45.0
+
+
+def _buffer_capped_body(resp, max_bytes: int = _FALLBACK_MAX_BYTES,
+                        deadline_seconds: float = _FALLBACK_DEADLINE_SECONDS) -> None:
+    """Read a streamed response into ``resp.content`` with a size and time cap.
+
+    ``timeout`` on requests bounds each socket read, not the whole download, so
+    a huge file or a server trickling bytes would otherwise buffer without
+    limit or hang the fetch.
+    """
+    import time
+
+    deadline = time.monotonic() + deadline_seconds
+    chunks: list[bytes] = []
+    total = 0
+    try:
+        for chunk in resp.iter_content(chunk_size=65536):
+            if not chunk:
+                continue
+            chunks.append(chunk)
+            total += len(chunk)
+            if total >= max_bytes or time.monotonic() > deadline:
+                break
+    finally:
+        resp.close()
+    resp._content = b"".join(chunks)[:max_bytes]
+    resp._content_consumed = True
+
+
 def diagnose_url_fetch_failure(url: str, observed_errors: list[str] | None = None, timeout: float = 8.0) -> str:
     """Diagnose a failed URL fetch with actionable categories.
 
@@ -231,8 +262,9 @@ def _fetch_url_fallbacks(url: str, max_chars: int = 10000) -> _Optional[str]:
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
             "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
         }
-        resp = safe_requests_get(url, request_get=_req.get, headers=headers, timeout=15)
+        resp = safe_requests_get(url, request_get=_req.get, headers=headers, timeout=15, stream=True)
         resp.raise_for_status()
+        _buffer_capped_body(resp)
 
         document = _document_text(resp)
         if document is not None:
@@ -328,55 +360,3 @@ async def fetch_url_content_async(url: str, max_chars: int = 10000) -> _Optional
     return await asyncio.to_thread(_fetch_url_fallbacks, url, max_chars)
 
 
-def fetch_urls_as_documents(urls: list[str], logs: list | None = None) -> list:
-    """Fetch content from multiple URLs and return as Document-compatible dicts.
-
-    Returns list of dicts with 'page_content' and 'metadata' keys.
-    If langchain Document class is available, returns Document objects.
-    Accepts optional logs list to append progress messages.
-    """
-    if logs is None:
-        logs = []
-    results = []
-    for url in urls[:3]:  # Limit to 3 URLs max
-        logs.append(f"🔗 [URL] 웹 페이지 내용 확인 중: {url[:80]}...")
-        content = fetch_url_content(url)
-        if content:
-            domain = _urlparse(url).netloc
-            try:
-                from langchain_core.documents import Document
-                doc = Document(
-                    page_content=content,
-                    metadata={"source": url, "title": f"[{domain}] URL 직접 참조"},
-                )
-            except ImportError:
-                doc = {
-                    "page_content": content,
-                    "metadata": {"source": url, "title": f"[{domain}] URL 직접 참조"},
-                }
-            results.append(doc)
-            logs.append(f"   ✅ {len(content)}자의 본문 내용을 확보했습니다.")
-        else:
-            logs.append(f"   ⚠️ 페이지 내용을 가져올 수 없습니다.")
-            # Create a failure document so the LLM knows the fetch failed
-            # (prevents hallucination from URL text alone)
-            fail_msg = (
-                f"[FETCH FAILED] URL: {url}\n"
-                "이 URL의 본문을 가져오는 데 실패했습니다. "
-                "URL 텍스트만으로 내용을 추측하거나 환각하지 마세요. "
-                "사용자에게 페이지 접근에 실패했음을 알리고, "
-                "직접 내용을 복사해서 붙여넣거나 다른 URL을 제공하도록 안내하세요."
-            )
-            try:
-                from langchain_core.documents import Document
-                doc = Document(
-                    page_content=fail_msg,
-                    metadata={"source": url, "title": "[FETCH FAILED]", "fetch_failed": True},
-                )
-            except ImportError:
-                doc = {
-                    "page_content": fail_msg,
-                    "metadata": {"source": url, "title": "[FETCH FAILED]", "fetch_failed": True},
-                }
-            results.append(doc)
-    return results

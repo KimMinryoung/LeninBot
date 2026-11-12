@@ -104,8 +104,19 @@ def finish(task_id: int, *, status: str, result=None, sources=(), usage=None, re
         return cur.rowcount == 1
 
 
-def is_cancelled(task_id: int) -> bool:
+def heartbeat(task_ids) -> set[int]:
+    """Extend the lease of tasks this worker is still running.
+
+    Returns the ids that are still ``running``; any other id was cancelled (or
+    finished) and its job should stop. Without renewal a task running past the
+    lease would be claimed again and run twice.
+    """
+    ids = [int(task_id) for task_id in task_ids]
+    if not ids:
+        return set()
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("SELECT status FROM agent_worker_tasks WHERE id = %s", (task_id,))
-        row = cur.fetchone()
-        return not row or row[0] == "cancelled"
+        cur.execute(
+            f"""UPDATE agent_worker_tasks SET lease_until = now() + {LEASE}
+                 WHERE id = ANY(%s) AND status = 'running' RETURNING id""",
+            (ids,))
+        return {row[0] for row in cur.fetchall()}

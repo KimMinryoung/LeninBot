@@ -1,8 +1,9 @@
 """leninbot-worker: executes queued agent tasks (worker/endpoint.py queues them).
 
 Polls agent_worker_tasks, runs up to WORKER_CONCURRENCY tasks at once, and
-stops a running task whose row was cancelled. A task interrupted by a restart
-is picked up again once its lease expires (store.MAX_ATTEMPTS).
+stops a running task whose row was cancelled. Each poll renews the lease of
+the tasks still running here; a task interrupted by a restart is picked up
+again once its lease expires (store.MAX_ATTEMPTS).
 """
 from __future__ import annotations
 
@@ -50,13 +51,17 @@ async def execute(task: dict) -> None:
 
 
 async def poll_once(running: dict) -> None:
-    for task_id, job in list(running.items()):
-        if await asyncio.to_thread(store.is_cancelled, task_id):
-            job.cancel()
+    if running:
+        alive = await asyncio.to_thread(store.heartbeat, list(running))
+        for task_id, job in list(running.items()):
+            if task_id not in alive and not job.done():
+                job.cancel()
     while len(running) < CONCURRENCY:
         task = await asyncio.to_thread(store.claim)
         if task is None:
             return
+        if task["id"] in running:  # defensive: never run one row twice in this process
+            continue
         logger.info("worker task %s started (client %s, attempt %s)", task["id"], task["client"], task["attempts"])
         job = asyncio.create_task(execute(task))
         running[task["id"]] = job

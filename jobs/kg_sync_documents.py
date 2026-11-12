@@ -97,7 +97,13 @@ def _record_result(stats: dict, res: dict, idx) -> None:
         stats['errors'].append(f"{res.get('ref')}: {res.get('message')}")
     stats['items'].append(res)
     if res['status'] == 'ok':
-        idx.refresh_from_neo4j()
+        # Later documents must resolve to nodes this one created. A failed
+        # reload only leaves the index one document behind; it must not abort
+        # the pass after the write already succeeded.
+        try:
+            idx.refresh_from_neo4j()
+        except Exception as exc:
+            logger.warning("[kg-sync documents] alias index reload after %s failed: %s", res.get('ref'), exc)
 
 
 def run(*, since: datetime | None = None, full: bool = False, limit: int | None = None,

@@ -82,7 +82,7 @@ class Executor(unittest.TestCase):
         async def scenario():
             job = asyncio.create_task(asyncio.sleep(30))
             running = {7: job}
-            with patch.object(service.store, "is_cancelled", return_value=True), \
+            with patch.object(service.store, "heartbeat", return_value=set()), \
                     patch.object(service.store, "claim", return_value=None):
                 await service.poll_once(running)
             await asyncio.sleep(0)

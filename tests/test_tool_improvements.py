@@ -243,14 +243,12 @@ class AuditTests(unittest.IsolatedAsyncioTestCase):
     def test_profiles_and_retired_implementations(self):
         from mcp_gateway.tools import build_handlers
         from runtime_tools.registry import TOOLS, TOOL_HANDLERS, RETIRED_TOOL_NAMES
-        from runtime_tools.db import DB_TOOL_HANDLERS
         from tool_gateway.inference import REPLAY_SAFE_TOOLS
         from tool_gateway.profiles import WEB_CYBER_LENIN_TOOLS, A2A_GENERAL_TOOLS
         from security_gateway.gateway import authorize
         from security_gateway.context import CallerContext
         self.assertFalse(RETIRED_TOOL_NAMES & set(TOOL_HANDLERS))
         self.assertFalse(RETIRED_TOOL_NAMES & {t['name'] for t in TOOLS})
-        self.assertIn('query_db', DB_TOOL_HANDLERS)
         self.assertNotIn('query_db', REPLAY_SAFE_TOOLS)
         self.assertIn('read_corpus_passage', build_handlers('inspect'))
         self.assertNotIn('tool_usage_report', build_handlers('inspect'))

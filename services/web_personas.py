@@ -23,7 +23,7 @@ web_chat (no import cycle).
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 from identity.prompts import CORE_IDENTITY
@@ -398,15 +398,6 @@ _REGISTRY_LIST: list[PersonaSpec] = [
 ]
 
 _REGISTRY: dict[str, PersonaSpec] = {p.id: p for p in _REGISTRY_LIST}
-
-
-def register_persona(spec: PersonaSpec) -> None:
-    """Register a persona spec (last write wins on id collision)."""
-    _REGISTRY[spec.id] = spec
-
-
-def is_known_persona(persona_id: str | None) -> bool:
-    return bool(persona_id) and persona_id in _REGISTRY
 
 
 def get_persona(persona_id: str | None) -> PersonaSpec:

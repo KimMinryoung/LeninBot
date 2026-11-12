@@ -138,6 +138,39 @@ def _normalize_project_path(path: str, project_root: str | None = None) -> tuple
     return abs_path, os.path.normpath(rel_path)
 
 
+# Read-only tools (read_file/search_files/list_directory) may look outside the
+# project only under these roots: the frontend checkout and the nginx config
+# that task verification inspects. Everything else (home dirs, /proc, /dev,
+# credential mounts) is refused so a prompt-injected agent cannot read secrets.
+_READ_FILE_MAX_BYTES = 20 * 1024 * 1024
+
+
+def _extra_read_roots() -> tuple[str, ...]:
+    from ops.paths import FRONTEND_DIR
+
+    return (os.path.realpath(str(FRONTEND_DIR)), "/etc/nginx")
+
+
+def _is_secret_basename(name: str) -> bool:
+    return name == ".env" or name.startswith(".env.") or name in {".pw_cookies.json", ".watchdog_ping_token"}
+
+
+def _read_path_error(abs_path: str, project_root: str | None = None) -> str | None:
+    """Return a refusal message when a read tool may not touch ``abs_path``."""
+    real = os.path.realpath(abs_path)
+    roots = (os.path.realpath(project_root or _project_root()),) + _extra_read_roots()
+    if not any(real == root or real.startswith(root + "/") for root in roots):
+        return f"Error: Read denied: {abs_path} is outside the project, frontend and nginx config directories"
+    if any(_is_secret_basename(part) for part in real.split("/")):
+        return "Error: Access to secret files is blocked for security reasons."
+    return None
+
+
+def _read_text_file(path: str) -> str:
+    with open(path, "r", encoding="utf-8", errors="replace") as file:
+        return file.read(_READ_FILE_MAX_BYTES)
+
+
 def _is_blocked_context_file(path: str, project_root: str | None = None) -> bool:
     _, rel_path = _normalize_project_path(path, project_root)
     return rel_path in _BLOCKED_CONTEXT_FILES
@@ -189,13 +222,14 @@ async def _exec_read_file(
         return ToolFailure(f"Error: File not found: {path}", {"failure_type": "file_missing"})
     if os.path.isdir(path):
         raise ToolRejection(f"Error: Path is a directory: {path}")
-    basename = os.path.basename(path)
-    if basename == ".env" or basename.startswith(".env."):
-        return "Error: Access to .env files is blocked for security reasons."
+    denied = _read_path_error(path, project_root)
+    if denied:
+        return denied
+    if not os.path.isfile(path):
+        raise ToolRejection(f"Error: Not a regular file: {path}")
 
     try:
-        with open(path, "r", encoding="utf-8", errors="replace") as file:
-            text = file.read()
+        text = await asyncio.to_thread(_read_text_file, path)
     except Exception as exc:
         return ToolFailure(f"Error reading file: {exc}")
 
@@ -300,6 +334,9 @@ async def _exec_search_files(
         )
     if not os.path.exists(search_path):
         return f"Error: path not found: {search_path}"
+    denied = _read_path_error(search_path, project_root)
+    if denied:
+        return denied
 
     if target == "files":
         cmd = [
@@ -337,7 +374,7 @@ async def _exec_search_files(
         cmd.append("-i")
     if file_glob:
         cmd += ["-g", file_glob]
-    cmd += ["-g", "!dev_docs/project_state.md"]
+    cmd += ["-g", "!dev_docs/project_state.md", "-g", "!.env", "-g", "!.env.*"]
     if output_mode == "files_only":
         cmd.append("-l")
     elif output_mode == "count":
@@ -498,13 +535,16 @@ async def _exec_list_directory(path: str = "", pattern: str = "*", recursive: bo
         path = os.path.join(project_root, path)
     if not os.path.isdir(path):
         return f"Error: Not a directory: {path}"
+    denied = _read_path_error(path, project_root)
+    if denied:
+        return denied
     try:
         if recursive:
             search = os.path.join(path, "**", pattern)
-            entries = glob.glob(search, recursive=True)
+            entries = await asyncio.to_thread(glob.glob, search, recursive=True)
         else:
             search = os.path.join(path, pattern)
-            entries = glob.glob(search)
+            entries = await asyncio.to_thread(glob.glob, search)
         entries.sort()
         lines = []
         for entry in entries[:200]:

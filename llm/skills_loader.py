@@ -4,7 +4,6 @@ Parses SKILL.md frontmatter and injects relevant skills into the system prompt.
 Skills are loaded once at startup and cached.
 """
 
-import os
 import re
 import logging
 from pathlib import Path
@@ -105,14 +104,6 @@ def build_skills_prompt() -> str:
         lines.append(f"- **{skill['name']}**: {skill['description']}")
 
     return "\n".join(lines)
-
-
-def get_skill_by_name(name: str) -> Optional[dict]:
-    """Retrieve a specific skill by name."""
-    for skill in load_skills():
-        if skill["name"] == name:
-            return skill
-    return None
 
 
 def reload_skills() -> int:

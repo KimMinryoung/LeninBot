@@ -357,7 +357,9 @@ def write_experiences():
 
     # Truncate to fit context window (~30K chars total)
     web_text = web_text[:12000]
-    tg_text = tg_text[:12000]
+    # Rows are the newest 200 in time order; keep the end of the window so a
+    # busy day does not drop its latest messages.
+    tg_text = tg_text[-12000:]
     task_text = task_text[:6000]
 
     # Compress via LLM

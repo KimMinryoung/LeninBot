@@ -339,35 +339,49 @@ async def exec_allowlist_sender(sender_filter: str) -> str:
         conn = imap.connect()
         if conn is None:
             return "Error: IMAP credentials not configured"
+        try:
+            status, _ = conn.select("Junk")
+            if status != "OK":
+                return "Junk folder not found or empty."
 
-        status, _ = conn.select("Junk")
-        if status != "OK":
-            conn.logout()
-            return "Junk folder not found or empty."
+            _, data = conn.search(None, "ALL")
+            all_ids = data[0].split() if data and data[0] else []
+            if not all_ids:
+                return "Junk folder is empty."
 
-        _, data = conn.search(None, "ALL")
-        all_ids = data[0].split()
-        if not all_ids:
-            conn.logout()
-            return "Junk folder is empty."
+            import email as _email
+            moved = 0
+            failed = 0
+            for mid in all_ids:
+                _, msg_data = conn.fetch(mid, "(RFC822.HEADER)")
+                header_raw = msg_data[0][1] if msg_data and isinstance(msg_data[0], tuple) else None
+                if not header_raw:
+                    continue
+                msg = _email.message_from_bytes(header_raw)
+                sender = msg.get("From", "")
+                if sender_filter.lower() not in sender.lower():
+                    continue
+                # COPY to INBOX, and only then flag the Junk copy for deletion.
+                # imaplib raises only on BAD; a NO reply (quota, lock) returns
+                # normally, so deleting without checking would lose the mail.
+                copy_status, _ = conn.copy(mid, "INBOX")
+                if copy_status != "OK":
+                    failed += 1
+                    continue
+                conn.store(mid, "+FLAGS", "(\\Deleted)")
+                moved += 1
 
-        import email as _email
-        moved = 0
-        for mid in all_ids:
-            _, msg_data = conn.fetch(mid, "(RFC822.HEADER)")
-            header_raw = msg_data[0][1]
-            msg = _email.message_from_bytes(header_raw)
-            sender = msg.get("From", "")
-            if sender_filter.lower() not in sender.lower():
-                continue
-            # COPY to INBOX then flag for deletion in Junk
-            conn.copy(mid, "INBOX")
-            conn.store(mid, "+FLAGS", "(\\Deleted)")
-            moved += 1
-
-        conn.expunge()
-        conn.logout()
-        return f"Moved {moved} email(s) from Junk to INBOX matching '{sender_filter}'."
+            if moved:
+                conn.expunge()
+            result = f"Moved {moved} email(s) from Junk to INBOX matching '{sender_filter}'."
+            if failed:
+                result += f" {failed} matching email(s) could not be copied and were left in Junk."
+            return result
+        finally:
+            try:
+                conn.logout()
+            except Exception:
+                pass
 
     try:
         return await asyncio.to_thread(_move)

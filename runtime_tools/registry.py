@@ -361,12 +361,6 @@ from publishing.site_publishing import SITE_PUBLISHING_TOOLS, SITE_PUBLISHING_TO
 TOOLS.extend(SITE_PUBLISHING_TOOLS)
 TOOL_HANDLERS.update(SITE_PUBLISHING_TOOL_HANDLERS)
 
-# ── Direct SQL tool (programmer only; analyst etc. keep read_self/kg_search) ──
-from runtime_tools.db import DB_TOOLS, DB_TOOL_HANDLERS
-
-TOOLS.extend(DB_TOOLS)
-TOOL_HANDLERS.update(DB_TOOL_HANDLERS)
-
 # ── Public-post editor (UPDATE + Redis cache purge in one step) ──
 from publishing.post_edit import POST_EDIT_TOOLS, POST_EDIT_TOOL_HANDLERS
 

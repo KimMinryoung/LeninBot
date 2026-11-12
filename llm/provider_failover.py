@@ -45,6 +45,11 @@ async def resolve_deepseek_failover_model(runtime_kind: str, openai_client) -> s
         return None
 
 
+# Share of the turn budget a failover retry always gets, so a turn costs at
+# most (1 + ratio) × budget instead of 2 × budget.
+FALLBACK_BUDGET_FLOOR_RATIO = 0.25
+
+
 async def run_with_provider_failover(
     primary,
     fallback,
@@ -53,11 +58,13 @@ async def run_with_provider_failover(
     fallback_label: str,
     budget_tracker: dict | None = None,
     on_progress=None,
+    budget_usd: float | None = None,
 ):
     """primary()를 돌리고, 공급자 장애면 fallback()으로 턴을 다시 돈다.
 
     primary/fallback은 코루틴을 반환하는 **thunk**다. fallback 코루틴은 실제로
-    필요할 때만 만들어진다.
+    필요할 때만 만들어진다. budget_usd를 주면 fallback(budget_usd=남은 예산)으로
+    부른다 — 1차가 쓴 비용을 빼서 턴 전체가 예산의 두 배를 쓰지 않게 한다.
 
     fallback이 None이거나 오류가 공급자 장애 계열이 아니면 그대로 올려보낸다 —
     설정 오류·예산 초과·툴 실패까지 2차 공급자로 넘겨서 돈을 두 번 쓰면 안 된다.
@@ -88,7 +95,13 @@ async def run_with_provider_failover(
             f"{primary_label} 응답 없음 — {fallback_label}로 턴을 다시 시작합니다.",
         )
 
-        result = await fallback()
+        if budget_usd is not None:
+            # The turn budget covers both attempts; the floor keeps the retry
+            # able to answer when the failed attempt already spent most of it.
+            remaining = max(float(budget_usd) * FALLBACK_BUDGET_FLOOR_RATIO, float(budget_usd) - carried_cost)
+            result = await fallback(budget_usd=remaining)
+        else:
+            result = await fallback()
 
         if budget_tracker is not None and carried_cost:
             try:

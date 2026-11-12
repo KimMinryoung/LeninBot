@@ -40,7 +40,7 @@ GENERAL = AgentSpec(
     tools=[
         "knowledge_graph_search", "vector_search",
         "web_search", "fetch_url", "fetch_x_post", "check_inbox", "allowlist_sender",
-        "read_file", "write_file", "list_directory", "execute_python",
+        "read_file", "write_file", "list_directory",
         "read_self", "write_kg_structured", "retract_kg_fact",
         "save_finding", "mission", "upload_to_r2", "get_finance_data",
         # Read-only lookup in our own CommuLingo dictionaries (people, history

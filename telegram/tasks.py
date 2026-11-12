@@ -1933,7 +1933,10 @@ async def process_task(
     # answers are lost, so the loop reminds the model once to call it.
     from telegram.diary_mode import is_diary_writing_task
     terminal_required = bool(terminal_tools) and is_diary_writing_task(task)
-    content = _build_task_context_content(
+    # Sync DB queries, a local embedding and Neo4j recall: keep them off the
+    # event loop (to_thread copies contextvars).
+    content = await asyncio.to_thread(
+        _build_task_context_content,
         task,
         content,
         context_provider=context_provider,

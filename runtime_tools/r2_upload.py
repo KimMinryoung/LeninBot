@@ -37,7 +37,15 @@ async def upload_to_r2_tool(
     from db import execute as db_execute, query as db_query
     import mimetypes
 
-    path = os.path.abspath(local_path)
+    from runtime_tools.filesystem import _is_secret_basename, _project_root
+
+    project_root = os.path.realpath(_project_root())
+    raw_path = local_path if os.path.isabs(local_path) else os.path.join(project_root, local_path)
+    path = os.path.realpath(raw_path)
+    if not path.startswith(project_root + "/"):
+        return f"Upload denied: {local_path} is outside the project directory"
+    if any(_is_secret_basename(part) for part in path.split("/")):
+        return "Upload denied: secret files cannot be published"
     if not os.path.isfile(path):
         return f"File not found: {local_path}"
 

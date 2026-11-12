@@ -36,7 +36,8 @@ A tool is callable only if both its definition and handler are present after fil
 전역 등록 해제: `write_kg`, `query_db`, `kg_admin`, `execute_python`, `patch_file`,
 `swap_eth_to_usdc`, `transfer_usdc`, `pay_and_fetch`. `RETIRED_TOOL_NAMES`가 schema와 handler를
 함께 제거한다. 각 도메인의 구현·정책·직접 호출 테스트와 독립 결제 API/운영 스크립트는 남는다.
-`query_db`의 내부 위험 등급은 `write`이며 replay-safe 목록에서도 제외된다. 운영 SQL은
+`query_db`는 구현(`runtime_tools/db.py`)까지 삭제했다(2026-11-12, 호출처 없음·키워드 가드 우회 가능).
+이름은 재등록 방지용으로 `RETIRED_TOOL_NAMES`와 정책 등급(`write`)에 남는다. 운영 SQL은
 `readonly_query_db` / `scripts/query-db`를 사용한다. `restart_service`, 문맥에 바인딩하는
 `mission`·`run_agent`, 단계별 CommuLingo 도구, `moltbook`·`mersoom`은 유지한다.
 소셜 도구의 작업별 제한은 명시적인 소셜 작업 구분을 설계하는 후속 작업이다.
@@ -66,7 +67,7 @@ When adding a new orchestrator tool:
 
 ## Read Tool Pagination
 
-Long body reads should keep per-call character limits and expose continuation parameters instead of forcing agents to rely on one large result. `fetch_url` uses `max_chars` + `offset`; its local HTTP paths also reject unsafe schemes/ports, non-global DNS destinations, and unsafe redirects before connecting. `read_self` detail reads use `max_chars` + `offset`; `check_inbox` list mode returns bounded previews with `folder`/`uid`, and a single-email read uses `folder` + `uid` + `body_offset` + `body_max_chars`. `read_file`/`read_document` use their existing line or character pagination parameters.
+Long body reads should keep per-call character limits and expose continuation parameters instead of forcing agents to rely on one large result. `fetch_url` uses `max_chars` + `offset`; its local HTTP paths also reject unsafe schemes/ports, non-global DNS destinations, and unsafe redirects before connecting. `read_self` detail reads use `max_chars` + `offset`; `check_inbox` list mode returns bounded previews with `folder`/`uid`, and a single-email read uses `folder` + `uid` + `body_offset` + `body_max_chars`. `read_file`/`read_document` use their existing line or character pagination parameters. `read_file`, `search_files` and `list_directory` read only inside the project, `FRONTEND_DIR` and `/etc/nginx` (realpath, so symlinks cannot escape), refuse `.env*`/cookie/token files and non-regular files such as `/dev/stdin`, and cap a read at 20 MB off the event loop. `write_file`/`patch_file` stay confined to the project root, and `upload_to_r2` publishes only project files.
 
 ## Specialist Agents
 

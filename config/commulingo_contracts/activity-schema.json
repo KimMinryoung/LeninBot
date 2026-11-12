@@ -79,7 +79,8 @@
           "null"
         ],
         "minimum": -3000,
-        "maximum": 2200
+        "maximum": 2200,
+        "description": "Required (or endYear) on a new or changed activity unless yearsUnknown is true."
       },
       "endYear": {
         "type": [
@@ -134,6 +135,13 @@
           null
         ],
         "description": "Set only by migration 215 for activities carried over from the retired role classification without evidence. Never add one; keep an existing one unchanged or replace it with a documented activity."
+      },
+      "yearsUnknown": {
+        "type": "boolean",
+        "enum": [
+          true
+        ],
+        "description": "Only when no source gives any year for this activity; then startYear and endYear stay null. A new or changed activity otherwise needs startYear (or at least endYear)."
       }
     }
   }

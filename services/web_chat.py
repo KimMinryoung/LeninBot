@@ -1136,10 +1136,11 @@ async def _invoke_web_model(
                 model=profile.model_id, **loop_kwargs, **deepseek_options,
             )
 
-        def fallback():
+        def fallback(budget_usd: float | None = None):
             from llm.openai_tool_loop import chat_with_tools as openai_chat
             return openai_chat(
-                turn.history, client=_openai_client, model=failover_model, **loop_kwargs,
+                turn.history, client=_openai_client, model=failover_model,
+                **{**loop_kwargs, "budget_usd": budget_usd if budget_usd is not None else loop_kwargs["budget_usd"]},
                 return_metadata=True, provider_label="openai:web-failover",
             )
 
@@ -1147,6 +1148,7 @@ async def _invoke_web_model(
             primary, fallback if failover_model else None,
             primary_label="deepseek", fallback_label=failover_model or "openai",
             budget_tracker=budget_tracker, on_progress=on_progress,
+            budget_usd=profile.budget_usd,
         )
     else:
         result = await chat_with_tools(

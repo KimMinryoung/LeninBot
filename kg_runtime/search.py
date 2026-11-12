@@ -15,9 +15,11 @@ Read path (2026-09-03 redesign):
   label (commulingo / research:<slug> / scout / news …).
 """
 
+import atexit
 import logging
 import os
 import re
+import threading
 from contextlib import contextmanager
 
 from kg_runtime.service_runtime import get_kg_service, reset_kg_service, run_kg_task
@@ -117,12 +119,28 @@ def _prioritize_canonical_hits(nodes: list[dict], edges: list[dict], query: str)
 
 # ── Neo4j sync driver ─────────────────────────────────────────────────────────
 
+_sync_driver_lock = threading.Lock()
+_sync_driver_cache: dict[tuple, object] = {}
+
+
+@atexit.register
+def _close_sync_drivers() -> None:
+    for driver in list(_sync_driver_cache.values()):
+        try:
+            driver.close()
+        except Exception:
+            pass
+    _sync_driver_cache.clear()
+
+
 @contextmanager
 def _get_neo4j_sync_driver():
-    """Create a lightweight sync Neo4j driver for direct Cypher queries.
+    """Yield a process-wide sync Neo4j driver for direct Cypher queries.
 
     Does NOT trigger Graphiti async init — avoids 'no running event loop' errors.
-    Yields (driver, database_name). Driver is automatically closed on exit.
+    Yields (driver, database_name). The driver is thread-safe and pools its
+    connections, so it is created once per (uri, user, password) and reused;
+    building one per query paid a fresh connect/handshake/auth every time.
     """
     from neo4j import GraphDatabase
 
@@ -134,11 +152,14 @@ def _get_neo4j_sync_driver():
     if not password:
         raise RuntimeError("NEO4J_PASSWORD is not configured for this service")
     db = os.getenv("NEO4J_DATABASE", "neo4j")
-    driver = GraphDatabase.driver(uri, auth=(user, password))
-    try:
-        yield driver, db
-    finally:
-        driver.close()
+    key = (uri, user, password)
+    with _sync_driver_lock:
+        driver = _sync_driver_cache.get(key)
+        if driver is None:
+            driver = GraphDatabase.driver(uri, auth=(user, password))
+            _sync_driver_cache.clear()
+            _sync_driver_cache[key] = driver
+    yield driver, db
 
 
 def _run_rows(query: str, **params) -> list[dict]:
@@ -295,6 +316,9 @@ RETURN r.uuid AS uuid LIMIT $limit
 def kg_facts_for_external_id(external_id: str, *, limit: int = 5, skip_prefix: str = "commulingo:") -> list[str]:
     """Formatted non-mirror facts attached to the node carrying ``external_id``
     (e.g. news/analysis facts about a CommuLingo person). Empty on any failure."""
+    # Pin one policy for both queries so document visibility (a full Document
+    # scan plus a Postgres lookup) is computed once, not once per helper.
+    token = _current.set(current_policy())
     try:
         rows = _run_rows(_FACTS_BY_EXTERNAL_ID_CYPHER.replace("__EDGE_POLICY__", edge_where()), eid=external_id, skip_prefix=skip_prefix, limit=int(limit), **current_policy().params())
         hydrated = _hydrate_edges([r["uuid"] for r in rows])
@@ -302,6 +326,8 @@ def kg_facts_for_external_id(external_id: str, *, limit: int = 5, skip_prefix: s
     except Exception as exc:
         logger.debug("[KG] facts_for_external_id skipped (%s): %s", external_id, exc)
         return []
+    finally:
+        _current.reset(token)
 
 
 # ── Formatting ────────────────────────────────────────────────────────────────

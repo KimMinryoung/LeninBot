@@ -86,7 +86,6 @@ TOOL_RISK_CLASS: dict[str, str] = {
     "recall_experience": "read",
     "search_manuscript": "read",
     "read_manuscript": "read",
-    "read_document": "read",
     "search_documents": "read",
     "query_db": "write",
     "commulingo_people": "read",

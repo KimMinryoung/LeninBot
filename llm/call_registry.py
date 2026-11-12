@@ -199,11 +199,6 @@ def _load_config() -> dict:
         return data
 
 
-def list_features() -> dict[str, dict]:
-    """Raw JSON entries, for the CLI."""
-    return dict(_load_config())
-
-
 def resolve(feature: str, **defaults) -> CallSiteProfile:
     """Resolve the effective profile for a feature.
 

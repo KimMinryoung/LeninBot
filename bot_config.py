@@ -220,12 +220,42 @@ def _load_config() -> dict:
 
 
 def _save_config():
-    """Persist current config to disk."""
+    """Persist current config to disk atomically.
+
+    Other services read this file (``is_autonomous_active``, the gateway
+    enforce mode); writing in place would let them load a truncated file and
+    fall back to defaults such as shadow mode.
+    """
+    tmp_path = f"{_CONFIG_PATH}.{os.getpid()}.tmp"
     try:
-        with open(_CONFIG_PATH, "w") as f:
+        with open(tmp_path, "w") as f:
             f.write(json.dumps(_config, indent=2))
+        os.replace(tmp_path, _CONFIG_PATH)
     except Exception as e:
         logger.warning("Config save failed: %s", e)
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
+
+_disk_config_cache: tuple[float, dict] | None = None
+
+
+def _disk_config() -> dict:
+    """Config as currently on disk, re-parsed only when the file changes.
+
+    For settings that one process (telegram /config) changes and other
+    services must follow without a restart.
+    """
+    global _disk_config_cache
+    try:
+        mtime = os.stat(_CONFIG_PATH).st_mtime
+    except OSError:
+        return _config
+    if _disk_config_cache is None or _disk_config_cache[0] != mtime:
+        _disk_config_cache = (mtime, _load_config())
+    return _disk_config_cache[1]
 
 
 _config = _load_config()
@@ -593,8 +623,12 @@ def set_autonomous_active(active: bool) -> bool:
 
 
 def get_gateway_enforce_mode() -> str:
-    """Return the security gateway enforcement posture ("shadow" | "enforce")."""
-    return str(_config.get("gateway_enforce_mode", "shadow"))
+    """Return the security gateway enforcement posture ("shadow" | "enforce").
+
+    Read from disk (mtime-cached) so a flip made in the telegram process
+    reaches the API and worker processes too.
+    """
+    return str(_disk_config().get("gateway_enforce_mode", "shadow"))
 
 
 def set_gateway_enforce_mode(mode: str) -> str:

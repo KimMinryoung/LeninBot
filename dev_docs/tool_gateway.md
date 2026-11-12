@@ -177,7 +177,7 @@ check and `automatic_turns`, while writes outside a draft retain ordinary gatewa
 
 
 검색·추출의 진단 메타데이터와 `ToolFailure`/`ToolRejection`/`ToolContinue` 상태는
-[security_gateway.md](security_gateway.md)를 따른다. `query_db`를 포함한 퇴역 도구는 전역
-schema/handler에서 제거하며 내부 구현은 보존한다. 현재 목록과 작업별 일기 필터는
+[security_gateway.md](security_gateway.md)를 따른다. 퇴역 도구는 전역
+schema/handler에서 제거하며 내부 구현은 보존한다(`query_db`는 구현까지 삭제). 현재 목록과 작업별 일기 필터는
 [tool_allowlist_current_state.md](tool_allowlist_current_state.md), 새 운영 감사 도구는
 [mcp_gateway.md](mcp_gateway.md)를 따른다.

@@ -8,6 +8,7 @@ from there rather than growing this module.
 import logging
 import os
 from datetime import timezone, timedelta
+from urllib.parse import quote
 
 from secrets_loader import get_secret
 
@@ -53,6 +54,7 @@ def upload_to_r2(local_path: str, key: str | None = None, content_type: str | No
     try:
         with open(path, "rb") as f:
             data = f.read()
+        key = quote(key.lstrip("/"), safe="/")
         resp = _req.put(
             f"https://api.cloudflare.com/client/v4/accounts/{account_id}/r2/buckets/{bucket}/objects/{key}",
             headers={"Authorization": f"Bearer {cf_token}", "Content-Type": content_type},

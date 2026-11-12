@@ -16,7 +16,7 @@ Missing or invalid key returns `403`. If the server has no `ADMIN_API_KEY`, admi
 
 Some public web-chat requests may include frontend proxy headers such as `X-User-Fingerprints`; these are accepted only when the proxy secret path marks the request trusted in `services/api.py`.
 
-Inbound A2A is served by `leninbot-a2a-api.service` and controlled by non-secret env `A2A_ENABLED`. When false, `/.well-known/agent-card.json` returns `503` and `/a2a` returns a JSON-RPC error with HTTP `503` before any LLM call. The enabled endpoint remains unauthenticated and therefore read-only: its profiles expose only read/fetch capabilities, and `security_gateway` independently rejects write/publish/send/pay/execute/admin classes for the A2A interface.
+Inbound A2A is served by `leninbot-a2a-api.service` and controlled by non-secret env `A2A_ENABLED`. When false, `/.well-known/agent-card.json` returns `503` and `/a2a` returns a JSON-RPC error with HTTP `503` before any LLM call. The enabled endpoint remains unauthenticated and therefore read-only: its profiles expose only read/fetch capabilities, and `security_gateway` independently rejects write/publish/send/pay/execute/admin classes for the A2A interface. Because each `SendMessage` runs a paid tool loop, `/a2a` also allows `A2A_RATE_LIMIT` (5) requests per client IP (nginx `X-Real-IP`) per `A2A_RATE_WINDOW_SECONDS` (3600) and `A2A_MAX_CONCURRENT` (2) runs at once, answering HTTP `429`/`503` JSON-RPC errors beyond that; a non-object JSON body is a `-32600` error.
 
 ## Service vs Module Boundaries
 
@@ -100,7 +100,7 @@ Request:
 }
 ```
 
-Limits are enforced in `ChatRequest`: message 1-8000 chars, session ID 1-128 chars, fingerprint max 256 chars, persona max 64 chars. Unknown persona IDs fall back server-side to `cyber-lenin`. `regenerate_from_id`, `tone_feedback`, and `feedback_note` are optional; when `regenerate_from_id` is present, the server verifies that the target `chat_logs.id` belongs to the same fingerprint/session/persona, excludes that prior answer from the regenerated prompt history, regenerates that user turn, updates the same `chat_logs` row with the new answer, and returns the same `message_id`.
+Web chat is rate-limited per fingerprint (`WEBCHAT_RATE_LIMIT`, 20 per `WEBCHAT_RATE_WINDOW_SECONDS`) and always also per client IP at three times that limit, so rotating fingerprints does not bypass it. The client IP comes from the trusted proxy's `X-Real-IP` (nginx overwrites it), falling back to the rightmost `X-Forwarded-For` hop; the leftmost hop is client-controlled. Limits are enforced in `ChatRequest`: message 1-8000 chars, session ID 1-128 chars, fingerprint max 256 chars, persona max 64 chars. Unknown persona IDs fall back server-side to `cyber-lenin`. `regenerate_from_id`, `tone_feedback`, and `feedback_note` are optional; when `regenerate_from_id` is present, the server verifies that the target `chat_logs.id` belongs to the same fingerprint/session/persona, excludes that prior answer from the regenerated prompt history, regenerates that user turn, updates the same `chat_logs` row with the new answer, and returns the same `message_id`.
 
 `POST /chat/messages/{message_id}/deactivate` accepts `part` (`user` or `assistant`), `fingerprint`, `session_id`, and `persona` through the trusted frontend proxy. It sets the corresponding `chat_logs.user_query_active` or `chat_logs.bot_answer_active` flag to false without deleting stored text. Inactive sides are omitted from browser history responses and represented as `[지워진 턴]` in LLM and agent chat-history context.
 

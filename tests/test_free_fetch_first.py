@@ -14,6 +14,7 @@ class FreeFetchTests(unittest.TestCase):
         self.addCleanup(validator.stop)
         self.body = "This is a substantive historical source paragraph with documented facts. " * 30
         self.response = Mock(text=f"<article>{self.body}</article>", apparent_encoding="utf-8")
+        self.response.iter_content.return_value = [self.response.text.encode()]
 
     def test_free_http_success_never_calls_gateway(self):
         with patch.object(urls, "safe_requests_get", return_value=self.response), patch.object(client, "extract") as extract:
@@ -42,6 +43,7 @@ class FreeFetchTests(unittest.TestCase):
 
     def test_pdf_response_is_converted_not_parsed_as_html(self):
         pdf = Mock(headers={"Content-Type": "application/octet-stream"}, content=b"%PDF-1.4\n\x00\xff binary")
+        pdf.iter_content.return_value = [pdf.content]
         with patch.object(urls, "safe_requests_get", return_value=pdf), \
              patch("content_fetch.documents.convert_document", return_value=self.body) as convert, \
              patch.object(client, "extract") as extract:
@@ -52,6 +54,7 @@ class FreeFetchTests(unittest.TestCase):
 
     def test_textless_pdf_never_returns_raw_bytes(self):
         pdf = Mock(headers={"Content-Type": "application/pdf"}, content=b"%PDF-1.7\n" + b"stream x y z " * 100)
+        pdf.iter_content.return_value = [pdf.content]
         with patch.object(urls, "safe_requests_get", return_value=pdf), \
              patch("content_fetch.documents.convert_document", return_value=None), \
              patch.object(client, "extract", return_value={"results": []}) as extract:
@@ -69,3 +72,16 @@ class FreeFetchTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CappedBodyTests(unittest.TestCase):
+    def test_body_is_cut_at_the_byte_cap_and_connection_closed(self):
+        import requests
+
+        resp = requests.Response()
+        resp.iter_content = Mock(return_value=iter([b"a" * 600, b"b" * 600, b"c" * 600]))
+        resp.close = Mock()
+        urls._buffer_capped_body(resp, max_bytes=1000)
+        self.assertEqual(len(resp.content), 1000)
+        resp.close.assert_called_once()
+
