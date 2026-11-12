@@ -33,7 +33,6 @@ curl_cffi==0.16.3
 cytoolz==1.1.0
 defusedxml==0.7.1
 distro==1.9.0
-docopt==0.6.2
 docstring_parser==0.17.0
 eth-account==0.13.7
 eth-hash==0.8.0
@@ -114,13 +113,11 @@ multitasking==0.0.12
 neo4j==6.1.0
 nest-asyncio==1.6.0
 networkx==3.6.1
-nonogram==3.1.1
 numpy==2.4.3
 oauthlib==4.0.0
 ollama==0.6.1
 onnxruntime==1.24.4
 openai==2.16.0
-opencv-python-headless==4.13.0.92
 orjson==3.11.7
 ormsgpack==1.12.2
 packaging==26.0

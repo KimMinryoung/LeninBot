@@ -42,9 +42,6 @@ croniter
 # Document conversion
 markdown-it-py
 markitdown[pdf]
-Pillow
-nonogram==3.1.1
-opencv-python-headless
 
 # State management
 redis>=5.0

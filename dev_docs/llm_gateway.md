@@ -154,7 +154,7 @@ local 파일이 없거나 특정 key가 없으면 tracked default를 그대로 �
   "block_all": false,             // kill switch
   "blocked_providers": [],
   "blocked_models": [],
-  "daily_budget_usd": null,       // UTC 일일 총액 캡
+  "daily_budget_usd": 100,        // UTC 일일 총액 캡 (2026-11-12 사용자 결정, 전역 백스톱)
   "daily_budget_per_provider": {} // {"claude": 20.0} 형태
 }
 ```
