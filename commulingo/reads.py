@@ -13,6 +13,7 @@ import time
 from commulingo.mcp_client import CommuLingoToolError, call_tool
 
 _TTL = 60.0
+_MAX_ENTRIES = 500
 
 
 class McpReads:
@@ -25,11 +26,19 @@ class McpReads:
         if hit and now - hit[0] < ttl:
             return hit[1]
         value = fetch()
+        if len(self._cache) >= _MAX_ENTRIES:
+            # Search keys are one per distinct query; drop what has expired so a
+            # long-lived process does not grow without bound.
+            self._cache = {k: v for k, v in self._cache.items() if now - v[0] < _TTL}
         self._cache[key] = (now, value)
         return value
 
     def clear(self):
         self._cache.clear()
+
+    def invalidate(self, key) -> None:
+        """Forget one entry, e.g. a person just written (its revision changed)."""
+        self._cache.pop(key, None)
 
     # ── existence and single records ─────────────────────────────────
     def existing(self, kind: str, ids) -> set[str]:
@@ -112,20 +121,22 @@ class McpReads:
         return call_tool("people_search", {"q": q, "groupId": group_id, "functionId": function_id,
                                            "affiliationIds": list(affiliation_ids), "limit": limit})["people"]
 
-    def _paged(self, tool: str, arguments: dict, key: str = "items") -> list[dict]:
+    def _paged(self, tool: str, arguments: dict, key: str = "items", max_items: int | None = None) -> list[dict]:
         items, offset = [], 0
         while True:
-            page = call_tool(tool, {**arguments, "limit": 100, "offset": offset})
+            size = 100 if max_items is None else max(1, min(100, max_items - len(items)))
+            page = call_tool(tool, {**arguments, "limit": size, "offset": offset})
             items += page[key]
             offset += len(page[key])
-            if not page[key] or offset >= page["total"]:
+            if not page[key] or offset >= page["total"] or (max_items is not None and len(items) >= max_items):
                 return items
 
-    def events(self, q: str = "") -> list[dict]:
-        return self._cached(("events", q), lambda: self._paged("event_search", {"q": q}))
+    def events(self, q: str = "", limit: int | None = None) -> list[dict]:
+        """Matching events; ``limit`` stops paging once that many are fetched."""
+        return self._cached(("events", q, limit), lambda: self._paged("event_search", {"q": q}, max_items=limit))
 
-    def terms(self, q: str = "") -> list[dict]:
-        return self._cached(("terms", q), lambda: self._paged("term_search", {"q": q}))
+    def terms(self, q: str = "", limit: int | None = None) -> list[dict]:
+        return self._cached(("terms", q, limit), lambda: self._paged("term_search", {"q": q}, max_items=limit))
 
     def offices(self) -> list[dict]:
         return self._cached(("offices",), lambda: call_tool("offices_list")["offices"])

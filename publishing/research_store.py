@@ -207,14 +207,19 @@ def upsert_document(
           markdown_en_source_sha256 = CASE WHEN EXCLUDED.markdown_en IS NOT NULL THEN EXCLUDED.content_sha256
             WHEN research_documents.markdown = EXCLUDED.markdown THEN research_documents.markdown_en_source_sha256 END,
           content_sha256 = EXCLUDED.content_sha256,
-          published_at = EXCLUDED.published_at,
+          -- An edit of a public document keeps its original publication
+          -- date; only an explicit value or the move to public stamps a new one.
+          published_at = CASE
+            WHEN %s::timestamptz IS NOT NULL THEN EXCLUDED.published_at
+            WHEN research_documents.status = 'public' THEN research_documents.published_at
+            ELSE EXCLUDED.published_at END,
           updated_at = EXCLUDED.updated_at
         RETURNING *
         """,
         (
             slug, fname, title, markdown, summary, status, source_task_id,
             markdown_en, title_en, summary_en, content_hash if markdown_en else None,
-            content_hash, published_at, updated_at,
+            content_hash, published_at, updated_at, published_at,
         ),
     )
     _schedule_kg_sync(slug)

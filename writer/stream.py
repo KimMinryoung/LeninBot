@@ -350,6 +350,10 @@ async def stream_active_run(
         yield item
 
 
+# Projects whose run is being prepared (between the request and register_run).
+_starting_projects: set[int] = set()
+
+
 async def stream_writer_reply(
     *,
     project_id: int,
@@ -360,9 +364,41 @@ async def stream_writer_reply(
     critic: bool = False,
     client_disconnected: Callable[[], Awaitable[bool]] | None = None,
 ) -> AsyncIterator[str]:
-    project = get_project(project_id)
+    """One run per project: a second run would edit the same manuscript and
+    take over the first run's edit/cost bookkeeping. The slot is reserved
+    synchronously so a double submit cannot slip through the awaits before
+    register_run."""
+    if project_id in _starting_projects or get_active_run(project_id) is not None:
+        yield _sse({"type": "error", "content": "A writer run is already in progress for this project; wait for it or reattach."})
+        return
+    _starting_projects.add(project_id)
+    try:
+        async for item in _stream_writer_reply(
+            project_id=project_id, prompt=prompt, selection_start=selection_start,
+            selection_end=selection_end, model_choice=model_choice, critic=critic,
+            client_disconnected=client_disconnected,
+        ):
+            yield item
+    finally:
+        _starting_projects.discard(project_id)
+
+
+async def _stream_writer_reply(
+    *,
+    project_id: int,
+    prompt: str,
+    selection_start: int | None = None,
+    selection_end: int | None = None,
+    model_choice: str | None = None,
+    critic: bool = False,
+    client_disconnected: Callable[[], Awaitable[bool]] | None = None,
+) -> AsyncIterator[str]:
+    project = await asyncio.to_thread(get_project, project_id)
     if not project:
         yield _sse({"type": "error", "content": "Project not found."})
+        return
+    if project.get("status") == "deleted":
+        yield _sse({"type": "error", "content": "This project is in the trash; restore it before writing."})
         return
 
     try:
@@ -377,15 +413,16 @@ async def stream_writer_reply(
     # Heavy Claude/Kimi turns get the longer tail + history; cheap DeepSeek
     # tiers keep the lean defaults. See writer.config.
     heavy_context = writer_model.startswith(("claude", "kimi-"))
-    model_messages = messages_for_model(
-        project_id, prompt, selection_start, selection_end, heavy=heavy_context
+    model_messages = await asyncio.to_thread(
+        messages_for_model, project_id, prompt, selection_start, selection_end, heavy=heavy_context
     )
     # DeepSeek main models have produced phantom edits (a reply claiming a
     # scene was added, zero tool calls, nothing saved — 2026-07-07). Pin the
     # tool contract to the end of the current turn for those models.
     if writer_model.startswith("deepseek"):
         model_messages = with_tool_discipline_reminder(model_messages)
-    user_row = insert_message(
+    user_row = await asyncio.to_thread(
+        insert_message,
         project_id=project_id,
         role="user",
         content=prompt.strip(),
@@ -655,6 +692,7 @@ async def stream_writer_reply(
     # Register and start the run BEFORE the first yield: a client that drops
     # right after connecting must not prevent the background run from starting.
     register_run(run)
+    _starting_projects.discard(project_id)  # get_active_run guards from here on
     task = asyncio.create_task(run_llm())
     _writer_background_tasks.add(task)
     task.add_done_callback(_writer_background_tasks.discard)

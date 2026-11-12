@@ -109,3 +109,6 @@ class FakeReads:
 
     def events_list(self):
         return []
+
+    def invalidate(self, key):
+        pass

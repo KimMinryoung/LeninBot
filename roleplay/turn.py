@@ -1,5 +1,6 @@
 """Authorize -> isolated draft -> adjudicate/project -> verify -> commit/send."""
-from contextlib import closing, contextmanager
+import asyncio
+from contextlib import asynccontextmanager, closing, contextmanager
 from copy import deepcopy
 from dataclasses import replace
 from datetime import datetime, timedelta
@@ -148,6 +149,38 @@ def staged_memory(uid):
             stage['people'] = memory.load_people(uid)
             with memory._connection() as conn:
                 stage['records'] = _records(conn,uid)
+        finally:
+            memory.MEMORY_OVERRIDE.reset(token)
+
+
+def _snapshot_into(path, uid):
+    with memory._connection() as source, closing(sqlite3.connect(path)) as dest:
+        baseline = _records(source, uid)
+        source.backup(dest)
+    return baseline
+
+
+def _read_stage(uid):
+    stage = {'state': memory.load_state(uid), 'people': memory.load_people(uid)}
+    with memory._connection() as conn:
+        stage['records'] = _records(conn, uid)
+    return stage
+
+
+@asynccontextmanager
+async def staged_memory_async(uid):
+    """``staged_memory`` for async callers: the database copy and the reads run
+    in a thread (the memory file is tens of MB and has a 10 s busy timeout), so
+    a draft never blocks Telegram polling for other players. The override is
+    set here, in the caller's context; asyncio.to_thread copies it."""
+    with tempfile.TemporaryDirectory(prefix='roleplay-draft-') as tmp:
+        path = Path(tmp)/'memory.sqlite3'
+        baseline = await asyncio.to_thread(_snapshot_into, path, uid)
+        token = memory.MEMORY_OVERRIDE.set(path)
+        stage = {'baseline': baseline}
+        try:
+            yield stage
+            stage.update(await asyncio.to_thread(_read_stage, uid))
         finally:
             memory.MEMORY_OVERRIDE.reset(token)
 

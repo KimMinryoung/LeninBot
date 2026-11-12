@@ -1,4 +1,5 @@
 """Consequential outcomes, draft reuse, failure isolation and Telegram ordering."""
+from roleplay_test_support import async_stage
 import asyncio
 import json
 import unittest
@@ -166,7 +167,7 @@ class TelegramDecisionTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(bot.asyncio, 'to_thread', side_effect=thread), \
              patch.object(bot, '_asks_player', return_value=False), \
              patch.object(bot, 'build_system_prompt', return_value='test'), \
-             patch.object(turn, 'staged_memory', side_effect=stage), \
+             patch.object(turn, 'staged_memory_async', side_effect=async_stage(stage)), \
              patch.object(turn, 'review_reply', return_value={'approved': None}), \
              patch.object(jev, 'classify', side_effect=lambda *a, **k: deepcopy(v)) as classify, \
              patch.object(jev, 'estimate_duration', return_value={'elapsed_minutes': 2}) as duration, \

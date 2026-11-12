@@ -1,4 +1,5 @@
 """Roleplay failure notices must not become conversation history."""
+from roleplay_test_support import async_stage
 import unittest
 from contextlib import contextmanager
 from types import SimpleNamespace
@@ -27,7 +28,7 @@ class TestReplyPersistence(unittest.IsolatedAsyncioTestCase):
              patch.object(bot, "adjudicate_turn", return_value={"status": "unchanged", "reply":reply}), \
              patch.object(bot.roleplay_turn, "committed_reply", return_value=None), \
              patch.object(bot.roleplay_turn, "authorize", return_value=authorization), \
-             patch.object(bot.roleplay_turn, "staged_memory", side_effect=fake_stage), \
+             patch.object(bot.roleplay_turn, "staged_memory_async", side_effect=async_stage(fake_stage)), \
              patch.object(bot.roleplay_turn, "prepare", return_value={}), \
              patch.object(bot, "save_message") as save, \
              patch.object(bot, "load_history", return_value=[{"role": "user", "content": "질문"}]), \
@@ -142,7 +143,7 @@ class UnsettledDirectiveTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(bot.asyncio, "to_thread", side_effect=inline_thread), \
              patch.object(bot.roleplay_turn, "committed_reply", return_value=None), \
              patch.object(bot.roleplay_turn, "authorize", return_value=authorization), \
-             patch.object(bot.roleplay_turn, "staged_memory", side_effect=fake_stage), \
+             patch.object(bot.roleplay_turn, "staged_memory_async", side_effect=async_stage(fake_stage)), \
              patch.object(bot.roleplay_turn, "prepare", side_effect=rejection), \
              patch.object(bot, "_asks_player", return_value=not auto), \
              patch.object(bot, "save_message", return_value=997) as save, \

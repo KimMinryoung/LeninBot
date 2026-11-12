@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import asyncio
 from copy import deepcopy
+import hashlib
 import json
 import logging
 import os
@@ -711,13 +712,13 @@ def _search_all(q: str, limit: int) -> dict:
     """
     needle = q.casefold()
     events = [{"id": e["id"], "period_label": e.get("period") or "", "title_ko": e["title"]["ko"], "title_en": e["title"]["en"]}
-              for e in _reads.events(q)][:limit]
+              for e in _reads.events(q, limit)][:limit]
     offices = [{"id": o["id"], "range_label": o.get("range", ""), "title_ko": o["title"]["ko"], "title_en": o["title"]["en"]}
                for o in _reads.offices()
                if needle in o["id"].casefold() or needle in o["title"]["ko"].casefold() or needle in o["title"]["en"].casefold()][:limit]
     result = {
         "people": _search_people(q, "", limit),
-        "terms": _list_terms(q)[:limit],
+        "terms": _list_terms(q, limit)[:limit],
         "events": events,
         "offices": offices,
     }
@@ -800,13 +801,13 @@ def _get_event(event_id: str) -> dict | None:
     return event
 
 
-def _list_terms(q: str = "") -> list[dict]:
+def _list_terms(q: str = "", limit: int | None = None) -> list[dict]:
     # Unfiltered this is ~1300 terms with their aliases. A curator checking
     # whether one candidate is already registered used to pull that whole blob,
     # hit the tool-result cap, and pull it again — three rounds spent to not get
     # an answer. 'q' answers the same question in one small result.
     return [{"id": t["id"], "term": t["term"], "original": t.get("original") or "", "aliases": t.get("aliases") or []}
-            for t in _reads.terms(q)]
+            for t in _reads.terms(q, limit)]
 
 
 def _get_term(term_id: str) -> dict | None:
@@ -2341,6 +2342,14 @@ def _public_page(target_type: str, target_id: str) -> str:
 
 def _run_edit(target_type: str, action: str, target_id: str, patch: dict,
               sources: list[str], confidence: float | None) -> str:
+    if target_type=='term':
+        # Local prose checks first: a write they reject must not pay for a
+        # classification on every repair retry.
+        prose = {k:v for k,v in patch.items() if k not in {'evidence','sources'}}
+        problems = [p for p in (_em_dash_problem(prose),_script_leak_problem(prose),
+            "Error: use 조선민주주의인민공화국 or 조선" if _contains_north_korea(prose) else None) if p]
+        if problems:
+            return '; '.join(problems)
     if target_type=='term' and action=='create' and not patch.get('category'):
         from commulingo.classify import classify_term, fill_term_category
         classification = classify_term(patch)
@@ -2348,11 +2357,6 @@ def _run_edit(target_type: str, action: str, target_id: str, patch: dict,
             return "Error: activity classification needs cited bio/career evidence with source, locator, claim and excerpt; if already provided, retry the saved draft after the classifier recovers."
         patch = fill_term_category(patch, classification)
     if target_type=='term':
-        prose = {k:v for k,v in patch.items() if k not in {'evidence','sources'}}
-        problems = [p for p in (_em_dash_problem(prose),_script_leak_problem(prose),
-            "Error: use 조선민주주의인민공화국 or 조선" if _contains_north_korea(prose) else None) if p]
-        if problems:
-            return '; '.join(problems)
         try:
             result = call_person_service({'command':'submit','target':'term','action':action,
                 'id':target_id,'fields':patch,'sources':sources,'changedBy':_SUGGESTED_BY})
@@ -2372,6 +2376,15 @@ def _run_edit(target_type: str, action: str, target_id: str, patch: dict,
         fields.pop("role", None)
         activity_review_required = False
         if target_type == "person":
+            # The evidence check is local; run it before any paid classification
+            # so a bad citation string is rejected without a Jev decision. It is
+            # repeated below on the classified fields.
+            pre_sources = list(dict.fromkeys([*sources, *(e["source"] for a in fields.get("activities") or []
+                                                          if isinstance(a, dict)
+                                                          for e in a.get("evidence") or [] if e.get("source"))]))
+            pre_errors = _person_evidence_errors(fields, pre_sources)
+            if pre_errors:
+                return "Error: evidence validation: " + "; ".join(pre_errors)
             from commulingo.classify import (classify_person, classify_person_card, classify_person_codes,
                                                           fill_classification, fill_person_codes, missing_person_codes)
             needs_codes = bool(missing_person_codes(fields))
@@ -2411,6 +2424,9 @@ def _run_edit(target_type: str, action: str, target_id: str, patch: dict,
                 "directApply": direct_apply_enabled() and not activity_review_required})
         except ValueError as exc:
             return f"Error: {exc}"
+        # get_person caches for a few seconds; a re-read right after this write
+        # must see the new revision or the next write fails on revision_conflict.
+        _reads.invalidate(("person", target_id))
         return (f"OK — {result['status']}: {action} {target_type} '{target_id}'. "
                 f"Logged as edit #{result['suggestionId']}. "
                 + ("Pending review; no content changed." if result["status"] == "pending"
@@ -3517,16 +3533,42 @@ async def _exec_commulingo_person_update(person_id: str, fields: dict, citations
     return await _exec_commulingo_write("person", "update", person_id, citations, fields, confidence)
 
 
+# Section slugs cost an LLM call and the write is validated only afterwards, so
+# a create the curator repairs and resubmits would pay again for the same slug.
+# Keyed on everything the slug depends on.
+_SECTION_SLUG_CACHE: dict[str, str] = {}
+_SECTION_SLUG_CACHE_MAX = 256
+
+
+def _section_slug_key(person_id: str, heading: dict, body: dict, sections: list) -> str:
+    existing = sorted(str((section or {}).get("slug") or "") for section in sections or [])
+    payload = json.dumps([person_id, heading, body, existing], sort_keys=True, ensure_ascii=False, default=str)
+    return hashlib.sha256(payload.encode()).hexdigest()
+
+
+def _cached_section_slug(person_id: str, heading: dict, body: dict, sections: list) -> str:
+    from commulingo.section_slug import generate_section_slug
+
+    key = _section_slug_key(person_id, heading, body, sections)
+    slug = _SECTION_SLUG_CACHE.get(key)
+    if slug is None:
+        slug = generate_section_slug(person_id, heading, body, sections)
+        if len(_SECTION_SLUG_CACHE) >= _SECTION_SLUG_CACHE_MAX:
+            _SECTION_SLUG_CACHE.pop(next(iter(_SECTION_SLUG_CACHE)))
+        _SECTION_SLUG_CACHE[key] = slug
+    return slug
+
+
 async def _exec_commulingo_section_save(
     action: str, person_id: str, heading: dict, body: dict,
     citations: list, slug: str | None = None, start_year: int | None = None,
     start_month: int | None = None, expected_revision: str | None = None, evidence: list | None = None,
 ) -> str:
-    from commulingo.section_slug import generate_section_slug, section_sort_order
+    from commulingo.section_slug import section_sort_order
     if action == "create":
         try:
             current = await asyncio.to_thread(call_person_service, {"command": "read", "id": person_id})
-            slug = await asyncio.to_thread(generate_section_slug, person_id, heading, body,
+            slug = await asyncio.to_thread(_cached_section_slug, person_id, heading, body,
                                            (current or {}).get("sections", []))
         except (ValueError, RuntimeError) as exc:
             return _commulingo_error("validation_failed", str(exc))
@@ -3661,22 +3703,6 @@ COMMULINGO_GAP_REPORT_TOOL = {
         "required": ["gaps", "event_id"],
     },
 }
-
-
-def registered_event_labels() -> list[str]:
-    """Event-dictionary titles as 'ko (en)', for prompts that must not re-register one.
-
-    Lives here rather than in the glossary lane because two lanes need it and
-    that module cannot be imported to borrow it: it sets COMMULINGO_SUGGESTED_BY
-    at import time, so importing it from another lane would relabel that lane's
-    writes.
-    """
-    labels = []
-    for event in _reads.events():
-        ko = str(event["title"].get("ko") or "").strip()
-        en = str(event["title"].get("en") or "").strip()
-        labels.append(f"{ko} ({en})" if ko and en else ko or en)
-    return sorted(label for label in labels if label)
 
 
 def _file_gaps(gaps: list, event_id: str) -> dict:

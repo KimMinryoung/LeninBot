@@ -12,6 +12,7 @@ import logging
 import secrets
 from typing import Any
 
+import psycopg2.errors
 from psycopg2.extras import RealDictCursor, execute_values
 
 # Writer tables live in the dedicated `writer` database (db.get_writer_conn),
@@ -292,8 +293,10 @@ def set_project_public(project_id: int, is_public: bool) -> dict | None:
                     (secrets.token_urlsafe(6), project_id),
                 )
                 break
-            except Exception:  # noqa: BLE001 — unique-index race, roll a new slug
+            except psycopg2.errors.UniqueViolation:  # slug collision, roll a new one
                 continue
+        else:
+            raise RuntimeError("could not mint a unique public slug")
     return db_query_one(
         """UPDATE writer_projects
               SET is_public = %s, updated_at = NOW()
@@ -417,7 +420,9 @@ def read_manuscript_slice(project_id: int, start: int | None, end: int | None) -
     if total == 0:
         return "The manuscript is empty."
     try:
-        if start is None:
+        if start is None and end is not None:
+            lo = max(0, min(int(end), total) - 5000)
+        elif start is None:
             lo = max(0, total - 5000)
         else:
             lo = max(0, min(int(start), total))
@@ -434,27 +439,41 @@ def read_manuscript_slice(project_id: int, start: int | None, end: int | None) -
     return f"Manuscript chars {lo}–{hi} of {total}:\n{piece}"
 
 
-def _write_manuscript(project_id: int, body: str, *, action: str, note: str = "") -> dict | None:
+class ManuscriptChanged(ValueError):
+    """The manuscript changed between the caller's read and its write."""
+
+
+_EDIT_RETRIES = 3
+
+
+def _write_manuscript(project_id: int, body: str, *, action: str, note: str = "",
+                      expected_before: str | None = None) -> dict | None:
+    """Replace the body, keeping a revision.
+
+    The row is locked (FOR UPDATE) for the whole write. ``expected_before`` is
+    the body the caller computed ``body`` from; when another writer (a parallel
+    tool call, a browser save) changed it meanwhile, ManuscriptChanged is raised
+    instead of silently overwriting that edit.
+    """
     chunks = _chunk_manuscript(body)
     with get_conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute(
-                """SELECT p.id, w.body
-                     FROM writer_projects p
-                LEFT JOIN writer_manuscripts w ON w.project_id = p.id
-                    WHERE p.id = %s""",
-                (project_id,),
-            )
-            previous = cur.fetchone()
-            if not previous:
+            cur.execute("SELECT id FROM writer_projects WHERE id = %s", (project_id,))
+            if not cur.fetchone():
                 return None
-            before_body = str(previous.get("body") or "")
             cur.execute(
                 """INSERT INTO writer_manuscripts (project_id, body)
                      VALUES (%s, '')
                 ON CONFLICT (project_id) DO NOTHING""",
                 (project_id,),
             )
+            cur.execute(
+                "SELECT body FROM writer_manuscripts WHERE project_id = %s FOR UPDATE",
+                (project_id,),
+            )
+            before_body = str((cur.fetchone() or {}).get("body") or "")
+            if expected_before is not None and before_body != expected_before:
+                raise ManuscriptChanged("The manuscript changed since it was read; reload and retry.")
             cur.execute(
                 """INSERT INTO writer_manuscript_revisions
                           (project_id, action, before_body, after_body, note)
@@ -505,18 +524,25 @@ def save_manuscript(project_id: int, body: str, note: str = "") -> dict | None:
 
 
 def append_manuscript(project_id: int, text: str, note: str = "") -> dict | None:
-    manuscript = get_manuscript(project_id)
-    if not manuscript:
-        return None
-    current = str(manuscript.get("body") or "")
     # Full strip, not just newlines: models often send a leading space or
     # trailing blank padding, which survives verbatim into the draft. The
     # paragraph break is owned by the separator below, not by the input.
     addition = text.strip()
-    if not addition:
-        return manuscript
-    separator = "\n\n" if current and not current.endswith("\n\n") else ""
-    result = _write_manuscript(project_id, current + separator + addition, action="append", note=note)
+    for attempt in range(_EDIT_RETRIES):
+        manuscript = get_manuscript(project_id)
+        if not manuscript:
+            return None
+        current = str(manuscript.get("body") or "")
+        if not addition:
+            return manuscript
+        separator = "\n\n" if current and not current.endswith("\n\n") else ""
+        try:
+            result = _write_manuscript(project_id, current + separator + addition, action="append",
+                                       note=note, expected_before=current)
+            break
+        except ManuscriptChanged:
+            if attempt == _EDIT_RETRIES - 1:
+                raise
     if result:
         result = dict(result)
         result["edit_start"] = len(current) + len(separator)
@@ -538,10 +564,23 @@ def replace_manuscript_range(
     if start < 0 or end < start or end > len(current):
         raise ValueError("invalid manuscript range")
     updated = current[:start] + replacement + current[end:]
-    return _write_manuscript(project_id, updated, action="replace", note=note)
+    # Offsets refer to the body just read; refuse rather than apply them to a
+    # body another writer changed in between.
+    return _write_manuscript(project_id, updated, action="replace", note=note, expected_before=current)
 
 
 def replace_manuscript_text(project_id: int, find: str, replacement: str, note: str = "") -> dict:
+    """Retrying wrapper: a concurrent edit between read and write re-runs the match."""
+    for attempt in range(_EDIT_RETRIES):
+        try:
+            return _replace_manuscript_text_once(project_id, find, replacement, note)
+        except ManuscriptChanged:
+            if attempt == _EDIT_RETRIES - 1:
+                return {"ok": False, "message": "The manuscript kept changing during the edit; retry."}
+    return {"ok": False, "message": "The manuscript kept changing during the edit; retry."}
+
+
+def _replace_manuscript_text_once(project_id: int, find: str, replacement: str, note: str = "") -> dict:
     """Find one exact passage and replace it. Safe for LLM tool use: fails
     (ok=False) if the passage is absent or appears more than once, so the model
     can never silently edit the wrong location. Falls back to whitespace/quote-
@@ -576,7 +615,8 @@ def replace_manuscript_text(project_id: int, find: str, replacement: str, note: 
         span = spans[0]
         matched_how = "normalized whitespace/quotes"
     updated = current[:span[0]] + replacement + current[span[1]:]
-    result = _write_manuscript(project_id, updated, action="replace", note=note or "tool replace")
+    result = _write_manuscript(project_id, updated, action="replace", note=note or "tool replace",
+                               expected_before=current)
     return {
         "ok": True,
         "message": f"Replaced (matched {matched_how}).",

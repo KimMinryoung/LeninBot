@@ -75,6 +75,14 @@ def save_private_report_sync(
         raise ValueError("title is required")
     if not markdown:
         raise ValueError("markdown_body is required")
+    existing = research_store.get_document(f"{clean_slug}.md", include_private=True)
+    if existing and existing.get("status") != "private":
+        # The upsert would replace a public/staged document's text and silently
+        # unpublish it without a backup, cache purge or unpublish record.
+        raise ValueError(
+            f"slug {clean_slug!r} belongs to a {existing.get('status')} research document; "
+            "choose another slug (use edit_public/unpublish for published documents)"
+        )
 
     row, _ = research_store.upsert_document(
         filename=f"{clean_slug}.md",

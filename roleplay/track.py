@@ -21,8 +21,10 @@ MILESTONES = (
 )
 
 
-def event_id(day):
-    return f"track-{day}"
+def event_id(day, enabled_minute=None):
+    # Each enable gets its own ids: events from an earlier enable stay in
+    # story_events (cancelled on disable), and an id cannot be scheduled twice.
+    return f"track-{day}" if enabled_minute is None else f"track-{day}-{enabled_minute}"
 
 
 def enable(state):
@@ -32,14 +34,21 @@ def enable(state):
     if not clock.get("date") or now is None:
         raise ValueError("실존 궤도는 장면의 날짜와 시각이 알려진 뒤에 켤 수 있음")
     today = date.fromisoformat(clock["date"])
-    existing = {e["id"] for e in state.get("story_events", [])}
+    # A milestone is taken while it is scheduled, or once it played out (met or
+    # departed from). Only events released by `/track 끄기` may be scheduled again.
+    taken = {e.get("date") for e in state.get("story_events", [])
+             if e.get("kind") == TRACK_KIND and not (e["status"] == "cancelled" and e.get("outcome") == RELEASE_OUTCOME)}
+    existing_ids = {e["id"] for e in state.get("story_events", [])}
     updates = []
     for day, title in MILESTONES:
         when = date.fromisoformat(day)
-        if when <= today or event_id(day) in existing:
+        if when <= today or day in taken:
             continue
+        new_id = event_id(day)
+        if new_id in existing_ids:
+            new_id = event_id(day, state["scene_minute"])
         due = state["scene_minute"] + (when - today).days * 1440 - now + TRACK_MORNING_MINUTE
-        updates.append({"op": "schedule", "id": event_id(day), "kind": TRACK_KIND, "date": day,
+        updates.append({"op": "schedule", "id": new_id, "kind": TRACK_KIND, "date": day,
                         "title": f"{day} {title}", "source": TRACK_SOURCE, "due_minute": due})
     if not updates:
         raise ValueError("남은 실존 연표 사건이 없음 (장면 날짜가 연표 끝을 지났거나 이미 등록됨)")

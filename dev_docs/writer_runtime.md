@@ -35,3 +35,5 @@ Kimi Writer (`kimi_k3`) uses Moonshot's Anthropic-compatible protocol through th
 DeepSeek 모델 카탈로그는 `deepseek_flash` 항목 하나만 제공하며 모델 ID·표시 이름·시간대별 요율을 공통 provider registry에서 읽는다. 옛 `deepseek_pro` 요청과 저장값은 Writer 입력 경계에서 `deepseek_flash`로 정규화한다.
 
 Writer 조사기는 basic 검색부터 시작하고 근거가 충분하면 중단한다. 기존 출처가 있는 brief는 문장·저장 오류 때문에 다시 조사하지 않는다. 검색 API 비용은 LLM sub-run 비용과 별도로 [공용 web 예산](web_research.md)에 집계된다.
+
+**동시 편집 경계 (2026-11-12).** 프로젝트당 실행은 하나다. `stream_writer_reply`는 요청 시점에 프로젝트 슬롯을 동기적으로 잡아 중복 제출(더블 클릭·두 탭)을 오류 SSE로 돌려보낸다. 휴지통(`status='deleted'`) 프로젝트는 실행할 수 없다. 실행 중에는 브라우저의 원고 저장·추가·범위 치환 API가 `409`를 반환한다. `_write_manuscript`는 원고 행을 `FOR UPDATE`로 잠그고 호출자가 읽은 본문(`expected_before`)과 다르면 `ManuscriptChanged`를 낸다. 도구 추가·치환은 다시 읽고 최대 3회 재시도하며, 클라이언트 범위 치환은 `409`로 거절한다.

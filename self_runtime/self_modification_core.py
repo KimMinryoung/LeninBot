@@ -16,13 +16,11 @@ Version: 1.0
 
 import os
 import sys
-import json
 import shutil
 import subprocess
 import tempfile
 import ast
-import inspect
-from typing import Dict, List, Optional
+from typing import List, Optional
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from pathlib import Path
@@ -127,10 +125,6 @@ class ModificationResult:
             result["test_results"] = self.test_results.to_dict()
         return result
     
-    def to_json(self):
-        return json.dumps(self.to_dict(), indent=2, ensure_ascii=False)
-
-
 # ============================================================================
 # Phase 1: File Backup
 # ============================================================================
@@ -194,11 +188,6 @@ def restore_backup(backup_path: str) -> bool:
     except Exception as e:
         logger.error(f"[ROLLBACK] ✗ Exception: {e}")
         return False
-
-
-# Old names, kept for callers written before the rename. Neither uses git.
-git_backup_before_modification = backup_file
-git_reset_to_commit = restore_backup
 
 
 # ============================================================================
@@ -300,37 +289,6 @@ def generate_line_patch(old_content: str, new_content: str) -> PatchSummary:
     )
 
 
-def format_diff_for_display(patch: PatchSummary, context_lines: int = 2) -> str:
-    """
-    패치를 사용자 친화적 형식으로 표시
-    
-    Args:
-        patch: PatchSummary 객체
-        context_lines: 변경 주변 컨텍스트 라인 수
-    
-    Returns:
-        str: 포맷된 diff 문자열
-    """
-    lines = []
-    lines.append("=" * 70)
-    lines.append("DIFF OUTPUT")
-    lines.append("=" * 70)
-    
-    for op in patch.operations:
-        if op.op == "keep":
-            lines.append(f" {op.line_num:4d} │ {op.content}")
-        elif op.op == "insert":
-            lines.append(f"+{op.line_num:4d} │ {op.content}")
-        elif op.op == "delete":
-            lines.append(f"-{op.line_num:4d} │ {op.content}")
-    
-    lines.append("=" * 70)
-    lines.append(f"Summary: +{patch.insertions} -{patch.deletions} (Total: {patch.total_changes})")
-    lines.append("=" * 70)
-    
-    return "\n".join(lines)
-
-
 # ============================================================================
 # Phase 3: Safe File Write (라인 패치 적용)
 # ============================================================================
@@ -368,27 +326,30 @@ def apply_line_patch_safe(filepath: str, patch: PatchSummary) -> bool:
             new_content += '\n'
         
         # Step 2: Write to temp file
-        temp_fd, temp_file = tempfile.mkstemp(suffix=".tmp", text=True)
+        # Same directory so the final move is an atomic rename; mkstemp's
+        # 0600 mode is replaced by the original's so scripts keep +x.
+        temp_fd, temp_file = tempfile.mkstemp(suffix=".tmp", text=True,
+                                              dir=os.path.dirname(os.path.abspath(filepath)))
         try:
             with os.fdopen(temp_fd, 'w', encoding='utf-8') as f:
                 f.write(new_content)
+            if os.path.exists(filepath):
+                shutil.copymode(filepath, temp_file)
         except Exception as e:
-            os.close(temp_fd)
             os.unlink(temp_file)
             raise RuntimeError(f"Temp file write failed: {e}")
-        
+
         logger.info(f"[APPLY] Temp file created: {temp_file}")
-        
-        # Step 3: Validate temp file (syntax check)
-        try:
-            with open(temp_file, 'r', encoding='utf-8') as f:
-                syntax_test = f.read()
-            ast.parse(syntax_test)
-            logger.info(f"[APPLY] ✓ Syntax validation passed")
-        except SyntaxError as e:
-            os.unlink(temp_file)
-            logger.error(f"[APPLY] ✗ Syntax error: {e}")
-            raise RuntimeError(f"Syntax validation failed: {e}")
+
+        # Step 3: Validate temp file (syntax check, Python files only)
+        if filepath.endswith(".py"):
+            try:
+                ast.parse(new_content)
+                logger.info(f"[APPLY] ✓ Syntax validation passed")
+            except SyntaxError as e:
+                os.unlink(temp_file)
+                logger.error(f"[APPLY] ✗ Syntax error: {e}")
+                raise RuntimeError(f"Syntax validation failed: {e}")
         
         # Step 4: Backup original
         backup_file = filepath + ".backup"
@@ -402,7 +363,7 @@ def apply_line_patch_safe(filepath: str, patch: PatchSummary) -> bool:
         
         # Step 5: Atomic move
         try:
-            shutil.move(temp_file, filepath)
+            os.replace(temp_file, filepath)
             logger.info(f"[APPLY] ✓ File updated: {filepath}")
         except Exception as e:
             # Restore from backup
@@ -429,15 +390,15 @@ def apply_line_patch_safe(filepath: str, patch: PatchSummary) -> bool:
 # Phase 4: Sandbox Tests
 # ============================================================================
 
-def run_sandbox_tests(filepath: str) -> SandboxTestResults:
+def run_sandbox_tests(filepath: str, *, allow_execution: bool = False) -> SandboxTestResults:
     """
     수정된 파일의 기본 동작을 샌드박스에서 테스트
     
     Tests:
-        1. Import check: 모듈 임포트 가능
-        2. Syntax check: AST 파싱 가능
-        3. Defined functions: 함수 검색 및 호출 가능성
-        4. Pytest basic: 연관된 테스트 실행
+        1. Syntax check: AST 파싱 가능
+        2. Undefined names: pyflakes 정적 검사 (파일을 import/실행하지 않음)
+        3. Defined functions: 함수·클래스 목록
+        4. Pytest basic: 연관된 테스트 실행 — allow_execution=True(소유자 승인 /modify)일 때만
     
     Args:
         filepath: 테스트할 파일
@@ -472,27 +433,28 @@ def run_sandbox_tests(filepath: str) -> SandboxTestResults:
         ))
         logger.error(f"[TEST] ✗ {test_name}: {e}")
     
-    # Test 2: Import Check
-    test_name = "import_check"
+    # Test 2: Static name check. The file is never imported: importing ran
+    # agent-written code inside this process (and a cached module in
+    # sys.modules made a broken rewrite pass anyway).
+    test_name = "undefined_names"
     try:
-        module_name = Path(filepath).stem
-        sys.path.insert(0, str(Path(filepath).parent))
-        
-        spec = __import__(module_name)
+        from pyflakes.checker import Checker
+        from pyflakes.messages import UndefinedExport, UndefinedLocal, UndefinedName
+
+        with open(filepath, 'r', encoding='utf-8') as f:
+            checker = Checker(ast.parse(f.read()), filename=str(filepath))
+        problems = [str(m) for m in checker.messages
+                    if isinstance(m, (UndefinedName, UndefinedLocal, UndefinedExport))]
         tests.append(TestResult(
             name=test_name,
-            result="pass",
-            message=f"Module imported successfully: {module_name}"
+            result="fail" if problems else "pass",
+            message="; ".join(problems[:5]) if problems else "No undefined names",
         ))
-        logger.info(f"[TEST] ✓ {test_name}")
+    except SyntaxError:
+        pass  # already reported by syntax_check
     except Exception as e:
-        tests.append(TestResult(
-            name=test_name,
-            result="fail",
-            message=f"Import failed: {e}"
-        ))
-        logger.error(f"[TEST] ✗ {test_name}: {e}")
-    
+        tests.append(TestResult(name=test_name, result="fail", message=f"Name check failed: {e}"))
+
     # Test 3: Defined Functions
     test_name = "defined_functions"
     try:
@@ -523,7 +485,9 @@ def run_sandbox_tests(filepath: str) -> SandboxTestResults:
     test_file = f"test_{Path(filepath).stem}.py"
     test_path = Path(filepath).parent / test_file
     
-    if test_path.exists():
+    # Running a neighbouring test file executes code; only the owner-approved
+    # /modify path may do that, never an agent's unapproved write_file.
+    if allow_execution and test_path.exists():
         try:
             result = subprocess.run(
                 [sys.executable, "-m", "pytest", str(test_path), "-v", "--tb=short"],
@@ -679,9 +643,9 @@ def self_modify_with_safety(
     
     # Phase 5: Run tests
     test_results = None
-    if not skip_tests:
+    if not skip_tests and str(filepath).endswith(".py"):
         print("[5/6] Running sandbox tests...")
-        test_results = run_sandbox_tests(filepath)
+        test_results = run_sandbox_tests(filepath, allow_execution=True)
         
         if test_results.status == "fail":
             logger.error(f"[5/6] ✗ Sandbox tests failed")
@@ -727,12 +691,6 @@ def self_modify_with_safety(
 # ============================================================================
 # Utilities
 # ============================================================================
-
-def read_file(filepath: str) -> str:
-    """파일 읽기"""
-    with open(filepath, 'r', encoding='utf-8') as f:
-        return f.read()
-
 
 if __name__ == "__main__":
     print("Self-modification core module loaded.")

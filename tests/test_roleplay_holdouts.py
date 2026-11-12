@@ -1,4 +1,5 @@
 """Holdouts, delayed reactions, player-settled choices and the settlement line."""
+from roleplay_test_support import async_stage
 import json
 import tempfile
 import unittest
@@ -213,7 +214,7 @@ class BotChoiceFlowTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(bot.asyncio, 'to_thread', side_effect=inline_thread), \
              patch.object(bot.roleplay_turn, 'committed_reply', return_value=None), \
              patch.object(bot.roleplay_turn, 'authorize', return_value=auth), \
-             patch.object(bot.roleplay_turn, 'staged_memory', side_effect=fake_stage), \
+             patch.object(bot.roleplay_turn, 'staged_memory_async', side_effect=async_stage(fake_stage)), \
              patch.object(bot.roleplay_turn, 'prepare', side_effect=[pending, prepared]) as prepare, \
              patch.object(bot, 'adjudicate_turn', return_value={'status': 'applied', 'reply': '초안 본문', 'applied': {'event': 'interrogation', 'minutes': 3}}) as settle, \
              patch.object(bot, 'save_message') as save, patch.object(bot, 'load_history', return_value=[]), \
@@ -368,7 +369,7 @@ class AutoSettleTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(bot.asyncio, 'to_thread', side_effect=inline_thread), \
              patch.object(bot.roleplay_turn, 'committed_reply', return_value=None), \
              patch.object(bot.roleplay_turn, 'authorize', return_value=auth), \
-             patch.object(bot.roleplay_turn, 'staged_memory', side_effect=fake_stage), \
+             patch.object(bot.roleplay_turn, 'staged_memory_async', side_effect=async_stage(fake_stage)), \
              patch.object(bot.roleplay_turn, 'prepare', return_value=prepared) as prepare, \
              patch.object(bot, 'adjudicate_turn', side_effect=lambda *a, **k: {'status': 'applied', 'reply': '초안', 'applied': k['prepared']['applied']}) as settle, \
              patch.object(bot, 'save_message', return_value=5), patch.object(bot, 'load_history', return_value=[]), \

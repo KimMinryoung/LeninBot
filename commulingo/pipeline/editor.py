@@ -86,7 +86,8 @@ class Editor:
         if job['kind']=='person' and not section:
             from commulingo.classify import load_catalogs
             catalogs = await asyncio.to_thread(load_catalogs)
-        decisions = Decisions(job,current,catalogs,usage,deepcopy(checkpoint.get('classification_cache',{})))
+        decisions = Decisions(job,current,catalogs,usage,deepcopy(checkpoint.get('classification_cache',{})),
+                              deepcopy(checkpoint.get('citation_cache',{})))
         field_schema = decisions.author_schema(schema_for(job, current, catalogs))
         field_schema['properties']['notes'] = {'type':'string','maxLength':4000,
             'description':'Private working notes; moved out of published fields.'}
@@ -147,6 +148,7 @@ class Editor:
                     'error':last_error if error is None else author.author_error(error),
                     'error_kind':error_kind,
                     'classification_cache':decisions.cache,
+                    'citation_cache':decisions.citations,
                     'section_slug_cache':section_slug_cache})
 
         async def finish(value):

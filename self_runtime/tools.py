@@ -1882,15 +1882,15 @@ async def _exec_read_server_logs(
 
     minutes_back = max(1, min(60, minutes_back))
     limit = max(1, min(200, limit))
-    hours_back = max(1, (minutes_back + 59) // 60)
     grep_terms = _normalize_grep_terms(grep)
 
     rows = await asyncio.to_thread(
         fetch_server_logs,
         service,
-        hours_back,
-        None,
+        1,
+        grep_terms or None,
         limit,
+        minutes_back=minutes_back,
     )
     if not rows:
         return f"=== SERVER LOGS ({service}, last {minutes_back}min) ===\n(no output)"

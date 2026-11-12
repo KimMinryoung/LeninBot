@@ -9,10 +9,12 @@ class ClassificationUnavailable(RuntimeError):
 
 
 class Decisions:
-    def __init__(self, job, current, catalogs, usage, cache=None):
+    def __init__(self, job, current, catalogs, usage, cache=None, citations=None):
         self.job, self.current, self.catalogs, self.usage = job,current or {},catalogs,usage
         self.cache = cache if cache is not None else {}
-        self.citations = {}
+        # Citation verdicts, keyed on the bounded claim state; checkpointed with
+        # the classification cache so a re-attempt does not re-judge them.
+        self.citations = citations if citations is not None else {}
 
     def detailed(self, *args, **kwargs):
         from llm.call_registry import decide_detailed
@@ -115,9 +117,19 @@ class Decisions:
         if not basis:
             return fields
         primary = next((a for a in current if a.get('primary')), current[0])
-        party = await asyncio.to_thread(c.classify_party_activity, merged, primary, basis,
-                                        state=c.person_card_state(merged, excerpts), catalog=catalog,
-                                        decide=self.detailed)
+        state = c.person_card_state(merged, excerpts)
+        # Cached like the other verdicts: every submit that passes the citation
+        # gate reaches here, and a re-paid (non-deterministic) verdict would also
+        # change the patch hash between attempts.
+        cache_key = canonical({'party_state': state, 'primary': primary, 'basis': basis,
+                               'affiliations': catalog['affiliations']})
+        cached = self.cache.get(cache_key)
+        if cached is None:
+            party = await asyncio.to_thread(c.classify_party_activity, merged, primary, basis,
+                                            state=state, catalog=catalog, decide=self.detailed)
+            self.cache[cache_key] = {'party': party}
+        else:
+            party = cached.get('party')
         if not party:
             return fields
         out = deepcopy(fields)

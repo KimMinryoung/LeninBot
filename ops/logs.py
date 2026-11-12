@@ -68,15 +68,23 @@ def grep_matches_text(text, grep) -> bool:
 
 
 
-def fetch_server_logs(service: str = "api", hours_back: int = 1, grep: str | list[str] | tuple[str, ...] | None = None, limit: int = 200, *, level: str | None = None) -> list[dict]:
+# With a grep filter the window is scanned up to this many lines before the
+# newest ``limit`` matches are kept; ``-n limit`` alone would only search the
+# newest ``limit`` lines and miss older matches.
+_GREP_SCAN_LINES = 20000
+
+
+def fetch_server_logs(service: str = "api", hours_back: int = 1, grep: str | list[str] | tuple[str, ...] | None = None, limit: int = 200, *, level: str | None = None, minutes_back: int | None = None) -> list[dict]:
     """Fetch local systemd/journald service logs.
 
     Args:
         service: Logical service name (api, telegram, nginx).
         hours_back: How many recent hours to inspect.
-        grep: Optional substring filter(s) applied after fetching.
+        grep: Optional substring filter(s); the whole window (up to
+              _GREP_SCAN_LINES lines) is searched, newest ``limit`` matches kept.
               Accepts a string or collection of strings.
         limit: Max returned log lines.
+        minutes_back: Optional window in minutes; overrides ``hours_back``.
 
     Returns list of dicts: timestamp, message, raw.
     """
@@ -101,9 +109,9 @@ def fetch_server_logs(service: str = "api", hours_back: int = 1, grep: str | lis
         "-u",
         unit,
         "--since",
-        f"-{hours_back} hour",
+        f"-{max(1, min(int(minutes_back), 168 * 60))} min" if minutes_back else f"-{hours_back} hour",
         "-n",
-        str(limit),
+        str(_GREP_SCAN_LINES if grep_terms_lower else limit),
         "--no-pager",
         "-o",
         "short-iso",
@@ -141,6 +149,6 @@ def fetch_server_logs(service: str = "api", hours_back: int = 1, grep: str | lis
                 timestamp = text[:third_sep]
                 message = text[third_sep + 1 :]
         rows.append({"timestamp": timestamp, "message": message, "raw": text})
-    return rows
+    return rows[-limit:]
 
 

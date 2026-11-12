@@ -691,7 +691,7 @@ async def _draft_and_settle(message: Message, user_id: int, turn: dict, authoriz
         for attempt in range(1 if turn.get("rewrite_without") else 2):
             draft_count += 1
             with caller_scope(ctx), turn_time_scope(time_policy):
-                with roleplay_turn.staged_memory(user_id) as stage:
+                async with roleplay_turn.staged_memory_async(user_id) as stage:
                     reply = await deepseek_chat(
                         history, client=deepseek_client, model=ROLEPLAY_MODEL,
                         tools=RP_TOOLS, tool_handlers=RP_HANDLERS,

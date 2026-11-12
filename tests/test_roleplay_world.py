@@ -211,6 +211,12 @@ class TrackTests(unittest.TestCase):
         self.assertFalse(released['track']['enabled'])
         self.assertEqual(track.summary(released)['remaining'], 0)
         self.assertEqual(track.summary(released)['departed'], 1)  # a release is not a departure
+        # Turning the track back on reschedules the released milestones under new
+        # ids; the departed one stays played out.
+        again = track.enable(released)
+        self.assertTrue(again['track']['enabled'])
+        self.assertEqual(track.summary(again)['remaining'], len(track.MILESTONES) - 1)
+        self.assertEqual(track.summary(again)['departed'], 1)
 
     def test_far_milestones_do_not_block_next_day_and_bot_commands(self):
         state = track.enable(initial(participants=[]))

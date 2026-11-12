@@ -207,10 +207,20 @@ async def get_writer_manuscript(project_id: int):
     return {"manuscript": manuscript}
 
 
+def _reject_during_run(project_id: int) -> None:
+    """Browser edits while a model run edits the same manuscript would
+    overwrite its appends with the editor's stale text."""
+    from writer.runs import get_active_run
+
+    if get_active_run(project_id) is not None:
+        raise HTTPException(status_code=409, detail="A writer run is editing this manuscript; wait for it to finish.")
+
+
 @router.put("/writer/projects/{project_id}/manuscript", dependencies=[Depends(require_writer_access)])
 async def save_writer_manuscript(project_id: int, request: WriterManuscriptRequest):
     from writer import save_manuscript
 
+    _reject_during_run(project_id)
     manuscript = await asyncio.to_thread(save_manuscript, project_id, request.body, request.note)
     if not manuscript:
         raise HTTPException(status_code=404, detail="writer project not found")
@@ -236,6 +246,7 @@ async def search_writer_manuscript(
 async def append_writer_manuscript(project_id: int, request: WriterManuscriptAppendRequest):
     from writer import append_manuscript
 
+    _reject_during_run(project_id)
     manuscript = await asyncio.to_thread(append_manuscript, project_id, request.text, request.note)
     if not manuscript:
         raise HTTPException(status_code=404, detail="writer project not found")
@@ -245,7 +256,9 @@ async def append_writer_manuscript(project_id: int, request: WriterManuscriptApp
 @router.post("/writer/projects/{project_id}/manuscript/replace", dependencies=[Depends(require_writer_access)])
 async def replace_writer_manuscript(project_id: int, request: WriterManuscriptReplaceRequest):
     from writer import replace_manuscript_range
+    from writer.store import ManuscriptChanged
 
+    _reject_during_run(project_id)
     try:
         manuscript = await asyncio.to_thread(
             replace_manuscript_range,
@@ -255,6 +268,8 @@ async def replace_writer_manuscript(project_id: int, request: WriterManuscriptRe
             request.replacement,
             request.note,
         )
+    except ManuscriptChanged as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not manuscript:
