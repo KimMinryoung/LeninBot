@@ -1,5 +1,5 @@
 {
-  "version": 55,
+  "version": 56,
   "functions": [
     {
       "id": "political-leadership",
@@ -2536,7 +2536,7 @@
       "countryCode": "north-korea",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Workers' Party of Korea (WPK). Never infer affiliation from nationality, residence or ideology. Use this party for pre-state revolutionary activity, activity outside its ruling period, explicitly oppositional party activity, and — during 1948–present, its ruling period — documented party membership (including ordinary members holding only state posts), party posts and party cadre work (party first/general secretary, politburo, central committee secretariat and departments, regional party committees). Government, armed forces, security and other state-institution service in that period belongs to state-north-korea; a person who held both gets both activities. Opposition, independent work and victimhood must not be attributed to that state.",
+      "criteria": "Only documented service, membership or organizational activity in Workers' Party of Korea (WPK), formed in June 1949 by the merger of the northern and southern Workers' Parties (before that use party-north-korean-workers or the Workers' Party of South Korea). Never infer affiliation from nationality, residence or ideology. Use this party for activity outside its ruling period, explicitly oppositional party activity, and — during 1949–present, its ruling period — documented party membership (including ordinary members holding only state posts), party posts and party cadre work (party first/general secretary, politburo, central committee secretariat and departments, regional party committees). Government, armed forces, security and other state-institution service in that period belongs to state-north-korea; a person who held both gets both activities. Opposition, independent work and victimhood must not be attributed to that state.",
       "periods": [
         [
           1949,
@@ -2547,7 +2547,7 @@
         "id": "state-north-korea",
         "periods": [
           [
-            1948,
+            1949,
             null
           ]
         ]
@@ -2701,7 +2701,7 @@
       "countryCode": "yemen",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Yemeni Socialist Party (YSP). Never infer affiliation from nationality, residence or ideology. Use this party for pre-state revolutionary activity, activity outside its ruling period, explicitly oppositional party activity, and — during 1967–1990, its ruling period — documented party membership (including ordinary members holding only state posts), party posts and party cadre work (party first/general secretary, politburo, central committee secretariat and departments, regional party committees). Government, armed forces, security and other state-institution service in that period belongs to state-south-yemen; a person who held both gets both activities. Opposition, independent work and victimhood must not be attributed to that state.",
+      "criteria": "Only documented service, membership or organizational activity in Yemeni Socialist Party (YSP), founded in October 1978 (before that use party-south-yemen-nlf). Never infer affiliation from nationality, residence or ideology. Use this party for activity outside its ruling period, explicitly oppositional party activity, and — during 1978–1990, its ruling period — documented party membership (including ordinary members holding only state posts), party posts and party cadre work (party first/general secretary, politburo, central committee secretariat and departments, regional party committees). Government, armed forces, security and other state-institution service in that period belongs to state-south-yemen; a person who held both gets both activities. Opposition, independent work and victimhood must not be attributed to that state.",
       "periods": [
         [
           1978,
@@ -2712,7 +2712,7 @@
         "id": "state-south-yemen",
         "periods": [
           [
-            1967,
+            1978,
             1990
           ]
         ]
@@ -3472,7 +3472,7 @@
       "countryCode": "ethiopia",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in Workers' Party of Ethiopia. Never infer affiliation from nationality, residence or ideology. Use this party for pre-state revolutionary activity, activity outside its ruling period, explicitly oppositional party activity, and — during 1974–1991, its ruling period — documented party membership (including ordinary members holding only state posts), party posts and party cadre work (party first/general secretary, politburo, central committee secretariat and departments, regional party committees). Government, armed forces, security and other state-institution service in that period belongs to state-ethiopia; a person who held both gets both activities. Opposition, independent work and victimhood must not be attributed to that state.",
+      "criteria": "Only documented service, membership or organizational activity in Workers' Party of Ethiopia, founded in September 1984 (Derg rule before that had no ruling party; service under it belongs to state-ethiopia). Never infer affiliation from nationality, residence or ideology. Use this party for activity outside its ruling period, explicitly oppositional party activity, and — during 1984–1991, its ruling period — documented party membership (including ordinary members holding only state posts), party posts and party cadre work (party first/general secretary, politburo, central committee secretariat and departments, regional party committees). Government, armed forces, security and other state-institution service in that period belongs to state-ethiopia; a person who held both gets both activities. Opposition, independent work and victimhood must not be attributed to that state.",
       "periods": [
         [
           1984,
@@ -3483,7 +3483,7 @@
         "id": "state-ethiopia",
         "periods": [
           [
-            1974,
+            1984,
             1991
           ]
         ]
@@ -6372,7 +6372,7 @@
       "id": "party-dahomeyan-unity",
       "kind": "party",
       "label": {
-        "ko": "다호메 통일당",
+        "ko": "다호메이 통일당",
         "en": "Dahomeyan Unity Party"
       },
       "termIds": [
@@ -11957,6 +11957,2455 @@
       ],
       "termIds": [
         "korean-communist-party-irkutsk-faction"
+      ]
+    },
+    {
+      "id": "party-korean-drp",
+      "kind": "party",
+      "label": {
+        "ko": "민주공화당 (대한민국)",
+        "en": "Democratic Republican Party (South Korea)"
+      },
+      "termIds": [
+        "democratic-republican-party-south-korea"
+      ],
+      "countryCode": "south-korea",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Democratic Republican Party (South Korea). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1963,
+          1980
+        ]
+      ]
+    },
+    {
+      "id": "party-korean-djp",
+      "kind": "party",
+      "label": {
+        "ko": "민주정의당",
+        "en": "Democratic Justice Party"
+      },
+      "termIds": [
+        "democratic-justice-party"
+      ],
+      "countryCode": "south-korea",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Democratic Justice Party. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1981,
+          1990
+        ]
+      ]
+    },
+    {
+      "id": "party-korean-gnp",
+      "kind": "party",
+      "label": {
+        "ko": "한나라당·새누리당·자유한국당",
+        "en": "Grand National Party / Saenuri Party / Liberty Korea Party"
+      },
+      "termIds": [
+        "liberty-korea-party"
+      ],
+      "countryCode": "south-korea",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Grand National Party / Saenuri Party / Liberty Korea Party. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1997,
+          2020
+        ]
+      ]
+    },
+    {
+      "id": "party-korean-ppp",
+      "kind": "party",
+      "label": {
+        "ko": "국민의힘",
+        "en": "People Power Party (South Korea)"
+      },
+      "termIds": [
+        "people-power-party-south-korea"
+      ],
+      "countryCode": "south-korea",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in People Power Party (South Korea). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          2020,
+          null
+        ]
+      ]
+    },
+    {
+      "id": "party-korean-mdp",
+      "kind": "party",
+      "label": {
+        "ko": "새천년민주당",
+        "en": "Millennium Democratic Party"
+      },
+      "termIds": [
+        "millennium-democratic-party"
+      ],
+      "countryCode": "south-korea",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Millennium Democratic Party. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          2000,
+          2007
+        ]
+      ]
+    },
+    {
+      "id": "party-korean-uri",
+      "kind": "party",
+      "label": {
+        "ko": "열린우리당",
+        "en": "Uri Party"
+      },
+      "termIds": [
+        "uri-party"
+      ],
+      "countryCode": "south-korea",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Uri Party. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          2003,
+          2007
+        ]
+      ]
+    },
+    {
+      "id": "party-korean-dpk",
+      "kind": "party",
+      "label": {
+        "ko": "더불어민주당",
+        "en": "Democratic Party of Korea"
+      },
+      "termIds": [
+        "democratic-party-of-korea"
+      ],
+      "countryCode": "south-korea",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Democratic Party of Korea. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          2014,
+          null
+        ]
+      ]
+    },
+    {
+      "id": "party-korean-dp-1955",
+      "kind": "party",
+      "label": {
+        "ko": "민주당 (1955)",
+        "en": "Democratic Party (South Korea, 1955)"
+      },
+      "termIds": [
+        "democratic-party-south-korea-1955"
+      ],
+      "countryCode": "south-korea",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Democratic Party (South Korea, 1955). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1955,
+          1965
+        ]
+      ]
+    },
+    {
+      "id": "state-usamgik",
+      "icon": "landmark",
+      "kind": "state",
+      "label": {
+        "ko": "미군정청",
+        "en": "United States Army Military Government in Korea"
+      },
+      "periods": [
+        [
+          1945,
+          1948
+        ]
+      ],
+      "criteria": "Documented service for the US Army Military Government in Korea (September 1945 to 15 August 1948) south of the 38th parallel: its military governor and departments, the Korean National Police under its Police Department, and the Korean Constabulary (국방경비대) before the founding of the Republic of Korea. Service after 15 August 1948 belongs to state-south-korea; US Army service outside the military government belongs to state-usa. Do NOT infer from residence, citizenship or cooperation with the occupation.",
+      "parentId": null,
+      "countryCode": "korea",
+      "termIds": [
+        "usamgik"
+      ]
+    },
+    {
+      "id": "party-korean-progressive-1956",
+      "kind": "party",
+      "label": {
+        "ko": "진보당 (1956)",
+        "en": "Progressive Party (South Korea, 1956)"
+      },
+      "termIds": [
+        "progressive-party-1956"
+      ],
+      "countryCode": "south-korea",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in the Progressive Party (South Korea, 1956-1958) led by Cho Bong-am. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1955,
+          1958
+        ]
+      ]
+    },
+    {
+      "id": "party-korean-mass-socialist-1960",
+      "kind": "party",
+      "label": {
+        "ko": "사회대중당",
+        "en": "Socialist Mass Party (South Korea)"
+      },
+      "termIds": [
+        "socialist-mass-party-1960"
+      ],
+      "countryCode": "south-korea",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in the Socialist Mass Party (South Korea, 1960-1961). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1960,
+          1961
+        ]
+      ]
+    },
+    {
+      "id": "korea-cheonggye-garment-union",
+      "icon": "flag",
+      "kind": "force",
+      "label": {
+        "ko": "청계피복노동조합",
+        "en": "Cheonggye Garment Workers' Union"
+      },
+      "periods": [
+        [
+          1970,
+          1998
+        ]
+      ],
+      "termIds": [
+        "cheonggye-garment-workers-union"
+      ],
+      "criteria": "Only documented service, membership or organizational activity in the Cheonggye Garment Workers' Union (Peace Market, Seoul). Never infer affiliation from nationality, residence or ideology.",
+      "parentId": "labor-union",
+      "countryCode": "south-korea"
+    },
+    {
+      "id": "korea-kctu",
+      "kind": "force",
+      "label": {
+        "ko": "전국민주노동조합총연맹",
+        "en": "Korean Confederation of Trade Unions (KCTU)"
+      },
+      "termIds": [
+        "korean-confederation-of-trade-unions"
+      ],
+      "countryCode": "south-korea",
+      "icon": "flag",
+      "parentId": "labor-union",
+      "criteria": "Only documented service, membership or organizational activity in the Korean Confederation of Trade Unions (Minju Nochong, founded 1995), including its preparatory bodies. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1995,
+          null
+        ]
+      ]
+    },
+    {
+      "id": "korea-fktu",
+      "kind": "force",
+      "label": {
+        "ko": "한국노동조합총연맹",
+        "en": "Federation of Korean Trade Unions (FKTU)"
+      },
+      "termIds": [
+        "federation-of-korean-trade-unions"
+      ],
+      "countryCode": "south-korea",
+      "icon": "flag",
+      "parentId": "labor-union",
+      "criteria": "Only documented service, membership or organizational activity in the Federation of Korean Trade Unions (Hanguk Nochong). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1960,
+          null
+        ]
+      ]
+    },
+    {
+      "id": "party-korean-pv21",
+      "kind": "party",
+      "label": {
+        "ko": "국민승리21",
+        "en": "People's Victory 21"
+      },
+      "termIds": [
+        "peoples-victory-21"
+      ],
+      "countryCode": "south-korea",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in People's Victory 21 (Construction People's Victory 21, 1997-1999), the progressive party that ran Kwon Young-ghil for president in 1997. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1997,
+          1999
+        ]
+      ]
+    },
+    {
+      "id": "korea-southern-partisans",
+      "kind": "military",
+      "label": {
+        "ko": "남한 빨치산 (조선인민유격대)",
+        "en": "South Korean partisans (Korean People's Guerrillas)"
+      },
+      "termIds": [
+        "south-korean-partisans"
+      ],
+      "countryCode": "south-korea",
+      "icon": "swords",
+      "parentId": null,
+      "criteria": "Only documented service in the left-wing partisan units of southern Korea (1946 to 1963): the mountain units (yasandae) of the Workers' Party of South Korea, the Korean People's Guerrillas corps of 1949, the Southern Army (Nambugun) and the district party guerrillas of the Korean War. Party posts belong to party-south-korean-workers or party-korean-workers; Korean People's Army service to state-north-korea. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1946,
+          1963
+        ]
+      ]
+    },
+    {
+      "id": "party-korean-dlp",
+      "icon": "flag",
+      "kind": "party",
+      "label": {
+        "en": "Democratic Labor Party (South Korea)",
+        "ko": "민주노동당 (한국)"
+      },
+      "periods": [
+        [
+          2000,
+          2011
+        ]
+      ],
+      "termIds": [
+        "democratic-labor-party-south-korea"
+      ],
+      "criteria": "Only documented service, membership or organizational activity in the Democratic Labor Party (South Korea, 2000-2011), the progressive party founded on People's Victory 21 and the KCTU that merged into the Unified Progressive Party in 2011. Not the 2025 renaming of the Justice Party. Never infer affiliation from nationality, residence or ideology.",
+      "parentId": null,
+      "countryCode": "south-korea"
+    },
+    {
+      "id": "party-korean-ndp-1967",
+      "icon": "flag",
+      "kind": "party",
+      "label": {
+        "en": "New Democratic Party (South Korea, 1967)",
+        "ko": "신민당 (1967)"
+      },
+      "periods": [
+        [
+          1967,
+          1980
+        ]
+      ],
+      "termIds": [
+        "new-democratic-party-south-korea-1967"
+      ],
+      "criteria": "Only documented service, membership or organizational activity in the New Democratic Party (South Korea, 1967-1980), the main opposition party under Park Chung Hee and the Yushin regime. Not the 1960 New Democratic Party of the Democratic Party's old faction, the 1946 New People's Party of Korea or the 1985 New Korea Democratic Party. Never infer affiliation from nationality, residence or ideology.",
+      "parentId": null,
+      "countryCode": "south-korea"
+    },
+    {
+      "id": "japan-rodo-kumiai-kiseikai",
+      "kind": "force",
+      "label": {
+        "ko": "노동조합기성회",
+        "en": "Rodo Kumiai Kiseikai (Society for the Promotion of Trade Unions)"
+      },
+      "termIds": [
+        "rodo-kumiai-kiseikai"
+      ],
+      "countryCode": "japan",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Rodo Kumiai Kiseikai (Society for the Promotion of Trade Unions). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1897,
+          1901
+        ]
+      ]
+    },
+    {
+      "id": "party-japan-social-democratic-1901",
+      "kind": "party",
+      "label": {
+        "ko": "사회민주당 (일본 1901)",
+        "en": "Social Democratic Party (Japan, 1901)"
+      },
+      "termIds": [
+        "social-democratic-party-japan-1901"
+      ],
+      "countryCode": "japan",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Social Democratic Party (Japan, 1901). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1901,
+          1901
+        ]
+      ]
+    },
+    {
+      "id": "japan-heiminsha",
+      "kind": "force",
+      "label": {
+        "ko": "평민사",
+        "en": "Heiminsha"
+      },
+      "termIds": [
+        "heiminsha"
+      ],
+      "countryCode": "japan",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Heiminsha. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1903,
+          1910
+        ]
+      ]
+    },
+    {
+      "id": "party-japan-socialist-1906",
+      "kind": "party",
+      "label": {
+        "ko": "일본사회당 (1906)",
+        "en": "Japan Socialist Party (1906)"
+      },
+      "termIds": [
+        "japan-socialist-party-1906"
+      ],
+      "countryCode": "japan",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Japan Socialist Party (1906). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1906,
+          1907
+        ]
+      ]
+    },
+    {
+      "id": "japan-sodomei",
+      "kind": "force",
+      "label": {
+        "ko": "일본노동총동맹 (우애회)",
+        "en": "Japan General Federation of Labour (Sōdōmei, formerly Yūaikai)"
+      },
+      "termIds": [
+        "japan-general-federation-of-labour",
+        "yuaikai"
+      ],
+      "countryCode": "japan",
+      "icon": "flag",
+      "parentId": "labor-union",
+      "criteria": "Only documented service, membership or organizational activity in Japan General Federation of Labour (Sōdōmei, formerly Yūaikai). Never infer affiliation from nationality, residence, descent or ideology.",
+      "periods": [
+        [
+          1912,
+          1940
+        ]
+      ]
+    },
+    {
+      "id": "japan-hyogikai",
+      "kind": "force",
+      "label": {
+        "ko": "일본노동조합평의회",
+        "en": "Council of Japanese Labour Unions (Hyōgikai)"
+      },
+      "termIds": [
+        "hyogikai"
+      ],
+      "countryCode": "japan",
+      "icon": "flag",
+      "parentId": "labor-union",
+      "criteria": "Only documented service, membership or organizational activity in Council of Japanese Labour Unions (Hyōgikai). Never infer affiliation from nationality, residence, descent or ideology.",
+      "periods": [
+        [
+          1925,
+          1928
+        ]
+      ]
+    },
+    {
+      "id": "japan-farmers-union",
+      "kind": "force",
+      "label": {
+        "ko": "일본농민조합",
+        "en": "Japan Farmers' Union (Nichinō)"
+      },
+      "termIds": [
+        "japan-farmers-union-1922"
+      ],
+      "countryCode": "japan",
+      "icon": "flag",
+      "parentId": "labor-union",
+      "criteria": "Only documented service, membership or organizational activity in Japan Farmers' Union (Nichinō). Never infer affiliation from nationality, residence, descent or ideology.",
+      "periods": [
+        [
+          1922,
+          1928
+        ]
+      ]
+    },
+    {
+      "id": "japan-suiheisha",
+      "kind": "force",
+      "label": {
+        "ko": "전국수평사",
+        "en": "Zenkoku Suiheisha"
+      },
+      "termIds": [
+        "zenkoku-suiheisha"
+      ],
+      "countryCode": "japan",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in Zenkoku Suiheisha. Never infer affiliation from nationality, residence, descent or ideology.",
+      "periods": [
+        [
+          1922,
+          1942
+        ]
+      ]
+    },
+    {
+      "id": "japan-new-womens-association",
+      "kind": "force",
+      "label": {
+        "ko": "신부인협회",
+        "en": "New Women's Association (Japan)"
+      },
+      "termIds": [
+        "new-womens-association-japan"
+      ],
+      "countryCode": "japan",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in New Women's Association (Japan). Never infer affiliation from nationality, residence, descent or ideology.",
+      "periods": [
+        [
+          1919,
+          1922
+        ]
+      ]
+    },
+    {
+      "id": "party-japan-socialist",
+      "icon": "flag",
+      "kind": "party",
+      "label": {
+        "en": "Japan Socialist Party (1945)",
+        "ko": "일본사회당"
+      },
+      "periods": [
+        [
+          1945,
+          1996
+        ]
+      ],
+      "termIds": [
+        "japan-socialist-party"
+      ],
+      "criteria": "Only documented service, membership or organizational activity in the Japan Socialist Party (1945). Never infer affiliation from nationality, residence or ideology.",
+      "parentId": null,
+      "countryCode": "japan"
+    },
+    {
+      "id": "japan-sanbetsu-kaigi",
+      "icon": "flag",
+      "kind": "force",
+      "label": {
+        "en": "Congress of Industrial Unions of Japan (Sanbetsu Kaigi)",
+        "ko": "전일본산업별노동조합회의 (산별회의)"
+      },
+      "periods": [
+        [
+          1946,
+          1958
+        ]
+      ],
+      "termIds": [
+        "sanbetsu-kaigi"
+      ],
+      "criteria": "Only documented service, membership or organizational activity in the Congress of Industrial Unions of Japan (Sanbetsu Kaigi). Never infer affiliation from nationality, residence, descent or ideology.",
+      "parentId": "labor-union",
+      "countryCode": "japan"
+    },
+    {
+      "id": "party-japanese-jiyuto-1881",
+      "icon": "flag",
+      "kind": "party",
+      "label": {
+        "en": "Liberal Party (Japan, 1881)",
+        "ko": "자유당 (일본 1881)"
+      },
+      "periods": [
+        [
+          1881,
+          1884
+        ]
+      ],
+      "termIds": [
+        "liberal-party-japan-1881"
+      ],
+      "criteria": "Only documented service, membership or organizational activity in the Liberal Party (Jiyūtō) founded in 1881. Never infer affiliation from nationality, residence or ideology.",
+      "parentId": null,
+      "countryCode": "japan"
+    },
+    {
+      "id": "party-japanese-kaishinto",
+      "icon": "flag",
+      "kind": "party",
+      "label": {
+        "en": "Rikken Kaishintō",
+        "ko": "입헌개진당"
+      },
+      "periods": [
+        [
+          1882,
+          1896
+        ]
+      ],
+      "termIds": [
+        "rikken-kaishinto"
+      ],
+      "criteria": "Only documented service, membership or organizational activity in the Rikken Kaishintō. Never infer affiliation from nationality, residence or ideology.",
+      "parentId": null,
+      "countryCode": "japan"
+    },
+    {
+      "id": "party-japanese-labour-farmer",
+      "kind": "party",
+      "label": {
+        "ko": "노동농민당",
+        "en": "Labour-Farmer Party (Japan)"
+      },
+      "termIds": [
+        "labour-farmer-party-japan"
+      ],
+      "countryCode": "japan",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in the Labour-Farmer Party (Rōdō Nōmintō, 1926-1928). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1926,
+          1928
+        ]
+      ]
+    },
+    {
+      "id": "party-japanese-minseito",
+      "kind": "party",
+      "icon": "flag",
+      "label": {
+        "ko": "입헌민정당",
+        "en": "Rikken Minseitō"
+      },
+      "termIds": [
+        "rikken-minseito"
+      ],
+      "countryCode": "japan",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in the Rikken Minseitō. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1927,
+          1940
+        ]
+      ]
+    },
+    {
+      "id": "japan-kokuro",
+      "kind": "force",
+      "label": {
+        "ko": "국철노동조합 (국노)",
+        "en": "National Railway Workers' Union (Kokuro)"
+      },
+      "termIds": [
+        "national-railway-workers-union-kokuro"
+      ],
+      "countryCode": "japan",
+      "icon": "flag",
+      "parentId": "labor-union",
+      "periods": [
+        [
+          1946,
+          null
+        ]
+      ],
+      "criteria": "Only documented service, membership or organizational activity in the National Railway Workers' Union (Kokuro). Never infer affiliation from nationality, residence, descent, ideology or employment on the railways."
+    },
+    {
+      "id": "japan-doro",
+      "kind": "force",
+      "label": {
+        "ko": "국철 동력차노동조합 (동로)",
+        "en": "National Railway Motive Power Union (Doro)"
+      },
+      "termIds": [
+        "national-railway-motive-power-union-doro"
+      ],
+      "countryCode": "japan",
+      "icon": "flag",
+      "parentId": "labor-union",
+      "periods": [
+        [
+          1951,
+          1987
+        ]
+      ],
+      "criteria": "Only documented service, membership or organizational activity in the National Railway Motive Power Union (Doro, until 1959 Kiro). Never infer affiliation from nationality, residence, descent, ideology or employment on the railways."
+    },
+    {
+      "id": "japan-rengo",
+      "kind": "force",
+      "label": {
+        "ko": "일본노동조합총연합회 (렌고)",
+        "en": "Japanese Trade Union Confederation (Rengo)"
+      },
+      "termIds": [
+        "rengo-japanese-trade-union-confederation"
+      ],
+      "countryCode": "japan",
+      "icon": "flag",
+      "parentId": "labor-union",
+      "periods": [
+        [
+          1987,
+          null
+        ]
+      ],
+      "criteria": "Only documented service, membership or organizational activity in Rengo (the private-sector Zenminroren from 1987 and the unified Japanese Trade Union Confederation from 1989). Never infer affiliation from nationality, residence, descent, ideology or membership of an affiliated union alone."
+    },
+    {
+      "id": "party-okinawa-peoples",
+      "kind": "party",
+      "label": {
+        "ko": "오키나와 인민당",
+        "en": "Okinawa People's Party"
+      },
+      "termIds": [
+        "okinawa-peoples-party"
+      ],
+      "countryCode": "japan",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented membership, leadership or organizational activity in the Okinawa People's Party (Okinawa Jinmintō, 1947-1973; called the Ryukyu People's Party in 1951-1953), the left-wing party of US-ruled Okinawa that merged into the Japanese Communist Party in October 1973. Membership of the JCP after the merger belongs to party-japanese-communist. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1947,
+          1973
+        ]
+      ]
+    },
+    {
+      "id": "japan-sohyo",
+      "icon": "flag",
+      "kind": "force",
+      "label": {
+        "en": "General Council of Trade Unions of Japan (Sohyo)",
+        "ko": "일본노동조합총평의회 (총평)"
+      },
+      "periods": [
+        [
+          1950,
+          1989
+        ]
+      ],
+      "termIds": [
+        "sohyo"
+      ],
+      "criteria": "Only documented service, membership or organizational activity in the General Council of Trade Unions of Japan (Sohyo). Never infer affiliation from nationality, residence, descent, ideology or membership of an affiliated union alone.",
+      "parentId": "labor-union",
+      "countryCode": "japan"
+    },
+    {
+      "id": "japan-zengakuren",
+      "icon": "flag",
+      "kind": "force",
+      "label": {
+        "en": "All-Japan Federation of Students' Self-Government Associations (Zengakuren)",
+        "ko": "전일본학생자치회총연합 (전학련)"
+      },
+      "periods": [
+        [
+          1948,
+          null
+        ]
+      ],
+      "termIds": [
+        "zengakuren"
+      ],
+      "criteria": "Only documented service, membership or organizational activity in Zengakuren or one of its factions. Never infer affiliation from nationality, residence, descent, ideology or university enrolment.",
+      "parentId": null,
+      "countryCode": "japan"
+    },
+    {
+      "id": "japan-communist-league-bund",
+      "icon": "flag",
+      "kind": "force",
+      "label": {
+        "en": "Communist League (Japan, Bund)",
+        "ko": "공산주의자동맹 (일본, 분트)"
+      },
+      "periods": [
+        [
+          1958,
+          1960
+        ]
+      ],
+      "termIds": [
+        "communist-league-japan"
+      ],
+      "criteria": "Only documented service, membership or organizational activity in the Japanese Communist League (Bund) founded in December 1958. Never infer affiliation from nationality, residence, descent, ideology or Zengakuren membership alone.",
+      "parentId": null,
+      "countryCode": "japan"
+    },
+    {
+      "id": "party-japan-democratic-socialist",
+      "icon": "flag",
+      "kind": "party",
+      "label": {
+        "en": "Democratic Socialist Party (Japan)",
+        "ko": "민주사회당 (일본)"
+      },
+      "periods": [
+        [
+          1960,
+          1994
+        ]
+      ],
+      "termIds": [
+        "democratic-socialist-party-japan"
+      ],
+      "criteria": "Only documented service, membership or organizational activity in the Democratic Socialist Party of Japan (1960-1994). Never infer affiliation from nationality, residence, descent or ideology.",
+      "parentId": null,
+      "countryCode": "japan"
+    },
+    {
+      "id": "japan-beheiren",
+      "icon": "flag",
+      "kind": "force",
+      "label": {
+        "ko": "베트남에 평화를! 시민연합 (베헤렌)",
+        "en": "Citizens' League for Peace in Vietnam (Beheiren)"
+      },
+      "periods": [
+        [
+          1965,
+          1974
+        ]
+      ],
+      "termIds": [
+        "beheiren"
+      ],
+      "criteria": "Only documented service, membership or organizational activity in Beheiren or one of its local groups. Never infer affiliation from nationality, residence, descent, ideology or university enrolment.",
+      "parentId": null,
+      "countryCode": "japan"
+    },
+    {
+      "id": "japan-zenkyoto",
+      "icon": "flag",
+      "kind": "force",
+      "label": {
+        "ko": "전학공투회의 (전공투)",
+        "en": "Zenkyōtō (All-Campus Joint Struggle Committees)"
+      },
+      "periods": [
+        [
+          1968,
+          1972
+        ]
+      ],
+      "termIds": [
+        "zenkyoto"
+      ],
+      "criteria": "Only documented service, membership or organizational activity in a campus Zenkyōtō or the national Zenkyōtō federation. Never infer affiliation from nationality, residence, descent, ideology or university enrolment.",
+      "parentId": null,
+      "countryCode": "japan"
+    },
+    {
+      "id": "japan-revolutionary-communist-league",
+      "icon": "flag",
+      "kind": "force",
+      "label": {
+        "ko": "혁명적 공산주의자동맹 (혁공동, 중핵파·혁마르파)",
+        "en": "Revolutionary Communist League (Kakukyōdō, Chūkaku-ha and Kakumaru-ha)"
+      },
+      "periods": [
+        [
+          1957,
+          null
+        ]
+      ],
+      "termIds": [
+        "revolutionary-communist-league-japan"
+      ],
+      "criteria": "Only documented service, membership or organizational activity in the Japanese Revolutionary Communist League or its successor factions (Chūkaku-ha, Kakumaru-ha). Never infer affiliation from nationality, residence, descent, ideology or university enrolment.",
+      "parentId": null,
+      "countryCode": "japan"
+    },
+    {
+      "id": "japan-sanrizuka-league",
+      "icon": "flag",
+      "kind": "force",
+      "label": {
+        "ko": "산리즈카·시바야마 연합 공항 반대동맹",
+        "en": "Sanrizuka-Shibayama United League against the Airport"
+      },
+      "periods": [
+        [
+          1966,
+          null
+        ]
+      ],
+      "termIds": [
+        "sanrizuka-struggle"
+      ],
+      "criteria": "Only documented service, membership or organizational activity in the Sanrizuka-Shibayama United League against the Airport. Never infer affiliation from nationality, residence, descent, ideology or university enrolment.",
+      "parentId": null,
+      "countryCode": "japan"
+    },
+    {
+      "id": "japan-red-army-faction",
+      "icon": "flag",
+      "kind": "force",
+      "label": {
+        "ko": "공산주의자동맹 적군파",
+        "en": "Communist League Red Army Faction"
+      },
+      "periods": [
+        [
+          1969,
+          1972
+        ]
+      ],
+      "termIds": [
+        "red-army-faction-japan"
+      ],
+      "criteria": "Only documented service, membership or organizational activity in the Communist League Red Army Faction (Sekigun-ha). Never infer affiliation from nationality, residence, descent, ideology or university enrolment.",
+      "parentId": null,
+      "countryCode": "japan"
+    },
+    {
+      "id": "japan-united-red-army",
+      "icon": "flag",
+      "kind": "force",
+      "label": {
+        "ko": "연합적군",
+        "en": "United Red Army"
+      },
+      "periods": [
+        [
+          1971,
+          1972
+        ]
+      ],
+      "termIds": [
+        "united-red-army"
+      ],
+      "criteria": "Only documented service, membership or organizational activity in the United Red Army. Never infer affiliation from nationality, residence, descent, ideology or university enrolment.",
+      "parentId": null,
+      "countryCode": "japan"
+    },
+    {
+      "id": "japan-red-army",
+      "icon": "flag",
+      "kind": "force",
+      "label": {
+        "ko": "일본적군",
+        "en": "Japanese Red Army"
+      },
+      "periods": [
+        [
+          1971,
+          2001
+        ]
+      ],
+      "termIds": [
+        "japanese-red-army"
+      ],
+      "criteria": "Only documented service, membership or organizational activity in the Japanese Red Army or its forerunner the Arab Red Army. Never infer affiliation from nationality, residence, descent, ideology or university enrolment.",
+      "parentId": null,
+      "countryCode": "japan"
+    },
+    {
+      "id": "party-korean-kip",
+      "kind": "party",
+      "icon": "flag",
+      "label": {
+        "ko": "한국독립당",
+        "en": "Korea Independence Party"
+      },
+      "termIds": [
+        "korea-independence-party"
+      ],
+      "countryCode": "south-korea",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in the Korea Independence Party (1930-1970), the governing party of the Korean Provisional Government from 1940 led by Kim Ku, and its postwar and re-founded successors until its absorption in 1970. Never infer affiliation from nationality, residence, descent or ideology.",
+      "periods": [
+        [
+          1930,
+          1970
+        ]
+      ]
+    },
+    {
+      "id": "party-korean-gungmindang-1945",
+      "kind": "party",
+      "icon": "flag",
+      "label": {
+        "ko": "국민당 (1945)",
+        "en": "Nationalist Party (Korea, 1945)"
+      },
+      "termIds": [
+        "nationalist-party-korea-1945"
+      ],
+      "countryCode": "south-korea",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in the Nationalist Party (Gungmindang) founded in Seoul in September 1945 under Ahn Jae-hong and merged into the Korea Independence Party in April 1946; not the Chinese Kuomintang. Never infer affiliation from nationality, residence, descent or ideology.",
+      "periods": [
+        [
+          1945,
+          1946
+        ]
+      ]
+    },
+    {
+      "id": "party-south-korean-new-people",
+      "kind": "party",
+      "icon": "flag",
+      "label": {
+        "ko": "남조선신민당",
+        "en": "South Korean New People's Party"
+      },
+      "termIds": [
+        "south-korean-new-peoples-party"
+      ],
+      "countryCode": "south-korea",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in the South Korean New People's Party (July-November 1946) led by Paek Nam-un; the northern New People's Party of Korea is party-choson-new-people. Never infer affiliation from nationality, residence, descent or ideology.",
+      "periods": [
+        [
+          1946,
+          1946
+        ]
+      ]
+    },
+    {
+      "id": "party-korean-laboring-people",
+      "kind": "party",
+      "icon": "flag",
+      "label": {
+        "ko": "근로인민당",
+        "en": "Laboring People's Party (Korea)"
+      },
+      "termIds": [
+        "laboring-peoples-party-korea"
+      ],
+      "countryCode": "south-korea",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in the Laboring People's Party founded by Yeo Un-hyeong in May 1947 and absorbed into the Independent Labour-Farmer Party in 1949. Never infer affiliation from nationality, residence, descent or ideology.",
+      "periods": [
+        [
+          1947,
+          1949
+        ]
+      ]
+    },
+    {
+      "id": "party-korean-dnp-1949",
+      "kind": "party",
+      "icon": "flag",
+      "label": {
+        "ko": "민주국민당 (1949)",
+        "en": "Democratic Nationalist Party (South Korea)"
+      },
+      "termIds": [
+        "democratic-nationalist-party-south-korea"
+      ],
+      "countryCode": "south-korea",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in the Democratic Nationalist Party of 1949-1955 (successor of the Korea Democratic Party, absorbed into the Democratic Party in 1955); not the 2000 party of the same name. Never infer affiliation from nationality, residence, descent or ideology.",
+      "periods": [
+        [
+          1949,
+          1955
+        ]
+      ]
+    },
+    {
+      "id": "party-korean-civil-rule",
+      "kind": "party",
+      "icon": "flag",
+      "label": {
+        "ko": "민정당 (1963)",
+        "en": "Civil Rule Party"
+      },
+      "termIds": [
+        "civil-rule-party-south-korea"
+      ],
+      "countryCode": "south-korea",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in the Civil Rule Party of 1963-1965 led by Yun Po-sun; not the Democratic Justice Party (party-korean-djp), also called Minjeongdang. Never infer affiliation from nationality, residence, descent or ideology.",
+      "periods": [
+        [
+          1963,
+          1965
+        ]
+      ]
+    },
+    {
+      "id": "party-korean-rdp",
+      "kind": "party",
+      "icon": "flag",
+      "label": {
+        "ko": "통일민주당",
+        "en": "Reunification Democratic Party"
+      },
+      "termIds": [
+        "reunification-democratic-party"
+      ],
+      "countryCode": "south-korea",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in the Reunification Democratic Party (1987-1990) of Kim Young-sam and Kim Dae-jung. Never infer affiliation from nationality, residence, descent or ideology.",
+      "periods": [
+        [
+          1987,
+          1990
+        ]
+      ]
+    },
+    {
+      "id": "party-korean-dup",
+      "kind": "party",
+      "icon": "flag",
+      "label": {
+        "ko": "민주통합당",
+        "en": "Democratic United Party"
+      },
+      "termIds": [
+        "democratic-united-party-south-korea"
+      ],
+      "countryCode": "south-korea",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in the Democratic United Party (December 2011 - March 2014, renamed the Democratic Party in May 2013). Never infer affiliation from nationality, residence, descent or ideology.",
+      "periods": [
+        [
+          2011,
+          2014
+        ]
+      ]
+    },
+    {
+      "id": "party-japanese-shakai-minshuto",
+      "kind": "party",
+      "icon": "flag",
+      "label": {
+        "ko": "사회민중당",
+        "en": "Social Democratic Party (Japan, 1926)"
+      },
+      "termIds": [
+        "shakai-minshuto-1926"
+      ],
+      "countryCode": "japan",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in the Shakai Minshūtō (Social Democratic Party of Japan, 1926-1932). Never infer affiliation from nationality, residence, descent or ideology.",
+      "periods": [
+        [
+          1926,
+          1932
+        ]
+      ]
+    },
+    {
+      "id": "party-japanese-nichiroto",
+      "kind": "party",
+      "icon": "flag",
+      "label": {
+        "ko": "일본노농당",
+        "en": "Japan Labour-Farmer Party"
+      },
+      "termIds": [
+        "japan-labour-farmer-party"
+      ],
+      "countryCode": "japan",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in the Japan Labour-Farmer Party (Nihon Rōnōtō, December 1926 - December 1928); not the Labour-Farmer Party (party-japanese-labour-farmer). Never infer affiliation from nationality, residence, descent or ideology.",
+      "periods": [
+        [
+          1926,
+          1928
+        ]
+      ]
+    },
+    {
+      "id": "party-japanese-shakai-taishuto",
+      "kind": "party",
+      "icon": "flag",
+      "label": {
+        "ko": "사회대중당 (일본)",
+        "en": "Social Masses Party (Japan)"
+      },
+      "termIds": [
+        "shakai-taishuto-japan"
+      ],
+      "countryCode": "japan",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in the Shakai Taishūtō (Social Masses Party of Japan, 1932-1940); not the South Korean Socialist Mass Party of 1960 or the Okinawa Social Mass Party. Never infer affiliation from nationality, residence, descent or ideology.",
+      "periods": [
+        [
+          1932,
+          1940
+        ]
+      ]
+    },
+    {
+      "id": "party-japanese-kenseikai",
+      "kind": "party",
+      "icon": "flag",
+      "label": {
+        "ko": "헌정회",
+        "en": "Kenseikai"
+      },
+      "termIds": [
+        "kenseikai"
+      ],
+      "countryCode": "japan",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in the Kenseikai (1916-1927) led by Katō Takaaki. Never infer affiliation from nationality, residence, descent or ideology.",
+      "periods": [
+        [
+          1916,
+          1927
+        ]
+      ]
+    },
+    {
+      "id": "party-japanese-kokuminto",
+      "kind": "party",
+      "icon": "flag",
+      "label": {
+        "ko": "입헌국민당",
+        "en": "Rikken Kokumintō"
+      },
+      "termIds": [
+        "rikken-kokuminto"
+      ],
+      "countryCode": "japan",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in the Rikken Kokumintō (1910-1922). Never infer affiliation from nationality, residence, descent or ideology.",
+      "periods": [
+        [
+          1910,
+          1922
+        ]
+      ]
+    },
+    {
+      "id": "party-japanese-kakushin-club",
+      "kind": "party",
+      "icon": "flag",
+      "label": {
+        "ko": "혁신구락부",
+        "en": "Kakushin Club"
+      },
+      "termIds": [
+        "kakushin-club"
+      ],
+      "countryCode": "japan",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in the Kakushin Club (1922-1925). Never infer affiliation from nationality, residence, descent or ideology.",
+      "periods": [
+        [
+          1922,
+          1925
+        ]
+      ]
+    },
+    {
+      "id": "party-japanese-jiyuto-1945",
+      "kind": "party",
+      "icon": "flag",
+      "label": {
+        "ko": "일본자유당 (1945)",
+        "en": "Japan Liberal Party (1945)"
+      },
+      "termIds": [
+        "japan-liberal-party-1945"
+      ],
+      "countryCode": "japan",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in the Japan Liberal Party (Nihon Jiyūtō, November 1945 - March 1948); not the Liberal Party of 1881 or the later Liberal Party of 1950-1955. Never infer affiliation from nationality, residence, descent or ideology.",
+      "periods": [
+        [
+          1945,
+          1948
+        ]
+      ]
+    },
+    {
+      "id": "party-japanese-shinpoto-1945",
+      "kind": "party",
+      "icon": "flag",
+      "label": {
+        "ko": "일본진보당",
+        "en": "Japan Progressive Party"
+      },
+      "termIds": [
+        "japan-progressive-party-1945"
+      ],
+      "countryCode": "japan",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in the Japan Progressive Party (Nihon Shinpotō, 1945-1947). Never infer affiliation from nationality, residence, descent or ideology.",
+      "periods": [
+        [
+          1945,
+          1947
+        ]
+      ]
+    },
+    {
+      "id": "party-japanese-minshuto-1947",
+      "kind": "party",
+      "icon": "flag",
+      "label": {
+        "ko": "민주당 (일본 1947)",
+        "en": "Democratic Party (Japan, 1947)"
+      },
+      "termIds": [
+        "democratic-party-japan-1947"
+      ],
+      "countryCode": "japan",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in the Democratic Party of Japan of 1947-1950 (Ashida Hitoshi); not the Japan Democratic Party of 1954 (party-japan-democratic). Never infer affiliation from nationality, residence, descent or ideology.",
+      "periods": [
+        [
+          1947,
+          1950
+        ]
+      ]
+    },
+    {
+      "id": "party-japanese-aikokuto",
+      "kind": "party",
+      "icon": "flag",
+      "label": {
+        "ko": "대일본애국당",
+        "en": "Greater Japan Patriotic Party"
+      },
+      "termIds": [
+        "greater-japan-patriotic-party"
+      ],
+      "countryCode": "japan",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in the Greater Japan Patriotic Party (Dai Nippon Aikokutō) founded by Akao Bin in 1951. Never infer affiliation from nationality, residence, descent or ideology.",
+      "periods": [
+        [
+          1951,
+          null
+        ]
+      ]
+    },
+    {
+      "id": "japan-choren",
+      "kind": "force",
+      "icon": "flag",
+      "label": {
+        "ko": "재일본조선인연맹 (조련)",
+        "en": "League of Koreans in Japan (Chōren)"
+      },
+      "termIds": [
+        "league-of-koreans-in-japan"
+      ],
+      "countryCode": "japan",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in the League of Koreans in Japan (Chōren, 1945-1949). Never infer affiliation from nationality, residence, descent or ideology.",
+      "periods": [
+        [
+          1945,
+          1949
+        ]
+      ]
+    },
+    {
+      "id": "japan-korean-labour-federation",
+      "kind": "force",
+      "icon": "flag",
+      "label": {
+        "ko": "재일본조선노동총동맹",
+        "en": "General Federation of Korean Labour in Japan"
+      },
+      "termIds": [
+        "korean-labour-federation-in-japan"
+      ],
+      "countryCode": "japan",
+      "parentId": "labor-union",
+      "criteria": "Only documented service, membership or organizational activity in the General Federation of Korean Labour in Japan (1925-1930). Never infer affiliation from nationality, residence, descent or ideology.",
+      "periods": [
+        [
+          1925,
+          1930
+        ]
+      ]
+    },
+    {
+      "id": "party-okinawa-social-mass",
+      "kind": "party",
+      "icon": "flag",
+      "label": {
+        "ko": "오키나와 사회대중당",
+        "en": "Okinawa Social Mass Party"
+      },
+      "termIds": [
+        "okinawa-social-mass-party"
+      ],
+      "countryCode": "japan",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in the Okinawa Social Mass Party (Okinawa Shakai Taishūtō, founded 1950); not the prewar Social Masses Party (party-japanese-shakai-taishuto). Never infer affiliation from nationality, residence, descent or ideology.",
+      "periods": [
+        [
+          1950,
+          null
+        ]
+      ]
+    },
+    {
+      "id": "party-taiwan-npp",
+      "icon": "flag",
+      "kind": "party",
+      "label": {
+        "en": "New Power Party",
+        "ko": "시대역량"
+      },
+      "periods": [
+        [
+          2015,
+          null
+        ]
+      ],
+      "termIds": [
+        "new-power-party"
+      ],
+      "criteria": "Choose only when the cited career explicitly establishes service or organizational membership in this body; not citizenship or sympathy.",
+      "parentId": null,
+      "countryCode": "taiwan"
+    },
+    {
+      "id": "party-taiwan-tpp",
+      "icon": "flag",
+      "kind": "party",
+      "label": {
+        "en": "Taiwan People's Party (2019)",
+        "ko": "대만민중당 (2019)"
+      },
+      "periods": [
+        [
+          2019,
+          null
+        ]
+      ],
+      "termIds": [
+        "taiwan-peoples-party"
+      ],
+      "criteria": "Choose only when the cited career explicitly establishes service or organizational membership in this body; not citizenship or sympathy.",
+      "parentId": null,
+      "countryCode": "taiwan"
+    },
+    {
+      "id": "party-taiwan-labor",
+      "icon": "flag",
+      "kind": "party",
+      "label": {
+        "en": "Labor Party (Taiwan)",
+        "ko": "노동당 (대만 1989)"
+      },
+      "periods": [
+        [
+          1989,
+          null
+        ]
+      ],
+      "termIds": [
+        "labor-party-taiwan"
+      ],
+      "criteria": "Only documented membership, leadership or organizational activity in the Labor Party (Laodongdang) founded in Taiwan on 29 March 1989 by the China Tide faction and Far Eastern Chemical Fiber unionists. Not the Workers' Party (Gongdang, 1987) it split from. Never infer affiliation from nationality, residence or ideology.",
+      "parentId": null,
+      "countryCode": "taiwan"
+    },
+    {
+      "id": "taiwanese-cultural-association",
+      "icon": "flag",
+      "kind": "force",
+      "label": {
+        "en": "Taiwanese Cultural Association",
+        "ko": "대만문화협회"
+      },
+      "periods": [
+        [
+          1921,
+          1931
+        ]
+      ],
+      "termIds": [
+        "taiwanese-cultural-association"
+      ],
+      "criteria": "Only documented membership, office or organizational activity in the Taiwanese Cultural Association (1921-1931), including the left-wing New Cultural Association after the 1927 split. Not the People's Party or the Alliance for Local Self-Government. Never infer affiliation from nationality, residence or ideology.",
+      "parentId": null,
+      "countryCode": "taiwan"
+    },
+    {
+      "id": "party-taiwanese-peoples-1927",
+      "icon": "flag",
+      "kind": "party",
+      "label": {
+        "en": "Taiwanese People's Party (1927)",
+        "ko": "대만민중당 (1927)"
+      },
+      "periods": [
+        [
+          1927,
+          1931
+        ]
+      ],
+      "termIds": [
+        "taiwanese-peoples-party-1927"
+      ],
+      "criteria": "Only documented membership, office or organizational activity in the Taiwanese People's Party founded in Taichung on 10 July 1927 and banned on 18 February 1931. Not the Taiwan People's Party founded in 2019 (party-taiwan-tpp). Never infer affiliation from nationality, residence or ideology.",
+      "parentId": null,
+      "countryCode": "taiwan"
+    },
+    {
+      "id": "taiwan-farmers-union",
+      "icon": "flag",
+      "kind": "force",
+      "label": {
+        "en": "Taiwan Farmers' Union",
+        "ko": "대만농민조합"
+      },
+      "periods": [
+        [
+          1926,
+          1931
+        ]
+      ],
+      "termIds": [
+        "taiwan-farmers-union"
+      ],
+      "criteria": "Only documented membership, office or organizational activity in the island-wide Taiwan Farmers' Union founded in Fengshan in September 1926 or its local unions. Never infer affiliation from nationality, residence, descent or ideology.",
+      "parentId": "labor-union",
+      "countryCode": "taiwan"
+    },
+    {
+      "id": "party-taiwanese-communist",
+      "icon": "flag",
+      "kind": "party",
+      "label": {
+        "en": "Taiwanese Communist Party",
+        "ko": "대만공산당"
+      },
+      "periods": [
+        [
+          1928,
+          1931
+        ]
+      ],
+      "termIds": [
+        "taiwanese-communist-party"
+      ],
+      "criteria": "Only documented membership, office or organizational activity in the Taiwanese Communist Party (Taiwanese National Branch of the Japanese Communist Party), founded in Shanghai on 15 April 1928 and broken up in 1931. Never infer affiliation from nationality, residence or ideology.",
+      "parentId": null,
+      "countryCode": "taiwan"
+    },
+    {
+      "id": "party-angolan-fnla",
+      "kind": "party",
+      "label": {
+        "ko": "앙골라 민족해방전선",
+        "en": "National Liberation Front of Angola (FNLA)"
+      },
+      "termIds": [
+        "national-liberation-front-of-angola"
+      ],
+      "countryCode": "angola",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in the National Liberation Front of Angola (FNLA), including its forerunners UPNA/UPA and its government in exile (GRAE). Never infer affiliation from nationality, ethnicity, residence or ideology.",
+      "periods": [
+        [
+          1954,
+          null
+        ]
+      ]
+    },
+    {
+      "id": "party-angolan-unita",
+      "kind": "party",
+      "label": {
+        "ko": "앙골라 완전독립민족동맹",
+        "en": "National Union for the Total Independence of Angola (UNITA)"
+      },
+      "termIds": [
+        "unita-angola"
+      ],
+      "countryCode": "angola",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in UNITA, including its armed wing. Never infer affiliation from nationality, ethnicity, residence or ideology.",
+      "periods": [
+        [
+          1966,
+          null
+        ]
+      ]
+    },
+    {
+      "id": "party-borotbists",
+      "icon": "flag",
+      "kind": "party",
+      "label": {
+        "en": "Borotbists (Ukrainian Communist Party)",
+        "ko": "보로트비스트"
+      },
+      "periods": [
+        [
+          1918,
+          1920
+        ]
+      ],
+      "termIds": [
+        "borotbists"
+      ],
+      "criteria": "Only documented service, membership or organizational activity in the Borotbist party (Ukrainian Party of Socialist Revolutionaries-Borotbists, later Ukrainian Communist Party (Borotbists)), 1918-1920. Never infer affiliation from nationality, residence or ideology.",
+      "parentId": null,
+      "countryCode": "ukraine"
+    },
+    {
+      "id": "party-norwegian-labour",
+      "kind": "party",
+      "label": {
+        "ko": "노르웨이 노동당",
+        "en": "Labour Party (Norway)"
+      },
+      "termIds": [
+        "labour-party-norway"
+      ],
+      "countryCode": "norway",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in the Labour Party (Norway). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1887,
+          null
+        ]
+      ]
+    },
+    {
+      "id": "party-malagasy-psd",
+      "kind": "party",
+      "label": {
+        "ko": "말라가시 사회민주당 (PSD)",
+        "en": "Social Democratic Party of Madagascar (PSD)"
+      },
+      "termIds": [
+        "psd-madagascar"
+      ],
+      "countryCode": "madagascar",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in the Social Democratic Party of Madagascar (PSD, founded 1956). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1956,
+          null
+        ]
+      ]
+    },
+    {
+      "id": "party-malagasy-akfm",
+      "kind": "party",
+      "label": {
+        "ko": "마다가스카르 독립회의당 (AKFM)",
+        "en": "Congress Party for the Independence of Madagascar (AKFM)"
+      },
+      "termIds": [
+        "akfm-madagascar"
+      ],
+      "countryCode": "madagascar",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in the AKFM (Congress Party for the Independence of Madagascar, founded 1958). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1958,
+          null
+        ]
+      ]
+    },
+    {
+      "id": "party-south-yemen-nlf",
+      "kind": "party",
+      "label": {
+        "ko": "민족해방전선 (남예멘)",
+        "en": "National Liberation Front (South Yemen)"
+      },
+      "termIds": [
+        "national-liberation-front-south-yemen"
+      ],
+      "countryCode": "yemen",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in the South Yemeni National Liberation Front (from 1967 the National Front, from 1975 the Unified Political Organization of the National Front). Never infer affiliation from nationality, residence or ideology. Use it for the armed struggle before independence, explicitly oppositional activity and, from 1967 to 1978, for documented party membership and party posts; government, armed forces and security service in that period belongs to state-south-yemen, and a person who held both gets both activities. Opposition, independent work and victimhood must not be attributed to that state. From October 1978 use party-yemeni-socialist.",
+      "periods": [
+        [
+          1963,
+          1978
+        ]
+      ],
+      "governingState": {
+        "id": "state-south-yemen",
+        "periods": [
+          [
+            1967,
+            1978
+          ]
+        ]
+      }
+    },
+    {
+      "id": "party-flosy",
+      "kind": "party",
+      "label": {
+        "ko": "피점령 남예멘 해방전선",
+        "en": "Front for the Liberation of Occupied South Yemen (FLOSY)"
+      },
+      "termIds": [
+        "flosy"
+      ],
+      "countryCode": "yemen",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented leadership, membership or armed activity in FLOSY, the Egyptian-backed Arab nationalist front of the Aden Emergency. Never infer affiliation from nationality, residence or ideology, and never record it as service to a state.",
+      "periods": [
+        [
+          1966,
+          1967
+        ]
+      ]
+    },
+    {
+      "id": "party-mozambican-renamo",
+      "kind": "party",
+      "label": {
+        "ko": "모잠비크 민족저항",
+        "en": "Mozambican National Resistance (RENAMO)"
+      },
+      "termIds": [
+        "mozambican-national-resistance"
+      ],
+      "countryCode": "mozambique",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in RENAMO, including its armed wing. Never infer affiliation from nationality, ethnicity, residence or ideology.",
+      "periods": [
+        [
+          1977,
+          null
+        ]
+      ]
+    },
+    {
+      "id": "party-mozambican-pcn",
+      "kind": "party",
+      "label": {
+        "ko": "국민연합당 (모잠비크)",
+        "en": "National Coalition Party (PCN, Mozambique)"
+      },
+      "termIds": [
+        "national-coalition-party-mozambique"
+      ],
+      "countryCode": "mozambique",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in the Partido de Coligação Nacional (PCN) of 1974–1975. Never infer affiliation from nationality, ethnicity, residence or ideology.",
+      "periods": [
+        [
+          1974,
+          1975
+        ]
+      ]
+    },
+    {
+      "id": "party-somali-youth-league",
+      "icon": "flag",
+      "kind": "party",
+      "label": {
+        "en": "Somali Youth League",
+        "ko": "소말리 청년동맹"
+      },
+      "periods": [
+        [
+          1943,
+          1969
+        ]
+      ],
+      "termIds": [
+        "somali-youth-league"
+      ],
+      "criteria": "Only documented service, membership or organizational activity in the Somali Youth League. Never infer affiliation from nationality, residence or ideology.",
+      "parentId": null,
+      "countryCode": "somalia"
+    },
+    {
+      "id": "party-congolese-mnr",
+      "kind": "party",
+      "label": {
+        "ko": "민족혁명운동 (콩고)",
+        "en": "National Movement of the Revolution (MNR, Congo)"
+      },
+      "termIds": [
+        "national-movement-of-the-revolution-congo"
+      ],
+      "countryCode": "republic-of-congo",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in the National Movement of the Revolution (MNR), the single party of Congo-Brazzaville from 1964 until the PCT replaced it in December 1969, including its youth wing (JMNR). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1964,
+          1969
+        ]
+      ]
+    },
+    {
+      "id": "party-japan-new-party",
+      "kind": "party",
+      "icon": "flag",
+      "label": {
+        "ko": "일본신당",
+        "en": "Japan New Party"
+      },
+      "termIds": [
+        "japan-new-party"
+      ],
+      "countryCode": "japan",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in the Japan New Party (Nihon Shintō, 1992-1994) founded by Morihiro Hosokawa; not the New Frontier Party it joined in 1994. Never infer affiliation from nationality, residence, descent or ideology.",
+      "periods": [
+        [
+          1992,
+          1994
+        ]
+      ]
+    },
+    {
+      "id": "party-japan-dpj",
+      "kind": "party",
+      "icon": "flag",
+      "label": {
+        "ko": "민주당 (일본 1996)",
+        "en": "Democratic Party of Japan (1996-2016)"
+      },
+      "termIds": [
+        "democratic-party-of-japan"
+      ],
+      "countryCode": "japan",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in the Democratic Party of Japan (Minshutō) founded in 1996 and relaunched in 1998, until it became the Democratic Party (Minshintō) in 2016; not the Democratic Party of 1947-1950, the Japan Democratic Party of 1954-1955 or the later Minshintō and Constitutional Democratic Party. Never infer affiliation from nationality, residence, descent or ideology.",
+      "periods": [
+        [
+          1996,
+          2016
+        ]
+      ]
+    },
+    {
+      "id": "party-korean-national-revolutionary",
+      "kind": "party",
+      "icon": "flag",
+      "label": {
+        "ko": "조선민족혁명당",
+        "en": "Korean National Revolutionary Party"
+      },
+      "termIds": [
+        "korean-national-revolutionary-party"
+      ],
+      "countryCode": "korea",
+      "parentId": null,
+      "criteria": "Only documented membership, office or organizational activity in the Korean National Revolutionary Party founded at Nanjing in July 1935 (until 1937 also called the Korean/Hanguk National Revolutionary Party; renamed the People's Republican Party after liberation). The Heroic Corps before the 1935 merger belongs to korea-uiyeoldan, its armed wing to korea-volunteer-corps. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1935,
+          1947
+        ]
+      ]
+    },
+    {
+      "id": "korea-uiyeoldan",
+      "kind": "force",
+      "icon": "swords",
+      "label": {
+        "ko": "의열단",
+        "en": "Heroic Corps (Uiyeoldan)"
+      },
+      "termIds": [
+        "uiyeoldan"
+      ],
+      "countryCode": "korea",
+      "parentId": "korean-independence-movement",
+      "criteria": "Only documented membership or leadership in the Heroic Corps (Uiyeoldan), the anti-Japanese secret society founded at Jilin in November 1919 and merged into the Korean National Revolutionary Party in 1935. Writing for it or cooperating with it without joining does not qualify. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1919,
+          1935
+        ]
+      ]
+    },
+    {
+      "id": "korea-volunteer-corps",
+      "kind": "military",
+      "icon": "swords",
+      "label": {
+        "ko": "조선의용대",
+        "en": "Korean Volunteer Corps"
+      },
+      "termIds": [
+        "korean-volunteer-corps"
+      ],
+      "countryCode": "korea",
+      "parentId": "korean-independence-movement",
+      "criteria": "Only documented service in the Korean Volunteer Corps formed at Hankou in October 1938 under the Korean National Front Federation, including its North China detachment of 1941–1942. From July 1942 the North China units belong to korea-volunteer-army and the Chongqing units to korea-liberation-army. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1938,
+          1942
+        ]
+      ]
+    },
+    {
+      "id": "korea-volunteer-army",
+      "kind": "military",
+      "icon": "swords",
+      "label": {
+        "ko": "조선의용군",
+        "en": "Korean Volunteer Army"
+      },
+      "termIds": [
+        "korean-volunteer-army"
+      ],
+      "countryCode": "korea",
+      "parentId": "korean-independence-movement",
+      "criteria": "Only documented service in the Korean Volunteer Army, the armed force of the Korean Independence League reorganized from the North China detachment of the Korean Volunteer Corps in July 1942, up to its absorption into the Korean People's Army in 1949–1950. Korean People's Army service belongs to state-north-korea; earlier Eighth Route Army service to china-pla. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1942,
+          1950
+        ]
+      ]
+    },
+    {
+      "id": "korea-independence-league",
+      "kind": "force",
+      "icon": "flag",
+      "label": {
+        "ko": "조선독립동맹",
+        "en": "Korean Independence League (North China)"
+      },
+      "termIds": [
+        "korean-independence-league"
+      ],
+      "countryCode": "korea",
+      "parentId": "korean-independence-movement",
+      "criteria": "Only documented membership, office or organizational activity in the (North China) Korean Independence League formed in the Taihang base area in July 1942, until it became the New People's Party of Korea in February 1946 (then party-choson-new-people). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1942,
+          1946
+        ]
+      ]
+    },
+    {
+      "id": "korea-liberation-army",
+      "kind": "military",
+      "icon": "swords",
+      "label": {
+        "ko": "한국광복군",
+        "en": "Korean Liberation Army"
+      },
+      "termIds": [
+        "korean-liberation-army"
+      ],
+      "countryCode": "korea",
+      "parentId": "korean-independence-movement",
+      "criteria": "Only documented service in the Korean Liberation Army, the army of the Provisional Government of the Republic of Korea founded at Chongqing in September 1940 and disbanded in 1946. Civil posts in the Provisional Government belong to korean-independence-movement. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1940,
+          1946
+        ]
+      ]
+    },
+    {
+      "id": "china-najua",
+      "kind": "military",
+      "icon": "swords",
+      "label": {
+        "ko": "동북항일연군",
+        "en": "Northeast Anti-Japanese United Army"
+      },
+      "termIds": [
+        "northeast-anti-japanese-united-army"
+      ],
+      "countryCode": "china",
+      "parentId": "china-ccp",
+      "criteria": "Only documented service in the Northeast Anti-Japanese United Army, the guerrilla army led by the Chinese Communist Party in Manchuria from 1936, in its predecessor the Northeast People's Revolutionary Army (1933–1936), or in the training brigade its survivors formed in the Soviet Far East (1942–1945). Chinese and Korean fighters alike. Red Army, Eighth Route Army and New Fourth Army service belongs to china-pla. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1933,
+          1945
+        ]
+      ]
+    },
+    {
+      "id": "korea-fatherland-restoration-association",
+      "kind": "force",
+      "icon": "flag",
+      "label": {
+        "ko": "조국광복회",
+        "en": "Association for the Restoration of the Fatherland"
+      },
+      "termIds": [
+        "fatherland-restoration-association"
+      ],
+      "countryCode": "korea",
+      "parentId": "korean-independence-movement",
+      "criteria": "Only documented founding, office or membership in the Association for the Restoration of the Fatherland in Manchuria (Jaeman Hanin Joguk Gwangbokhoe), the anti-Japanese united-front organization of 1936 broken up by the arrests of 1937–1938. Guerrilla service belongs to china-najua. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1936,
+          1938
+        ]
+      ]
+    },
+    {
+      "id": "korea-kapf",
+      "kind": "institution",
+      "icon": "landmark",
+      "label": {
+        "ko": "조선프롤레타리아예술가동맹 (카프)",
+        "en": "Korea Artista Proleta Federacio (KAPF)"
+      },
+      "termIds": [
+        "kapf"
+      ],
+      "countryCode": "korea",
+      "parentId": null,
+      "criteria": "Only documented membership or office in the Korea Artista Proleta Federacio (KAPF, August 1925 to its dissolution in May 1935), including its Tokyo branch of 1927–1929. Fellow-travelling writers, contributors to its journals and the post-1945 writers' leagues do not qualify. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1925,
+          1935
+        ]
+      ]
+    },
+    {
+      "id": "japan-musanjasa",
+      "kind": "force",
+      "icon": "flag",
+      "label": {
+        "ko": "무산자사",
+        "en": "Musanjasa (Proletarian Society, Tokyo)"
+      },
+      "countryCode": "japan",
+      "parentId": null,
+      "criteria": "Only documented membership or office in Musanjasa, the Korean communist publishing group formed in Tokyo in May 1929 out of the KAPF Tokyo branch (journal Musanja), until it was broken up in 1931. Never infer affiliation from nationality, residence, descent or ideology.",
+      "periods": [
+        [
+          1929,
+          1931
+        ]
+      ]
+    },
+    {
+      "id": "party-koryo-communist-league",
+      "kind": "party",
+      "icon": "flag",
+      "label": {
+        "ko": "고려공산동맹",
+        "en": "Koryo Communist League (Seoul faction)"
+      },
+      "countryCode": "korea",
+      "parentId": null,
+      "criteria": "Only documented membership or office in the Koryo Communist League, the clandestine communist organization of the Seoul faction founded in February 1923, including its youth body the Koryo Communist Youth League, until its members entered the Communist Party of Korea in 1926–1927. The open Seoul Youth Association alone does not qualify; the Communist Party of Korea is party-korean-communist. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1923,
+          1927
+        ]
+      ]
+    },
+    {
+      "id": "japan-chongryon",
+      "kind": "force",
+      "icon": "flag",
+      "label": {
+        "ko": "재일본조선인총련합회 (총련)",
+        "en": "General Association of Korean Residents in Japan (Chongryon)"
+      },
+      "countryCode": "japan",
+      "parentId": null,
+      "criteria": "Only documented office, staff work or membership in the General Association of Korean Residents in Japan (Chongryon, founded May 1955). Its predecessors are japan-choren (1945–1949) and japan-minjon (1951–1955). Never infer affiliation from nationality, residence, descent or ideology.",
+      "periods": [
+        [
+          1955,
+          null
+        ]
+      ],
+      "termIds": [
+        "chongryon"
+      ]
+    },
+    {
+      "id": "japan-minjon",
+      "kind": "force",
+      "icon": "flag",
+      "label": {
+        "ko": "재일조선통일민주전선 (민전)",
+        "en": "United Democratic Front of Koreans in Japan (Minjon)"
+      },
+      "countryCode": "japan",
+      "parentId": null,
+      "criteria": "Only documented office or membership in the United Democratic Front of Koreans in Japan (Minjon, January 1951 to May 1955). Never infer affiliation from nationality, residence, descent or ideology.",
+      "periods": [
+        [
+          1951,
+          1955
+        ]
+      ]
+    },
+    {
+      "id": "japan-mindan",
+      "kind": "force",
+      "icon": "flag",
+      "label": {
+        "ko": "재일본대한민국민단 (민단)",
+        "en": "Korean Residents Union in Japan (Mindan)"
+      },
+      "countryCode": "japan",
+      "parentId": null,
+      "criteria": "Only documented office or membership in the Korean Residents Union in Japan (Mindan), founded in October 1946 as the Korean Residents' Association in Japan and renamed in 1948 and 1994. Never infer affiliation from nationality, residence, descent or ideology.",
+      "periods": [
+        [
+          1946,
+          null
+        ]
+      ],
+      "termIds": [
+        "mindan"
+      ]
+    },
+    {
+      "id": "party-korean-revolutionary-reunification",
+      "kind": "party",
+      "icon": "flag",
+      "label": {
+        "ko": "통일혁명당",
+        "en": "Revolutionary Party for Reunification"
+      },
+      "countryCode": "south-korea",
+      "parentId": null,
+      "criteria": "Only documented membership or leadership in the underground Revolutionary Party for Reunification in South Korea, from its preparatory committee of 1964 to its destruction in the arrests of 1968 and the executions of 1969. Being tried in the 1968 case without established membership does not qualify; the name used afterwards by North Korean broadcasting does not count. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1964,
+          1969
+        ]
+      ]
+    },
+    {
+      "id": "korea-namminjeon",
+      "kind": "force",
+      "icon": "flag",
+      "label": {
+        "ko": "남조선민족해방전선 준비위원회 (남민전)",
+        "en": "South Korean National Liberation Front Preparation Committee (Namminjeon)"
+      },
+      "termIds": [
+        "south-korean-national-liberation-front-preparation-committee"
+      ],
+      "countryCode": "south-korea",
+      "parentId": null,
+      "criteria": "Only documented membership or leadership in the South Korean National Liberation Front Preparation Committee (Namminjeon), the underground organization of February 1976 to the arrests of October 1979, and its front bodies. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1976,
+          1979
+        ]
+      ]
+    },
+    {
+      "id": "party-korean-socialist-1960",
+      "kind": "party",
+      "icon": "flag",
+      "label": {
+        "ko": "사회당 (1960)",
+        "en": "Socialist Party (South Korea, 1960)"
+      },
+      "countryCode": "south-korea",
+      "parentId": null,
+      "criteria": "Only documented membership or organizational activity in the Socialist Party of South Korea formed after the April Revolution in 1960 and dissolved by the military coup of May 1961. The Socialist Mass Party is party-korean-mass-socialist-1960. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1960,
+          1961
+        ]
+      ]
+    },
+    {
+      "id": "korea-national-council-1919",
+      "kind": "force",
+      "icon": "flag",
+      "label": {
+        "ko": "대한국민의회",
+        "en": "Korean National Council (Vladivostok, 1919)"
+      },
+      "countryCode": "korea",
+      "parentId": "korean-independence-movement",
+      "criteria": "Only documented office or membership in the Korean National Council (Daehan Gungmin Uihoe), the provisional-government body of the Koreans in Russia formed at Vladivostok in March 1919 out of the All-Russian Korean National Association, later based in the Amur region. The Provisional Government at Shanghai belongs to korean-independence-movement. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1919,
+          1922
+        ]
+      ]
+    },
+    {
+      "id": "japan-january-society",
+      "kind": "force",
+      "icon": "flag",
+      "label": {
+        "ko": "일월회",
+        "en": "January Society (Irwolhoe)"
+      },
+      "termIds": [
+        "january-society"
+      ],
+      "countryCode": "japan",
+      "parentId": null,
+      "criteria": "Only documented membership or office in the January Society (Irwolhoe), the Korean socialist study group in Tokyo of 3 January 1925 to 28 November 1926. Never infer affiliation from nationality, residence, descent or ideology.",
+      "periods": [
+        [
+          1925,
+          1926
+        ]
+      ]
+    },
+    {
+      "id": "japan-north-star-society",
+      "kind": "force",
+      "icon": "flag",
+      "label": {
+        "ko": "북성회",
+        "en": "North Star Society (Bukseonghoe)"
+      },
+      "termIds": [
+        "north-star-society"
+      ],
+      "countryCode": "japan",
+      "parentId": null,
+      "criteria": "Only documented membership or office in the North Star Society (Bukseonghoe), the Korean socialist group in Tokyo of December 1922 to January 1925. Its Seoul offshoots (Geonseolsa, the North Wind Society) do not qualify by themselves. Never infer affiliation from nationality, residence, descent or ideology.",
+      "periods": [
+        [
+          1922,
+          1925
+        ]
+      ]
+    },
+    {
+      "id": "japan-black-wave-society",
+      "kind": "force",
+      "icon": "flag",
+      "label": {
+        "ko": "흑도회",
+        "en": "Black Wave Society (Heukdohoe)"
+      },
+      "termIds": [
+        "black-wave-society"
+      ],
+      "countryCode": "japan",
+      "parentId": null,
+      "criteria": "Only documented membership in the Black Wave Society (Heukdohoe), the Korean radical students' group in Tokyo of November 1921 to autumn 1922. Its successors (the Black Friends Society, the North Star Society) do not qualify. Never infer affiliation from nationality, residence, descent or ideology.",
+      "periods": [
+        [
+          1921,
+          1922
+        ]
+      ]
+    },
+    {
+      "id": "korea-singanhoe",
+      "kind": "force",
+      "icon": "flag",
+      "label": {
+        "ko": "신간회",
+        "en": "Singanhoe"
+      },
+      "termIds": [
+        "singanhoe"
+      ],
+      "countryCode": "korea",
+      "parentId": null,
+      "criteria": "Only documented office or membership in Singanhoe (February 1927 to its dissolution in May 1931), headquarters or branches including the Tokyo branch. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1927,
+          1931
+        ]
+      ]
+    },
+    {
+      "id": "korea-geunuhoe",
+      "kind": "force",
+      "icon": "flag",
+      "label": {
+        "ko": "근우회",
+        "en": "Geunuhoe"
+      },
+      "termIds": [
+        "geunuhoe"
+      ],
+      "countryCode": "korea",
+      "parentId": null,
+      "criteria": "Only documented office or membership in Geunuhoe, the Korean women's organization of May 1927 to 1931, headquarters or branches. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1927,
+          1931
+        ]
+      ]
+    },
+    {
+      "id": "korea-hyeongpyeongsa",
+      "kind": "force",
+      "icon": "flag",
+      "label": {
+        "ko": "조선형평사",
+        "en": "Joseon Hyeongpyeongsa"
+      },
+      "termIds": [
+        "joseon-hyeongpyeongsa"
+      ],
+      "countryCode": "korea",
+      "parentId": null,
+      "criteria": "Only documented office or membership in the Hyeongpyeongsa (Equity Society), the movement against discrimination of the baekjeong founded at Jinju in April 1923, until it became the Daedongsa in 1935. Never infer affiliation from nationality, residence, descent or ideology.",
+      "periods": [
+        [
+          1923,
+          1935
+        ]
+      ]
+    },
+    {
+      "id": "japan-shinjinkai",
+      "kind": "force",
+      "icon": "flag",
+      "label": {
+        "ko": "신인회 (도쿄제국대학)",
+        "en": "Shinjinkai (Tokyo Imperial University)"
+      },
+      "termIds": [
+        "shinjinkai"
+      ],
+      "countryCode": "japan",
+      "parentId": null,
+      "criteria": "Only documented membership in the Shinjinkai (New Man Society) of Tokyo Imperial University, December 1918 to November 1929, students and graduate members alike. Sponsors and lecturers who were not members do not qualify. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1918,
+          1929
+        ]
+      ]
+    },
+    {
+      "id": "japan-zenkyo",
+      "kind": "force",
+      "icon": "flag",
+      "label": {
+        "ko": "일본노동조합전국협의회 (전협)",
+        "en": "National Council of Japanese Labour Unions (Zenkyō)"
+      },
+      "termIds": [
+        "zenkyo"
+      ],
+      "countryCode": "japan",
+      "parentId": "labor-union",
+      "criteria": "Only documented service, membership or organizational activity in the National Council of Japanese Labour Unions (Zenkyō, December 1928 to about 1936) and its industrial unions. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1928,
+          1936
+        ]
+      ]
+    },
+    {
+      "id": "taiwan-volunteer-corps",
+      "kind": "military",
+      "icon": "swords",
+      "label": {
+        "ko": "대만의용대",
+        "en": "Taiwan Volunteer Corps"
+      },
+      "termIds": [
+        "taiwan-volunteer-corps"
+      ],
+      "countryCode": "taiwan",
+      "parentId": null,
+      "criteria": "Only documented service in the Taiwan Volunteer Corps formed by Taiwanese in mainland China in 1939 (the Taiwan Volunteer General Corps from 1944) until it was disbanded in 1946. The Japanese army's Takasago Volunteers do not qualify. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1939,
+          1946
+        ]
       ]
     }
   ],
