@@ -1792,7 +1792,10 @@ _COMMULINGO_FIELD_SCHEMA = {
                 "sentences ending in 다 / '.' (the store rejects these on new or changed rows)."),
             "items": {
                 "type": "object", "additionalProperties": False,
-                "properties": {"period": PERIOD_SCHEMA, "r": _BILINGUAL_TEXT_SCHEMA},
+                "properties": {"period": PERIOD_SCHEMA, "r": _BILINGUAL_TEXT_SCHEMA,
+                               "yearInName": {"type": "string", "description": (
+                                   "Only when r names a year outside the period as part of a name "
+                                   "(the 1936 Constitution): why. Years inside 『』「」 need nothing.")}},
                 "required": ["period", "r"],
             },
         },
@@ -2135,7 +2138,8 @@ _COLLECTION_SCHEMAS = {
     "aliasEdits": {"lang": {"type": "string", "enum": ["ko", "en"]}, "value": {"type": "string"}, "replacement": {"type": "string"}},
     "sceneEdits": {"scene": _PAIR_SCHEMA, "replacement": _PAIR_SCHEMA},
     "careerEdits": {"id": {"type": "string"}, "entry": {"type": "object", "properties": {
-        "period": PERIOD_SCHEMA, "r": _BILINGUAL_TEXT_SCHEMA}, "additionalProperties": False}},
+        "period": PERIOD_SCHEMA, "r": _BILINGUAL_TEXT_SCHEMA, "yearInName": {"type": "string"}},
+        "additionalProperties": False}},
 }
 for _key, _properties in _COLLECTION_SCHEMAS.items():
     _COMMULINGO_FIELD_SCHEMA["properties"][_key] = {"type": "array", "maxItems": 100,
