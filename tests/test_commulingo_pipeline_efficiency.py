@@ -14,13 +14,13 @@ class EvidenceContracts(TestCase):
         from commulingo.people import COMMULINGO_PERSON_CREATE_TOOL, _COMMULINGO_FIELD_SCHEMA
         from jsonschema import validate as schema_validate, ValidationError
         schema=_COMMULINGO_FIELD_SCHEMA['properties']['fate']
-        schema_validate({'kind':'','label':{'ko':'사망 경위 미확정','en':'Circumstances unconfirmed'}},schema)
+        schema_validate({'kind':'unknown','label':{'ko':'','en':''}},schema)
         with self.assertRaises(ValidationError):
-            schema_validate({'kind':'unknown','label':{'ko':'미확정','en':'Unknown'}},schema)
+            schema_validate({'kind':'deposed','label':{'ko':'실각','en':'Deposed'}},schema)
         # The writer's tool carries the label only; the runner assigns kind.
         tool_fate=COMMULINGO_PERSON_CREATE_TOOL['input_schema']['properties']['fields']['properties']['fate']
         self.assertNotIn('kind', tool_fate['properties'])
-        schema_validate({'label':{'ko':'사망 경위 미확정','en':'Circumstances unconfirmed'}},tool_fate)
+        schema_validate({'label':{'ko':'사인 미상','en':'Cause unknown'}},tool_fate)
 
     def test_empty_arguments_are_explained_as_unparsed_json(self):
         from tool_gateway.validation import validate_tool_arguments, ToolArgumentValidationError

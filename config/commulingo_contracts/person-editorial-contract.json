@@ -4,5 +4,17 @@
   "factFields": ["bio", "moment", "years", "citizenship", "nationalOrigin", "origin", "body"],
   "reviewFlags": ["identity_uncertain", "source_conflict"],
   "topics": ["basics", "nationality", "bio", "moment", "events", "sections"],
-  "statuses": ["open", "complete", "not_applicable", "sources_unavailable"]
+  "statuses": ["open", "complete", "not_applicable", "sources_unavailable"],
+  "fateKinds": {
+    "natural": {"ko": "자연사", "en": "Natural causes", "criteria": "died of illness or old age (a disease name may be the label)"},
+    "executed": {"ko": "처형", "en": "Executed", "criteria": "executed after a sentence, a purge verdict or a summary order"},
+    "assassinated": {"ko": "암살", "en": "Assassinated", "criteria": "killed by an attacker who targeted this person for political ends"},
+    "murdered": {"ko": "살해", "en": "Murdered", "criteria": "killed outside any judicial process and not a targeted assassination (torture, mob, rival)"},
+    "killed": {"ko": "전사", "en": "Killed in action", "criteria": "killed in war, battle or armed clash"},
+    "accident": {"ko": "사고사", "en": "Accident", "criteria": "died in an accident (crash, traffic, explosion) with no proven foul play"},
+    "custody": {"ko": "옥사", "en": "Died in custody", "criteria": "died in prison, a camp, exile settlement or detention, not by execution"},
+    "suicide": {"ko": "자살", "en": "Suicide", "criteria": "died by suicide"},
+    "disappeared": {"ko": "실종", "en": "Disappeared", "criteria": "vanished; death never confirmed"},
+    "unknown": {"ko": "사인 미상", "en": "Cause unknown", "criteria": "dead, but the cause is not stated, unknown or disputed"}
+  }
 }

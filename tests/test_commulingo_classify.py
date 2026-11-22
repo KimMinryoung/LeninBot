@@ -270,14 +270,14 @@ class ClassifyCodesTests(unittest.TestCase):
         self.assertEqual(cc.missing_person_codes(CARD), ['citizenship.code', 'fate.kind'])
         self.assertEqual(seen['questions'], {'citizenship', 'fate'})  # no nationalOrigin object on this card
 
-    def test_unconfirmed_maps_to_empty_kind_and_low_confidence_is_reported_not_deferred(self):
+    def test_unknown_cause_is_a_real_kind_and_low_confidence_is_reported_not_deferred(self):
         def decide(feature, state, questions, label=None):
-            return codes_result(citizenship=('russia', 0.4), fate=('unconfirmed', 0.9))
+            return codes_result(citizenship=('russia', 0.4), fate=('unknown', 0.9))
         codes = cc.classify_person_codes(CARD, decide=decide)
-        self.assertEqual(codes['fate']['kind'], '')
+        self.assertEqual(codes['fate']['kind'], 'unknown')
         self.assertTrue(codes['citizenship']['low_confidence'])
         filled = cc.fill_person_codes(CARD, codes)
-        self.assertEqual((filled['citizenship']['code'], filled['fate']['kind']), ('russia', ''))
+        self.assertEqual((filled['citizenship']['code'], filled['fate']['kind']), ('russia', 'unknown'))
 
     def test_living_person_gets_empty_fate_without_asking_about_it(self):
         def decide(feature, state, questions, label=None):

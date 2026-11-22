@@ -24,7 +24,7 @@ def _source():
         people=[
             {"id": "khrushchev", "group_id": "thaw", "cyrillic": "Никита Хрущёв", "years_label": "1894–1971",
              "name_ko": "니키타 흐루쇼프", "name_en": "Nikita Khrushchev", "epithet_ko": "관 뚜껑을 연 사람",
-             "bio_ko": "1956년 비밀연설로 관 뚜껑을 열었다.", "fate_kind": "deposed", "fate_label_ko": "실각",
+             "bio_ko": "1956년 비밀연설로 관 뚜껑을 열었다.", "fate_kind": "natural", "fate_label_ko": "",
              "activities": [{"functionId": "political-leadership", "officeId": "party-leadership", "primary": True}]},
             {"id": "yezhov", "group_id": "stalin-era", "name_ko": "니콜라이 예조프", "name_en": "Nikolai Yezhov",
              "activities": [{"functionId": "security", "primary": False, "officeId": "party-leadership"},
@@ -67,7 +67,7 @@ class SideTests(unittest.TestCase):
         self.assertNotIn("니키타 흐루쇼프", ps["aliases"])
         self.assertIn("1894–1971", ps["summary"])
         self.assertIn("주요 경력: 1953–1964 제1서기; 1958–1964 각료회의 의장", ps["summary"])
-        self.assertIn("최후: 실각", ps["summary"])
+        self.assertIn("최후: 자연사", ps["summary"])  # empty label shows the kind default
         self.assertEqual(ps["name_en"], "Nikita Khrushchev")
 
     def test_person_side_qualifier(self):

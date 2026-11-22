@@ -31,6 +31,7 @@ carrying the old id is merged into the canonical one.
 """
 
 from __future__ import annotations
+from commulingo.fate import fate_label
 from commulingo.periods import format_period
 
 import json
@@ -137,8 +138,9 @@ def person_summary(p: dict, career: list[dict]) -> str:
         parts.append(years)
     if p.get("bio_ko"):
         parts.append(_clean(p["bio_ko"]))
-    if p.get("fate_label_ko"):
-        parts.append(f"최후: {_clean(p['fate_label_ko'])}")
+    fate = fate_label(p.get("fate_kind"), p.get("fate_label_ko"))
+    if fate:
+        parts.append(f"최후: {_clean(fate)}")
     lines = []
     for c in career[:CAREER_LINES]:
         role = _clean(c.get("role_ko"))

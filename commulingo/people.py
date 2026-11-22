@@ -76,11 +76,9 @@ _TARGET_TYPES = (
 from commulingo.relation_kinds import HISTORY_RELATION_KINDS as _HISTORY_RELATION_KINDS  # noqa: E402
 _ACTIONS = ("create", "update", "delete")
 
-_FATE_KINDS = (
-    "",  # Unknown/unclassified; preserve the supported uncertainty in label.
-    "executed", "assassinated", "murdered", "killed", "suicide",
-    "deposed", "exile", "natural",
-)
+from commulingo.fate import FATE_KINDS as _FATE_KIND_CONTRACT  # noqa: E402
+# "" is a living person's fate only; a dead person whose cause is unknown is "unknown".
+_FATE_KINDS = ("",) + tuple(_FATE_KIND_CONTRACT)
 
 _PERSON_PATCH_KEYS = frozenset({
     "id", "group", "groupId", "sortOrder", "cyrillic", "years",
@@ -1629,16 +1627,16 @@ _SECTION_BODY_SCHEMA = _capped_bilingual_schema(
     target="length",
 )
 
-# Fate label = cause of death only, NO death year (it renders from `years`).
-# Execution → 처형/Executed; vague natural death → 자연사/Natural causes; keep a
-# specific illness word (심장마비/폐암…); place with " · " (암살 · 멕시코). A
-# deposed/exile fate keeps its EVENT year (실각 1964) and may append the cause
-# (실각 1964 · 자연사). The death year is stripped automatically on save.
+# Fate label = how the person died, nothing else (2026-11-22 rule, enforced by
+# the frontend store): empty shows the kind's default; otherwise one narrower
+# cause — 총살, 교수형, 폐암, 수용소에서 사망. No year, place, list, bracket or
+# note; falls from power and exile go in the career timeline.
 _FATE_LABEL_SCHEMA = _capped_bilingual_schema(
     "fate_label",
-    " Cause of death only, no death year (dropped on save): 실각 1964 · 자연사 / "
-    "Removed 1964 · natural causes. Execution=처형/Executed; natural=자연사/Natural "
-    "causes; place after ' · '.",
+    " How the person died, nothing else: leave empty for the kind's default "
+    "(자연사, 처형, 사인 미상) or give one narrower cause (총살/Shot, 폐암/Lung cancer, "
+    "수용소에서 사망/Died in a camp). No year, place, comma, '·', brackets or notes; "
+    "a fall from power or exile is not a fate.",
     # A badge, not prose: there is no sentence to count.
     target="length",
 )
@@ -1799,7 +1797,7 @@ _COMMULINGO_FIELD_SCHEMA = {
                 # Enumerated here so the closed vocabulary is readable up front;
                 # it was only discoverable by tripping the write-boundary check.
                 "kind": {"type": "string", "enum": list(_FATE_KINDS),
-                         "description": "Use the empty string when the fate is unconfirmed; explain uncertainty in label. Imprisonment is not exile or execution. Never invent unknown/unconfirmed enum values."},
+                         "description": "Manner of death. unknown when the person is dead and the cause is not known or disputed; the empty string only for a living person. Death in prison or a camp is custody, not execution. A fall from power or exile is never a fate kind."},
                 "label": _FATE_LABEL_SCHEMA,
             },
             "required": ["kind", "label"],

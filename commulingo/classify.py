@@ -273,17 +273,10 @@ def fill_term_category(fields: dict, classification: dict | None) -> dict:
 
 
 CODES_FEATURE = "commulingo_person_codes"
-FATE_CRITERIA = {
-    "unconfirmed": "not stated, disputed, unknown, or the person is still living",
-    "executed": "executed after a sentence or purge",
-    "assassinated": "assassinated by an attacker",
-    "murdered": "murdered outside a judicial process",
-    "killed": "killed in war or action",
-    "suicide": "died by suicide",
-    "deposed": "removed from power and lived on",
-    "exile": "died in exile or emigration",
-    "natural": "died a natural death (illness, old age)",
-}
+# The choices are the contract's kinds; "unknown" is a real kind for a dead
+# person whose cause is not known (a living person never gets the question).
+from commulingo.fate import FATE_KINDS as _FATE_KINDS  # noqa: E402
+FATE_CRITERIA = {kind: entry["criteria"] for kind, entry in _FATE_KINDS.items()}
 # Without these rules the origin code matched the writer 42/49 (a Jewish
 # background became "israel"); with them 48/49, the miss at 0.49 confidence.
 ORIGIN_INSTRUCTIONS = (
@@ -322,7 +315,7 @@ def person_code_questions(fields: dict, citizenship_codes, origin_codes=()) -> d
     if isinstance(fields.get("fate"), dict) and fields["fate"].get("kind") is None and not _living(fields.get("years")):
         questions["fate"] = {
             "type": "choice", "criteria": FATE_CRITERIA,
-            "instructions": "How did this person's life or career end, according to the fate label and the source excerpts?"}
+            "instructions": "How did this person die, according to the fate label and the source excerpts? unknown when the cause is not stated or disputed."}
     return questions
 
 
@@ -357,8 +350,7 @@ def _codes_from(decision, questions, fields, accept) -> dict:
         if choice not in valid:
             continue
         conf = round(decision.confidence(key) or 0.0, 3)
-        value = "" if key == "fate" and choice == "unconfirmed" else choice
-        out[key] = {field: value, "confidence": conf, "low_confidence": conf < accept}
+        out[key] = {field: choice, "confidence": conf, "low_confidence": conf < accept}
     out["model"] = decision.model
     return out
 
