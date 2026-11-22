@@ -1785,6 +1785,11 @@ _COMMULINGO_FIELD_SCHEMA = {
         },
         "career": {
             "type": "array",
+            "description": (
+                "One row = one post or event in one period, as a noun phrase. Posts held together "
+                "in the same period may share a row with a comma. A later step gets its own row: "
+                "no year other than the row's own start/end year in r, no 'A → B' chains, no "
+                "sentences ending in 다 / '.' (the store rejects these on new or changed rows)."),
             "items": {
                 "type": "object", "additionalProperties": False,
                 "properties": {"period": PERIOD_SCHEMA, "r": _BILINGUAL_TEXT_SCHEMA},

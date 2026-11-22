@@ -117,7 +117,8 @@ Content rules:
   one too long to fit is excerpted to its sharpest clause with '…' or traded for a shorter
   one — never trimmed by paraphrase, which stops it being a quotation.
 - A new card requires group, role (`officeId` or `category`), native-script name, bilingual
-  name/epithet/bio/fate, and a concise 4-8 row career. Names are stored as parts:
+  name/epithet/bio/fate, and a concise 4-8 row career (one post or event per row and
+  period, a noun phrase; a later step with another year is its own row, never 'A → B'). Names are stored as parts:
   prefer `givenName: {ko, en}` + `familyName: {ko, en}` (single-token East Asian names like
   김일성 go wholly in `familyName`; a Western middle name is part of `givenName`). The name
   must be given name + surname ONLY — put the patronymic ONLY in `patronymic: {ko, en}`;
