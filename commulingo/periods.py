@@ -9,8 +9,9 @@ from __future__ import annotations
 
 import calendar
 
-START_QUALS = ("circa", "decade", "early", "mid", "late", "after", "summer")
-END_QUALS = START_QUALS + ("until", "open", "unknown")
+_DATE_QUALS = ("circa", "decade", "early", "mid", "late", "after", "summer")
+START_QUALS = _DATE_QUALS + ("unknown",)
+END_QUALS = _DATE_QUALS + ("until", "open", "unknown")
 _DECADE_QUALS = {"decade", "early", "mid", "late"}
 _NO_DATE = {"open", "unknown"}
 
@@ -34,7 +35,7 @@ PERIOD_SCHEMA = {
         "Period as numbers, never a label string. {\"start\": [1918, 7], \"end\": [1918, 9]} → 1918.07–09; "
         "omit end for a single date. Qualifiers: circa (about), decade (start [1920] = the 1920s), "
         "early/mid/late (of that decade), after (that date or later), summer; end-only: until (no start), "
-        "open (continued, end not recorded: 1945–), unknown (1979–?). ongoing: true for 'to the present'. "
+        "open (continued, end not recorded: 1945–), unknown (1979–?); startQual unknown with no start when the start date could not be found (?–present, ?–1950). ongoing: true for 'to the present'. "
         "label {ko,en} ONLY when numbers cannot say it (conflicting sources: '1963 또는 1964'); still give start."
     ),
 }
@@ -72,7 +73,9 @@ def period_columns(period) -> dict:
         raise ValueError(f"period.startQual must be one of {', '.join(START_QUALS)}")
     if eq is not None and eq not in END_QUALS:
         raise ValueError(f"period.endQual must be one of {', '.join(END_QUALS)}")
-    if sq and not start:
+    if sq == "unknown" and start:
+        raise ValueError("period.startQual unknown takes no start date")
+    if sq and sq != "unknown" and not start:
         raise ValueError("period.startQual needs a start")
     if eq in _NO_DATE and end:
         raise ValueError(f"period.endQual {eq} takes no end date")
@@ -90,7 +93,7 @@ def period_columns(period) -> dict:
         if not isinstance(label, dict) or not str(label.get("ko") or "").strip() or not str(label.get("en") or "").strip():
             raise ValueError("period.label must have non-empty ko and en")
         label = {"ko": label["ko"].strip(), "en": label["en"].strip()}
-    if not (start or end or ongoing or label or eq):
+    if not (start or end or ongoing or label or eq or sq):
         raise ValueError("period is empty")
     if start and end and tuple(v or 0 for v in end) < tuple(v or 0 for v in start):
         raise ValueError("period.end precedes start")
@@ -127,7 +130,7 @@ def format_period(row: dict, lang: str = "ko") -> str:
     sy, sm, sd = row.get("start_year"), row.get("start_month"), row.get("start_day")
     ey, em, ed = row.get("end_year"), row.get("end_month"), row.get("end_day")
     sq, eq = row.get("start_qual"), row.get("end_qual")
-    s = _fmt_point(sy, sm, sd, sq, lang) if sy is not None else ""
+    s = "?" if sq == "unknown" else (_fmt_point(sy, sm, sd, sq, lang) if sy is not None else "")
     present = "present" if lang == "en" else "현재"
     if row.get("ongoing"):
         return f"{s}–{present}" if s else present
@@ -138,7 +141,7 @@ def format_period(row: dict, lang: str = "ko") -> str:
     if ey is None:
         return s
     if eq == "until" or sy is None:
-        return "–" + _fmt_point(ey, em, ed, None, lang)
+        return s + "–" + _fmt_point(ey, em, ed, None, lang)
     e = _fmt_point(ey, em, ed, eq, lang)
     if not sq and not eq and sm and em and sy == ey:
         if sm == em and sd and ed:
