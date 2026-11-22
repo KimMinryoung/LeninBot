@@ -40,6 +40,31 @@ def _pop_audit_owner(kwargs: dict) -> str | None:
     return None
 
 
+def _stamped(client, caller: str):
+    """The client with x-llm-caller as a default header on every request.
+
+    The endpoint wrappers below add the header to the calls they wrap, but an
+    endpoint reached through __getattr__ (batches, files, beta, …) went out
+    unnamed, and the proxy refuses an unnamed POST. Test doubles without
+    with_options are returned as they are.
+    """
+    with_options = getattr(client, "with_options", None)
+    if not callable(with_options):
+        return client
+    try:
+        return with_options(default_headers={"x-llm-caller": caller})
+    except Exception:
+        return client
+
+
+def genai_http_options(base_url: str | None, caller: str) -> dict:
+    """Constructor kwargs for genai.Client behind the proxy: base URL plus the
+    caller name. Empty when the client talks to the provider directly."""
+    if not base_url:
+        return {}
+    return {"http_options": {"base_url": base_url, "headers": {"x-llm-caller": caller}}}
+
+
 def _model_arg(args: tuple, kwargs: dict) -> str | None:
     model = kwargs.get("model")
     if not model and args:
@@ -227,6 +252,7 @@ class AuditedAsyncAnthropic:
 
     def __init__(self, client, *, caller: str, provider: str, thinking_off: bool = False):
         self._leninbot_audit_wrapper = True
+        client = _stamped(client, caller)
         self._client = client
         self.messages = _AuditedAsyncMessages(client.messages, caller, provider, thinking_off)
 
@@ -316,6 +342,7 @@ class AuditedAsyncOpenAI:
 
     def __init__(self, client, *, caller: str, provider: str):
         self._leninbot_audit_wrapper = True
+        client = _stamped(client, caller)
         self._client = client
         self.chat = _AuditedChat(client.chat, caller, provider)
         if hasattr(client, "responses"):

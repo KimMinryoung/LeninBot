@@ -45,7 +45,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from ops import audit_sink
-from llm.gateway import evaluate_policy, record_llm_call
+from llm.gateway import evaluate_policy, load_policy, record_llm_call
 from llm.provider_registry import (
     claude_thinking_off, claude_thinking_off_allowed, current_text_model, model_caps,
     openai_reasoning_effort,
@@ -152,6 +152,25 @@ _STRIP_REQUEST = {
 _STRIP_RESPONSE = {
     "content-length", "connection", "keep-alive", "transfer-encoding",
 }
+
+def missing_caller_reason(method: str, headers) -> str | None:
+    """Why this request is refused for not naming its call site, else None.
+
+    Only POST spends money; GETs (model lists, batch polling) pass unnamed.
+    848 Opus requests in the 30 days to 2026-11-22 came from throwaway scripts
+    that posted here directly, and the ledger could say only "no caller".
+    """
+    if method.upper() != "POST" or (headers.get("x-llm-caller") or "").strip():
+        return None
+    try:
+        required = bool(load_policy().get("require_caller", True))
+    except Exception:
+        required = True
+    if not required:
+        return None
+    return ("missing x-llm-caller header: name the call site, or go through "
+            "llm.call_registry / the bot_config clients, which send it")
+
 
 # Generous read timeout: writer generations stream for many minutes. Stall
 # detection is the caller's job (the loops' idle guards), not this hop's.
@@ -642,6 +661,17 @@ async def proxy(provider: str, path: str, request: Request):
         logger.info("proxy %s model %s -> %s", provider, requested_model, normalized_model)
     audit_label = (path + (" +model-normalized" if model_rewritten else "")
                    + (" +think-off-default" if thinking_injected else ""))[:200]
+
+    caller_error = missing_caller_reason(request.method, request.headers)
+    if caller_error:
+        record_llm_call(
+            surface="proxy", caller=None,
+            provider=POLICY_PROVIDER.get(provider, provider), model=normalized_model,
+            label=audit_label, status="denied", error_excerpt=caller_error,
+            estimate_cost=False,
+        )
+        logger.warning("proxy REFUSED unnamed POST %s /%s", provider, path)
+        return JSONResponse({"error": caller_error}, status_code=400)
 
     # Authoritative policy gate. The decision logic is shared with the
     # in-process seam (llm/gateway.evaluate_policy — single source); THIS

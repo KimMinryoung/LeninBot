@@ -41,12 +41,12 @@ def _load(path: Path) -> dict:
 def _client():
     from google import genai
     from llm.call_registry import resolve_provider_connection
+    from llm.instrumented_clients import genai_http_options
 
     connection = resolve_provider_connection("gemini")
     return genai.Client(
         api_key=connection.api_key,
-        **({"http_options": {"base_url": connection.base_url}}
-           if connection.base_url else {}),
+        **genai_http_options(connection.base_url, "archival_batch"),
     )
 
 

@@ -5,5 +5,6 @@
   "blocked_models": [],
   "daily_budget_usd": 100,
   "daily_budget_per_provider": {},
-  "proxy_base": "http://127.0.0.1:8110"
+  "proxy_base": "http://127.0.0.1:8110",
+  "require_caller": true
 }

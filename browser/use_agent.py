@@ -220,7 +220,8 @@ def _build_llm(model: str | None = None, provider: str | None = None):
             # its thinking_level field. The raw config reaches the GenAI SDK.
             config={"thinking_config": {"thinking_level": "LOW"}},
             max_output_tokens=4096,
-            **({"http_options": {"base_url": f"{base}/gemini"}} if base else {}),
+            **({"http_options": {"base_url": f"{base}/gemini",
+                                 "headers": {"x-llm-caller": "browser_use"}}} if base else {}),
         )
         logger.info("browser-use LLM: Google %s", model)
         return llm
@@ -247,6 +248,7 @@ def _build_llm(model: str | None = None, provider: str | None = None):
             api_key=OPENAI_CLIENT_KEY,
             base_url=OPENAI_BASE_URL_EFFECTIVE,
             timeout=120,
+            default_headers={"x-llm-caller": "browser_use"},
             max_completion_tokens=4096,
         )
         logger.info("browser-use LLM: OpenAI %s", model)
@@ -258,6 +260,7 @@ def _build_llm(model: str | None = None, provider: str | None = None):
             api_key=_deepseek_key(),
             base_url=_deepseek_anthropic_base(),
             timeout=120,
+            default_headers={"x-llm-caller": "browser_use"},
         )
         logger.info("browser-use LLM: DeepSeek Anthropic-compatible %s", model)
         return llm
@@ -270,6 +273,7 @@ def _build_llm(model: str | None = None, provider: str | None = None):
         api_key=_deepseek_key(),
         base_url=_deepseek_anthropic_base(),
         timeout=120,
+        default_headers={"x-llm-caller": "browser_use"},
     )
     logger.info("browser-use LLM: DeepSeek Anthropic-compatible deepseek-v4-flash")
     return llm

@@ -293,10 +293,11 @@ def _generate_gemini(p: CallSiteProfile, prompt: str, system: str | None) -> tup
     from google.genai.types import GenerateContentConfig
 
     connection = resolve_provider_connection("gemini")
+    from llm.instrumented_clients import genai_http_options
+
     client = genai.Client(
         api_key=connection.api_key,
-        **({"http_options": {"base_url": connection.base_url}}
-           if connection.base_url else {}),
+        **genai_http_options(connection.base_url, p.feature),
     )
     config = GenerateContentConfig(
         temperature=p.temperature,
@@ -412,6 +413,7 @@ def _generate_openai_compat(p: CallSiteProfile, prompt: str, system: str | None)
         api_key=connection.api_key,
         base_url=connection.base_url,
         timeout=p.timeout,
+        default_headers={"x-llm-caller": p.feature},
     )
     messages = ([{"role": "system", "content": system}] if system else []) + [
         {"role": "user", "content": prompt}
@@ -465,6 +467,7 @@ def _generate_claude(p: CallSiteProfile, prompt: str, system: str | None) -> tup
     connection = resolve_provider_connection("claude")
     client = anthropic.Anthropic(
         api_key=connection.api_key, timeout=p.timeout,
+        default_headers={"x-llm-caller": p.feature},
         **({"base_url": connection.base_url} if connection.base_url else {}),
     )
     kwargs: dict = {"system": system} if system else {}
@@ -510,6 +513,7 @@ def _generate_deepseek_anthropic(p: CallSiteProfile, prompt: str, system: str | 
         api_key=connection.api_key,
         base_url=connection.base_url,
         timeout=p.timeout,
+        default_headers={"x-llm-caller": p.feature},
     )
     kwargs: dict = {"system": system} if system else {}
     thinking = p.extra.get("thinking")

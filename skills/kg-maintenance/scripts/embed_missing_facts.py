@@ -43,10 +43,10 @@ def make_embedder():
     from graphiti_core.embedder.gemini import GeminiEmbedder, GeminiEmbedderConfig
     from llm.call_registry import resolve as resolve_call_site
     from llm.gateway import provider_endpoint
-    from llm.instrumented_clients import AuditedGenAIClient
+    from llm.instrumented_clients import AuditedGenAIClient, genai_http_options
 
     base, key = provider_endpoint("gemini", None, (os.getenv("GEMINI_API_KEY") or "").strip())
-    raw = genai.Client(api_key=key, **({"http_options": {"base_url": base}} if base else {}))
+    raw = genai.Client(api_key=key, **genai_http_options(base, "kg_embed_missing"))
     model = resolve_call_site("kg_embedding", model="gemini-embedding-001").model
     return GeminiEmbedder(config=GeminiEmbedderConfig(api_key=key, embedding_model=model),
                           client=AuditedGenAIClient(raw, caller="kg_embed_missing"))

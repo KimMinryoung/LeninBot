@@ -224,7 +224,7 @@ class GraphMemoryService:
             # embedding requests pass through the common policy/audit seam.
             from google import genai as _genai
             from llm.gateway import provider_endpoint
-            from llm.instrumented_clients import AuditedGenAIClient
+            from llm.instrumented_clients import AuditedGenAIClient, genai_http_options
 
             gemini_base, gemini_client_key = provider_endpoint(
                 "gemini", None, gemini_api_key,
@@ -233,8 +233,7 @@ class GraphMemoryService:
             def _proxied_genai_client():
                 raw = _genai.Client(
                     api_key=gemini_client_key,
-                    **({"http_options": {"base_url": gemini_base}}
-                       if gemini_base else {}),
+                    **genai_http_options(gemini_base, "kg_graphiti"),
                 )
                 return AuditedGenAIClient(raw, caller="kg_graphiti")
 

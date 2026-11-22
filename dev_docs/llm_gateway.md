@@ -196,6 +196,24 @@ Gemini는 `models/{model}:method` URL 경로(퍼센트 인코딩 포함)에서 �
 이벤트에서 읽기를 멈추고 연결을 닫아 upstream 종료 대기 중인 relay가 취소되던
 경우로, 응답은 완전히 전달됐는데 주 30여 건이 `stream aborted: CancelledError`로 남았다.
 
+### 호출자 이름 없는 POST 거부 (2026-11-22)
+
+프록시는 `x-llm-caller` 헤더가 비어 있는 provider POST를 400으로 거부하고
+`surface=proxy`, `status=denied` 행을 남긴다(`llm_proxy.app.missing_caller_reason`).
+GET(모델 목록, 배치 조회)은 비용이 없어 이름 없이 통과한다. 정책 키는
+`require_caller`(기본 true, 핫리로드)이고, 끄려면 `config/llm_gateway.local.json`에
+`"require_caller": false`를 둔다. 계기: 2026-11-22까지 30일 동안 호출자 없는 Opus
+POST가 848건 있었고, 추적한 11-18분 34건은 frontend 세션이 쓴 임시 번역 스크립트가
+프록시를 직접 부른 것이었다. 장부로는 누가 썼는지 알 수 없었다.
+
+헤더는 다음이 붙인다. `AuditedAsyncAnthropic`/`AuditedAsyncOpenAI`는 감싼 SDK 객체의
+기본 헤더에 caller를 넣어 `create` 외의 엔드포인트도 이름을 달고 나간다.
+레지스트리 원샷 executor는 feature 키를, `genai.Client`를 직접 만드는 곳(KG graphiti,
+사료 배치, 누락 임베딩 스크립트, 레지스트리 Gemini)은
+`llm.instrumented_clients.genai_http_options(base, caller)`를, browser-use 채팅 객체는
+`browser_use`를 쓴다. 새 임시 스크립트도 레지스트리나 `bot_config` 클라이언트를 쓰면
+자동으로 붙는다. 헤더는 상류 제공자에게 전달하지 않는다.
+
 ## 운영 CLI
 
 ```bash

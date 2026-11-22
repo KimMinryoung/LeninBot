@@ -75,6 +75,9 @@ _DEFAULTS = {
     # of the gateway) instead of calling providers directly. Applied at
     # client construction — a service restart picks it up.
     "proxy_base": None,
+    # The proxy refuses a POST that does not name its call site in the
+    # x-llm-caller header. Read by llm_proxy only; hot-reloaded like the rest.
+    "require_caller": True,
 }
 
 
