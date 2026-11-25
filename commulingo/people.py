@@ -1773,7 +1773,8 @@ _COMMULINGO_FIELD_SCHEMA = {
                 "Person: optional; {\"ko\": [], \"en\": []} when the person has no other name. "
                 "Only genuinely different names (real name, pseudonym, maiden/married name, other "
                 "established transliteration, English initials form); never the headword, the "
-                "name with patronymic or the bare one-word surname; no parenthetical note, quotes "
+                "name with patronymic, the bare one-word surname or a Korean headword with its syllables "
+                "apart (Park Chung-hee); no parenthetical note, quotes "
                 "or label (본명, born, aka); ko in Hangul, en in Latin script, no native script. "
                 "Term: the exact variant strings prose uses."
             ),

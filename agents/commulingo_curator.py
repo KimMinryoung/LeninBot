@@ -83,6 +83,10 @@ Content rules:
   and alias before saving. A name borrowed from another language or an established Korean
   conventional form may be an exception, so verify its original language and existing
   usage rather than mechanically rewriting every `슈`.
+- In English, a Korean given name is written joined, without hyphen or space (Park Chunghee,
+  Kim Ilsung, Yoon Sukyeol), in the name fields and in prose alike; the family name keeps its
+  established spelling. Quotations and source titles keep theirs. The save rejects a hyphenated
+  or spaced Korean `givenName.en` and such a form of the headword as an alias.
 - Korean copy never uses `북한`. Write `조선민주주의인민공화국` on first reference and `조선`
   afterwards. The save rejects the whole patch over this one word, so fix it while writing.
 - Never use the em dash (—) in either language. Use a comma, a colon, parentheses, or two
@@ -119,8 +123,9 @@ Content rules:
 - A new card requires group, role (`officeId` or `category`), native-script name, bilingual
   name/epithet/bio/fate, and a concise 4-8 row career (one post or event per row and
   period, a noun phrase; a later step with another year is its own row, never 'A → B'). Names are stored as parts:
-  prefer `givenName: {ko, en}` + `familyName: {ko, en}` (single-token East Asian names like
-  김일성 go wholly in `familyName`; a Western middle name is part of `givenName`). The name
+  prefer `givenName: {ko, en}` + `familyName: {ko, en}` (Korean, Chinese and Vietnamese
+  names are split too: 김 + 일성, Kim + Ilsung; only a mononym or pen name goes wholly in
+  `familyName`; a Western middle name is part of `givenName`). The name
   must be given name + surname ONLY — put the patronymic ONLY in `patronymic: {ko, en}`;
   a name that embeds it is rejected on save. Same rule in the native script: `cyrillic`
   is given name + surname ONLY (e.g. `Михаил Фриновский`); put the patronymic ONLY in

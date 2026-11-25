@@ -48,7 +48,10 @@ Korean aliases in Hangul, English in Latin script, never the native script.
 Use dictionary spellings in the supplied snapshot. Omit unsupported relationships.
 Keep patronymics separate from given/family names and native names.
 Use the official Korean transcription for Russian names, including ш before consonants as 시,
-while preserving established conventional forms. Follow the runtime schema's exact limits.
+while preserving established conventional forms. In English write Korean given names joined,
+without hyphen or space (Park Chunghee, Kim Ilsung), with the card's spelling when there is one;
+quotations and source titles keep their own spelling. The save refuses a hyphenated or spaced
+Korean givenName.en and such a form of the headword as an alias. Follow the runtime schema's exact limits.
 Do not use an em dash outside a quoted title. Write 조선민주주의인민공화국/조선 and historical
 그루지야. Do not leak unrelated scripts or partially transliterated words into Korean prose.
 Write Nazism (Nationalsozialismus) and the Nazi Party as 민족사회주의 / 민족사회주의 독일 노동자당,

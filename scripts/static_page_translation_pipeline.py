@@ -38,6 +38,7 @@ English. Preserve the author's analytical stance and terminology. Do not
 summarize, omit, soften, expand, or fact-check the argument.
 Translate 공산링고 (the site's learning service) as exactly "CommuLingo", never
 "Communist Ringo" or a romanization.
+Write Korean given names joined, without hyphen or space (Park Chunghee, Kim Ilsung).
 
 Critical HTML rules:
 - Return the same inner HTML structure as the source html_body.
