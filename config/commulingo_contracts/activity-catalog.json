@@ -12161,7 +12161,7 @@
       "countryCode": "south-korea",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in the Progressive Party (South Korea, 1956-1958) led by Cho Bong-am. Never infer affiliation from nationality, residence or ideology.",
+      "criteria": "Only documented service, membership or organizational activity in the Progressive Party (South Korea, 1956-1958) led by Cho Bongam. Never infer affiliation from nationality, residence or ideology.",
       "periods": [
         [
           1955,
@@ -12266,7 +12266,7 @@
       "countryCode": "south-korea",
       "icon": "flag",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in People's Victory 21 (Construction People's Victory 21, 1997-1999), the progressive party that ran Kwon Young-ghil for president in 1997. Never infer affiliation from nationality, residence or ideology.",
+      "criteria": "Only documented service, membership or organizational activity in People's Victory 21 (Construction People's Victory 21, 1997-1999), the progressive party that ran Kwon Youngghil for president in 1997. Never infer affiliation from nationality, residence or ideology.",
       "periods": [
         [
           1997,
@@ -12333,7 +12333,7 @@
       "termIds": [
         "new-democratic-party-south-korea-1967"
       ],
-      "criteria": "Only documented service, membership or organizational activity in the New Democratic Party (South Korea, 1967-1980), the main opposition party under Park Chung Hee and the Yushin regime. Not the 1960 New Democratic Party of the Democratic Party's old faction, the 1946 New People's Party of Korea or the 1985 New Korea Democratic Party. Never infer affiliation from nationality, residence or ideology.",
+      "criteria": "Only documented service, membership or organizational activity in the New Democratic Party (South Korea, 1967-1980), the main opposition party under Park Chunghee and the Yushin regime. Not the 1960 New Democratic Party of the Democratic Party's old faction, the 1946 New People's Party of Korea or the 1985 New Korea Democratic Party. Never infer affiliation from nationality, residence or ideology.",
       "parentId": null,
       "countryCode": "south-korea"
     },
@@ -13002,7 +13002,7 @@
       ],
       "countryCode": "south-korea",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in the Nationalist Party (Gungmindang) founded in Seoul in September 1945 under Ahn Jae-hong and merged into the Korea Independence Party in April 1946; not the Chinese Kuomintang. Never infer affiliation from nationality, residence, descent or ideology.",
+      "criteria": "Only documented service, membership or organizational activity in the Nationalist Party (Gungmindang) founded in Seoul in September 1945 under Ahn Jaehong and merged into the Korea Independence Party in April 1946; not the Chinese Kuomintang. Never infer affiliation from nationality, residence, descent or ideology.",
       "periods": [
         [
           1945,
@@ -13023,7 +13023,7 @@
       ],
       "countryCode": "south-korea",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in the South Korean New People's Party (July-November 1946) led by Paek Nam-un; the northern New People's Party of Korea is party-choson-new-people. Never infer affiliation from nationality, residence, descent or ideology.",
+      "criteria": "Only documented service, membership or organizational activity in the South Korean New People's Party (July-November 1946) led by Paek Namun; the northern New People's Party of Korea is party-choson-new-people. Never infer affiliation from nationality, residence, descent or ideology.",
       "periods": [
         [
           1946,
@@ -13044,7 +13044,7 @@
       ],
       "countryCode": "south-korea",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in the Laboring People's Party founded by Yeo Un-hyeong in May 1947 and absorbed into the Independent Labour-Farmer Party in 1949. Never infer affiliation from nationality, residence, descent or ideology.",
+      "criteria": "Only documented service, membership or organizational activity in the Laboring People's Party founded by Yeo Unhyeong in May 1947 and absorbed into the Independent Labour-Farmer Party in 1949. Never infer affiliation from nationality, residence, descent or ideology.",
       "periods": [
         [
           1947,
@@ -13086,7 +13086,7 @@
       ],
       "countryCode": "south-korea",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in the Civil Rule Party of 1963-1965 led by Yun Po-sun; not the Democratic Justice Party (party-korean-djp), also called Minjeongdang. Never infer affiliation from nationality, residence, descent or ideology.",
+      "criteria": "Only documented service, membership or organizational activity in the Civil Rule Party of 1963-1965 led by Yun Posun; not the Democratic Justice Party (party-korean-djp), also called Minjeongdang. Never infer affiliation from nationality, residence, descent or ideology.",
       "periods": [
         [
           1963,
@@ -13107,7 +13107,7 @@
       ],
       "countryCode": "south-korea",
       "parentId": null,
-      "criteria": "Only documented service, membership or organizational activity in the Reunification Democratic Party (1987-1990) of Kim Young-sam and Kim Dae-jung. Never infer affiliation from nationality, residence, descent or ideology.",
+      "criteria": "Only documented service, membership or organizational activity in the Reunification Democratic Party (1987-1990) of Kim Youngsam and Kim Daejung. Never infer affiliation from nationality, residence, descent or ideology.",
       "periods": [
         [
           1987,
