@@ -14407,6 +14407,92 @@
           1946
         ]
       ]
+    },
+    {
+      "id": "party-french-order",
+      "kind": "party",
+      "label": {
+        "ko": "질서당",
+        "en": "Party of Order (France)"
+      },
+      "termIds": [
+        "party-of-order-1848-1851"
+      ],
+      "countryCode": "france",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented membership, leadership or organizational activity in the Party of Order (Rue de Poitiers Committee), the Legitimist, Orléanist and conservative coalition of the French Second Republic, 1848–1851. Voting with the Assembly majority, serving as a minister of Louis-Napoléon or sympathy alone does NOT qualify. Never infer affiliation from nationality, monarchism or ideology.",
+      "periods": [
+        [
+          1848,
+          1851
+        ]
+      ]
+    },
+    {
+      "id": "party-algerian-communist",
+      "kind": "party",
+      "label": {
+        "ko": "알제리 공산당",
+        "en": "Algerian Communist Party (PCA)"
+      },
+      "termIds": [
+        "algerian-communist-party"
+      ],
+      "countryCode": "algeria",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in the Algerian Communist Party (PCA) from its founding as a separate party in October 1936. Membership of the Algerian section of the French Communist Party before then belongs to party-french-communist. Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1936,
+          1966
+        ]
+      ]
+    },
+    {
+      "id": "party-us-slp",
+      "kind": "party",
+      "label": {
+        "ko": "미국 사회주의노동당",
+        "en": "Socialist Labor Party of America (SLP)"
+      },
+      "termIds": [
+        "socialist-labor-party-of-america"
+      ],
+      "countryCode": "usa",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented service, membership or organizational activity in the Socialist Labor Party of America (SLP, founded 1876 as the Workingmen's Party of the United States and renamed in 1877). Not the Socialist Workers Party (party-us-swp) or the Socialist Party of America (party-us-socialist). Never infer affiliation from nationality, residence or ideology.",
+      "periods": [
+        [
+          1876,
+          null
+        ]
+      ]
+    },
+    {
+      "id": "russian-decembrists",
+      "kind": "force",
+      "label": {
+        "ko": "데카브리스트 결사",
+        "en": "Decembrist societies"
+      },
+      "termIds": [
+        "decembrists",
+        "northern-society-decembrists",
+        "southern-society-decembrists"
+      ],
+      "countryCode": "russia",
+      "icon": "flag",
+      "parentId": null,
+      "criteria": "Only documented membership or organizational activity in the Decembrist secret societies (Union of Salvation, Union of Welfare, Northern Society, Southern Society, Society of United Slavs). Never infer affiliation from nationality, residence, kinship or ideology.",
+      "periods": [
+        [
+          1816,
+          1826
+        ]
+      ]
     }
   ],
   "legacy": {
