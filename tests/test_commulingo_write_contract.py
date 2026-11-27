@@ -33,7 +33,7 @@ class WriteContractTests(unittest.TestCase):
     def test_term_period_is_the_structured_career_shape(self):
         tool = people.COMMULINGO_TERM_CREATE_TOOL['input_schema']['properties']['fields']
         self.assertTrue({'startYear', 'endYear'}.isdisjoint(tool['properties']))
-        self.assertIn('periodNote', tool['properties'])
+        self.assertNotIn('periodNote', tool['properties'])
         self.assertEqual(tool['properties']['period']['type'], ['object', 'null'])
 
     def test_person_author_provides_labels_and_runner_assigns_codes(self):

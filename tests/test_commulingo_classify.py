@@ -177,8 +177,6 @@ class ClassifyTermTests(unittest.TestCase):
         self.assertEqual(state['aliases'], ['군사공산주의', 'military communism'])
         self.assertEqual(state['parent_term'], 'nep')
         self.assertEqual(state['period'], '1918–1921')
-        noted = cc.term_state({**TERM, 'periodNote': {'ko': '내전기', 'en': 'civil war'}})
-        self.assertEqual(noted['period'], '1918–1921 (내전기)')
         self.assertEqual(cc.term_state({**TERM, 'period': None})['period'], '')
         questions = cc.term_questions(TERM_CATS, TERM_REGIONS)
         self.assertIn('Soviet planning', questions['category']['criteria']['economy'])

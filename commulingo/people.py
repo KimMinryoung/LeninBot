@@ -224,12 +224,12 @@ _HISTORY_EVENT_SECTION_PATCH_KEYS = frozenset({"heading", "body", "after"})
 # `period` is the career-period shape ({start, end, startQual, endQual,
 # ongoing, label}) stored as columns (frontend migration 364), or null for an
 # undated term; the years come from it, so there are no startYear/endYear
-# fields. `periodNote` is an optional bilingual remark that qualifies the
-# period ("1917–1921 (전성기)"). A term written without a category shows up on
-# the glossary as 'Uncategorized', so it is required on create rather than
-# backfilled later by hand.
+# fields. There is no remark beside the years (periodNote was removed
+# 2026-11-27): a fact about the dates goes in the body. A term written without
+# a category shows up on the glossary as 'Uncategorized', so it is required on
+# create rather than backfilled later by hand.
 _TERM_PATCH_KEYS = frozenset({
-    "id", "sortOrder", "term", "original", "period", "periodNote",
+    "id", "sortOrder", "term", "original", "period",
     "category", "region", "definition", "body", "aliases", "people", "events", "sources",
     "parentId", "expectedRevision", "evidence",
 })
@@ -1729,13 +1729,6 @@ _COMMULINGO_FIELD_SCHEMA = {
                 + PERIOD_SCHEMA["description"]
             ),
         },
-        "periodNote": {
-            **_BILINGUAL_TEXT_SCHEMA,
-            "description": (
-                "term: optional remark that qualifies the period, shown as 1917–1921 (전성기): "
-                "{\"ko\": \"전성기\", \"en\": \"heyday\"}. Both languages or neither."
-            ),
-        },
         "category": {
             "type": "string", "enum": list(_TERM_CATEGORIES),
             "description": f"term: which glossary group it belongs to. One of {_TERM_CATEGORY_HINT}.",
@@ -2169,7 +2162,7 @@ _PERSON_NARROW_KEYS = (
     "expectedRevision", "evidence", "reviewFlags", "aliasEdits", "careerEdits", "sceneEdits",
 )
 _TERM_NARROW_KEYS = (
-    "sortOrder", "term", "original", "period", "periodNote",
+    "sortOrder", "term", "original", "period",
     "category", "definition", "body", "aliases", "people", "events", "parentId", "evidence", "expectedRevision",
 )
 # Create fills the card's source list from the top-level citations. An update

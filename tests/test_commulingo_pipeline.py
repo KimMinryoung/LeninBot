@@ -260,7 +260,7 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
         # End to end through the editor: test_commulingo_editor
         # EditorContractTests.test_echoed_term_years_never_reach_validation.
         from commulingo.pipeline.stages import drop_unchanged_term_facts
-        current = {'period':{'start':[2023],'end':None,'ongoing':True},'periodNote':{'ko':'','en':''}}
+        current = {'period':{'start':[2023],'end':None,'ongoing':True}}
         fields = {'definition':{'ko':'정의','en':'Definition'},'period':{'start':[2023],'ongoing':True}}
         drop_unchanged_term_facts(fields,current,'update')
         self.assertEqual(set(fields),{'definition'})
